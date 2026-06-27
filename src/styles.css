@@ -127,3 +127,27 @@
   color: var(--victory);
   text-shadow: 0 0 10px color-mix(in oklab, var(--victory) 60%, transparent);
 }
+
+@keyframes suspend-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 1px var(--destructive),
+                0 0 18px -2px color-mix(in oklab, var(--destructive) 70%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 1px var(--destructive),
+                0 0 36px 2px color-mix(in oklab, var(--destructive) 90%, transparent);
+  }
+}
+@utility suspended-glow {
+  animation: suspend-pulse 1.4s ease-in-out infinite;
+  border-color: var(--destructive);
+  color: var(--destructive);
+}
+@keyframes neon-mega-pulse {
+  0%, 100% { text-shadow: 0 0 18px color-mix(in oklab, var(--victory) 60%, transparent), 0 0 40px color-mix(in oklab, var(--victory) 30%, transparent); }
+  50%      { text-shadow: 0 0 28px color-mix(in oklab, var(--victory) 90%, transparent), 0 0 70px color-mix(in oklab, var(--victory) 55%, transparent); }
+}
+@utility text-mega-victory {
+  color: var(--victory);
+  animation: neon-mega-pulse 2.8s ease-in-out infinite;
+}

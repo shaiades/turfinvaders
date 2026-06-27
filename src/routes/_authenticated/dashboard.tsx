@@ -4,6 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { StatCard, ArcadePanel, TeamBadge } from "@/components/arcade";
 import { LiveLeadCounter } from "@/components/LiveLeadCounter";
+import { CommandCenter } from "@/components/CommandCenter";
+import { SuspendedBadge, useCanvasserStatuses } from "@/components/SuspendedBadge";
 import { useTodayLeads } from "@/hooks/useTodayLeads";
 import { DEMO_TEAMS, demoCanvassers, teamTotals, formatCurrency } from "@/lib/demo-data";
 import { Trophy, Zap, DoorOpen, Target, TrendingUp, Building2, Truck } from "lucide-react";
@@ -101,6 +103,8 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
         </div>
         <LiveLeadCounter value={leads.total} size="lg" accent="victory" label="LEADS · TODAY" />
       </div>
+
+      <CommandCenter />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard label="Total Revenue" value={formatCurrency(grand.revenue)} accent="victory" />
@@ -224,6 +228,8 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
         <LiveLeadCounter value={leads.byTeam[myTeam.id] ?? 0} size="md" accent="victory" />
       </div>
 
+      <CommandCenter teamId={myTeam.id} />
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard label="Team Revenue" value={formatCurrency(totals.revenue)} accent="victory" />
         <StatCard label="Doors" value={totals.doors.toLocaleString()} accent="neon" />
@@ -336,6 +342,7 @@ function Mini({ label, value }: { label: string; value: string }) {
 }
 
 function RosterTable({ members }: { members: ReturnType<typeof demoCanvassers> }) {
+  const { data: statuses } = useCanvasserStatuses();
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -350,18 +357,24 @@ function RosterTable({ members }: { members: ReturnType<typeof demoCanvassers> }
           </tr>
         </thead>
         <tbody>
-          {members.map((m, i) => (
-            <tr key={m.id} className="border-b border-border/40 hover:bg-surface-elevated">
-              <td className="py-2.5 font-display text-xs text-muted-foreground">{String(i + 1).padStart(2, "0")}</td>
-              <td className="py-2.5">
-                <Link to="/canvassers/$canvasserId" params={{ canvasserId: m.id }} className="hover:text-neon font-medium">{m.name}</Link>
-              </td>
-              <td className="py-2.5 text-right text-victory font-display text-xs">{m.level}</td>
-              <td className="py-2.5 text-right">{m.doorsKnocked}</td>
-              <td className="py-2.5 text-right">{m.salesClosed}</td>
-              <td className="py-2.5 text-right text-victory">{formatCurrency(m.revenueGenerated)}</td>
-            </tr>
-          ))}
+          {members.map((m, i) => {
+            const suspended = statuses?.[m.id] === "suspended";
+            return (
+              <tr key={m.id} className="border-b border-border/40 hover:bg-surface-elevated">
+                <td className="py-2.5 font-display text-xs text-muted-foreground">{String(i + 1).padStart(2, "0")}</td>
+                <td className="py-2.5">
+                  <div className="flex items-center gap-2">
+                    <Link to="/canvassers/$canvasserId" params={{ canvasserId: m.id }} className="hover:text-neon font-medium">{m.name}</Link>
+                    {suspended && <SuspendedBadge />}
+                  </div>
+                </td>
+                <td className="py-2.5 text-right text-victory font-display text-xs">{m.level}</td>
+                <td className="py-2.5 text-right">{m.doorsKnocked}</td>
+                <td className="py-2.5 text-right">{m.salesClosed}</td>
+                <td className="py-2.5 text-right text-victory">{formatCurrency(m.revenueGenerated)}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
