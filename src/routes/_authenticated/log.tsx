@@ -74,6 +74,7 @@ function LogPage() {
         people_talked_to: existing.data.people_talked_to ?? 0,
         renters: existing.data.renters ?? 0,
         leads_called_in: existing.data.leads_called_in ?? 0,
+        confirmed_leads: (existing.data as { confirmed_leads?: number }).confirmed_leads ?? 0,
         next_days: existing.data.next_days ?? 0,
         future_leads: existing.data.future_leads ?? 0,
         demos_sits: existing.data.demos_sits ?? 0,
