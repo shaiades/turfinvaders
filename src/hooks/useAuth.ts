@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { User } from "@supabase/supabase-js";
 
-export type AppRole = "owner" | "captain" | "canvasser";
+export type AppRole = "owner" | "office_staff" | "captain" | "canvasser";
 
 export interface AuthState {
   loading: boolean;
@@ -32,7 +32,10 @@ export function useAuth(): AuthState {
       // priority owner > captain > canvasser
       const r = roles?.map((x) => x.role as AppRole) ?? [];
       const role: AppRole | null =
-        r.includes("owner") ? "owner" : r.includes("captain") ? "captain" : r.includes("canvasser") ? "canvasser" : null;
+        r.includes("owner") ? "owner"
+        : r.includes("office_staff") ? "office_staff"
+        : r.includes("captain") ? "captain"
+        : r.includes("canvasser") ? "canvasser" : null;
       if (active) {
         setState({
           loading: false,

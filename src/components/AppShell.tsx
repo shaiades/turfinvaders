@@ -2,7 +2,7 @@ import { Link, useRouter } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import { LogOut, Trophy, Users, Settings, LayoutDashboard, ShieldCheck } from "lucide-react";
+import { LogOut, Trophy, Users, Settings, LayoutDashboard, ShieldCheck, ClipboardList, Inbox } from "lucide-react";
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, role, displayName } = useAuth();
@@ -12,6 +12,12 @@ export function AppShell({ children }: { children: ReactNode }) {
     { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { to: "/teams", label: "Teams", icon: Users },
     { to: "/leaderboard", label: "Leaderboard", icon: Trophy },
+    ...(role === "canvasser" || role === "captain"
+      ? [{ to: "/log", label: "Daily Log", icon: ClipboardList }]
+      : []),
+    ...(role === "owner" || role === "office_staff"
+      ? [{ to: "/confirmation-desk", label: "Confirmation Desk", icon: Inbox }]
+      : []),
     ...(role === "owner"
       ? [
           { to: "/users", label: "Players", icon: ShieldCheck },
