@@ -71,6 +71,72 @@ export type Database = {
         }
         Relationships: []
       }
+      lead_events: {
+        Row: {
+          canvasser_id: string | null
+          count: number
+          created_at: string
+          id: string
+          occurred_at: string
+          team_id: string
+        }
+        Insert: {
+          canvasser_id?: string | null
+          count?: number
+          created_at?: string
+          id?: string
+          occurred_at?: string
+          team_id: string
+        }
+        Update: {
+          canvasser_id?: string | null
+          count?: number
+          created_at?: string
+          id?: string
+          occurred_at?: string
+          team_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lead_events_canvasser_id_fkey"
+            columns: ["canvasser_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_events_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      offices: {
+        Row: {
+          color: string
+          created_at: string
+          id: string
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          color?: string
+          created_at?: string
+          id?: string
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          color?: string
+          created_at?: string
+          id?: string
+          name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -119,6 +185,7 @@ export type Database = {
           created_at: string
           id: string
           name: string
+          office_id: string | null
         }
         Insert: {
           captain_id?: string | null
@@ -126,6 +193,7 @@ export type Database = {
           created_at?: string
           id?: string
           name: string
+          office_id?: string | null
         }
         Update: {
           captain_id?: string | null
@@ -133,8 +201,17 @@ export type Database = {
           created_at?: string
           id?: string
           name?: string
+          office_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "teams_office_id_fkey"
+            columns: ["office_id"]
+            isOneToOne: false
+            referencedRelation: "offices"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       user_roles: {
         Row: {
