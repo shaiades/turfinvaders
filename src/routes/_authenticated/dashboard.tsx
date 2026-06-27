@@ -4,6 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { StatCard, ArcadePanel, TeamBadge } from "@/components/arcade";
 import { LiveLeadCounter } from "@/components/LiveLeadCounter";
+import { CommandCenter } from "@/components/CommandCenter";
+import { SuspendedBadge, useCanvasserStatuses } from "@/components/SuspendedBadge";
 import { useTodayLeads } from "@/hooks/useTodayLeads";
 import { DEMO_TEAMS, demoCanvassers, teamTotals, formatCurrency } from "@/lib/demo-data";
 import { Trophy, Zap, DoorOpen, Target, TrendingUp, Building2, Truck } from "lucide-react";
