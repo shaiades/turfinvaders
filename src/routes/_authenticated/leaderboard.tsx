@@ -14,6 +14,7 @@ export const Route = createFileRoute("/_authenticated/leaderboard")({
 
 function Leaderboard() {
   const { role, teamId } = useAuth();
+  const { data: statuses } = useCanvasserStatuses();
   const { data: settings } = useQuery({
     queryKey: ["company_settings"],
     queryFn: async () => (await supabase.from("company_settings").select("*").maybeSingle()).data,
