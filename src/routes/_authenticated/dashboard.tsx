@@ -63,6 +63,21 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
     revenue: a.revenue + t.totals.revenue, members: a.members + t.totals.members,
   }), { doors: 0, sales: 0, revenue: 0, members: 0 });
 
+  const { data: leads } = useTodayLeads();
+
+  const offices = useQuery({
+    queryKey: ["offices", "with-teams"],
+    queryFn: async () => {
+      const [officesRes, teamsRes] = await Promise.all([
+        supabase.from("offices").select("id, name, color").order("name"),
+        supabase.from("teams").select("id, name, color, office_id").order("name"),
+      ]);
+      if (officesRes.error) throw officesRes.error;
+      if (teamsRes.error) throw teamsRes.error;
+      return { offices: officesRes.data ?? [], teams: teamsRes.data ?? [] };
+    },
+  });
+
   return (
     <div className="space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -73,6 +88,20 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
         <VisibilityChip on={visibility} />
       </div>
 
+      {/* Master Live Lead Counter — company-wide leads today */}
+      <div className="arcade-card p-6 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+        <div>
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            Live · All Offices
+          </div>
+          <h2 className="font-display text-lg text-neon mt-1">TOTAL LEADS TODAY</h2>
+          <p className="text-xs text-muted-foreground mt-1">
+            Auto-summed from every Van across the company. Updates in real time.
+          </p>
+        </div>
+        <LiveLeadCounter value={leads.total} size="lg" accent="victory" label="LEADS · TODAY" />
+      </div>
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard label="Total Revenue" value={formatCurrency(grand.revenue)} accent="victory" />
         <StatCard label="Doors Knocked" value={grand.doors.toLocaleString()} accent="neon" />
@@ -80,7 +109,66 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
         <StatCard label="Active Players" value={grand.members} accent="warning" />
       </div>
 
-      <ArcadePanel title="All Teams">
+      <ArcadePanel title="Offices">
+        {offices.isLoading ? (
+          <div className="text-sm text-muted-foreground">Loading offices…</div>
+        ) : (offices.data?.offices.length ?? 0) === 0 ? (
+          <div className="text-sm text-muted-foreground">No offices yet.</div>
+        ) : (
+          <div className="space-y-5">
+            {offices.data!.offices.map((o) => {
+              const vans = offices.data!.teams.filter((t) => t.office_id === o.id);
+              return (
+                <div key={o.id} className="border border-border rounded-lg p-4">
+                  <div className="flex items-center justify-between gap-4 flex-wrap">
+                    <div className="flex items-center gap-3">
+                      <span
+                        className="w-9 h-9 rounded-md grid place-items-center"
+                        style={{ background: `color-mix(in oklab, ${o.color} 18%, transparent)`, color: o.color }}
+                      >
+                        <Building2 className="w-5 h-5" />
+                      </span>
+                      <div>
+                        <div className="font-display text-sm" style={{ color: o.color }}>{o.name}</div>
+                        <div className="text-xs text-muted-foreground">{vans.length} vans</div>
+                      </div>
+                    </div>
+                    <LiveLeadCounter
+                      value={leads.byOffice[o.id] ?? 0}
+                      size="md"
+                      label={`${o.name} · LEADS`}
+                    />
+                  </div>
+                  {vans.length > 0 && (
+                    <div className="mt-4 grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {vans.map((v) => (
+                        <Link
+                          key={v.id}
+                          to="/teams/$teamId"
+                          params={{ teamId: v.id }}
+                          className="arcade-card p-3 flex items-center justify-between gap-3 hover:arcade-card-glow transition-shadow"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Truck className="w-4 h-4 shrink-0" style={{ color: v.color }} />
+                            <TeamBadge name={v.name} color={v.color} />
+                          </div>
+                          <LiveLeadCounter
+                            value={leads.byTeam[v.id] ?? 0}
+                            size="sm"
+                            label="LEADS"
+                          />
+                        </Link>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </ArcadePanel>
+
+      <ArcadePanel title="All Teams (Legacy Mock)">
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {teams.map((t) => (
             <Link key={t.id} to="/teams/$teamId" params={{ teamId: t.id }} className="arcade-card p-5 hover:arcade-card-glow transition-shadow">
@@ -108,6 +196,7 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
   const myTeam = DEMO_TEAMS.find((t) => t.id === myTeamId) ?? DEMO_TEAMS[0];
   const members = demoCanvassers().filter((c) => c.teamId === myTeam.id).sort((a, b) => b.revenueGenerated - a.revenueGenerated);
   const totals = teamTotals(myTeam.id);
+  const { data: leads } = useTodayLeads();
 
   return (
     <div className="space-y-8">
@@ -119,6 +208,20 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
           </h1>
         </div>
         <VisibilityChip on={visibility} />
+      </div>
+
+      {/* Van-level Live Lead Counter */}
+      <div className="arcade-card p-5 flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex items-center gap-3">
+          <Truck className="w-5 h-5 text-neon" />
+          <div>
+            <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+              Live · This Van
+            </div>
+            <div className="font-display text-sm text-neon mt-0.5">{myTeam.name.toUpperCase()} · LEADS TODAY</div>
+          </div>
+        </div>
+        <LiveLeadCounter value={leads.byTeam[myTeam.id] ?? 0} size="md" accent="victory" />
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -133,7 +236,7 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
       </ArcadePanel>
 
       {visibility ? (
-        <ArcadePanel title="Other Teams">
+        <ArcadePanel title="Other Vans">
           <div className="grid sm:grid-cols-2 gap-4">
             {DEMO_TEAMS.filter((t) => t.id !== myTeam.id).map((t) => {
               const tt = teamTotals(t.id);
@@ -141,7 +244,7 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
                 <Link key={t.id} to="/teams/$teamId" params={{ teamId: t.id }} className="arcade-card p-4 hover:arcade-card-glow">
                   <div className="flex items-center justify-between mb-3">
                     <TeamBadge name={t.name} color={t.color} />
-                    <span className="text-xs text-muted-foreground">{tt.members} players</span>
+                    <LiveLeadCounter value={leads.byTeam[t.id] ?? 0} size="sm" label="LEADS" />
                   </div>
                   <div className="grid grid-cols-3 gap-2">
                     <Mini label="Doors" value={tt.doors.toLocaleString()} />
@@ -155,7 +258,7 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
         </ArcadePanel>
       ) : (
         <div className="arcade-card p-5 text-sm text-muted-foreground flex items-center gap-2">
-          <Zap className="w-4 h-4" /> Global Visibility is off. Only your team is visible. Ask the Owner to flip it on for cross-team views.
+          <Zap className="w-4 h-4" /> Global Visibility is off. Only your van is visible. Ask the Owner to flip it on for cross-team views.
         </div>
       )}
     </div>
