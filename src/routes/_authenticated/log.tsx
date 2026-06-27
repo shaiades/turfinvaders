@@ -40,7 +40,7 @@ type LogState = Record<LogKey, number> & { notes: string };
 
 const EMPTY: LogState = {
   doors_knocked: 0, people_talked_to: 0, renters: 0, leads_called_in: 0,
-  next_days: 0, future_leads: 0, demos_sits: 0, sales: 0,
+  confirmed_leads: 0, next_days: 0, future_leads: 0, demos_sits: 0, sales: 0,
   one_legs: 0, no_shows: 0, no_demo: 0, notes: "",
 };
 
