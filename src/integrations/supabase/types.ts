@@ -14,16 +14,163 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      canvasser_stats: {
+        Row: {
+          contacts_made: number
+          created_at: string
+          doors_knocked: number
+          id: string
+          period: string
+          period_start: string
+          revenue_generated: number
+          sales_closed: number
+          user_id: string
+        }
+        Insert: {
+          contacts_made?: number
+          created_at?: string
+          doors_knocked?: number
+          id?: string
+          period: string
+          period_start: string
+          revenue_generated?: number
+          sales_closed?: number
+          user_id: string
+        }
+        Update: {
+          contacts_made?: number
+          created_at?: string
+          doors_knocked?: number
+          id?: string
+          period?: string
+          period_start?: string
+          revenue_generated?: number
+          sales_closed?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
+      company_settings: {
+        Row: {
+          company_name: string
+          global_visibility: boolean
+          id: boolean
+          updated_at: string
+        }
+        Insert: {
+          company_name?: string
+          global_visibility?: boolean
+          id?: boolean
+          updated_at?: string
+        }
+        Update: {
+          company_name?: string
+          global_visibility?: boolean
+          id?: boolean
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string
+          display_name: string
+          id: string
+          level: number
+          team_id: string | null
+          updated_at: string
+          xp: number
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name: string
+          id: string
+          level?: number
+          team_id?: string | null
+          updated_at?: string
+          xp?: number
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name?: string
+          id?: string
+          level?: number
+          team_id?: string | null
+          updated_at?: string
+          xp?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "profiles_team_fk"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      teams: {
+        Row: {
+          captain_id: string | null
+          color: string
+          created_at: string
+          id: string
+          name: string
+        }
+        Insert: {
+          captain_id?: string | null
+          color?: string
+          created_at?: string
+          id?: string
+          name: string
+        }
+        Update: {
+          captain_id?: string | null
+          color?: string
+          created_at?: string
+          id?: string
+          name?: string
+        }
+        Relationships: []
+      }
+      user_roles: {
+        Row: {
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      global_visibility_on: { Args: never; Returns: boolean }
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
+      my_team_id: { Args: { _user_id: string }; Returns: string }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "owner" | "captain" | "canvasser"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +297,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["owner", "captain", "canvasser"],
+    },
   },
 } as const
