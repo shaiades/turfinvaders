@@ -1,0 +1,264 @@
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useAuth } from "@/hooks/useAuth";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { StatCard, ArcadePanel, TeamBadge } from "@/components/arcade";
+import { DEMO_TEAMS, demoCanvassers, teamTotals, formatCurrency } from "@/lib/demo-data";
+import { Trophy, Zap, DoorOpen, Target, TrendingUp } from "lucide-react";
+
+export const Route = createFileRoute("/_authenticated/dashboard")({
+  head: () => ({ meta: [{ title: "Dashboard — Knockout" }] }),
+  component: Dashboard,
+});
+
+function Dashboard() {
+  const { role, loading, teamId, displayName } = useAuth();
+
+  const { data: settings } = useQuery({
+    queryKey: ["company_settings"],
+    queryFn: async () => {
+      const { data } = await supabase.from("company_settings").select("*").maybeSingle();
+      return data;
+    },
+  });
+
+  if (loading) return <Loading />;
+  if (!role) return <NoRole />;
+
+  if (role === "owner") return <OwnerDashboard visibility={!!settings?.global_visibility} />;
+  if (role === "captain") return <CaptainDashboard teamId={teamId} visibility={!!settings?.global_visibility} />;
+  return <CanvasserDashboard displayName={displayName} teamId={teamId} visibility={!!settings?.global_visibility} />;
+}
+
+function Loading() { return <div className="text-muted-foreground text-sm">Loading dashboard…</div>; }
+
+function NoRole() {
+  return (
+    <div className="arcade-card p-8 text-center">
+      <h1 className="font-display text-base text-neon">AWAITING ROSTER ASSIGNMENT</h1>
+      <p className="mt-3 text-sm text-muted-foreground">
+        Your account is created. An Owner needs to assign you a role and team before you can play.
+      </p>
+    </div>
+  );
+}
+
+function VisibilityChip({ on }: { on: boolean }) {
+  return (
+    <span className={`text-[10px] font-display uppercase tracking-widest px-2 py-1 rounded border ${
+      on ? "border-[var(--victory)] text-victory" : "border-border text-muted-foreground"
+    }`}>
+      Global Vis · {on ? "ON" : "OFF"}
+    </span>
+  );
+}
+
+/* ============ OWNER ============ */
+function OwnerDashboard({ visibility }: { visibility: boolean }) {
+  const teams = DEMO_TEAMS.map((t) => ({ ...t, totals: teamTotals(t.id) }));
+  const grand = teams.reduce((a, t) => ({
+    doors: a.doors + t.totals.doors, sales: a.sales + t.totals.sales,
+    revenue: a.revenue + t.totals.revenue, members: a.members + t.totals.members,
+  }), { doors: 0, sales: 0, revenue: 0, members: 0 });
+
+  return (
+    <div className="space-y-8">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Owner View</div>
+          <h1 className="font-display text-2xl text-neon mt-1">COMPANY HQ</h1>
+        </div>
+        <VisibilityChip on={visibility} />
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard label="Total Revenue" value={formatCurrency(grand.revenue)} accent="victory" />
+        <StatCard label="Doors Knocked" value={grand.doors.toLocaleString()} accent="neon" />
+        <StatCard label="Sales Closed" value={grand.sales.toLocaleString()} accent="accent" />
+        <StatCard label="Active Players" value={grand.members} accent="warning" />
+      </div>
+
+      <ArcadePanel title="All Teams">
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {teams.map((t) => (
+            <Link key={t.id} to="/teams/$teamId" params={{ teamId: t.id }} className="arcade-card p-5 hover:arcade-card-glow transition-shadow">
+              <div className="flex items-center justify-between">
+                <TeamBadge name={t.name} color={t.color} />
+                <span className="text-xs text-muted-foreground">{t.totals.members} players</span>
+              </div>
+              <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+                <Mini label="Doors" value={t.totals.doors.toLocaleString()} />
+                <Mini label="Sales" value={t.totals.sales.toLocaleString()} />
+                <Mini label="Rev" value={formatCurrency(t.totals.revenue)} />
+              </div>
+              <div className="mt-4 text-xs text-muted-foreground">Captain · <span className="text-foreground">{t.captain}</span></div>
+            </Link>
+          ))}
+        </div>
+      </ArcadePanel>
+    </div>
+  );
+}
+
+/* ============ CAPTAIN ============ */
+function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visibility: boolean }) {
+  const myTeamId = teamId ?? DEMO_TEAMS[0].id; // demo fallback
+  const myTeam = DEMO_TEAMS.find((t) => t.id === myTeamId) ?? DEMO_TEAMS[0];
+  const members = demoCanvassers().filter((c) => c.teamId === myTeam.id).sort((a, b) => b.revenueGenerated - a.revenueGenerated);
+  const totals = teamTotals(myTeam.id);
+
+  return (
+    <div className="space-y-8">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Captain View</div>
+          <h1 className="font-display text-2xl text-neon mt-1 flex items-center gap-3">
+            <TeamBadge name={myTeam.name} color={myTeam.color} />
+          </h1>
+        </div>
+        <VisibilityChip on={visibility} />
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard label="Team Revenue" value={formatCurrency(totals.revenue)} accent="victory" />
+        <StatCard label="Doors" value={totals.doors.toLocaleString()} accent="neon" />
+        <StatCard label="Sales" value={totals.sales.toLocaleString()} accent="accent" />
+        <StatCard label="Roster" value={totals.members} accent="warning" />
+      </div>
+
+      <ArcadePanel title="Team Roster">
+        <RosterTable members={members} />
+      </ArcadePanel>
+
+      {visibility ? (
+        <ArcadePanel title="Other Teams">
+          <div className="grid sm:grid-cols-2 gap-4">
+            {DEMO_TEAMS.filter((t) => t.id !== myTeam.id).map((t) => {
+              const tt = teamTotals(t.id);
+              return (
+                <Link key={t.id} to="/teams/$teamId" params={{ teamId: t.id }} className="arcade-card p-4 hover:arcade-card-glow">
+                  <div className="flex items-center justify-between mb-3">
+                    <TeamBadge name={t.name} color={t.color} />
+                    <span className="text-xs text-muted-foreground">{tt.members} players</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <Mini label="Doors" value={tt.doors.toLocaleString()} />
+                    <Mini label="Sales" value={tt.sales.toLocaleString()} />
+                    <Mini label="Rev" value={formatCurrency(tt.revenue)} />
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        </ArcadePanel>
+      ) : (
+        <div className="arcade-card p-5 text-sm text-muted-foreground flex items-center gap-2">
+          <Zap className="w-4 h-4" /> Global Visibility is off. Only your team is visible. Ask the Owner to flip it on for cross-team views.
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============ CANVASSER ============ */
+function CanvasserDashboard({ displayName, teamId, visibility }: { displayName: string | null; teamId: string | null; visibility: boolean }) {
+  const myTeam = DEMO_TEAMS.find((t) => t.id === teamId) ?? DEMO_TEAMS[0];
+  const me = {
+    name: displayName ?? "You",
+    doorsKnocked: 142, contactsMade: 53, salesClosed: 11, revenueGenerated: 18400, level: 4,
+  };
+  const peers = demoCanvassers().sort((a, b) => b.salesClosed - a.salesClosed).slice(0, 6);
+
+  return (
+    <div className="space-y-8">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Player Card</div>
+          <h1 className="font-display text-2xl text-neon mt-1">{me.name.toUpperCase()}</h1>
+          <div className="mt-2 flex items-center gap-2">
+            <TeamBadge name={myTeam.name} color={myTeam.color} />
+            <span className="text-xs font-display text-victory">LVL {me.level}</span>
+          </div>
+        </div>
+        <VisibilityChip on={visibility} />
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard label="Doors Knocked" value={me.doorsKnocked} sublabel="This week" accent="neon" />
+        <StatCard label="Contacts" value={me.contactsMade} sublabel="This week" accent="warning" />
+        <StatCard label="Sales Closed" value={me.salesClosed} sublabel="This week" accent="accent" />
+        <StatCard label="Revenue" value={formatCurrency(me.revenueGenerated)} sublabel="MTD" accent="victory" />
+      </div>
+
+      {visibility ? (
+        <ArcadePanel title="Player Leaderboard" action={<Link to="/leaderboard" className="text-xs text-neon">View all →</Link>}>
+          <ol className="divide-y divide-border">
+            {peers.map((p, i) => {
+              const team = DEMO_TEAMS.find((t) => t.id === p.teamId)!;
+              return (
+                <li key={p.id} className="flex items-center justify-between py-3">
+                  <div className="flex items-center gap-3">
+                    <span className="font-display text-xs text-muted-foreground w-6">{String(i + 1).padStart(2, "0")}</span>
+                    <Link to="/canvassers/$canvasserId" params={{ canvasserId: p.id }} className="font-medium hover:text-neon">{p.name}</Link>
+                    <TeamBadge name={team.name} color={team.color} />
+                  </div>
+                  <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                    <span><DoorOpen className="inline w-3 h-3 mr-1" />{p.doorsKnocked}</span>
+                    <span><Target className="inline w-3 h-3 mr-1" />{p.salesClosed}</span>
+                    <span className="text-victory"><TrendingUp className="inline w-3 h-3 mr-1" />{formatCurrency(p.revenueGenerated)}</span>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        </ArcadePanel>
+      ) : (
+        <div className="arcade-card p-5 text-sm text-muted-foreground flex items-center gap-2">
+          <Trophy className="w-4 h-4" /> Global Visibility is off. Focus mode — only your own stats are shown.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Mini({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-[9px] font-display uppercase tracking-widest text-muted-foreground">{label}</div>
+      <div className="text-sm font-medium mt-1">{value}</div>
+    </div>
+  );
+}
+
+function RosterTable({ members }: { members: ReturnType<typeof demoCanvassers> }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border">
+            <th className="text-left py-2">Rank</th>
+            <th className="text-left py-2">Player</th>
+            <th className="text-right py-2">Lvl</th>
+            <th className="text-right py-2">Doors</th>
+            <th className="text-right py-2">Sales</th>
+            <th className="text-right py-2">Revenue</th>
+          </tr>
+        </thead>
+        <tbody>
+          {members.map((m, i) => (
+            <tr key={m.id} className="border-b border-border/40 hover:bg-surface-elevated">
+              <td className="py-2.5 font-display text-xs text-muted-foreground">{String(i + 1).padStart(2, "0")}</td>
+              <td className="py-2.5">
+                <Link to="/canvassers/$canvasserId" params={{ canvasserId: m.id }} className="hover:text-neon font-medium">{m.name}</Link>
+              </td>
+              <td className="py-2.5 text-right text-victory font-display text-xs">{m.level}</td>
+              <td className="py-2.5 text-right">{m.doorsKnocked}</td>
+              <td className="py-2.5 text-right">{m.salesClosed}</td>
+              <td className="py-2.5 text-right text-victory">{formatCurrency(m.revenueGenerated)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
