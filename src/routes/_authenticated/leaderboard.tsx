@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { DEMO_TEAMS, demoCanvassers, formatCurrency } from "@/lib/demo-data";
 import { ArcadePanel, TeamBadge } from "@/components/arcade";
+import { SuspendedBadge, useCanvasserStatuses } from "@/components/SuspendedBadge";
 import { useAuth } from "@/hooks/useAuth";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
