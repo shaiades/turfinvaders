@@ -71,6 +71,77 @@ export type Database = {
         }
         Relationships: []
       }
+      daily_logs: {
+        Row: {
+          canvasser_id: string
+          created_at: string
+          demos_sits: number
+          doors_knocked: number
+          future_leads: number
+          id: string
+          leads_called_in: number
+          log_date: string
+          next_days: number
+          no_demo: number
+          no_shows: number
+          notes: string | null
+          one_legs: number
+          people_talked_to: number
+          renters: number
+          sales: number
+          team_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          canvasser_id: string
+          created_at?: string
+          demos_sits?: number
+          doors_knocked?: number
+          future_leads?: number
+          id?: string
+          leads_called_in?: number
+          log_date?: string
+          next_days?: number
+          no_demo?: number
+          no_shows?: number
+          notes?: string | null
+          one_legs?: number
+          people_talked_to?: number
+          renters?: number
+          sales?: number
+          team_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          canvasser_id?: string
+          created_at?: string
+          demos_sits?: number
+          doors_knocked?: number
+          future_leads?: number
+          id?: string
+          leads_called_in?: number
+          log_date?: string
+          next_days?: number
+          no_demo?: number
+          no_shows?: number
+          notes?: string | null
+          one_legs?: number
+          people_talked_to?: number
+          renters?: number
+          sales?: number
+          team_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "daily_logs_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       lead_events: {
         Row: {
           canvasser_id: string | null
@@ -106,6 +177,65 @@ export type Database = {
           },
           {
             foreignKeyName: "lead_events_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      leads: {
+        Row: {
+          address: string | null
+          canvasser_id: string
+          created_at: string
+          customer_name: string | null
+          deny_reason: string | null
+          id: string
+          is_sale: boolean
+          notes: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          sale_amount: number | null
+          status: Database["public"]["Enums"]["lead_status"]
+          team_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          address?: string | null
+          canvasser_id: string
+          created_at?: string
+          customer_name?: string | null
+          deny_reason?: string | null
+          id?: string
+          is_sale?: boolean
+          notes?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          sale_amount?: number | null
+          status?: Database["public"]["Enums"]["lead_status"]
+          team_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          address?: string | null
+          canvasser_id?: string
+          created_at?: string
+          customer_name?: string | null
+          deny_reason?: string | null
+          id?: string
+          is_sale?: boolean
+          notes?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          sale_amount?: number | null
+          status?: Database["public"]["Enums"]["lead_status"]
+          team_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "leads_team_id_fkey"
             columns: ["team_id"]
             isOneToOne: false
             referencedRelation: "teams"
@@ -248,6 +378,7 @@ export type Database = {
     }
     Enums: {
       app_role: "owner" | "captain" | "canvasser" | "office_staff"
+      lead_status: "pending" | "confirmed" | "denied"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -376,6 +507,7 @@ export const Constants = {
   public: {
     Enums: {
       app_role: ["owner", "captain", "canvasser", "office_staff"],
+      lead_status: ["pending", "confirmed", "denied"],
     },
   },
 } as const
