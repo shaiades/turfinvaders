@@ -3,8 +3,10 @@ import { useAuth } from "@/hooks/useAuth";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { StatCard, ArcadePanel, TeamBadge } from "@/components/arcade";
+import { LiveLeadCounter } from "@/components/LiveLeadCounter";
+import { useTodayLeads } from "@/hooks/useTodayLeads";
 import { DEMO_TEAMS, demoCanvassers, teamTotals, formatCurrency } from "@/lib/demo-data";
-import { Trophy, Zap, DoorOpen, Target, TrendingUp } from "lucide-react";
+import { Trophy, Zap, DoorOpen, Target, TrendingUp, Building2, Truck } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — Knockout" }] }),
