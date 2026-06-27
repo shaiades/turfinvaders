@@ -74,6 +74,7 @@ export type Database = {
       daily_logs: {
         Row: {
           canvasser_id: string
+          confirmed_leads: number
           created_at: string
           demos_sits: number
           doors_knocked: number
@@ -94,6 +95,7 @@ export type Database = {
         }
         Insert: {
           canvasser_id: string
+          confirmed_leads?: number
           created_at?: string
           demos_sits?: number
           doors_knocked?: number
@@ -114,6 +116,7 @@ export type Database = {
         }
         Update: {
           canvasser_id?: string
+          confirmed_leads?: number
           created_at?: string
           demos_sits?: number
           doors_knocked?: number

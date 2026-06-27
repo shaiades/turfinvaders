@@ -21,6 +21,7 @@ const VOCAB: { key: LogKey; label: string }[] = [
   { key: "people_talked_to", label: "People Talked To" },
   { key: "renters", label: "Renters" },
   { key: "leads_called_in", label: "Leads Called In" },
+  { key: "confirmed_leads", label: "Confirmed Leads" },
   { key: "next_days", label: "Next Days" },
   { key: "future_leads", label: "Future Leads" },
   { key: "demos_sits", label: "Demos / Sits" },
@@ -32,14 +33,14 @@ const VOCAB: { key: LogKey; label: string }[] = [
 
 type LogKey =
   | "doors_knocked" | "people_talked_to" | "renters" | "leads_called_in"
-  | "next_days" | "future_leads" | "demos_sits" | "sales"
+  | "confirmed_leads" | "next_days" | "future_leads" | "demos_sits" | "sales"
   | "one_legs" | "no_shows" | "no_demo";
 
 type LogState = Record<LogKey, number> & { notes: string };
 
 const EMPTY: LogState = {
   doors_knocked: 0, people_talked_to: 0, renters: 0, leads_called_in: 0,
-  next_days: 0, future_leads: 0, demos_sits: 0, sales: 0,
+  confirmed_leads: 0, next_days: 0, future_leads: 0, demos_sits: 0, sales: 0,
   one_legs: 0, no_shows: 0, no_demo: 0, notes: "",
 };
 
@@ -73,6 +74,7 @@ function LogPage() {
         people_talked_to: existing.data.people_talked_to ?? 0,
         renters: existing.data.renters ?? 0,
         leads_called_in: existing.data.leads_called_in ?? 0,
+        confirmed_leads: (existing.data as { confirmed_leads?: number }).confirmed_leads ?? 0,
         next_days: existing.data.next_days ?? 0,
         future_leads: existing.data.future_leads ?? 0,
         demos_sits: existing.data.demos_sits ?? 0,

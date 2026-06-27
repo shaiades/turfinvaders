@@ -1,0 +1,1 @@
+ALTER TABLE public.daily_logs ADD COLUMN IF NOT EXISTS confirmed_leads INTEGER NOT NULL DEFAULT 0;
