@@ -104,6 +104,8 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
         <LiveLeadCounter value={leads.total} size="lg" accent="victory" label="LEADS · TODAY" />
       </div>
 
+      <CommandCenter />
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard label="Total Revenue" value={formatCurrency(grand.revenue)} accent="victory" />
         <StatCard label="Doors Knocked" value={grand.doors.toLocaleString()} accent="neon" />
