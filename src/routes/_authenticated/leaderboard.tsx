@@ -46,6 +46,7 @@ function Leaderboard() {
         <ol className="divide-y divide-border">
           {scoped.map((p, i) => {
             const team = DEMO_TEAMS.find((t) => t.id === p.teamId)!;
+            const suspended = statuses?.[p.id] === "suspended";
             return (
               <li key={p.id} className="flex items-center justify-between py-3">
                 <div className="flex items-center gap-3 min-w-0">
@@ -54,6 +55,7 @@ function Leaderboard() {
                   </span>
                   <Link to="/canvassers/$canvasserId" params={{ canvasserId: p.id }} className="font-medium hover:text-neon truncate">{p.name}</Link>
                   <TeamBadge name={team.name} color={team.color} />
+                  {suspended && <SuspendedBadge />}
                 </div>
                 <div className="flex items-center gap-5 text-xs text-muted-foreground shrink-0">
                   <span>{p.doorsKnocked} doors</span>
