@@ -21,6 +21,7 @@ const VOCAB: { key: LogKey; label: string }[] = [
   { key: "people_talked_to", label: "People Talked To" },
   { key: "renters", label: "Renters" },
   { key: "leads_called_in", label: "Leads Called In" },
+  { key: "confirmed_leads", label: "Confirmed Leads" },
   { key: "next_days", label: "Next Days" },
   { key: "future_leads", label: "Future Leads" },
   { key: "demos_sits", label: "Demos / Sits" },
@@ -32,7 +33,7 @@ const VOCAB: { key: LogKey; label: string }[] = [
 
 type LogKey =
   | "doors_knocked" | "people_talked_to" | "renters" | "leads_called_in"
-  | "next_days" | "future_leads" | "demos_sits" | "sales"
+  | "confirmed_leads" | "next_days" | "future_leads" | "demos_sits" | "sales"
   | "one_legs" | "no_shows" | "no_demo";
 
 type LogState = Record<LogKey, number> & { notes: string };
