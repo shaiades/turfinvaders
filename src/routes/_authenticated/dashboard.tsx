@@ -228,6 +228,8 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
         <LiveLeadCounter value={leads.byTeam[myTeam.id] ?? 0} size="md" accent="victory" />
       </div>
 
+      <CommandCenter teamId={myTeam.id} />
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard label="Team Revenue" value={formatCurrency(totals.revenue)} accent="victory" />
         <StatCard label="Doors" value={totals.doors.toLocaleString()} accent="neon" />
