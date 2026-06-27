@@ -24,7 +24,7 @@ export const Route = createFileRoute("/_authenticated/users")({
   notFoundComponent: () => <div className="text-sm text-muted-foreground">Not found.</div>,
 });
 
-const ROLE_OPTIONS: AppRole[] = ["owner", "captain", "canvasser"];
+const ROLE_OPTIONS: AppRole[] = ["owner", "office_staff", "captain", "canvasser"];
 
 function UsersPage() {
   const qc = useQueryClient();
