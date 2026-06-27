@@ -111,6 +111,8 @@ function UsersPage() {
                 const roles = data.rolesByUser.get(p.id) ?? [];
                 const currentRole: AppRole = roles.includes("owner")
                   ? "owner"
+                  : roles.includes("office_staff")
+                  ? "office_staff"
                   : roles.includes("captain")
                   ? "captain"
                   : "canvasser";
