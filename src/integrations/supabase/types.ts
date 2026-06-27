@@ -277,6 +277,7 @@ export type Database = {
           display_name: string
           id: string
           level: number
+          status: Database["public"]["Enums"]["canvasser_status"]
           team_id: string | null
           updated_at: string
           xp: number
@@ -287,6 +288,7 @@ export type Database = {
           display_name: string
           id: string
           level?: number
+          status?: Database["public"]["Enums"]["canvasser_status"]
           team_id?: string | null
           updated_at?: string
           xp?: number
@@ -297,6 +299,7 @@ export type Database = {
           display_name?: string
           id?: string
           level?: number
+          status?: Database["public"]["Enums"]["canvasser_status"]
           team_id?: string | null
           updated_at?: string
           xp?: number
@@ -369,6 +372,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      evaluate_canvasser_suspension: {
+        Args: { _canvasser_id: string }
+        Returns: undefined
+      }
       global_visibility_on: { Args: never; Returns: boolean }
       has_role: {
         Args: {
@@ -381,6 +388,7 @@ export type Database = {
     }
     Enums: {
       app_role: "owner" | "captain" | "canvasser" | "office_staff"
+      canvasser_status: "active" | "suspended" | "inactive"
       lead_status: "pending" | "confirmed" | "denied"
     }
     CompositeTypes: {
@@ -510,6 +518,7 @@ export const Constants = {
   public: {
     Enums: {
       app_role: ["owner", "captain", "canvasser", "office_staff"],
+      canvasser_status: ["active", "suspended", "inactive"],
       lead_status: ["pending", "confirmed", "denied"],
     },
   },
