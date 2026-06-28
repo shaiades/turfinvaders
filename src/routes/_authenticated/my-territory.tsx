@@ -179,6 +179,7 @@ function MyTerritoryPage() {
         </ul>
       </ArcadePanel>
     </div>
+    </GratitudeGate>
   );
 }
 
