@@ -145,6 +145,47 @@ export type Database = {
           },
         ]
       }
+      field_pins: {
+        Row: {
+          canvasser_id: string
+          created_at: string
+          id: string
+          lat: number
+          lng: number
+          log_date: string
+          note: string | null
+          pin_type: Database["public"]["Enums"]["pin_type"]
+        }
+        Insert: {
+          canvasser_id: string
+          created_at?: string
+          id?: string
+          lat: number
+          lng: number
+          log_date?: string
+          note?: string | null
+          pin_type: Database["public"]["Enums"]["pin_type"]
+        }
+        Update: {
+          canvasser_id?: string
+          created_at?: string
+          id?: string
+          lat?: number
+          lng?: number
+          log_date?: string
+          note?: string | null
+          pin_type?: Database["public"]["Enums"]["pin_type"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "field_pins_canvasser_id_fkey"
+            columns: ["canvasser_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       lead_events: {
         Row: {
           canvasser_id: string | null
@@ -352,6 +393,64 @@ export type Database = {
           },
         ]
       }
+      territories: {
+        Row: {
+          canvasser_id: string | null
+          color: string
+          created_at: string
+          created_by: string | null
+          id: string
+          name: string
+          polygon: Json
+          team_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          canvasser_id?: string | null
+          color?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name: string
+          polygon: Json
+          team_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          canvasser_id?: string | null
+          color?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name?: string
+          polygon?: Json
+          team_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "territories_canvasser_id_fkey"
+            columns: ["canvasser_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "territories_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "territories_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_roles: {
         Row: {
           id: string
@@ -393,6 +492,7 @@ export type Database = {
       app_role: "owner" | "captain" | "canvasser" | "office_staff"
       canvasser_status: "active" | "suspended" | "inactive"
       lead_status: "pending" | "confirmed" | "denied"
+      pin_type: "not_home" | "talked_to" | "lead"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -523,6 +623,7 @@ export const Constants = {
       app_role: ["owner", "captain", "canvasser", "office_staff"],
       canvasser_status: ["active", "suspended", "inactive"],
       lead_status: ["pending", "confirmed", "denied"],
+      pin_type: ["not_home", "talked_to", "lead"],
     },
   },
 } as const

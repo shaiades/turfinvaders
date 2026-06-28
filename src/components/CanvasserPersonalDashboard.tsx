@@ -10,16 +10,31 @@ import { toast } from "sonner";
 import { DoorOpen, CalendarClock, CalendarDays, PhoneCall, DollarSign, Target, Gauge, Trophy, Sparkles, Pencil, Check, X } from "lucide-react";
 
 /**
- * Tiered weekly commission.
- * Points formula: every confirmed lead that becomes a sit/demo earns points.
- *   - Sit that did NOT close (pitch miss) = 1 point
- *   - Sit that closed into a sale         = 2 points
- *   → weekly points = (demos_sits - sales) * 1 + sales * 2 = demos_sits + sales
- * Rate applies to confirmed sale $ for the week.
+ * Paycheck engine — automated.
+ *
+ * Hours: auto-derived from days the canvasser submitted a Daily Log.
+ *   Mon–Fri log → 7.5 hrs    |    Sat log → 6.5 hrs    |    Sun → 0
+ *
+ * Weekly Points (Sits): pitch-miss sit = 1 pt, sale = 2 pts.
+ *   → weekPoints = demos_sits + sales
+ *
+ * Hourly threshold (end-of-week rule):
+ *   < 3 pts  → $18/hr  base + 1% commission
+ *   ≥ 3 pts  → $30/hr  base + 1% commission
  */
-const COMMISSION_LOW = 0.01;
-const COMMISSION_HIGH = 0.02;
-const COMMISSION_TIER_THRESHOLD = 7; // weekly points needed to unlock 2%
+const COMMISSION_RATE = 0.01;
+const POINTS_THRESHOLD = 3;
+const HOURLY_LOW = 18;
+const HOURLY_HIGH = 30;
+
+function hoursForDate(iso: string): number {
+  // JS: 0=Sun, 1=Mon, …, 6=Sat. Use UTC to match log_date (DATE type)
+  const d = new Date(iso + "T00:00:00Z");
+  const dow = d.getUTCDay();
+  if (dow === 0) return 0;          // Sun
+  if (dow === 6) return 6.5;        // Sat
+  return 7.5;                       // Mon–Fri
+}
 
 /** Fallback monthly financial goal default (USD) until canvasser sets their own. */
 const DEFAULT_MONTHLY_GOAL = 10_000;
@@ -135,7 +150,8 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
     },
   });
 
-  const { today, week, month, monthRevenue, weekRevenue, weekPoints, weekRate, monthCommission, weekCommission } = useMemo(() => {
+  const { today, week, month, monthRevenue, weekRevenue, weekPoints,
+          weekHours, hourlyRate, weekBase, weekCommission, monthCommission } = useMemo(() => {
     const rows = (logsQuery.data ?? []) as unknown as Array<Record<string, number | null> & { log_date: string }>;
     const t = todayISO(), w = startOfWeekISO();
     const today = aggregate(rows.filter((r) => r.log_date === t));
@@ -151,22 +167,28 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
       .filter((r) => new Date(r.created_at) >= wStart)
       .reduce((a, r) => a + Number(r.sale_amount ?? 0), 0);
 
-    // Weekly points: 1 pt per pitch-miss sit, 2 pts per sale.
-    // Simplifies to: demos_sits + sales (since a sale is also a sit).
+    // Weekly points: pitch-miss sit = 1, sale = 2 → demos_sits + sales.
     const weekPoints = week.demos_sits + week.sales;
-    const weekRate = weekPoints >= COMMISSION_TIER_THRESHOLD ? COMMISSION_HIGH : COMMISSION_LOW;
 
-    // Month commission: average-ish — apply 1% baseline to all month revenue,
-    // plus 1% bonus only on revenue from weeks where the player hit threshold.
-    // Simple approximation: use the current week's rate for the month estimate.
-    const monthRate = weekRate;
+    // Auto-hours: unique log dates this week, weighted by Mon–Fri=7.5 / Sat=6.5.
+    const weekDates = new Set(rows.filter((r) => r.log_date >= w).map((r) => r.log_date));
+    const weekHours = Array.from(weekDates).reduce((sum, d) => sum + hoursForDate(d), 0);
+
+    // End-of-week threshold: <3 pts → $18/hr, ≥3 pts → $30/hr. Commission flat 1%.
+    const hourlyRate = weekPoints >= POINTS_THRESHOLD ? HOURLY_HIGH : HOURLY_LOW;
+    const weekBase = weekHours * hourlyRate;
+    const weekCommission = weekRevenue * COMMISSION_RATE;
+
+    // Month commission estimate at flat 1%.
+    const monthCommission = monthRevenue * COMMISSION_RATE;
 
     return {
-      today, week, month, monthRevenue, weekRevenue, weekPoints, weekRate,
-      monthCommission: monthRevenue * monthRate,
-      weekCommission: weekRevenue * weekRate,
+      today, week, month, monthRevenue, weekRevenue, weekPoints,
+      weekHours, hourlyRate, weekBase, weekCommission, monthCommission,
     };
   }, [logsQuery.data, salesQuery.data]);
+
+  const weeklyPay = weekBase + weekCommission;
 
   const valuePerDoor = month.doors_knocked > 0 ? monthCommission / month.doors_knocked : 0;
   const lpd = week.days_worked > 0 ? week.confirmed_leads / week.days_worked : 0;
@@ -227,8 +249,8 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
           <div className="grid sm:grid-cols-2 gap-4">
             <BigStat
               label="Weekly Pay"
-              value={formatUSD(weekCommission)}
-              sub={`${(weekRate * 100).toFixed(0)}% tier · ${weekPoints} pts · ${formatUSD(weekRevenue)} confirmed sales`}
+              value={formatUSD(weeklyPay)}
+              sub={`${weekHours.toFixed(1)} hrs × $${hourlyRate}/hr + ${formatUSD(weekCommission)} commission`}
               icon={<DollarSign className="w-4 h-4" />}
               accent="var(--victory)"
             />
@@ -241,7 +263,14 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
             />
           </div>
 
-          <CommissionTierWidget points={weekPoints} threshold={COMMISSION_TIER_THRESHOLD} rate={weekRate} />
+          <PaycheckEngineWidget
+            points={weekPoints}
+            hours={weekHours}
+            hourlyRate={hourlyRate}
+            base={weekBase}
+            commission={weekCommission}
+            revenue={weekRevenue}
+          />
 
           <RankProgress
             current={current.label}
@@ -413,28 +442,46 @@ function RankProgress({
   );
 }
 
-function CommissionTierWidget({ points, threshold, rate }: { points: number; threshold: number; rate: number }) {
-  const pct = Math.min(1, points / threshold);
-  const atTop = rate >= COMMISSION_HIGH;
+function PaycheckEngineWidget({
+  points, hours, hourlyRate, base, commission, revenue,
+}: { points: number; hours: number; hourlyRate: number; base: number; commission: number; revenue: number }) {
+  const atTop = hourlyRate >= HOURLY_HIGH;
+  const pct = Math.min(1, points / POINTS_THRESHOLD);
+  const accent = atTop ? "var(--victory)" : "var(--neon)";
   return (
-    <ArcadePanel title="Commission Tier"
-      action={<span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Weekly · {points} pts</span>}
+    <ArcadePanel title="Paycheck Engine"
+      action={<span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Auto · Weekly</span>}
     >
-      <div className="flex items-center justify-between gap-4 flex-wrap">
+      <div className="grid sm:grid-cols-3 gap-4">
         <div>
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Current Rate</div>
-          <div className="font-display text-3xl text-victory mt-1" style={{ textShadow: "0 0 14px color-mix(in oklab, var(--victory) 60%, transparent)" }}>
-            {(rate * 100).toFixed(0)}%
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Hourly Tier</div>
+          <div className="font-display text-3xl mt-1" style={{ color: accent, textShadow: `0 0 14px color-mix(in oklab, ${accent} 60%, transparent)` }}>
+            ${hourlyRate}/hr
+          </div>
+          <div className="text-[10px] uppercase tracking-widest text-muted-foreground mt-1">
+            {atTop ? "🔥 $30 tier unlocked" : `${Math.max(0, POINTS_THRESHOLD - points)} pt(s) to $30/hr`}
           </div>
         </div>
-        <div className="text-right">
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Unlock 2%</div>
-          <div className="font-display text-lg text-neon">{threshold} pts / week</div>
+        <div>
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Auto Hours</div>
+          <div className="font-display text-3xl text-neon mt-1">{hours.toFixed(1)}</div>
+          <div className="text-[10px] uppercase tracking-widest text-muted-foreground mt-1">
+            M–F 7.5 · Sat 6.5 · per log day
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Sits / Points</div>
+          <div className="font-display text-3xl text-accent mt-1">{points}</div>
+          <div className="text-[10px] uppercase tracking-widest text-muted-foreground mt-1">
+            Sit = 1 · Sale = 2
+          </div>
         </div>
       </div>
-      <NeonBar pct={pct} accent={atTop ? "var(--victory)" : "var(--neon)"} />
-      <div className="mt-2 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-        {atTop ? "🔥 2% tier unlocked this week" : `${Math.max(0, threshold - points)} more pts to unlock 2%`}
+      <NeonBar pct={pct} accent={accent} />
+      <div className="mt-3 grid sm:grid-cols-3 gap-2 text-[11px] text-muted-foreground border-t border-border pt-3">
+        <div>Base · <span className="text-foreground">{formatUSD(base)}</span></div>
+        <div>Commission (1% of {formatUSD(revenue)}) · <span className="text-victory">{formatUSD(commission)}</span></div>
+        <div className="sm:text-right">Total · <span className="font-display text-victory">{formatUSD(base + commission)}</span></div>
       </div>
     </ArcadePanel>
   );

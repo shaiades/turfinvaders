@@ -54,7 +54,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { title: "Knockout — Canvassing Leaderboard" },
       { name: "description", content: "Track teams, climb the leaderboard, and level up your canvassing game." },
     ],
-    links: [{ rel: "stylesheet", href: appCss }],
+    links: [
+      { rel: "stylesheet", href: appCss },
+      { rel: "stylesheet", href: "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" },
+    ],
   }),
   shellComponent: RootShell,
   component: RootComponent,
