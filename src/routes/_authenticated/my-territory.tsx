@@ -19,6 +19,17 @@ function todayISO() {
   return d.toISOString().slice(0, 10);
 }
 
+function haversineMeters(a: LatLng, b: LatLng) {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const s1 = Math.sin(dLat / 2);
+  const s2 = Math.sin(dLng / 2);
+  const h = s1 * s1 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * s2 * s2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
 type ActivePin = FieldPin["pin_type"];
 
 function MyTerritoryPage() {
@@ -53,7 +64,7 @@ function MyTerritoryPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("field_pins")
-        .select("id, pin_type, lat, lng")
+        .select("id, pin_type, lat, lng, is_remote_drop, distance_m")
         .eq("canvasser_id", user!.id)
         .eq("log_date", todayISO());
       if (error) throw error;
@@ -73,17 +84,42 @@ function MyTerritoryPage() {
 
   const dropPin = useMutation({
     mutationFn: async (ll: LatLng) => {
+      // Capture a FRESH device fix at drop time (don't trust stale watch state)
+      const fix = await new Promise<GeolocationPosition | null>((resolve) => {
+        if (!navigator.geolocation) return resolve(null);
+        navigator.geolocation.getCurrentPosition(
+          (p) => resolve(p),
+          () => resolve(null),
+          { enableHighAccuracy: true, maximumAge: 10000, timeout: 8000 },
+        );
+      });
+      const device = fix ? { lat: fix.coords.latitude, lng: fix.coords.longitude } : me;
+      const distance_m = device ? haversineMeters(device, ll) : null;
+      const is_remote_drop = distance_m == null ? true : distance_m > 18; // 20 yards ≈ 18.288m
+
       const { error } = await supabase.from("field_pins").insert({
         canvasser_id: user!.id,
         pin_type: active,
         lat: ll.lat,
         lng: ll.lng,
         log_date: todayISO(),
+        device_lat: device?.lat ?? null,
+        device_lng: device?.lng ?? null,
+        distance_m,
+        is_remote_drop,
       });
       if (error) throw error;
+      return { is_remote_drop, distance_m };
     },
-    onSuccess: () => {
-      toast.success(active === "lead" ? "🟢 Lead pin dropped" : active === "talked_to" ? "🟡 Conversation logged" : "🔴 Not home");
+    onSuccess: ({ is_remote_drop, distance_m }) => {
+      if (is_remote_drop) {
+        const yds = distance_m != null ? Math.round(distance_m * 1.0936) : null;
+        toast.warning(`⚠ Remote Drop flagged${yds != null ? ` · ${yds} yds from pin` : ""}`, {
+          description: "Pin won't count toward your stats. Walk to the door and try again.",
+        });
+      } else {
+        toast.success(active === "lead" ? "🟢 Lead pin dropped" : active === "talked_to" ? "🟡 Conversation logged" : "🔴 Not home");
+      }
       qc.invalidateQueries({ queryKey: ["my_pins_today", user?.id] });
       qc.invalidateQueries({ queryKey: ["my_logs"] });
     },

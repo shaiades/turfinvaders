@@ -17,6 +17,8 @@ export type FieldPin = {
   pin_type: "not_home" | "talked_to" | "lead";
   lat: number;
   lng: number;
+  is_remote_drop?: boolean;
+  distance_m?: number | null;
 };
 
 const PIN_COLORS: Record<FieldPin["pin_type"], string> = {
@@ -24,6 +26,7 @@ const PIN_COLORS: Record<FieldPin["pin_type"], string> = {
   talked_to: "#ffd60a",
   lead: "#39ff14",
 };
+const REMOTE_DROP_COLOR = "#8a8f99";
 
 function glowingDotIcon(color: string, size = 18) {
   const html = `
@@ -39,6 +42,17 @@ function glowingDotIcon(color: string, size = 18) {
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
   });
+}
+
+function flaggedPinIcon(size = 22) {
+  const color = REMOTE_DROP_COLOR;
+  const html = `
+    <div style="position:relative;width:${size}px;height:${size}px;">
+      <div style="position:absolute;inset:0;border-radius:9999px;background:${color};border:2px dashed #fff;box-shadow:0 0 10px ${color},0 0 0 2px #ff2d5588;animation:nm-flag 1.6s ease-in-out infinite;"></div>
+      <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font:700 11px/1 ui-sans-serif,system-ui;text-shadow:0 0 4px #000;">!</div>
+    </div>
+    <style>@keyframes nm-flag{0%,100%{box-shadow:0 0 10px ${color},0 0 0 2px #ff2d5588}50%{box-shadow:0 0 18px ${color},0 0 0 4px #ff2d55cc}}</style>`;
+  return L.divIcon({ html, className: "neon-pin-flag", iconSize: [size, size], iconAnchor: [size / 2, size / 2] });
 }
 
 function pulseDotIcon(color: string) {
@@ -174,7 +188,7 @@ export function NeonMap({
         )}
 
         {pins.map((p) => (
-          <Marker key={p.id} position={[p.lat, p.lng]} icon={glowingDotIcon(PIN_COLORS[p.pin_type])} />
+          <Marker key={p.id} position={[p.lat, p.lng]} icon={p.is_remote_drop ? flaggedPinIcon() : glowingDotIcon(PIN_COLORS[p.pin_type])} />
         ))}
 
         {me && <Marker position={[me.lat, me.lng]} icon={pulseDotIcon("#00e5ff")} />}

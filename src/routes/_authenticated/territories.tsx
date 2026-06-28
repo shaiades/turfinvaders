@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { ArcadePanel } from "@/components/arcade";
-import { NeonMap, type Territory, type LatLng } from "@/components/NeonMap";
+import { NeonMap, type Territory, type LatLng, type FieldPin } from "@/components/NeonMap";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -47,6 +47,21 @@ function TerritoriesPage() {
       return data ?? [];
     },
   });
+
+  const pinsQuery = useQuery({
+    queryKey: ["territory_pins_today"],
+    queryFn: async () => {
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      const iso = today.toISOString().slice(0, 10);
+      const { data, error } = await supabase
+        .from("field_pins")
+        .select("id, pin_type, lat, lng, is_remote_drop, distance_m")
+        .eq("log_date", iso);
+      if (error) throw error;
+      return (data ?? []) as FieldPin[];
+    },
+  });
+  const remoteDropCount = (pinsQuery.data ?? []).filter((p) => p.is_remote_drop).length;
 
   const territories: Territory[] = useMemo(() => {
     return (territoriesQuery.data ?? []).map((t) => {
@@ -145,8 +160,16 @@ function TerritoriesPage() {
         </ArcadePanel>
       )}
 
+      {remoteDropCount > 0 && (
+        <div className="rounded border border-[#ff2d55]/60 bg-[#ff2d55]/10 px-3 py-2 font-display text-[10px] uppercase tracking-widest text-[#ff8fa3] flex items-center justify-between">
+          <span>⚠ {remoteDropCount} Remote Drop{remoteDropCount === 1 ? "" : "s"} flagged today (grey pins)</span>
+          <span className="opacity-70">Canvasser dropped pin &gt;20 yds from device</span>
+        </div>
+      )}
+
       <NeonMap
         territories={territories}
+        pins={pinsQuery.data ?? []}
         height={520}
         mode={drawing ? { kind: "draw", onComplete: (poly) => createTerritory.mutate(poly) } : { kind: "view" }}
       />
