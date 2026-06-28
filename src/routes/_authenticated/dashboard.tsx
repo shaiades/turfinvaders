@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { StatCard, ArcadePanel, TeamBadge } from "@/components/arcade";
 import { LiveLeadCounter } from "@/components/LiveLeadCounter";
 import { CommandCenter } from "@/components/CommandCenter";
+import { CanvasserPersonalDashboard } from "@/components/CanvasserPersonalDashboard";
 import { SuspendedBadge, useCanvasserStatuses } from "@/components/SuspendedBadge";
 import { useTodayLeads } from "@/hooks/useTodayLeads";
 import { DEMO_TEAMS, demoCanvassers, teamTotals, formatCurrency } from "@/lib/demo-data";
@@ -16,7 +17,7 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
 });
 
 function Dashboard() {
-  const { role, loading, teamId, displayName } = useAuth();
+  const { role, loading, teamId, displayName, user } = useAuth();
 
   const { data: settings } = useQuery({
     queryKey: ["company_settings"],
@@ -31,7 +32,7 @@ function Dashboard() {
 
   if (role === "owner") return <OwnerDashboard visibility={!!settings?.global_visibility} />;
   if (role === "captain") return <CaptainDashboard teamId={teamId} visibility={!!settings?.global_visibility} />;
-  return <CanvasserDashboard displayName={displayName} teamId={teamId} visibility={!!settings?.global_visibility} />;
+  return <CanvasserDashboard displayName={displayName} teamId={teamId} userId={user?.id} visibility={!!settings?.global_visibility} />;
 }
 
 function Loading() { return <div className="text-muted-foreground text-sm">Loading dashboard…</div>; }
@@ -272,12 +273,8 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
 }
 
 /* ============ CANVASSER ============ */
-function CanvasserDashboard({ displayName, teamId, visibility }: { displayName: string | null; teamId: string | null; visibility: boolean }) {
+function CanvasserDashboard({ displayName, teamId, userId, visibility }: { displayName: string | null; teamId: string | null; userId?: string; visibility: boolean }) {
   const myTeam = DEMO_TEAMS.find((t) => t.id === teamId) ?? DEMO_TEAMS[0];
-  const me = {
-    name: displayName ?? "You",
-    doorsKnocked: 142, contactsMade: 53, salesClosed: 11, revenueGenerated: 18400, level: 4,
-  };
   const peers = demoCanvassers().sort((a, b) => b.salesClosed - a.salesClosed).slice(0, 6);
 
   return (
@@ -285,21 +282,19 @@ function CanvasserDashboard({ displayName, teamId, visibility }: { displayName: 
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Player Card</div>
-          <h1 className="font-display text-2xl text-neon mt-1">{me.name.toUpperCase()}</h1>
+          <h1 className="font-display text-2xl text-neon mt-1">{(displayName ?? "You").toUpperCase()}</h1>
           <div className="mt-2 flex items-center gap-2">
             <TeamBadge name={myTeam.name} color={myTeam.color} />
-            <span className="text-xs font-display text-victory">LVL {me.level}</span>
           </div>
         </div>
         <VisibilityChip on={visibility} />
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard label="Doors Knocked" value={me.doorsKnocked} sublabel="This week" accent="neon" />
-        <StatCard label="Contacts" value={me.contactsMade} sublabel="This week" accent="warning" />
-        <StatCard label="Sales Closed" value={me.salesClosed} sublabel="This week" accent="accent" />
-        <StatCard label="Revenue" value={formatCurrency(me.revenueGenerated)} sublabel="MTD" accent="victory" />
-      </div>
+      {userId ? (
+        <CanvasserPersonalDashboard userId={userId} />
+      ) : (
+        <div className="text-sm text-muted-foreground">Loading your dashboard…</div>
+      )}
 
       {visibility ? (
         <ArcadePanel title="Player Leaderboard" action={<Link to="/leaderboard" className="text-xs text-neon">View all →</Link>}>
