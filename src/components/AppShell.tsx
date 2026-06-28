@@ -1,12 +1,13 @@
 import { Link, useRouter } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/hooks/useAuth";
-import { LogOut, Trophy, Users, Settings, LayoutDashboard, ShieldCheck, ClipboardList, Inbox, Map, MapPin } from "lucide-react";
+import { useAuth, setDevRoleOverride, type AppRole } from "@/hooks/useAuth";
+import { LogOut, Trophy, Users, Settings, LayoutDashboard, ShieldCheck, ClipboardList, Inbox, Map, MapPin, FlaskConical } from "lucide-react";
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { user, role, displayName } = useAuth();
+  const { user, role, realRole, displayName } = useAuth();
   const router = useRouter();
+  const isOverridden = role !== realRole && realRole !== null;
 
   const navItems = [
     { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -39,6 +40,45 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen flex flex-col">
+      {user && (
+        <div className="border-b border-[var(--neon-magenta)]/40 bg-[var(--neon-magenta)]/10 text-xs">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2 flex items-center gap-3 flex-wrap">
+            <FlaskConical className="w-3.5 h-3.5 text-[var(--neon-magenta)]" />
+            <span className="font-display uppercase tracking-widest text-[10px] text-[var(--neon-magenta)]">
+              Dev Mode · View As
+            </span>
+            <select
+              value={role ?? ""}
+              onChange={(e) => {
+                const v = e.target.value as AppRole;
+                setDevRoleOverride(v === realRole ? null : v);
+              }}
+              className="bg-surface border border-border rounded px-2 py-1 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-[var(--neon-magenta)]"
+            >
+              <option value="owner">Owner</option>
+              <option value="captain">Captain</option>
+              <option value="canvasser">Canvasser</option>
+              <option value="office_staff">Office Staff</option>
+            </select>
+            {isOverridden && (
+              <>
+                <span className="text-muted-foreground">
+                  (real role: <span className="text-foreground">{realRole}</span>)
+                </span>
+                <button
+                  onClick={() => setDevRoleOverride(null)}
+                  className="ml-auto text-[10px] uppercase tracking-widest text-[var(--neon-magenta)] hover:underline"
+                >
+                  Reset
+                </button>
+              </>
+            )}
+            <span className="ml-auto text-[10px] text-muted-foreground hidden sm:inline">
+              UI only · backend permissions unchanged
+            </span>
+          </div>
+        </div>
+      )}
       <header className="border-b border-border bg-surface/80 backdrop-blur sticky top-0 z-20">
         <div className="max-w-7xl mx-auto flex items-center gap-6 px-4 sm:px-6 py-3">
           <Link to="/dashboard" className="flex items-center gap-2">
