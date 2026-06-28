@@ -145,7 +145,7 @@ export function NeonMap({
         {territories.map((t) => (
           <Polygon
             key={t.id}
-            positions={t.polygon.map((p) => [p.lat, p.lng])}
+            positions={t.polygon.map((p) => [p.lat, p.lng] as [number, number])}
             pathOptions={{
               color: t.color,
               weight: 2,
@@ -158,7 +158,7 @@ export function NeonMap({
         {mode.kind === "draw" && draft.length > 0 && (
           <>
             <Polygon
-              positions={draft.map((p) => [p.lat, p.lng])}
+              positions={draft.map((p) => [p.lat, p.lng] as [number, number])}
               pathOptions={{
                 color: "var(--neon)" as unknown as string,
                 weight: 2,
