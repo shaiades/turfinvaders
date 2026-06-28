@@ -24,9 +24,6 @@ const COMMISSION_TIER_THRESHOLD = 10; // weekly points needed to unlock 2% — T
 /** Fallback monthly financial goal default (USD) until canvasser sets their own. */
 const DEFAULT_MONTHLY_GOAL = 10_000;
 
-/** Fallback monthly financial goal default (USD) until canvasser sets their own. */
-const DEFAULT_MONTHLY_GOAL = 10_000;
-
 /** Rank ladder — order matters. */
 const RANKS = [
   { key: "rookie",   label: "Rookie",      minSales: 0 },
