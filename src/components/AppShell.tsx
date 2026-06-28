@@ -1,12 +1,13 @@
 import { Link, useRouter } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/hooks/useAuth";
-import { LogOut, Trophy, Users, Settings, LayoutDashboard, ShieldCheck, ClipboardList, Inbox, Map, MapPin } from "lucide-react";
+import { useAuth, setDevRoleOverride, type AppRole } from "@/hooks/useAuth";
+import { LogOut, Trophy, Users, Settings, LayoutDashboard, ShieldCheck, ClipboardList, Inbox, Map, MapPin, FlaskConical } from "lucide-react";
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { user, role, displayName } = useAuth();
+  const { user, role, realRole, displayName } = useAuth();
   const router = useRouter();
+  const isOverridden = role !== realRole && realRole !== null;
 
   const navItems = [
     { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
