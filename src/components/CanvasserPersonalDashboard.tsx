@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel } from "@/components/arcade";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { LiveLeadCounter } from "@/components/LiveLeadCounter";
+import { WeeklyPlaybook } from "@/components/WeeklyPlaybook";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
