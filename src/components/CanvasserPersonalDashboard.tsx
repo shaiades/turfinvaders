@@ -4,16 +4,22 @@ import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel } from "@/components/arcade";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { LiveLeadCounter } from "@/components/LiveLeadCounter";
-import { DoorOpen, MessageCircle, PhoneCall, DollarSign, Target, Gauge, Trophy, Sparkles } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
+import { DoorOpen, CalendarClock, CalendarDays, PhoneCall, DollarSign, Target, Gauge, Trophy, Sparkles, Pencil, Check, X } from "lucide-react";
 
 /**
- * Default commission rate when none is set per-canvasser yet.
- * Used by the Value-Per-Door + Weekly Pay calculators.
+ * Tiered weekly commission. Rate applied to confirmed sale $ for the week.
+ * Threshold is "points" per week (1 point = 1 confirmed sale by default).
+ * TODO: confirm with Owner — currently 1% baseline, 2% when weekly points >= threshold.
  */
-const COMMISSION_RATE = 0.1;
+const COMMISSION_LOW = 0.01;
+const COMMISSION_HIGH = 0.02;
+const COMMISSION_TIER_THRESHOLD = 10; // weekly points needed to unlock 2%
 
-/** Monthly financial goal default (USD). */
-const MONTHLY_GOAL = 10_000;
+/** Fallback monthly financial goal default (USD) until canvasser sets their own. */
+const DEFAULT_MONTHLY_GOAL = 10_000;
 
 /** Rank ladder — order matters. */
 const RANKS = [
