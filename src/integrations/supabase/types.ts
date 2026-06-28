@@ -149,7 +149,11 @@ export type Database = {
         Row: {
           canvasser_id: string
           created_at: string
+          device_lat: number | null
+          device_lng: number | null
+          distance_m: number | null
           id: string
+          is_remote_drop: boolean
           lat: number
           lng: number
           log_date: string
@@ -159,7 +163,11 @@ export type Database = {
         Insert: {
           canvasser_id: string
           created_at?: string
+          device_lat?: number | null
+          device_lng?: number | null
+          distance_m?: number | null
           id?: string
+          is_remote_drop?: boolean
           lat: number
           lng: number
           log_date?: string
@@ -169,7 +177,11 @@ export type Database = {
         Update: {
           canvasser_id?: string
           created_at?: string
+          device_lat?: number | null
+          device_lng?: number | null
+          distance_m?: number | null
           id?: string
+          is_remote_drop?: boolean
           lat?: number
           lng?: number
           log_date?: string
