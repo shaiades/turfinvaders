@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMemo, useState, useEffect } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel } from "@/components/arcade";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -55,6 +55,8 @@ type Totals = {
   people_talked_to: number;
   leads_called_in: number;
   confirmed_leads: number;
+  next_days: number;
+  future_leads: number;
   demos_sits: number;
   sales: number;
   no_shows: number;
@@ -62,10 +64,11 @@ type Totals = {
 };
 const ZERO: Totals = {
   doors_knocked: 0, people_talked_to: 0, leads_called_in: 0,
-  confirmed_leads: 0, demos_sits: 0, sales: 0, no_shows: 0, days_worked: 0,
+  confirmed_leads: 0, next_days: 0, future_leads: 0,
+  demos_sits: 0, sales: 0, no_shows: 0, days_worked: 0,
 };
 
-function aggregate(rows: Array<Record<string, number | null>>): Totals {
+function aggregate(rows: Array<Record<string, number | null> & { log_date: string }>): Totals {
   const t = { ...ZERO };
   const days = new Set<string>();
   for (const r of rows) {
@@ -73,24 +76,39 @@ function aggregate(rows: Array<Record<string, number | null>>): Totals {
     t.people_talked_to += r.people_talked_to ?? 0;
     t.leads_called_in  += r.leads_called_in  ?? 0;
     t.confirmed_leads  += r.confirmed_leads  ?? 0;
+    t.next_days        += r.next_days        ?? 0;
+    t.future_leads     += r.future_leads     ?? 0;
     t.demos_sits       += r.demos_sits       ?? 0;
     t.sales            += r.sales            ?? 0;
     t.no_shows         += r.no_shows         ?? 0;
     const hadActivity = (r.doors_knocked ?? 0) + (r.leads_called_in ?? 0) + (r.confirmed_leads ?? 0) > 0;
-    if (hadActivity && typeof r.log_date === "string") days.add(r.log_date as unknown as string);
+    if (hadActivity && typeof r.log_date === "string") days.add(r.log_date);
   }
   t.days_worked = days.size;
   return t;
 }
 
 export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
+  const qc = useQueryClient();
+
+  const profileQuery = useQuery({
+    queryKey: ["my_profile_goal", userId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("profiles").select("monthly_goal").eq("id", userId).maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+  });
+  const monthlyGoal = Number((profileQuery.data as { monthly_goal?: number } | null)?.monthly_goal ?? DEFAULT_MONTHLY_GOAL);
+
   const logsQuery = useQuery({
     queryKey: ["my_logs", "mtd", userId],
     queryFn: async () => {
       const since = startOfMonthISO();
       const { data, error } = await supabase
         .from("daily_logs")
-        .select("log_date, doors_knocked, people_talked_to, leads_called_in, confirmed_leads, demos_sits, sales, no_shows")
+        .select("log_date, doors_knocked, people_talked_to, leads_called_in, confirmed_leads, next_days, future_leads, demos_sits, sales, no_shows")
         .eq("canvasser_id", userId)
         .gte("log_date", since);
       if (error) throw error;
