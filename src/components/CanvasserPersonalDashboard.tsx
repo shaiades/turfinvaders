@@ -442,28 +442,46 @@ function RankProgress({
   );
 }
 
-function CommissionTierWidget({ points, threshold, rate }: { points: number; threshold: number; rate: number }) {
-  const pct = Math.min(1, points / threshold);
-  const atTop = rate >= COMMISSION_HIGH;
+function PaycheckEngineWidget({
+  points, hours, hourlyRate, base, commission, revenue,
+}: { points: number; hours: number; hourlyRate: number; base: number; commission: number; revenue: number }) {
+  const atTop = hourlyRate >= HOURLY_HIGH;
+  const pct = Math.min(1, points / POINTS_THRESHOLD);
+  const accent = atTop ? "var(--victory)" : "var(--neon)";
   return (
-    <ArcadePanel title="Commission Tier"
-      action={<span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Weekly · {points} pts</span>}
+    <ArcadePanel title="Paycheck Engine"
+      action={<span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Auto · Weekly</span>}
     >
-      <div className="flex items-center justify-between gap-4 flex-wrap">
+      <div className="grid sm:grid-cols-3 gap-4">
         <div>
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Current Rate</div>
-          <div className="font-display text-3xl text-victory mt-1" style={{ textShadow: "0 0 14px color-mix(in oklab, var(--victory) 60%, transparent)" }}>
-            {(rate * 100).toFixed(0)}%
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Hourly Tier</div>
+          <div className="font-display text-3xl mt-1" style={{ color: accent, textShadow: `0 0 14px color-mix(in oklab, ${accent} 60%, transparent)` }}>
+            ${hourlyRate}/hr
+          </div>
+          <div className="text-[10px] uppercase tracking-widest text-muted-foreground mt-1">
+            {atTop ? "🔥 $30 tier unlocked" : `${Math.max(0, POINTS_THRESHOLD - points)} pt(s) to $30/hr`}
           </div>
         </div>
-        <div className="text-right">
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Unlock 2%</div>
-          <div className="font-display text-lg text-neon">{threshold} pts / week</div>
+        <div>
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Auto Hours</div>
+          <div className="font-display text-3xl text-neon mt-1">{hours.toFixed(1)}</div>
+          <div className="text-[10px] uppercase tracking-widest text-muted-foreground mt-1">
+            M–F 7.5 · Sat 6.5 · per log day
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Sits / Points</div>
+          <div className="font-display text-3xl text-accent mt-1">{points}</div>
+          <div className="text-[10px] uppercase tracking-widest text-muted-foreground mt-1">
+            Sit = 1 · Sale = 2
+          </div>
         </div>
       </div>
-      <NeonBar pct={pct} accent={atTop ? "var(--victory)" : "var(--neon)"} />
-      <div className="mt-2 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-        {atTop ? "🔥 2% tier unlocked this week" : `${Math.max(0, threshold - points)} more pts to unlock 2%`}
+      <NeonBar pct={pct} accent={accent} />
+      <div className="mt-3 grid sm:grid-cols-3 gap-2 text-[11px] text-muted-foreground border-t border-border pt-3">
+        <div>Base · <span className="text-foreground">{formatUSD(base)}</span></div>
+        <div>Commission (1% of {formatUSD(revenue)}) · <span className="text-victory">{formatUSD(commission)}</span></div>
+        <div className="sm:text-right">Total · <span className="font-display text-victory">{formatUSD(base + commission)}</span></div>
       </div>
     </ArcadePanel>
   );
