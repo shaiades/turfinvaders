@@ -10,16 +10,31 @@ import { toast } from "sonner";
 import { DoorOpen, CalendarClock, CalendarDays, PhoneCall, DollarSign, Target, Gauge, Trophy, Sparkles, Pencil, Check, X } from "lucide-react";
 
 /**
- * Tiered weekly commission.
- * Points formula: every confirmed lead that becomes a sit/demo earns points.
- *   - Sit that did NOT close (pitch miss) = 1 point
- *   - Sit that closed into a sale         = 2 points
- *   → weekly points = (demos_sits - sales) * 1 + sales * 2 = demos_sits + sales
- * Rate applies to confirmed sale $ for the week.
+ * Paycheck engine — automated.
+ *
+ * Hours: auto-derived from days the canvasser submitted a Daily Log.
+ *   Mon–Fri log → 7.5 hrs    |    Sat log → 6.5 hrs    |    Sun → 0
+ *
+ * Weekly Points (Sits): pitch-miss sit = 1 pt, sale = 2 pts.
+ *   → weekPoints = demos_sits + sales
+ *
+ * Hourly threshold (end-of-week rule):
+ *   < 3 pts  → $18/hr  base + 1% commission
+ *   ≥ 3 pts  → $30/hr  base + 1% commission
  */
-const COMMISSION_LOW = 0.01;
-const COMMISSION_HIGH = 0.02;
-const COMMISSION_TIER_THRESHOLD = 7; // weekly points needed to unlock 2%
+const COMMISSION_RATE = 0.01;
+const POINTS_THRESHOLD = 3;
+const HOURLY_LOW = 18;
+const HOURLY_HIGH = 30;
+
+function hoursForDate(iso: string): number {
+  // JS: 0=Sun, 1=Mon, …, 6=Sat. Use UTC to match log_date (DATE type)
+  const d = new Date(iso + "T00:00:00Z");
+  const dow = d.getUTCDay();
+  if (dow === 0) return 0;          // Sun
+  if (dow === 6) return 6.5;        // Sat
+  return 7.5;                       // Mon–Fri
+}
 
 /** Fallback monthly financial goal default (USD) until canvasser sets their own. */
 const DEFAULT_MONTHLY_GOAL = 10_000;
