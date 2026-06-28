@@ -21,6 +21,7 @@ import { Route as AuthenticatedLeaderboardRouteImport } from './routes/_authenti
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedConfirmationDeskRouteImport } from './routes/_authenticated/confirmation-desk'
 import { Route as AuthenticatedTeamsIndexRouteImport } from './routes/_authenticated/teams.index'
+import { Route as ApiPublicMondayWebhookRouteImport } from './routes/api/public/monday-webhook'
 import { Route as AuthenticatedTeamsTeamIdRouteImport } from './routes/_authenticated/teams.$teamId'
 import { Route as AuthenticatedCanvassersCanvasserIdRouteImport } from './routes/_authenticated/canvassers.$canvasserId'
 
@@ -87,6 +88,11 @@ const AuthenticatedTeamsIndexRoute = AuthenticatedTeamsIndexRouteImport.update({
   path: '/teams/',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const ApiPublicMondayWebhookRoute = ApiPublicMondayWebhookRouteImport.update({
+  id: '/api/public/monday-webhook',
+  path: '/api/public/monday-webhook',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthenticatedTeamsTeamIdRoute =
   AuthenticatedTeamsTeamIdRouteImport.update({
     id: '/teams/$teamId',
@@ -113,6 +119,7 @@ export interface FileRoutesByFullPath {
   '/users': typeof AuthenticatedUsersRoute
   '/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRoute
   '/teams/$teamId': typeof AuthenticatedTeamsTeamIdRoute
+  '/api/public/monday-webhook': typeof ApiPublicMondayWebhookRoute
   '/teams/': typeof AuthenticatedTeamsIndexRoute
 }
 export interface FileRoutesByTo {
@@ -128,6 +135,7 @@ export interface FileRoutesByTo {
   '/users': typeof AuthenticatedUsersRoute
   '/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRoute
   '/teams/$teamId': typeof AuthenticatedTeamsTeamIdRoute
+  '/api/public/monday-webhook': typeof ApiPublicMondayWebhookRoute
   '/teams': typeof AuthenticatedTeamsIndexRoute
 }
 export interface FileRoutesById {
@@ -145,6 +153,7 @@ export interface FileRoutesById {
   '/_authenticated/users': typeof AuthenticatedUsersRoute
   '/_authenticated/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRoute
   '/_authenticated/teams/$teamId': typeof AuthenticatedTeamsTeamIdRoute
+  '/api/public/monday-webhook': typeof ApiPublicMondayWebhookRoute
   '/_authenticated/teams/': typeof AuthenticatedTeamsIndexRoute
 }
 export interface FileRouteTypes {
@@ -162,6 +171,7 @@ export interface FileRouteTypes {
     | '/users'
     | '/canvassers/$canvasserId'
     | '/teams/$teamId'
+    | '/api/public/monday-webhook'
     | '/teams/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -177,6 +187,7 @@ export interface FileRouteTypes {
     | '/users'
     | '/canvassers/$canvasserId'
     | '/teams/$teamId'
+    | '/api/public/monday-webhook'
     | '/teams'
   id:
     | '__root__'
@@ -193,6 +204,7 @@ export interface FileRouteTypes {
     | '/_authenticated/users'
     | '/_authenticated/canvassers/$canvasserId'
     | '/_authenticated/teams/$teamId'
+    | '/api/public/monday-webhook'
     | '/_authenticated/teams/'
   fileRoutesById: FileRoutesById
 }
@@ -200,6 +212,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  ApiPublicMondayWebhookRoute: typeof ApiPublicMondayWebhookRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -288,6 +301,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedTeamsIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/api/public/monday-webhook': {
+      id: '/api/public/monday-webhook'
+      path: '/api/public/monday-webhook'
+      fullPath: '/api/public/monday-webhook'
+      preLoaderRoute: typeof ApiPublicMondayWebhookRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_authenticated/teams/$teamId': {
       id: '/_authenticated/teams/$teamId'
       path: '/teams/$teamId'
@@ -341,6 +361,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  ApiPublicMondayWebhookRoute: ApiPublicMondayWebhookRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
