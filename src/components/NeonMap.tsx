@@ -17,6 +17,8 @@ export type FieldPin = {
   pin_type: "not_home" | "talked_to" | "lead";
   lat: number;
   lng: number;
+  is_remote_drop?: boolean;
+  distance_m?: number | null;
 };
 
 const PIN_COLORS: Record<FieldPin["pin_type"], string> = {
@@ -24,6 +26,7 @@ const PIN_COLORS: Record<FieldPin["pin_type"], string> = {
   talked_to: "#ffd60a",
   lead: "#39ff14",
 };
+const REMOTE_DROP_COLOR = "#8a8f99";
 
 function glowingDotIcon(color: string, size = 18) {
   const html = `
