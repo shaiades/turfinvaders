@@ -7,7 +7,7 @@ import { LiveLeadCounter } from "@/components/LiveLeadCounter";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { DoorOpen, CalendarClock, CalendarDays, PhoneCall, DollarSign, Target, Gauge, Trophy, Sparkles, Pencil, Check, X } from "lucide-react";
+import { DoorOpen, CalendarClock, CalendarDays, PhoneCall, DollarSign, Target, Gauge, Trophy, Sparkles, Pencil, Check, X, Crosshair, Zap, Users, Swords, Flame } from "lucide-react";
 
 /**
  * Paycheck engine — automated.
@@ -120,19 +120,53 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
   });
   const monthlyGoal = Number((profileQuery.data as { monthly_goal?: number } | null)?.monthly_goal ?? DEFAULT_MONTHLY_GOAL);
 
+  // Personal logs — last 60 days for both MTD math and historical conversion rates.
   const logsQuery = useQuery({
-    queryKey: ["my_logs", "mtd", userId],
+    queryKey: ["my_logs", "60d", userId],
     queryFn: async () => {
-      const since = startOfMonthISO();
+      const since = new Date(); since.setHours(0,0,0,0); since.setDate(since.getDate() - 60);
       const { data, error } = await supabase
         .from("daily_logs")
         .select("log_date, doors_knocked, people_talked_to, leads_called_in, confirmed_leads, next_days, future_leads, demos_sits, sales, no_shows")
         .eq("canvasser_id", userId)
-        .gte("log_date", since);
+        .gte("log_date", since.toISOString().slice(0, 10));
       if (error) throw error;
       return data ?? [];
     },
   });
+
+  // Company-wide aggregates over last 30 days — used as fallback when canvasser has <2 weeks of data.
+  const companyAvgQuery = useQuery({
+    queryKey: ["company_funnel_avg", "30d"],
+    queryFn: async () => {
+      const since = new Date(); since.setHours(0,0,0,0); since.setDate(since.getDate() - 30);
+      const [logsRes, salesRes] = await Promise.all([
+        supabase.from("daily_logs")
+          .select("doors_knocked, confirmed_leads, demos_sits, sales")
+          .gte("log_date", since.toISOString().slice(0, 10)),
+        supabase.from("leads")
+          .select("sale_amount")
+          .eq("status", "confirmed")
+          .eq("is_sale", true)
+          .gte("created_at", since.toISOString()),
+      ]);
+      if (logsRes.error) throw logsRes.error;
+      if (salesRes.error) throw salesRes.error;
+      const t = (logsRes.data ?? []).reduce(
+        (a, r) => ({
+          doors: a.doors + (r.doors_knocked ?? 0),
+          confirmed: a.confirmed + (r.confirmed_leads ?? 0),
+          sits: a.sits + (r.demos_sits ?? 0),
+          sales: a.sales + (r.sales ?? 0),
+        }),
+        { doors: 0, confirmed: 0, sits: 0, sales: 0 },
+      );
+      const sales = salesRes.data ?? [];
+      const revenue = sales.reduce((a, r) => a + Number(r.sale_amount ?? 0), 0);
+      return { ...t, revenue, salesCount: sales.length };
+    },
+  });
+
 
   const salesQuery = useQuery({
     queryKey: ["my_confirmed_sales", "mtd", userId],
@@ -151,12 +185,13 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
   });
 
   const { today, week, month, monthRevenue, weekRevenue, weekPoints,
-          weekHours, hourlyRate, weekBase, weekCommission, monthCommission } = useMemo(() => {
-    const rows = (logsQuery.data ?? []) as unknown as Array<Record<string, number | null> & { log_date: string }>;
-    const t = todayISO(), w = startOfWeekISO();
-    const today = aggregate(rows.filter((r) => r.log_date === t));
-    const week  = aggregate(rows.filter((r) => r.log_date >= w));
-    const month = aggregate(rows);
+          weekHours, hourlyRate, weekBase, weekCommission, monthCommission, funnel } = useMemo(() => {
+    const allRows = (logsQuery.data ?? []) as unknown as Array<Record<string, number | null> & { log_date: string }>;
+    const t = todayISO(), w = startOfWeekISO(), m = startOfMonthISO();
+    const mtdRows = allRows.filter((r) => r.log_date >= m);
+    const today = aggregate(allRows.filter((r) => r.log_date === t));
+    const week  = aggregate(allRows.filter((r) => r.log_date >= w));
+    const month = aggregate(mtdRows);
 
     const sales = salesQuery.data ?? [];
     const monthRevenue = sales.reduce((a, r) => a + Number(r.sale_amount ?? 0), 0);
@@ -167,26 +202,50 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
       .filter((r) => new Date(r.created_at) >= wStart)
       .reduce((a, r) => a + Number(r.sale_amount ?? 0), 0);
 
-    // Weekly points: pitch-miss sit = 1, sale = 2 → demos_sits + sales.
     const weekPoints = week.demos_sits + week.sales;
-
-    // Auto-hours: unique log dates this week, weighted by Mon–Fri=7.5 / Sat=6.5.
-    const weekDates = new Set(rows.filter((r) => r.log_date >= w).map((r) => r.log_date));
+    const weekDates = new Set(allRows.filter((r) => r.log_date >= w).map((r) => r.log_date));
     const weekHours = Array.from(weekDates).reduce((sum, d) => sum + hoursForDate(d), 0);
-
-    // End-of-week threshold: <3 pts → $18/hr, ≥3 pts → $30/hr. Commission flat 1%.
     const hourlyRate = weekPoints >= POINTS_THRESHOLD ? HOURLY_HIGH : HOURLY_LOW;
     const weekBase = weekHours * hourlyRate;
     const weekCommission = weekRevenue * COMMISSION_RATE;
-
-    // Month commission estimate at flat 1%.
     const monthCommission = monthRevenue * COMMISSION_RATE;
+
+    // ===== Funnel math (reverse engineering) =====
+    // Personal conversion rates from last 60 days of logs (full sample).
+    const personalAgg = aggregate(allRows);
+    const personalDays = personalAgg.days_worked;
+    const personalAvgSale = sales.length > 0 ? monthRevenue / sales.length : 0;
+
+    const company = companyAvgQuery.data ?? { doors: 0, confirmed: 0, sits: 0, sales: 0, revenue: 0, salesCount: 0 };
+    const companyAvgSale = company.salesCount > 0 ? company.revenue / company.salesCount : 0;
+
+    // Fallback rule: <2 weeks (14 unique log days) → use company-wide averages.
+    const usePersonal = personalDays >= 14 && personalAgg.doors_knocked > 0;
+    const src = usePersonal
+      ? { doors: personalAgg.doors_knocked, confirmed: personalAgg.confirmed_leads, sits: personalAgg.demos_sits, sales: personalAgg.sales, avgSale: personalAvgSale }
+      : { doors: company.doors, confirmed: company.confirmed, sits: company.sits, sales: company.sales, avgSale: companyAvgSale };
+
+    const closeRate    = src.sits  > 0 ? src.sales / src.sits  : 0;        // sales per sit
+    const sitRate      = src.confirmed > 0 ? src.sits / src.confirmed : 0; // sits per confirmed lead
+    const leadDoorRate = src.doors > 0 ? src.confirmed / src.doors : 0;    // confirmed leads per door
+    const talkDoorRate = src.doors > 0 && usePersonal
+      ? (personalAgg.people_talked_to / personalAgg.doors_knocked)
+      : 0.27; // industry-typical fallback ~27%
+    const avgCommissionPerSale = src.avgSale * COMMISSION_RATE;
+
+    const funnel = {
+      usePersonal,
+      sampleDays: personalDays,
+      closeRate, sitRate, leadDoorRate, talkDoorRate,
+      avgSale: src.avgSale,
+      avgCommissionPerSale,
+    };
 
     return {
       today, week, month, monthRevenue, weekRevenue, weekPoints,
-      weekHours, hourlyRate, weekBase, weekCommission, monthCommission,
+      weekHours, hourlyRate, weekBase, weekCommission, monthCommission, funnel,
     };
-  }, [logsQuery.data, salesQuery.data]);
+  }, [logsQuery.data, salesQuery.data, companyAvgQuery.data]);
 
   const weeklyPay = weekBase + weekCommission;
 
@@ -205,7 +264,54 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
   const rankProgress = current === next ? 1 : Math.min(1, (month.sales - current.minSales) / rankSpan);
   const goalProgress = monthlyGoal > 0 ? Math.min(1, monthRevenue / monthlyGoal) : 0;
 
-  const [tab, setTab] = useState<"today" | "week" | "mtd">("today");
+  const [tab, setTab] = useState<"today" | "week" | "mtd" | "goals">("today");
+
+  // ===== Reverse-engineering funnel (drives My Goals tab & Value Per Door) =====
+  const mission = useMemo(() => {
+    const { closeRate, sitRate, leadDoorRate, talkDoorRate, avgCommissionPerSale } = funnel;
+    const ready = closeRate > 0 && sitRate > 0 && leadDoorRate > 0 && avgCommissionPerSale > 0 && monthlyGoal > 0;
+    if (!ready) {
+      return {
+        ready: false,
+        requiredSales: 0, requiredSits: 0, requiredConfirmed: 0, requiredDoors: 0,
+        requiredPeopleTalkedTo: 0,
+        daysRemaining: 0, doorsPerDay: 0, talksPerDay: 0,
+        targetValuePerDoor: 0,
+      };
+    }
+    const requiredSales     = monthlyGoal / (funnel.avgSale || 1);
+    const requiredSits      = requiredSales / closeRate;
+    const requiredConfirmed = requiredSits / sitRate;
+    const requiredDoors     = requiredConfirmed / leadDoorRate;
+    const requiredPeopleTalkedTo = requiredDoors * talkDoorRate;
+
+    // Remaining working days this month (Mon–Sat), today inclusive.
+    const now = new Date(); now.setHours(0,0,0,0);
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    let workdaysLeft = 0;
+    for (let d = new Date(now); d <= end; d.setDate(d.getDate() + 1)) {
+      const dow = d.getDay();
+      if (dow !== 0) workdaysLeft++; // exclude Sunday only
+    }
+
+    // Subtract progress already made this month.
+    const doorsRemaining   = Math.max(0, requiredDoors - month.doors_knocked);
+    const talksRemaining   = Math.max(0, requiredPeopleTalkedTo - month.people_talked_to);
+    const doorsPerDay = workdaysLeft > 0 ? doorsRemaining / workdaysLeft : doorsRemaining;
+    const talksPerDay = workdaysLeft > 0 ? talksRemaining / workdaysLeft : talksRemaining;
+
+    const targetValuePerDoor = requiredDoors > 0 ? monthlyGoal * COMMISSION_RATE / requiredDoors : 0;
+
+    return {
+      ready: true,
+      requiredSales, requiredSits, requiredConfirmed, requiredDoors,
+      requiredPeopleTalkedTo,
+      daysRemaining: workdaysLeft,
+      doorsPerDay, talksPerDay,
+      targetValuePerDoor,
+    };
+  }, [funnel, monthlyGoal, month.doors_knocked, month.people_talked_to]);
+
 
   const saveGoal = useMutation({
     mutationFn: async (newGoal: number) => {
@@ -223,10 +329,11 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
   return (
     <div className="space-y-6">
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
-        <TabsList className="grid w-full grid-cols-3 bg-surface border border-border p-1 h-auto">
+        <TabsList className="grid w-full grid-cols-4 bg-surface border border-border p-1 h-auto">
           <ArcadeTab value="today">Today</ArcadeTab>
           <ArcadeTab value="week">This Week</ArcadeTab>
           <ArcadeTab value="mtd">Month to Date</ArcadeTab>
+          <ArcadeTab value="goals">My Goals</ArcadeTab>
         </TabsList>
 
         {/* ============ TODAY ============ */}
@@ -241,8 +348,12 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
             value={valuePerDoor}
             doors={month.doors_knocked}
             commission={monthCommission}
+            targetValue={mission.targetValuePerDoor}
+            targetReady={mission.ready}
+            monthlyGoal={monthlyGoal}
           />
         </TabsContent>
+
 
         {/* ============ THIS WEEK ============ */}
         <TabsContent value="week" className="mt-6 space-y-6">
@@ -310,6 +421,40 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
             saving={saveGoal.isPending}
           />
         </TabsContent>
+
+        {/* ============ MY GOALS — Reverse-engineering funnel ============ */}
+        <TabsContent value="goals" className="mt-6 space-y-6">
+          <GoalInputPanel
+            goal={monthlyGoal}
+            onSave={(g) => saveGoal.mutate(g)}
+            saving={saveGoal.isPending}
+          />
+          <DailyMissionWidget
+            ready={mission.ready}
+            goal={monthlyGoal}
+            doorsPerDay={mission.doorsPerDay}
+            talksPerDay={mission.talksPerDay}
+            daysRemaining={mission.daysRemaining}
+            targetValuePerDoor={mission.targetValuePerDoor}
+          />
+          <FunnelBreakdown
+            ready={mission.ready}
+            goal={monthlyGoal}
+            avgSale={funnel.avgSale}
+            avgCommissionPerSale={funnel.avgCommissionPerSale}
+            closeRate={funnel.closeRate}
+            sitRate={funnel.sitRate}
+            leadDoorRate={funnel.leadDoorRate}
+            requiredSales={mission.requiredSales}
+            requiredSits={mission.requiredSits}
+            requiredConfirmed={mission.requiredConfirmed}
+            requiredDoors={mission.requiredDoors}
+            usePersonal={funnel.usePersonal}
+            sampleDays={funnel.sampleDays}
+            mtdDoors={month.doors_knocked}
+          />
+        </TabsContent>
+
       </Tabs>
     </div>
   );
@@ -356,8 +501,12 @@ function GrindCounter({
 }
 
 function ValuePerDoorWidget({
-  value, doors, commission,
-}: { value: number; doors: number; commission: number }) {
+  value, doors, commission, targetValue, targetReady, monthlyGoal,
+}: { value: number; doors: number; commission: number; targetValue: number; targetReady: boolean; monthlyGoal: number }) {
+  // If a target has been set and funnel math is ready, show the goal-driven value per door.
+  // Otherwise, fall back to historical (commission MTD / doors MTD).
+  const showTarget = targetReady && targetValue > 0;
+  const display = showTarget ? targetValue : value;
   return (
     <div className="relative overflow-hidden rounded-lg border border-[color-mix(in_oklab,var(--victory)_40%,var(--border))] bg-[color-mix(in_oklab,var(--victory)_7%,var(--surface))] p-6">
       <div className="absolute inset-0 pointer-events-none scanlines opacity-30" />
@@ -368,24 +517,35 @@ function ValuePerDoorWidget({
       <div className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-6">
         <div>
           <div className="flex items-center gap-1.5 text-[10px] font-display uppercase tracking-widest text-victory">
-            <Sparkles className="w-3 h-3" /> Value Per Door
+            <Sparkles className="w-3 h-3" /> Value Per Door {showTarget && <span className="text-victory/60">· TARGET</span>}
           </div>
           <div className="mt-3 font-display text-6xl md:text-7xl text-mega-victory leading-none">
-            {formatUSD(value)}
+            {formatUSD(display)}
           </div>
           <div className="mt-3 text-[10px] font-display uppercase tracking-widest text-victory/80">
-            EVERY KNOCK PAYS
+            {showTarget ? "EACH REQUIRED KNOCK IS WORTH THIS" : "EVERY KNOCK PAYS"}
           </div>
         </div>
         <div className="text-xs text-muted-foreground space-y-1 md:text-right">
-          <div>Commission MTD · <span className="text-victory font-display">{formatUSD(commission)}</span></div>
-          <div>Doors knocked MTD · <span className="text-neon font-display">{doors.toLocaleString()}</span></div>
-          <div className="text-[10px] uppercase tracking-widest mt-2">commission / doors</div>
+          {showTarget ? (
+            <>
+              <div>Target Income · <span className="text-victory font-display">{formatUSD(monthlyGoal)}</span></div>
+              <div>Historical pace · <span className="text-neon font-display">{formatUSD(value)}/door</span></div>
+              <div className="text-[10px] uppercase tracking-widest mt-2">goal commission / required doors</div>
+            </>
+          ) : (
+            <>
+              <div>Commission MTD · <span className="text-victory font-display">{formatUSD(commission)}</span></div>
+              <div>Doors knocked MTD · <span className="text-neon font-display">{doors.toLocaleString()}</span></div>
+              <div className="text-[10px] uppercase tracking-widest mt-2">commission / doors</div>
+            </>
+          )}
         </div>
       </div>
     </div>
   );
 }
+
 
 function BigStat({
   label, value, sub, icon, accent,
@@ -565,3 +725,169 @@ function NeonBar({ pct, accent, tall = false }: { pct: number; accent: string; t
     </div>
   );
 }
+
+/* ============ My Goals — Reverse Engineering ============ */
+
+function GoalInputPanel({
+  goal, onSave, saving,
+}: { goal: number; onSave: (g: number) => void; saving: boolean }) {
+  const [draft, setDraft] = useState(String(goal));
+  useEffect(() => { setDraft(String(goal)); }, [goal]);
+  const submit = () => {
+    const n = Math.max(0, Math.round(Number(draft) || 0));
+    onSave(n);
+  };
+  return (
+    <div className="relative overflow-hidden rounded-lg border border-[color-mix(in_oklab,var(--neon)_45%,var(--border))] bg-[color-mix(in_oklab,var(--neon)_6%,var(--surface))] p-6">
+      <div className="absolute inset-0 pointer-events-none scanlines opacity-25" />
+      <div className="absolute -inset-1 pointer-events-none rounded-lg opacity-50" style={{ boxShadow: "inset 0 0 50px -8px var(--neon)" }} />
+      <div className="relative space-y-4">
+        <div className="flex items-center gap-2 text-[10px] font-display uppercase tracking-widest text-neon">
+          <Crosshair className="w-3.5 h-3.5" /> Target Monthly Income · Quest Input
+        </div>
+        <div className="flex items-end gap-3 flex-wrap">
+          <div className="relative flex-1 min-w-[260px]">
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 font-display text-3xl text-neon/70 pointer-events-none">$</span>
+            <Input
+              type="number" min={0} step={100} inputMode="numeric"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+              className="h-16 pl-10 pr-4 font-display text-3xl bg-background/60 border-[color-mix(in_oklab,var(--neon)_50%,var(--border))] text-neon"
+              style={{ boxShadow: "0 0 24px -6px var(--neon), inset 0 0 16px -8px var(--neon)" }}
+              placeholder="5000"
+            />
+          </div>
+          <Button
+            size="lg"
+            onClick={submit}
+            disabled={saving}
+            className="h-16 px-8 font-display uppercase tracking-widest bg-neon/15 hover:bg-neon/25 text-neon border border-neon/50"
+            style={{ boxShadow: "0 0 20px -6px var(--neon)" }}
+          >
+            <Zap className="w-4 h-4 mr-2" /> Set Mission
+          </Button>
+        </div>
+        <p className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+          The funnel re-engineers backwards to tell you exactly what to do today.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function DailyMissionWidget({
+  ready, goal, doorsPerDay, talksPerDay, daysRemaining, targetValuePerDoor,
+}: {
+  ready: boolean; goal: number; doorsPerDay: number; talksPerDay: number;
+  daysRemaining: number; targetValuePerDoor: number;
+}) {
+  if (!ready) {
+    return (
+      <div className="rounded-lg border border-border bg-surface p-6 text-center">
+        <Swords className="w-6 h-6 text-muted-foreground mx-auto" />
+        <div className="mt-3 font-display text-sm uppercase tracking-widest text-muted-foreground">Mission unavailable</div>
+        <p className="mt-2 text-xs text-muted-foreground max-w-md mx-auto">
+          Set a target income above. We also need conversion data — either your own (2+ weeks of logs) or company-wide averages from active canvassers.
+        </p>
+      </div>
+    );
+  }
+  const doors = Math.ceil(doorsPerDay);
+  const talks = Math.ceil(talksPerDay);
+  return (
+    <div className="relative overflow-hidden rounded-lg border-2 border-[color-mix(in_oklab,var(--victory)_55%,transparent)] bg-gradient-to-br from-[color-mix(in_oklab,var(--victory)_12%,var(--surface))] to-[color-mix(in_oklab,var(--neon)_8%,var(--surface))] p-8">
+      <div className="absolute inset-0 pointer-events-none scanlines opacity-30" />
+      <div className="absolute -inset-1 pointer-events-none rounded-lg opacity-60" style={{ boxShadow: "inset 0 0 80px -12px var(--victory)" }} />
+      <div className="relative">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2 text-[10px] font-display uppercase tracking-widest text-victory">
+            <Flame className="w-3.5 h-3.5" /> Daily Mission · Objective
+          </div>
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            {daysRemaining} working day{daysRemaining === 1 ? "" : "s"} left
+          </div>
+        </div>
+
+        <div className="mt-4 font-display text-lg md:text-xl text-foreground/90 leading-relaxed">
+          To hit <span className="text-victory text-mega-victory">{formatUSD(goal)}</span>, your mission today is to knock{" "}
+          <span className="text-neon" style={{ textShadow: "0 0 18px var(--neon)" }}>{doors.toLocaleString()} doors</span>{" "}
+          and talk to{" "}
+          <span className="text-accent" style={{ textShadow: "0 0 18px var(--accent)" }}>{talks.toLocaleString()} people</span>.
+        </div>
+
+        <div className="mt-6 grid sm:grid-cols-3 gap-4">
+          <MissionStat icon={<DoorOpen className="w-4 h-4" />} label="Doors / Day" value={doors.toLocaleString()} accent="var(--neon)" />
+          <MissionStat icon={<Users   className="w-4 h-4" />} label="Talk To / Day" value={talks.toLocaleString()} accent="var(--accent)" />
+          <MissionStat icon={<DollarSign className="w-4 h-4" />} label="Per-Door Value" value={formatUSD(targetValuePerDoor)} accent="var(--victory)" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MissionStat({
+  icon, label, value, accent,
+}: { icon: React.ReactNode; label: string; value: string; accent: string }) {
+  return (
+    <div className="rounded-md border p-4" style={{
+      borderColor: `color-mix(in oklab, ${accent} 40%, var(--border))`,
+      background: `color-mix(in oklab, ${accent} 6%, var(--surface))`,
+    }}>
+      <div className="flex items-center gap-1.5 text-[10px] font-display uppercase tracking-widest" style={{ color: accent }}>
+        {icon} {label}
+      </div>
+      <div className="mt-2 font-display text-3xl leading-none" style={{ color: accent, textShadow: `0 0 16px color-mix(in oklab, ${accent} 60%, transparent)` }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function FunnelBreakdown({
+  ready, goal, avgSale, avgCommissionPerSale, closeRate, sitRate, leadDoorRate,
+  requiredSales, requiredSits, requiredConfirmed, requiredDoors,
+  usePersonal, sampleDays, mtdDoors,
+}: {
+  ready: boolean; goal: number; avgSale: number; avgCommissionPerSale: number;
+  closeRate: number; sitRate: number; leadDoorRate: number;
+  requiredSales: number; requiredSits: number; requiredConfirmed: number; requiredDoors: number;
+  usePersonal: boolean; sampleDays: number; mtdDoors: number;
+}) {
+  if (!ready) return null;
+  const rows = [
+    { label: "Required Sales",          value: Math.ceil(requiredSales),     formula: `${formatUSD(goal)} ÷ ${formatUSD(avgSale)} avg sale`, accent: "var(--victory)" },
+    { label: "Required Sits / Demos",   value: Math.ceil(requiredSits),      formula: `Sales ÷ ${(closeRate*100).toFixed(0)}% close rate`,    accent: "var(--accent)" },
+    { label: "Required Confirmed Leads",value: Math.ceil(requiredConfirmed), formula: `Sits ÷ ${(sitRate*100).toFixed(0)}% sit rate`,         accent: "var(--neon)" },
+    { label: "Total Doors to Knock",    value: Math.ceil(requiredDoors),     formula: `Leads ÷ ${(leadDoorRate*100).toFixed(2)}% lead-per-door`, accent: "var(--neon)" },
+  ];
+  return (
+    <ArcadePanel
+      title="Funnel Breakdown · Reverse Engineering"
+      action={
+        <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+          {usePersonal ? `Personal · ${sampleDays}d sample` : "Company avg · Fallback"}
+        </span>
+      }
+    >
+      <div className="space-y-3">
+        {rows.map((r) => (
+          <div key={r.label} className="flex items-center justify-between gap-4 rounded-md border border-border bg-background/40 px-4 py-3">
+            <div>
+              <div className="text-[10px] font-display uppercase tracking-widest" style={{ color: r.accent }}>{r.label}</div>
+              <div className="text-[10px] text-muted-foreground mt-0.5">{r.formula}</div>
+            </div>
+            <div className="font-display text-2xl" style={{ color: r.accent, textShadow: `0 0 14px color-mix(in oklab, ${r.accent} 60%, transparent)` }}>
+              {r.value.toLocaleString()}
+            </div>
+          </div>
+        ))}
+        <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-t border-border pt-3 flex justify-between flex-wrap gap-2">
+          <span>Avg commission / sale · {formatUSD(avgCommissionPerSale)}</span>
+          <span>MTD progress · {mtdDoors.toLocaleString()} / {Math.ceil(requiredDoors).toLocaleString()} doors</span>
+        </div>
+      </div>
+    </ArcadePanel>
+  );
+}
+
