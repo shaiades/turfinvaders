@@ -197,9 +197,10 @@ export const Route = createFileRoute("/api/public/monday-webhook")({
         if (rErr || !row) return json({ error: rErr?.message ?? "Log row missing" }, 500);
 
         const current = Number((row as Record<string, unknown>)[field] ?? 0);
+        const update: Record<string, number> = { [field]: current + 1 };
         const { error: wErr } = await supabaseAdmin
           .from("daily_logs")
-          .update({ [field]: current + 1 })
+          .update(update as never)
           .eq("id", (row as { id: string }).id);
         if (wErr) return json({ error: wErr.message }, 500);
 
