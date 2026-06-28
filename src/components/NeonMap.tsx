@@ -188,7 +188,7 @@ export function NeonMap({
         )}
 
         {pins.map((p) => (
-          <Marker key={p.id} position={[p.lat, p.lng]} icon={glowingDotIcon(PIN_COLORS[p.pin_type])} />
+          <Marker key={p.id} position={[p.lat, p.lng]} icon={p.is_remote_drop ? flaggedPinIcon() : glowingDotIcon(PIN_COLORS[p.pin_type])} />
         ))}
 
         {me && <Marker position={[me.lat, me.lng]} icon={pulseDotIcon("#00e5ff")} />}
