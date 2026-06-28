@@ -277,6 +277,7 @@ export type Database = {
           display_name: string
           id: string
           level: number
+          monthly_goal: number
           status: Database["public"]["Enums"]["canvasser_status"]
           team_id: string | null
           updated_at: string
@@ -288,6 +289,7 @@ export type Database = {
           display_name: string
           id: string
           level?: number
+          monthly_goal?: number
           status?: Database["public"]["Enums"]["canvasser_status"]
           team_id?: string | null
           updated_at?: string
@@ -299,6 +301,7 @@ export type Database = {
           display_name?: string
           id?: string
           level?: number
+          monthly_goal?: number
           status?: Database["public"]["Enums"]["canvasser_status"]
           team_id?: string | null
           updated_at?: string
