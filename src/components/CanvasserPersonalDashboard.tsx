@@ -10,13 +10,19 @@ import { toast } from "sonner";
 import { DoorOpen, CalendarClock, CalendarDays, PhoneCall, DollarSign, Target, Gauge, Trophy, Sparkles, Pencil, Check, X } from "lucide-react";
 
 /**
- * Tiered weekly commission. Rate applied to confirmed sale $ for the week.
- * Threshold is "points" per week (1 point = 1 confirmed sale by default).
- * TODO: confirm with Owner — currently 1% baseline, 2% when weekly points >= threshold.
+ * Tiered weekly commission.
+ * Points formula: every confirmed lead that becomes a sit/demo earns points.
+ *   - Sit that did NOT close (pitch miss) = 1 point
+ *   - Sit that closed into a sale         = 2 points
+ *   → weekly points = (demos_sits - sales) * 1 + sales * 2 = demos_sits + sales
+ * Rate applies to confirmed sale $ for the week.
  */
 const COMMISSION_LOW = 0.01;
 const COMMISSION_HIGH = 0.02;
-const COMMISSION_TIER_THRESHOLD = 10; // weekly points needed to unlock 2%
+const COMMISSION_TIER_THRESHOLD = 10; // weekly points needed to unlock 2% — TODO: confirm
+
+/** Fallback monthly financial goal default (USD) until canvasser sets their own. */
+const DEFAULT_MONTHLY_GOAL = 10_000;
 
 /** Fallback monthly financial goal default (USD) until canvasser sets their own. */
 const DEFAULT_MONTHLY_GOAL = 10_000;
@@ -148,9 +154,9 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
       .filter((r) => new Date(r.created_at) >= wStart)
       .reduce((a, r) => a + Number(r.sale_amount ?? 0), 0);
 
-    // Tiered commission: weekly "points" = confirmed sales this week.
-    // Below threshold → 1%, at/above threshold → 2%.
-    const weekPoints = week.sales;
+    // Weekly points: 1 pt per pitch-miss sit, 2 pts per sale.
+    // Simplifies to: demos_sits + sales (since a sale is also a sit).
+    const weekPoints = week.demos_sits + week.sales;
     const weekRate = weekPoints >= COMMISSION_TIER_THRESHOLD ? COMMISSION_HIGH : COMMISSION_LOW;
 
     // Month commission: average-ish — apply 1% baseline to all month revenue,
