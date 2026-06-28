@@ -725,3 +725,169 @@ function NeonBar({ pct, accent, tall = false }: { pct: number; accent: string; t
     </div>
   );
 }
+
+/* ============ My Goals — Reverse Engineering ============ */
+
+function GoalInputPanel({
+  goal, onSave, saving,
+}: { goal: number; onSave: (g: number) => void; saving: boolean }) {
+  const [draft, setDraft] = useState(String(goal));
+  useEffect(() => { setDraft(String(goal)); }, [goal]);
+  const submit = () => {
+    const n = Math.max(0, Math.round(Number(draft) || 0));
+    onSave(n);
+  };
+  return (
+    <div className="relative overflow-hidden rounded-lg border border-[color-mix(in_oklab,var(--neon)_45%,var(--border))] bg-[color-mix(in_oklab,var(--neon)_6%,var(--surface))] p-6">
+      <div className="absolute inset-0 pointer-events-none scanlines opacity-25" />
+      <div className="absolute -inset-1 pointer-events-none rounded-lg opacity-50" style={{ boxShadow: "inset 0 0 50px -8px var(--neon)" }} />
+      <div className="relative space-y-4">
+        <div className="flex items-center gap-2 text-[10px] font-display uppercase tracking-widest text-neon">
+          <Crosshair className="w-3.5 h-3.5" /> Target Monthly Income · Quest Input
+        </div>
+        <div className="flex items-end gap-3 flex-wrap">
+          <div className="relative flex-1 min-w-[260px]">
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 font-display text-3xl text-neon/70 pointer-events-none">$</span>
+            <Input
+              type="number" min={0} step={100} inputMode="numeric"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+              className="h-16 pl-10 pr-4 font-display text-3xl bg-background/60 border-[color-mix(in_oklab,var(--neon)_50%,var(--border))] text-neon"
+              style={{ boxShadow: "0 0 24px -6px var(--neon), inset 0 0 16px -8px var(--neon)" }}
+              placeholder="5000"
+            />
+          </div>
+          <Button
+            size="lg"
+            onClick={submit}
+            disabled={saving}
+            className="h-16 px-8 font-display uppercase tracking-widest bg-neon/15 hover:bg-neon/25 text-neon border border-neon/50"
+            style={{ boxShadow: "0 0 20px -6px var(--neon)" }}
+          >
+            <Zap className="w-4 h-4 mr-2" /> Set Mission
+          </Button>
+        </div>
+        <p className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+          The funnel re-engineers backwards to tell you exactly what to do today.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function DailyMissionWidget({
+  ready, goal, doorsPerDay, talksPerDay, daysRemaining, targetValuePerDoor,
+}: {
+  ready: boolean; goal: number; doorsPerDay: number; talksPerDay: number;
+  daysRemaining: number; targetValuePerDoor: number;
+}) {
+  if (!ready) {
+    return (
+      <div className="rounded-lg border border-border bg-surface p-6 text-center">
+        <Swords className="w-6 h-6 text-muted-foreground mx-auto" />
+        <div className="mt-3 font-display text-sm uppercase tracking-widest text-muted-foreground">Mission unavailable</div>
+        <p className="mt-2 text-xs text-muted-foreground max-w-md mx-auto">
+          Set a target income above. We also need conversion data — either your own (2+ weeks of logs) or company-wide averages from active canvassers.
+        </p>
+      </div>
+    );
+  }
+  const doors = Math.ceil(doorsPerDay);
+  const talks = Math.ceil(talksPerDay);
+  return (
+    <div className="relative overflow-hidden rounded-lg border-2 border-[color-mix(in_oklab,var(--victory)_55%,transparent)] bg-gradient-to-br from-[color-mix(in_oklab,var(--victory)_12%,var(--surface))] to-[color-mix(in_oklab,var(--neon)_8%,var(--surface))] p-8">
+      <div className="absolute inset-0 pointer-events-none scanlines opacity-30" />
+      <div className="absolute -inset-1 pointer-events-none rounded-lg opacity-60" style={{ boxShadow: "inset 0 0 80px -12px var(--victory)" }} />
+      <div className="relative">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2 text-[10px] font-display uppercase tracking-widest text-victory">
+            <Flame className="w-3.5 h-3.5" /> Daily Mission · Objective
+          </div>
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            {daysRemaining} working day{daysRemaining === 1 ? "" : "s"} left
+          </div>
+        </div>
+
+        <div className="mt-4 font-display text-lg md:text-xl text-foreground/90 leading-relaxed">
+          To hit <span className="text-victory text-mega-victory">{formatUSD(goal)}</span>, your mission today is to knock{" "}
+          <span className="text-neon" style={{ textShadow: "0 0 18px var(--neon)" }}>{doors.toLocaleString()} doors</span>{" "}
+          and talk to{" "}
+          <span className="text-accent" style={{ textShadow: "0 0 18px var(--accent)" }}>{talks.toLocaleString()} people</span>.
+        </div>
+
+        <div className="mt-6 grid sm:grid-cols-3 gap-4">
+          <MissionStat icon={<DoorOpen className="w-4 h-4" />} label="Doors / Day" value={doors.toLocaleString()} accent="var(--neon)" />
+          <MissionStat icon={<Users   className="w-4 h-4" />} label="Talk To / Day" value={talks.toLocaleString()} accent="var(--accent)" />
+          <MissionStat icon={<DollarSign className="w-4 h-4" />} label="Per-Door Value" value={formatUSD(targetValuePerDoor)} accent="var(--victory)" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MissionStat({
+  icon, label, value, accent,
+}: { icon: React.ReactNode; label: string; value: string; accent: string }) {
+  return (
+    <div className="rounded-md border p-4" style={{
+      borderColor: `color-mix(in oklab, ${accent} 40%, var(--border))`,
+      background: `color-mix(in oklab, ${accent} 6%, var(--surface))`,
+    }}>
+      <div className="flex items-center gap-1.5 text-[10px] font-display uppercase tracking-widest" style={{ color: accent }}>
+        {icon} {label}
+      </div>
+      <div className="mt-2 font-display text-3xl leading-none" style={{ color: accent, textShadow: `0 0 16px color-mix(in oklab, ${accent} 60%, transparent)` }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function FunnelBreakdown({
+  ready, goal, avgSale, avgCommissionPerSale, closeRate, sitRate, leadDoorRate,
+  requiredSales, requiredSits, requiredConfirmed, requiredDoors,
+  usePersonal, sampleDays, mtdDoors,
+}: {
+  ready: boolean; goal: number; avgSale: number; avgCommissionPerSale: number;
+  closeRate: number; sitRate: number; leadDoorRate: number;
+  requiredSales: number; requiredSits: number; requiredConfirmed: number; requiredDoors: number;
+  usePersonal: boolean; sampleDays: number; mtdDoors: number;
+}) {
+  if (!ready) return null;
+  const rows = [
+    { label: "Required Sales",          value: Math.ceil(requiredSales),     formula: `${formatUSD(goal)} ÷ ${formatUSD(avgSale)} avg sale`, accent: "var(--victory)" },
+    { label: "Required Sits / Demos",   value: Math.ceil(requiredSits),      formula: `Sales ÷ ${(closeRate*100).toFixed(0)}% close rate`,    accent: "var(--accent)" },
+    { label: "Required Confirmed Leads",value: Math.ceil(requiredConfirmed), formula: `Sits ÷ ${(sitRate*100).toFixed(0)}% sit rate`,         accent: "var(--neon)" },
+    { label: "Total Doors to Knock",    value: Math.ceil(requiredDoors),     formula: `Leads ÷ ${(leadDoorRate*100).toFixed(2)}% lead-per-door`, accent: "var(--neon)" },
+  ];
+  return (
+    <ArcadePanel
+      title="Funnel Breakdown · Reverse Engineering"
+      action={
+        <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+          {usePersonal ? `Personal · ${sampleDays}d sample` : "Company avg · Fallback"}
+        </span>
+      }
+    >
+      <div className="space-y-3">
+        {rows.map((r) => (
+          <div key={r.label} className="flex items-center justify-between gap-4 rounded-md border border-border bg-background/40 px-4 py-3">
+            <div>
+              <div className="text-[10px] font-display uppercase tracking-widest" style={{ color: r.accent }}>{r.label}</div>
+              <div className="text-[10px] text-muted-foreground mt-0.5">{r.formula}</div>
+            </div>
+            <div className="font-display text-2xl" style={{ color: r.accent, textShadow: `0 0 14px color-mix(in oklab, ${r.accent} 60%, transparent)` }}>
+              {r.value.toLocaleString()}
+            </div>
+          </div>
+        ))}
+        <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-t border-border pt-3 flex justify-between flex-wrap gap-2">
+          <span>Avg commission / sale · {formatUSD(avgCommissionPerSale)}</span>
+          <span>MTD progress · {mtdDoors.toLocaleString()} / {Math.ceil(requiredDoors).toLocaleString()} doors</span>
+        </div>
+      </div>
+    </ArcadePanel>
+  );
+}
+
