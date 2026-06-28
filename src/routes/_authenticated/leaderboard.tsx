@@ -6,6 +6,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Lock } from "lucide-react";
+import { LiveFeed } from "@/components/LiveFeed";
 
 export const Route = createFileRoute("/_authenticated/leaderboard")({
   head: () => ({ meta: [{ title: "Leaderboard — Knockout" }] }),
