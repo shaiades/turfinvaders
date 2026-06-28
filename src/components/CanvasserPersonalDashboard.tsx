@@ -120,19 +120,53 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
   });
   const monthlyGoal = Number((profileQuery.data as { monthly_goal?: number } | null)?.monthly_goal ?? DEFAULT_MONTHLY_GOAL);
 
+  // Personal logs — last 60 days for both MTD math and historical conversion rates.
   const logsQuery = useQuery({
-    queryKey: ["my_logs", "mtd", userId],
+    queryKey: ["my_logs", "60d", userId],
     queryFn: async () => {
-      const since = startOfMonthISO();
+      const since = new Date(); since.setHours(0,0,0,0); since.setDate(since.getDate() - 60);
       const { data, error } = await supabase
         .from("daily_logs")
         .select("log_date, doors_knocked, people_talked_to, leads_called_in, confirmed_leads, next_days, future_leads, demos_sits, sales, no_shows")
         .eq("canvasser_id", userId)
-        .gte("log_date", since);
+        .gte("log_date", since.toISOString().slice(0, 10));
       if (error) throw error;
       return data ?? [];
     },
   });
+
+  // Company-wide aggregates over last 30 days — used as fallback when canvasser has <2 weeks of data.
+  const companyAvgQuery = useQuery({
+    queryKey: ["company_funnel_avg", "30d"],
+    queryFn: async () => {
+      const since = new Date(); since.setHours(0,0,0,0); since.setDate(since.getDate() - 30);
+      const [logsRes, salesRes] = await Promise.all([
+        supabase.from("daily_logs")
+          .select("doors_knocked, confirmed_leads, demos_sits, sales")
+          .gte("log_date", since.toISOString().slice(0, 10)),
+        supabase.from("leads")
+          .select("sale_amount")
+          .eq("status", "confirmed")
+          .eq("is_sale", true)
+          .gte("created_at", since.toISOString()),
+      ]);
+      if (logsRes.error) throw logsRes.error;
+      if (salesRes.error) throw salesRes.error;
+      const t = (logsRes.data ?? []).reduce(
+        (a, r) => ({
+          doors: a.doors + (r.doors_knocked ?? 0),
+          confirmed: a.confirmed + (r.confirmed_leads ?? 0),
+          sits: a.sits + (r.demos_sits ?? 0),
+          sales: a.sales + (r.sales ?? 0),
+        }),
+        { doors: 0, confirmed: 0, sits: 0, sales: 0 },
+      );
+      const sales = salesRes.data ?? [];
+      const revenue = sales.reduce((a, r) => a + Number(r.sale_amount ?? 0), 0);
+      return { ...t, revenue, salesCount: sales.length };
+    },
+  });
+
 
   const salesQuery = useQuery({
     queryKey: ["my_confirmed_sales", "mtd", userId],
