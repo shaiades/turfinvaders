@@ -188,23 +188,24 @@ export const Route = createFileRoute("/api/public/monday-webhook")({
         // Read current values, apply increments, write back.
         const fields = Object.keys(inc) as (keyof typeof inc)[];
         const selectCols = ["id", ...fields].join(", ");
-        const { data: row, error: rErr } = await supabaseAdmin
+        const { data: rowData, error: rErr } = await supabaseAdmin
           .from("daily_logs")
           .select(selectCols)
           .eq("canvasser_id", profile.id)
           .eq("log_date", logDate)
           .maybeSingle();
-        if (rErr || !row) return json({ error: rErr?.message ?? "Log row missing" }, 500);
+        if (rErr || !rowData) return json({ error: rErr?.message ?? "Log row missing" }, 500);
+        const row = rowData as unknown as Record<string, unknown> & { id: string };
 
         const update: Record<string, number> = {};
         for (const f of fields) {
-          const curr = Number((row as Record<string, unknown>)[f as string] ?? 0);
+          const curr = Number(row[f as string] ?? 0);
           update[f as string] = curr + (inc[f] ?? 0);
         }
         const { error: wErr } = await supabaseAdmin
           .from("daily_logs")
           .update(update as never)
-          .eq("id", (row as { id: string }).id);
+          .eq("id", row.id);
         if (wErr) return json({ error: wErr.message }, 500);
 
         // For Sale: create a confirmed lead with sale_amount → feeds Paycheck
