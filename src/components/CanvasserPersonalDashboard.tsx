@@ -150,7 +150,8 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
     },
   });
 
-  const { today, week, month, monthRevenue, weekRevenue, weekPoints, weekRate, monthCommission, weekCommission } = useMemo(() => {
+  const { today, week, month, monthRevenue, weekRevenue, weekPoints,
+          weekHours, hourlyRate, weekBase, weekCommission, monthCommission } = useMemo(() => {
     const rows = (logsQuery.data ?? []) as unknown as Array<Record<string, number | null> & { log_date: string }>;
     const t = todayISO(), w = startOfWeekISO();
     const today = aggregate(rows.filter((r) => r.log_date === t));
@@ -166,22 +167,28 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
       .filter((r) => new Date(r.created_at) >= wStart)
       .reduce((a, r) => a + Number(r.sale_amount ?? 0), 0);
 
-    // Weekly points: 1 pt per pitch-miss sit, 2 pts per sale.
-    // Simplifies to: demos_sits + sales (since a sale is also a sit).
+    // Weekly points: pitch-miss sit = 1, sale = 2 → demos_sits + sales.
     const weekPoints = week.demos_sits + week.sales;
-    const weekRate = weekPoints >= COMMISSION_TIER_THRESHOLD ? COMMISSION_HIGH : COMMISSION_LOW;
 
-    // Month commission: average-ish — apply 1% baseline to all month revenue,
-    // plus 1% bonus only on revenue from weeks where the player hit threshold.
-    // Simple approximation: use the current week's rate for the month estimate.
-    const monthRate = weekRate;
+    // Auto-hours: unique log dates this week, weighted by Mon–Fri=7.5 / Sat=6.5.
+    const weekDates = new Set(rows.filter((r) => r.log_date >= w).map((r) => r.log_date));
+    const weekHours = Array.from(weekDates).reduce((sum, d) => sum + hoursForDate(d), 0);
+
+    // End-of-week threshold: <3 pts → $18/hr, ≥3 pts → $30/hr. Commission flat 1%.
+    const hourlyRate = weekPoints >= POINTS_THRESHOLD ? HOURLY_HIGH : HOURLY_LOW;
+    const weekBase = weekHours * hourlyRate;
+    const weekCommission = weekRevenue * COMMISSION_RATE;
+
+    // Month commission estimate at flat 1%.
+    const monthCommission = monthRevenue * COMMISSION_RATE;
 
     return {
-      today, week, month, monthRevenue, weekRevenue, weekPoints, weekRate,
-      monthCommission: monthRevenue * monthRate,
-      weekCommission: weekRevenue * weekRate,
+      today, week, month, monthRevenue, weekRevenue, weekPoints,
+      weekHours, hourlyRate, weekBase, weekCommission, monthCommission,
     };
   }, [logsQuery.data, salesQuery.data]);
+
+  const weeklyPay = weekBase + weekCommission;
 
   const valuePerDoor = month.doors_knocked > 0 ? monthCommission / month.doors_knocked : 0;
   const lpd = week.days_worked > 0 ? week.confirmed_leads / week.days_worked : 0;
