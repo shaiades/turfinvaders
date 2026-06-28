@@ -1,19 +1,25 @@
-import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMemo, useState, useEffect } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel } from "@/components/arcade";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { LiveLeadCounter } from "@/components/LiveLeadCounter";
-import { DoorOpen, MessageCircle, PhoneCall, DollarSign, Target, Gauge, Trophy, Sparkles } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
+import { DoorOpen, CalendarClock, CalendarDays, PhoneCall, DollarSign, Target, Gauge, Trophy, Sparkles, Pencil, Check, X } from "lucide-react";
 
 /**
- * Default commission rate when none is set per-canvasser yet.
- * Used by the Value-Per-Door + Weekly Pay calculators.
+ * Tiered weekly commission. Rate applied to confirmed sale $ for the week.
+ * Threshold is "points" per week (1 point = 1 confirmed sale by default).
+ * TODO: confirm with Owner — currently 1% baseline, 2% when weekly points >= threshold.
  */
-const COMMISSION_RATE = 0.1;
+const COMMISSION_LOW = 0.01;
+const COMMISSION_HIGH = 0.02;
+const COMMISSION_TIER_THRESHOLD = 10; // weekly points needed to unlock 2%
 
-/** Monthly financial goal default (USD). */
-const MONTHLY_GOAL = 10_000;
+/** Fallback monthly financial goal default (USD) until canvasser sets their own. */
+const DEFAULT_MONTHLY_GOAL = 10_000;
 
 /** Rank ladder — order matters. */
 const RANKS = [
@@ -49,6 +55,8 @@ type Totals = {
   people_talked_to: number;
   leads_called_in: number;
   confirmed_leads: number;
+  next_days: number;
+  future_leads: number;
   demos_sits: number;
   sales: number;
   no_shows: number;
@@ -56,10 +64,11 @@ type Totals = {
 };
 const ZERO: Totals = {
   doors_knocked: 0, people_talked_to: 0, leads_called_in: 0,
-  confirmed_leads: 0, demos_sits: 0, sales: 0, no_shows: 0, days_worked: 0,
+  confirmed_leads: 0, next_days: 0, future_leads: 0,
+  demos_sits: 0, sales: 0, no_shows: 0, days_worked: 0,
 };
 
-function aggregate(rows: Array<Record<string, number | null>>): Totals {
+function aggregate(rows: Array<Record<string, number | null> & { log_date: string }>): Totals {
   const t = { ...ZERO };
   const days = new Set<string>();
   for (const r of rows) {
@@ -67,24 +76,39 @@ function aggregate(rows: Array<Record<string, number | null>>): Totals {
     t.people_talked_to += r.people_talked_to ?? 0;
     t.leads_called_in  += r.leads_called_in  ?? 0;
     t.confirmed_leads  += r.confirmed_leads  ?? 0;
+    t.next_days        += r.next_days        ?? 0;
+    t.future_leads     += r.future_leads     ?? 0;
     t.demos_sits       += r.demos_sits       ?? 0;
     t.sales            += r.sales            ?? 0;
     t.no_shows         += r.no_shows         ?? 0;
     const hadActivity = (r.doors_knocked ?? 0) + (r.leads_called_in ?? 0) + (r.confirmed_leads ?? 0) > 0;
-    if (hadActivity && typeof r.log_date === "string") days.add(r.log_date as unknown as string);
+    if (hadActivity && typeof r.log_date === "string") days.add(r.log_date);
   }
   t.days_worked = days.size;
   return t;
 }
 
 export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
+  const qc = useQueryClient();
+
+  const profileQuery = useQuery({
+    queryKey: ["my_profile_goal", userId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("profiles").select("monthly_goal").eq("id", userId).maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+  });
+  const monthlyGoal = Number((profileQuery.data as { monthly_goal?: number } | null)?.monthly_goal ?? DEFAULT_MONTHLY_GOAL);
+
   const logsQuery = useQuery({
     queryKey: ["my_logs", "mtd", userId],
     queryFn: async () => {
       const since = startOfMonthISO();
       const { data, error } = await supabase
         .from("daily_logs")
-        .select("log_date, doors_knocked, people_talked_to, leads_called_in, confirmed_leads, demos_sits, sales, no_shows")
+        .select("log_date, doors_knocked, people_talked_to, leads_called_in, confirmed_leads, next_days, future_leads, demos_sits, sales, no_shows")
         .eq("canvasser_id", userId)
         .gte("log_date", since);
       if (error) throw error;
@@ -108,11 +132,11 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
     },
   });
 
-  const { today, week, month, monthRevenue, weekRevenue, monthCommission, weekCommission } = useMemo(() => {
+  const { today, week, month, monthRevenue, weekRevenue, weekPoints, weekRate, monthCommission, weekCommission } = useMemo(() => {
     const rows = (logsQuery.data ?? []) as unknown as Array<Record<string, number | null> & { log_date: string }>;
     const t = todayISO(), w = startOfWeekISO();
-    const today = aggregate(rows.filter((r) => (r.log_date as unknown as string) === t));
-    const week  = aggregate(rows.filter((r) => (r.log_date as unknown as string) >= w));
+    const today = aggregate(rows.filter((r) => r.log_date === t));
+    const week  = aggregate(rows.filter((r) => r.log_date >= w));
     const month = aggregate(rows);
 
     const sales = salesQuery.data ?? [];
@@ -124,10 +148,20 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
       .filter((r) => new Date(r.created_at) >= wStart)
       .reduce((a, r) => a + Number(r.sale_amount ?? 0), 0);
 
+    // Tiered commission: weekly "points" = confirmed sales this week.
+    // Below threshold → 1%, at/above threshold → 2%.
+    const weekPoints = week.sales;
+    const weekRate = weekPoints >= COMMISSION_TIER_THRESHOLD ? COMMISSION_HIGH : COMMISSION_LOW;
+
+    // Month commission: average-ish — apply 1% baseline to all month revenue,
+    // plus 1% bonus only on revenue from weeks where the player hit threshold.
+    // Simple approximation: use the current week's rate for the month estimate.
+    const monthRate = weekRate;
+
     return {
-      today, week, month, monthRevenue, weekRevenue,
-      monthCommission: monthRevenue * COMMISSION_RATE,
-      weekCommission: weekRevenue * COMMISSION_RATE,
+      today, week, month, monthRevenue, weekRevenue, weekPoints, weekRate,
+      monthCommission: monthRevenue * monthRate,
+      weekCommission: weekRevenue * weekRate,
     };
   }, [logsQuery.data, salesQuery.data]);
 
@@ -144,9 +178,22 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
   const next = RANKS[Math.min(currentIdx + 1, RANKS.length - 1)];
   const rankSpan = Math.max(1, next.minSales - current.minSales);
   const rankProgress = current === next ? 1 : Math.min(1, (month.sales - current.minSales) / rankSpan);
-  const goalProgress = Math.min(1, monthRevenue / MONTHLY_GOAL);
+  const goalProgress = monthlyGoal > 0 ? Math.min(1, monthRevenue / monthlyGoal) : 0;
 
   const [tab, setTab] = useState<"today" | "week" | "mtd">("today");
+
+  const saveGoal = useMutation({
+    mutationFn: async (newGoal: number) => {
+      const { error } = await supabase
+        .from("profiles").update({ monthly_goal: newGoal }).eq("id", userId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Monthly goal updated");
+      qc.invalidateQueries({ queryKey: ["my_profile_goal", userId] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
 
   return (
     <div className="space-y-6">
@@ -160,9 +207,9 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
         {/* ============ TODAY ============ */}
         <TabsContent value="today" className="mt-6 space-y-6">
           <div className="grid sm:grid-cols-3 gap-4">
-            <GrindCounter label="Doors Knocked"    value={today.doors_knocked}    icon={<DoorOpen className="w-4 h-4" />} accent="var(--neon)" />
-            <GrindCounter label="People Talked To" value={today.people_talked_to} icon={<MessageCircle className="w-4 h-4" />} accent="var(--accent)" />
-            <GrindCounter label="Leads Called In"  value={today.leads_called_in}  icon={<PhoneCall className="w-4 h-4" />} accent="var(--warning)" />
+            <GrindCounter label="Leads Called In"          value={today.leads_called_in} icon={<PhoneCall className="w-4 h-4" />}     accent="var(--neon)" />
+            <GrindCounter label="Confirmed Next Day Leads" value={today.next_days}       icon={<CalendarClock className="w-4 h-4" />} accent="var(--victory)" />
+            <GrindCounter label="Confirmed Future Leads"   value={today.future_leads}    icon={<CalendarDays className="w-4 h-4" />}  accent="var(--accent)" />
           </div>
 
           <ValuePerDoorWidget
@@ -178,7 +225,7 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
             <BigStat
               label="Weekly Pay"
               value={formatUSD(weekCommission)}
-              sub={`${(COMMISSION_RATE * 100).toFixed(0)}% of ${formatUSD(weekRevenue)} confirmed sales`}
+              sub={`${(weekRate * 100).toFixed(0)}% tier · ${weekPoints} pts · ${formatUSD(weekRevenue)} confirmed sales`}
               icon={<DollarSign className="w-4 h-4" />}
               accent="var(--victory)"
             />
@@ -190,6 +237,8 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
               accent="var(--neon)"
             />
           </div>
+
+          <CommissionTierWidget points={weekPoints} threshold={COMMISSION_TIER_THRESHOLD} rate={weekRate} />
 
           <RankProgress
             current={current.label}
@@ -221,7 +270,13 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
             />
           </div>
 
-          <GoalBar revenue={monthRevenue} goal={MONTHLY_GOAL} pct={goalProgress} />
+          <GoalBar
+            revenue={monthRevenue}
+            goal={monthlyGoal}
+            pct={goalProgress}
+            onSave={(g) => saveGoal.mutate(g)}
+            saving={saveGoal.isPending}
+          />
         </TabsContent>
       </Tabs>
     </div>
@@ -355,10 +410,57 @@ function RankProgress({
   );
 }
 
-function GoalBar({ revenue, goal, pct }: { revenue: number; goal: number; pct: number }) {
+function CommissionTierWidget({ points, threshold, rate }: { points: number; threshold: number; rate: number }) {
+  const pct = Math.min(1, points / threshold);
+  const atTop = rate >= COMMISSION_HIGH;
+  return (
+    <ArcadePanel title="Commission Tier"
+      action={<span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Weekly · {points} pts</span>}
+    >
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div>
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Current Rate</div>
+          <div className="font-display text-3xl text-victory mt-1" style={{ textShadow: "0 0 14px color-mix(in oklab, var(--victory) 60%, transparent)" }}>
+            {(rate * 100).toFixed(0)}%
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Unlock 2%</div>
+          <div className="font-display text-lg text-neon">{threshold} pts / week</div>
+        </div>
+      </div>
+      <NeonBar pct={pct} accent={atTop ? "var(--victory)" : "var(--neon)"} />
+      <div className="mt-2 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+        {atTop ? "🔥 2% tier unlocked this week" : `${Math.max(0, threshold - points)} more pts to unlock 2%`}
+      </div>
+    </ArcadePanel>
+  );
+}
+
+function GoalBar({
+  revenue, goal, pct, onSave, saving,
+}: { revenue: number; goal: number; pct: number; onSave: (g: number) => void; saving: boolean }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(String(goal));
+  useEffect(() => { if (!editing) setDraft(String(goal)); }, [goal, editing]);
+
+  const submit = () => {
+    const n = Math.max(0, Math.round(Number(draft) || 0));
+    onSave(n);
+    setEditing(false);
+  };
+
   return (
     <ArcadePanel title="Monthly Goal"
-      action={<span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Personal Target</span>}
+      action={
+        editing ? (
+          <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Set your target</span>
+        ) : (
+          <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>
+            <Pencil className="w-3.5 h-3.5 mr-1.5" /> Edit Goal
+          </Button>
+        )
+      }
     >
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
@@ -367,7 +469,25 @@ function GoalBar({ revenue, goal, pct }: { revenue: number; goal: number; pct: n
         </div>
         <div className="text-right">
           <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Goal</div>
-          <div className="font-display text-2xl text-neon">{formatUSD(goal)}</div>
+          {editing ? (
+            <div className="mt-1 flex items-center gap-2 justify-end">
+              <Input
+                type="number" min={0} step={100} inputMode="numeric"
+                className="w-36 font-display text-lg"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                autoFocus
+              />
+              <Button size="sm" onClick={submit} disabled={saving}>
+                <Check className="w-3.5 h-3.5" />
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => { setDraft(String(goal)); setEditing(false); }}>
+                <X className="w-3.5 h-3.5" />
+              </Button>
+            </div>
+          ) : (
+            <div className="font-display text-2xl text-neon">{formatUSD(goal)}</div>
+          )}
         </div>
       </div>
       <NeonBar pct={pct} accent="var(--victory)" tall />
