@@ -410,10 +410,57 @@ function RankProgress({
   );
 }
 
-function GoalBar({ revenue, goal, pct }: { revenue: number; goal: number; pct: number }) {
+function CommissionTierWidget({ points, threshold, rate }: { points: number; threshold: number; rate: number }) {
+  const pct = Math.min(1, points / threshold);
+  const atTop = rate >= COMMISSION_HIGH;
+  return (
+    <ArcadePanel title="Commission Tier"
+      action={<span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Weekly · {points} pts</span>}
+    >
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div>
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Current Rate</div>
+          <div className="font-display text-3xl text-victory mt-1" style={{ textShadow: "0 0 14px color-mix(in oklab, var(--victory) 60%, transparent)" }}>
+            {(rate * 100).toFixed(0)}%
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Unlock 2%</div>
+          <div className="font-display text-lg text-neon">{threshold} pts / week</div>
+        </div>
+      </div>
+      <NeonBar pct={pct} accent={atTop ? "var(--victory)" : "var(--neon)"} />
+      <div className="mt-2 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+        {atTop ? "🔥 2% tier unlocked this week" : `${Math.max(0, threshold - points)} more pts to unlock 2%`}
+      </div>
+    </ArcadePanel>
+  );
+}
+
+function GoalBar({
+  revenue, goal, pct, onSave, saving,
+}: { revenue: number; goal: number; pct: number; onSave: (g: number) => void; saving: boolean }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(String(goal));
+  useEffect(() => { if (!editing) setDraft(String(goal)); }, [goal, editing]);
+
+  const submit = () => {
+    const n = Math.max(0, Math.round(Number(draft) || 0));
+    onSave(n);
+    setEditing(false);
+  };
+
   return (
     <ArcadePanel title="Monthly Goal"
-      action={<span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Personal Target</span>}
+      action={
+        editing ? (
+          <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Set your target</span>
+        ) : (
+          <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>
+            <Pencil className="w-3.5 h-3.5 mr-1.5" /> Edit Goal
+          </Button>
+        )
+      }
     >
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
@@ -422,7 +469,25 @@ function GoalBar({ revenue, goal, pct }: { revenue: number; goal: number; pct: n
         </div>
         <div className="text-right">
           <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Goal</div>
-          <div className="font-display text-2xl text-neon">{formatUSD(goal)}</div>
+          {editing ? (
+            <div className="mt-1 flex items-center gap-2 justify-end">
+              <Input
+                type="number" min={0} step={100} inputMode="numeric"
+                className="w-36 font-display text-lg"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                autoFocus
+              />
+              <Button size="sm" onClick={submit} disabled={saving}>
+                <Check className="w-3.5 h-3.5" />
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => { setDraft(String(goal)); setEditing(false); }}>
+                <X className="w-3.5 h-3.5" />
+              </Button>
+            </div>
+          ) : (
+            <div className="font-display text-2xl text-neon">{formatUSD(goal)}</div>
+          )}
         </div>
       </div>
       <NeonBar pct={pct} accent="var(--victory)" tall />
