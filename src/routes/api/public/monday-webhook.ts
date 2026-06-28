@@ -90,12 +90,17 @@ function pickFromMondayEvent(ev: any) {
     }
     return undefined;
   };
+  // Exact-name precedence for the "Sale Price" column the user configured.
+  const exactSalePrice =
+    (cv["Sale Price"] && (cv["Sale Price"] as any).text) ??
+    (cv["Sale Price"] && (cv["Sale Price"] as any).value) ??
+    cv["Sale Price"];
   return {
     canvasser_name: find("canvasser", "agent", "rep"),
     lead_name: ev.pulseName ?? ev.itemName ?? find("lead", "customer", "name"),
     outcome_status: find("outcome", "status", "result"),
     date_of_action: find("date", "actiondate"),
-    sale_price: find("saleprice", "price", "amount", "dealvalue", "contractvalue"),
+    sale_price: (exactSalePrice as string | undefined) ?? find("saleprice", "price", "amount", "dealvalue", "contractvalue"),
   };
 }
 
@@ -144,8 +149,16 @@ export const Route = createFileRoute("/api/public/monday-webhook")({
         const outcomeRaw =
           body.outcome_status ?? body.outcome ?? body.status ?? fromEvent.outcome_status;
         const logDate = parseDate(body.date_of_action ?? body.date ?? fromEvent.date_of_action);
+        // Priority: exact Monday column "Sale Price", then aliases, then event-flat fields.
+        const rawAny = body as Record<string, unknown>;
         const salePrice = parseMoney(
-          body.sale_price ?? body.sale_amount ?? body.price ?? fromEvent.sale_price,
+          rawAny["Sale Price"] ??
+            rawAny["sale price"] ??
+            rawAny["SalePrice"] ??
+            body.sale_price ??
+            body.sale_amount ??
+            body.price ??
+            fromEvent.sale_price,
         );
 
         if (!canvasserName.trim()) return json({ error: "Missing canvasser name" }, 422);
@@ -227,6 +240,17 @@ export const Route = createFileRoute("/api/public/monday-webhook")({
             .maybeSingle();
           if (lErr) return json({ error: lErr.message }, 500);
           leadId = lead?.id ?? null;
+
+          // Push a Hype Feed event for the Kill Feed ticker.
+          await supabaseAdmin.from("hype_events").insert({
+            kind: "sale",
+            canvasser_id: profile.id,
+            canvasser_name: profile.display_name,
+            message: `${profile.display_name} just dropped a Sale! (+2 Points)`,
+            payload: { sale_price: salePrice, lead_id: leadId, lead_name: leadName },
+          });
+        } else {
+          // no-op: only Sales hit the Hype Feed
         }
 
         return json({

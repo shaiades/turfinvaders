@@ -6,6 +6,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Lock } from "lucide-react";
+import { LiveFeed } from "@/components/LiveFeed";
 
 export const Route = createFileRoute("/_authenticated/leaderboard")({
   head: () => ({ meta: [{ title: "Leaderboard — Knockout" }] }),
@@ -27,6 +28,7 @@ function Leaderboard() {
 
   return (
     <div className="space-y-6">
+      <LiveFeed />
       <div className="flex items-end justify-between flex-wrap gap-3">
         <h1 className="font-display text-2xl text-neon">LEADERBOARD</h1>
         <span className={`text-[10px] font-display uppercase tracking-widest px-2 py-1 rounded border ${

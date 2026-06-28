@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel } from "@/components/arcade";
+import { LiveFeed } from "@/components/LiveFeed";
 import { Gauge, Zap, Target, DoorClosed, TrendingUp } from "lucide-react";
 
 type Props = {
@@ -66,15 +67,17 @@ export function CommandCenter({ teamId }: Props) {
   const noShowRate = t.confirmedLeads > 0 ? Math.min(1, t.noShows / t.confirmedLeads) : 0;
 
   return (
-    <ArcadePanel
-      title="Command Center"
-      action={
-        <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-          Week to Date · Live
-        </span>
-      }
-    >
-      <div className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
+    <div className="space-y-4">
+      <LiveFeed />
+      <ArcadePanel
+        title="Command Center"
+        action={
+          <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            Week to Date · Live
+          </span>
+        }
+      >
+        <div className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
         {/* Volume + Pace */}
         <div className="grid gap-6 md:grid-cols-2">
           <VolumeTile value={t.confirmedLeads} />
@@ -87,8 +90,9 @@ export function CommandCenter({ teamId }: Props) {
           <Donut label="Close Rate"   value={closeRate}  color="var(--victory)" icon={<TrendingUp className="w-3.5 h-3.5" />} />
           <Donut label="No-Show Rate" value={noShowRate} color="var(--destructive)" icon={<DoorClosed className="w-3.5 h-3.5" />} invert />
         </div>
-      </div>
-    </ArcadePanel>
+        </div>
+      </ArcadePanel>
+    </div>
   );
 }
 

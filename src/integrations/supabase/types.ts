@@ -198,6 +198,36 @@ export type Database = {
           },
         ]
       }
+      hype_events: {
+        Row: {
+          canvasser_id: string | null
+          canvasser_name: string | null
+          created_at: string
+          id: string
+          kind: string
+          message: string
+          payload: Json
+        }
+        Insert: {
+          canvasser_id?: string | null
+          canvasser_name?: string | null
+          created_at?: string
+          id?: string
+          kind: string
+          message: string
+          payload?: Json
+        }
+        Update: {
+          canvasser_id?: string | null
+          canvasser_name?: string | null
+          created_at?: string
+          id?: string
+          kind?: string
+          message?: string
+          payload?: Json
+        }
+        Relationships: []
+      }
       lead_events: {
         Row: {
           canvasser_id: string | null
@@ -327,6 +357,7 @@ export type Database = {
         Row: {
           avatar_url: string | null
           created_at: string
+          current_rank: string | null
           display_name: string
           id: string
           level: number
@@ -339,6 +370,7 @@ export type Database = {
         Insert: {
           avatar_url?: string | null
           created_at?: string
+          current_rank?: string | null
           display_name: string
           id: string
           level?: number
@@ -351,6 +383,7 @@ export type Database = {
         Update: {
           avatar_url?: string | null
           created_at?: string
+          current_rank?: string | null
           display_name?: string
           id?: string
           level?: number
