@@ -501,8 +501,12 @@ function GrindCounter({
 }
 
 function ValuePerDoorWidget({
-  value, doors, commission,
-}: { value: number; doors: number; commission: number }) {
+  value, doors, commission, targetValue, targetReady, monthlyGoal,
+}: { value: number; doors: number; commission: number; targetValue: number; targetReady: boolean; monthlyGoal: number }) {
+  // If a target has been set and funnel math is ready, show the goal-driven value per door.
+  // Otherwise, fall back to historical (commission MTD / doors MTD).
+  const showTarget = targetReady && targetValue > 0;
+  const display = showTarget ? targetValue : value;
   return (
     <div className="relative overflow-hidden rounded-lg border border-[color-mix(in_oklab,var(--victory)_40%,var(--border))] bg-[color-mix(in_oklab,var(--victory)_7%,var(--surface))] p-6">
       <div className="absolute inset-0 pointer-events-none scanlines opacity-30" />
@@ -513,24 +517,35 @@ function ValuePerDoorWidget({
       <div className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-6">
         <div>
           <div className="flex items-center gap-1.5 text-[10px] font-display uppercase tracking-widest text-victory">
-            <Sparkles className="w-3 h-3" /> Value Per Door
+            <Sparkles className="w-3 h-3" /> Value Per Door {showTarget && <span className="text-victory/60">· TARGET</span>}
           </div>
           <div className="mt-3 font-display text-6xl md:text-7xl text-mega-victory leading-none">
-            {formatUSD(value)}
+            {formatUSD(display)}
           </div>
           <div className="mt-3 text-[10px] font-display uppercase tracking-widest text-victory/80">
-            EVERY KNOCK PAYS
+            {showTarget ? "EACH REQUIRED KNOCK IS WORTH THIS" : "EVERY KNOCK PAYS"}
           </div>
         </div>
         <div className="text-xs text-muted-foreground space-y-1 md:text-right">
-          <div>Commission MTD · <span className="text-victory font-display">{formatUSD(commission)}</span></div>
-          <div>Doors knocked MTD · <span className="text-neon font-display">{doors.toLocaleString()}</span></div>
-          <div className="text-[10px] uppercase tracking-widest mt-2">commission / doors</div>
+          {showTarget ? (
+            <>
+              <div>Target Income · <span className="text-victory font-display">{formatUSD(monthlyGoal)}</span></div>
+              <div>Historical pace · <span className="text-neon font-display">{formatUSD(value)}/door</span></div>
+              <div className="text-[10px] uppercase tracking-widest mt-2">goal commission / required doors</div>
+            </>
+          ) : (
+            <>
+              <div>Commission MTD · <span className="text-victory font-display">{formatUSD(commission)}</span></div>
+              <div>Doors knocked MTD · <span className="text-neon font-display">{doors.toLocaleString()}</span></div>
+              <div className="text-[10px] uppercase tracking-widest mt-2">commission / doors</div>
+            </>
+          )}
         </div>
       </div>
     </div>
   );
 }
+
 
 function BigStat({
   label, value, sub, icon, accent,
