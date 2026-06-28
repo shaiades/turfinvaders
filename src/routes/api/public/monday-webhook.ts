@@ -90,12 +90,17 @@ function pickFromMondayEvent(ev: any) {
     }
     return undefined;
   };
+  // Exact-name precedence for the "Sale Price" column the user configured.
+  const exactSalePrice =
+    (cv["Sale Price"] && (cv["Sale Price"] as any).text) ??
+    (cv["Sale Price"] && (cv["Sale Price"] as any).value) ??
+    cv["Sale Price"];
   return {
     canvasser_name: find("canvasser", "agent", "rep"),
     lead_name: ev.pulseName ?? ev.itemName ?? find("lead", "customer", "name"),
     outcome_status: find("outcome", "status", "result"),
     date_of_action: find("date", "actiondate"),
-    sale_price: find("saleprice", "price", "amount", "dealvalue", "contractvalue"),
+    sale_price: (exactSalePrice as string | undefined) ?? find("saleprice", "price", "amount", "dealvalue", "contractvalue"),
   };
 }
 
