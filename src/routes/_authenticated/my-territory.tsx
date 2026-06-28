@@ -8,6 +8,7 @@ import { NeonMap, type Territory, type FieldPin, type LatLng } from "@/component
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { Home, MessageSquare, Sparkles, Crosshair } from "lucide-react";
+import { GratitudeGate } from "@/components/GratitudeGate";
 
 export const Route = createFileRoute("/_authenticated/my-territory")({
   head: () => ({ meta: [{ title: "My Territory — Knockout" }] }),
