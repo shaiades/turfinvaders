@@ -113,6 +113,15 @@ function CanvasserProfile() {
           <h1 className="font-display text-2xl text-neon">{(player?.name ?? "PLAYER").toUpperCase()}</h1>
           {team.id && <TeamBadge name={team.name} color={team.color} />}
           {player && <span className="text-[10px] font-display text-victory">LVL {player.level}</span>}
+          {isRealUser && (role === "owner" || role === "office_staff" || role === "captain" || isSelf) && (
+            <Link
+              to="/canvassers/$canvasserId/field"
+              params={{ canvasserId }}
+              className="ml-auto inline-flex items-center gap-2 rounded border border-neon/50 bg-neon/10 px-3 py-1.5 text-[10px] font-display uppercase tracking-widest text-neon hover:bg-neon/20 transition"
+            >
+              👁 View Field Activity
+            </Link>
+          )}
         </div>
       </div>
 
