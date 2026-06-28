@@ -7,7 +7,7 @@ import { LiveLeadCounter } from "@/components/LiveLeadCounter";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { DoorOpen, CalendarClock, CalendarDays, PhoneCall, DollarSign, Target, Gauge, Trophy, Sparkles, Pencil, Check, X } from "lucide-react";
+import { DoorOpen, CalendarClock, CalendarDays, PhoneCall, DollarSign, Target, Gauge, Trophy, Sparkles, Pencil, Check, X, Crosshair, Zap, Users, Swords, Flame } from "lucide-react";
 
 /**
  * Paycheck engine — automated.
