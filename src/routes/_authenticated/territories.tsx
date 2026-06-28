@@ -70,7 +70,7 @@ function TerritoriesPage() {
         name: name.trim(),
         color,
         team_id: assignTeam,
-        polygon: polygon as unknown as object,
+        polygon: polygon as unknown as never,
         created_by: user?.id,
       });
       if (error) throw error;

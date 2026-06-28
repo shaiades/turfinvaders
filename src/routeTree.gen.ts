@@ -13,7 +13,9 @@ import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedUsersRouteImport } from './routes/_authenticated/users'
+import { Route as AuthenticatedTerritoriesRouteImport } from './routes/_authenticated/territories'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
+import { Route as AuthenticatedMyTerritoryRouteImport } from './routes/_authenticated/my-territory'
 import { Route as AuthenticatedLogRouteImport } from './routes/_authenticated/log'
 import { Route as AuthenticatedLeaderboardRouteImport } from './routes/_authenticated/leaderboard'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
@@ -41,11 +43,23 @@ const AuthenticatedUsersRoute = AuthenticatedUsersRouteImport.update({
   path: '/users',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedTerritoriesRoute =
+  AuthenticatedTerritoriesRouteImport.update({
+    id: '/territories',
+    path: '/territories',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedMyTerritoryRoute =
+  AuthenticatedMyTerritoryRouteImport.update({
+    id: '/my-territory',
+    path: '/my-territory',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedLogRoute = AuthenticatedLogRouteImport.update({
   id: '/log',
   path: '/log',
@@ -93,7 +107,9 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/leaderboard': typeof AuthenticatedLeaderboardRoute
   '/log': typeof AuthenticatedLogRoute
+  '/my-territory': typeof AuthenticatedMyTerritoryRoute
   '/settings': typeof AuthenticatedSettingsRoute
+  '/territories': typeof AuthenticatedTerritoriesRoute
   '/users': typeof AuthenticatedUsersRoute
   '/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRoute
   '/teams/$teamId': typeof AuthenticatedTeamsTeamIdRoute
@@ -106,7 +122,9 @@ export interface FileRoutesByTo {
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/leaderboard': typeof AuthenticatedLeaderboardRoute
   '/log': typeof AuthenticatedLogRoute
+  '/my-territory': typeof AuthenticatedMyTerritoryRoute
   '/settings': typeof AuthenticatedSettingsRoute
+  '/territories': typeof AuthenticatedTerritoriesRoute
   '/users': typeof AuthenticatedUsersRoute
   '/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRoute
   '/teams/$teamId': typeof AuthenticatedTeamsTeamIdRoute
@@ -121,7 +139,9 @@ export interface FileRoutesById {
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/leaderboard': typeof AuthenticatedLeaderboardRoute
   '/_authenticated/log': typeof AuthenticatedLogRoute
+  '/_authenticated/my-territory': typeof AuthenticatedMyTerritoryRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
+  '/_authenticated/territories': typeof AuthenticatedTerritoriesRoute
   '/_authenticated/users': typeof AuthenticatedUsersRoute
   '/_authenticated/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRoute
   '/_authenticated/teams/$teamId': typeof AuthenticatedTeamsTeamIdRoute
@@ -136,7 +156,9 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/leaderboard'
     | '/log'
+    | '/my-territory'
     | '/settings'
+    | '/territories'
     | '/users'
     | '/canvassers/$canvasserId'
     | '/teams/$teamId'
@@ -149,7 +171,9 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/leaderboard'
     | '/log'
+    | '/my-territory'
     | '/settings'
+    | '/territories'
     | '/users'
     | '/canvassers/$canvasserId'
     | '/teams/$teamId'
@@ -163,7 +187,9 @@ export interface FileRouteTypes {
     | '/_authenticated/dashboard'
     | '/_authenticated/leaderboard'
     | '/_authenticated/log'
+    | '/_authenticated/my-territory'
     | '/_authenticated/settings'
+    | '/_authenticated/territories'
     | '/_authenticated/users'
     | '/_authenticated/canvassers/$canvasserId'
     | '/_authenticated/teams/$teamId'
@@ -206,11 +232,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedUsersRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/territories': {
+      id: '/_authenticated/territories'
+      path: '/territories'
+      fullPath: '/territories'
+      preLoaderRoute: typeof AuthenticatedTerritoriesRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/settings': {
       id: '/_authenticated/settings'
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof AuthenticatedSettingsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/my-territory': {
+      id: '/_authenticated/my-territory'
+      path: '/my-territory'
+      fullPath: '/my-territory'
+      preLoaderRoute: typeof AuthenticatedMyTerritoryRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/log': {
@@ -270,7 +310,9 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
   AuthenticatedLeaderboardRoute: typeof AuthenticatedLeaderboardRoute
   AuthenticatedLogRoute: typeof AuthenticatedLogRoute
+  AuthenticatedMyTerritoryRoute: typeof AuthenticatedMyTerritoryRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
+  AuthenticatedTerritoriesRoute: typeof AuthenticatedTerritoriesRoute
   AuthenticatedUsersRoute: typeof AuthenticatedUsersRoute
   AuthenticatedCanvassersCanvasserIdRoute: typeof AuthenticatedCanvassersCanvasserIdRoute
   AuthenticatedTeamsTeamIdRoute: typeof AuthenticatedTeamsTeamIdRoute
@@ -282,7 +324,9 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
   AuthenticatedLeaderboardRoute: AuthenticatedLeaderboardRoute,
   AuthenticatedLogRoute: AuthenticatedLogRoute,
+  AuthenticatedMyTerritoryRoute: AuthenticatedMyTerritoryRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
+  AuthenticatedTerritoriesRoute: AuthenticatedTerritoriesRoute,
   AuthenticatedUsersRoute: AuthenticatedUsersRoute,
   AuthenticatedCanvassersCanvasserIdRoute:
     AuthenticatedCanvassersCanvasserIdRoute,
