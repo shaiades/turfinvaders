@@ -329,10 +329,11 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
   return (
     <div className="space-y-6">
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
-        <TabsList className="grid w-full grid-cols-3 bg-surface border border-border p-1 h-auto">
+        <TabsList className="grid w-full grid-cols-4 bg-surface border border-border p-1 h-auto">
           <ArcadeTab value="today">Today</ArcadeTab>
           <ArcadeTab value="week">This Week</ArcadeTab>
           <ArcadeTab value="mtd">Month to Date</ArcadeTab>
+          <ArcadeTab value="goals">My Goals</ArcadeTab>
         </TabsList>
 
         {/* ============ TODAY ============ */}
@@ -347,8 +348,12 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
             value={valuePerDoor}
             doors={month.doors_knocked}
             commission={monthCommission}
+            targetValue={mission.targetValuePerDoor}
+            targetReady={mission.ready}
+            monthlyGoal={monthlyGoal}
           />
         </TabsContent>
+
 
         {/* ============ THIS WEEK ============ */}
         <TabsContent value="week" className="mt-6 space-y-6">
