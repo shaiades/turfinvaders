@@ -90,8 +90,9 @@ export function CommandCenter({ teamId }: Props) {
           <Donut label="Close Rate"   value={closeRate}  color="var(--victory)" icon={<TrendingUp className="w-3.5 h-3.5" />} />
           <Donut label="No-Show Rate" value={noShowRate} color="var(--destructive)" icon={<DoorClosed className="w-3.5 h-3.5" />} invert />
         </div>
-      </div>
-    </ArcadePanel>
+        </div>
+      </ArcadePanel>
+    </div>
   );
 }
 
