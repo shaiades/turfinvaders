@@ -73,17 +73,42 @@ function MyTerritoryPage() {
 
   const dropPin = useMutation({
     mutationFn: async (ll: LatLng) => {
+      // Capture a FRESH device fix at drop time (don't trust stale watch state)
+      const fix = await new Promise<GeolocationPosition | null>((resolve) => {
+        if (!navigator.geolocation) return resolve(null);
+        navigator.geolocation.getCurrentPosition(
+          (p) => resolve(p),
+          () => resolve(null),
+          { enableHighAccuracy: true, maximumAge: 10000, timeout: 8000 },
+        );
+      });
+      const device = fix ? { lat: fix.coords.latitude, lng: fix.coords.longitude } : me;
+      const distance_m = device ? haversineMeters(device, ll) : null;
+      const is_remote_drop = distance_m == null ? true : distance_m > 18; // 20 yards ≈ 18.288m
+
       const { error } = await supabase.from("field_pins").insert({
         canvasser_id: user!.id,
         pin_type: active,
         lat: ll.lat,
         lng: ll.lng,
         log_date: todayISO(),
+        device_lat: device?.lat ?? null,
+        device_lng: device?.lng ?? null,
+        distance_m,
+        is_remote_drop,
       });
       if (error) throw error;
+      return { is_remote_drop, distance_m };
     },
-    onSuccess: () => {
-      toast.success(active === "lead" ? "🟢 Lead pin dropped" : active === "talked_to" ? "🟡 Conversation logged" : "🔴 Not home");
+    onSuccess: ({ is_remote_drop, distance_m }) => {
+      if (is_remote_drop) {
+        const yds = distance_m != null ? Math.round(distance_m * 1.0936) : null;
+        toast.warning(`⚠ Remote Drop flagged${yds != null ? ` · ${yds} yds from pin` : ""}`, {
+          description: "Pin won't count toward your stats. Walk to the door and try again.",
+        });
+      } else {
+        toast.success(active === "lead" ? "🟢 Lead pin dropped" : active === "talked_to" ? "🟡 Conversation logged" : "🔴 Not home");
+      }
       qc.invalidateQueries({ queryKey: ["my_pins_today", user?.id] });
       qc.invalidateQueries({ queryKey: ["my_logs"] });
     },
