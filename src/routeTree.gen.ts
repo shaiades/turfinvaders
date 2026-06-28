@@ -24,6 +24,7 @@ import { Route as AuthenticatedTeamsIndexRouteImport } from './routes/_authentic
 import { Route as ApiPublicMondayWebhookRouteImport } from './routes/api/public/monday-webhook'
 import { Route as AuthenticatedTeamsTeamIdRouteImport } from './routes/_authenticated/teams.$teamId'
 import { Route as AuthenticatedCanvassersCanvasserIdRouteImport } from './routes/_authenticated/canvassers.$canvasserId'
+import { Route as AuthenticatedCanvassersCanvasserIdFieldRouteImport } from './routes/_authenticated/canvassers.$canvasserId.field'
 
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
@@ -105,6 +106,12 @@ const AuthenticatedCanvassersCanvasserIdRoute =
     path: '/canvassers/$canvasserId',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedCanvassersCanvasserIdFieldRoute =
+  AuthenticatedCanvassersCanvasserIdFieldRouteImport.update({
+    id: '/field',
+    path: '/field',
+    getParentRoute: () => AuthenticatedCanvassersCanvasserIdRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -117,10 +124,11 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AuthenticatedSettingsRoute
   '/territories': typeof AuthenticatedTerritoriesRoute
   '/users': typeof AuthenticatedUsersRoute
-  '/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRoute
+  '/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRouteWithChildren
   '/teams/$teamId': typeof AuthenticatedTeamsTeamIdRoute
   '/api/public/monday-webhook': typeof ApiPublicMondayWebhookRoute
   '/teams/': typeof AuthenticatedTeamsIndexRoute
+  '/canvassers/$canvasserId/field': typeof AuthenticatedCanvassersCanvasserIdFieldRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -133,10 +141,11 @@ export interface FileRoutesByTo {
   '/settings': typeof AuthenticatedSettingsRoute
   '/territories': typeof AuthenticatedTerritoriesRoute
   '/users': typeof AuthenticatedUsersRoute
-  '/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRoute
+  '/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRouteWithChildren
   '/teams/$teamId': typeof AuthenticatedTeamsTeamIdRoute
   '/api/public/monday-webhook': typeof ApiPublicMondayWebhookRoute
   '/teams': typeof AuthenticatedTeamsIndexRoute
+  '/canvassers/$canvasserId/field': typeof AuthenticatedCanvassersCanvasserIdFieldRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -151,10 +160,11 @@ export interface FileRoutesById {
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/territories': typeof AuthenticatedTerritoriesRoute
   '/_authenticated/users': typeof AuthenticatedUsersRoute
-  '/_authenticated/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRoute
+  '/_authenticated/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRouteWithChildren
   '/_authenticated/teams/$teamId': typeof AuthenticatedTeamsTeamIdRoute
   '/api/public/monday-webhook': typeof ApiPublicMondayWebhookRoute
   '/_authenticated/teams/': typeof AuthenticatedTeamsIndexRoute
+  '/_authenticated/canvassers/$canvasserId/field': typeof AuthenticatedCanvassersCanvasserIdFieldRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -173,6 +183,7 @@ export interface FileRouteTypes {
     | '/teams/$teamId'
     | '/api/public/monday-webhook'
     | '/teams/'
+    | '/canvassers/$canvasserId/field'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -189,6 +200,7 @@ export interface FileRouteTypes {
     | '/teams/$teamId'
     | '/api/public/monday-webhook'
     | '/teams'
+    | '/canvassers/$canvasserId/field'
   id:
     | '__root__'
     | '/'
@@ -206,6 +218,7 @@ export interface FileRouteTypes {
     | '/_authenticated/teams/$teamId'
     | '/api/public/monday-webhook'
     | '/_authenticated/teams/'
+    | '/_authenticated/canvassers/$canvasserId/field'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -322,8 +335,30 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedCanvassersCanvasserIdRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/canvassers/$canvasserId/field': {
+      id: '/_authenticated/canvassers/$canvasserId/field'
+      path: '/field'
+      fullPath: '/canvassers/$canvasserId/field'
+      preLoaderRoute: typeof AuthenticatedCanvassersCanvasserIdFieldRouteImport
+      parentRoute: typeof AuthenticatedCanvassersCanvasserIdRoute
+    }
   }
 }
+
+interface AuthenticatedCanvassersCanvasserIdRouteChildren {
+  AuthenticatedCanvassersCanvasserIdFieldRoute: typeof AuthenticatedCanvassersCanvasserIdFieldRoute
+}
+
+const AuthenticatedCanvassersCanvasserIdRouteChildren: AuthenticatedCanvassersCanvasserIdRouteChildren =
+  {
+    AuthenticatedCanvassersCanvasserIdFieldRoute:
+      AuthenticatedCanvassersCanvasserIdFieldRoute,
+  }
+
+const AuthenticatedCanvassersCanvasserIdRouteWithChildren =
+  AuthenticatedCanvassersCanvasserIdRoute._addFileChildren(
+    AuthenticatedCanvassersCanvasserIdRouteChildren,
+  )
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedConfirmationDeskRoute: typeof AuthenticatedConfirmationDeskRoute
@@ -334,7 +369,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
   AuthenticatedTerritoriesRoute: typeof AuthenticatedTerritoriesRoute
   AuthenticatedUsersRoute: typeof AuthenticatedUsersRoute
-  AuthenticatedCanvassersCanvasserIdRoute: typeof AuthenticatedCanvassersCanvasserIdRoute
+  AuthenticatedCanvassersCanvasserIdRoute: typeof AuthenticatedCanvassersCanvasserIdRouteWithChildren
   AuthenticatedTeamsTeamIdRoute: typeof AuthenticatedTeamsTeamIdRoute
   AuthenticatedTeamsIndexRoute: typeof AuthenticatedTeamsIndexRoute
 }
@@ -349,7 +384,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedTerritoriesRoute: AuthenticatedTerritoriesRoute,
   AuthenticatedUsersRoute: AuthenticatedUsersRoute,
   AuthenticatedCanvassersCanvasserIdRoute:
-    AuthenticatedCanvassersCanvasserIdRoute,
+    AuthenticatedCanvassersCanvasserIdRouteWithChildren,
   AuthenticatedTeamsTeamIdRoute: AuthenticatedTeamsTeamIdRoute,
   AuthenticatedTeamsIndexRoute: AuthenticatedTeamsIndexRoute,
 }

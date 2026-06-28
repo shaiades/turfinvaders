@@ -174,7 +174,7 @@ function FieldActivityPage() {
       <ArcadePanel title="Live Map · Today's Pin Trail">
         <NeonMap
           territories={territories}
-          pins={pins}
+          pins={pins.map((p) => ({ ...p, is_remote_drop: p.is_remote_drop ?? false }))}
           height={520}
           mode={{ kind: "view" }}
         />
