@@ -240,6 +240,17 @@ export const Route = createFileRoute("/api/public/monday-webhook")({
             .maybeSingle();
           if (lErr) return json({ error: lErr.message }, 500);
           leadId = lead?.id ?? null;
+
+          // Push a Hype Feed event for the Kill Feed ticker.
+          await supabaseAdmin.from("hype_events").insert({
+            kind: "sale",
+            canvasser_id: profile.id,
+            canvasser_name: profile.display_name,
+            message: `${profile.display_name} just dropped a Sale! (+2 Points)`,
+            payload: { sale_price: salePrice, lead_id: leadId, lead_name: leadName },
+          });
+        } else {
+          // no-op: only Sales hit the Hype Feed
         }
 
         return json({
