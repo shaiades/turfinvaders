@@ -19,7 +19,7 @@ import { DoorOpen, CalendarClock, CalendarDays, PhoneCall, DollarSign, Target, G
  */
 const COMMISSION_LOW = 0.01;
 const COMMISSION_HIGH = 0.02;
-const COMMISSION_TIER_THRESHOLD = 10; // weekly points needed to unlock 2% — TODO: confirm
+const COMMISSION_TIER_THRESHOLD = 7; // weekly points needed to unlock 2%
 
 /** Fallback monthly financial goal default (USD) until canvasser sets their own. */
 const DEFAULT_MONTHLY_GOAL = 10_000;
