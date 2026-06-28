@@ -264,6 +264,36 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
   const rankProgress = current === next ? 1 : Math.min(1, (month.sales - current.minSales) / rankSpan);
   const goalProgress = monthlyGoal > 0 ? Math.min(1, monthRevenue / monthlyGoal) : 0;
 
+  // ===== Level-Up Detection → Hype Feed =====
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    (async () => {
+      const { data: prof } = await supabase
+        .from("profiles")
+        .select("current_rank, display_name")
+        .eq("id", userId)
+        .maybeSingle();
+      if (cancelled) return;
+      const stored = (prof as { current_rank?: string | null } | null)?.current_rank ?? null;
+      const name = (prof as { display_name?: string | null } | null)?.display_name ?? "A canvasser";
+      const newRank = current.key;
+      // Skip first-ever stamp (no level-up alert when seeding).
+      if (stored === newRank) return;
+      await supabase.from("profiles").update({ current_rank: newRank } as never).eq("id", userId);
+      if (stored && stored !== newRank) {
+        await supabase.from("hype_events").insert({
+          kind: "level_up",
+          canvasser_id: userId,
+          canvasser_name: name,
+          message: `${name} just Leveled Up to ${current.label}!`,
+          payload: { from: stored, to: newRank },
+        });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [userId, current.key, current.label]);
+
   const [tab, setTab] = useState<"today" | "week" | "mtd" | "goals">("today");
 
   // ===== Reverse-engineering funnel (drives My Goals tab & Value Per Door) =====
