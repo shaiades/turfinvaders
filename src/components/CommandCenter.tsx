@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel } from "@/components/arcade";
+import { LiveFeed } from "@/components/LiveFeed";
 import { Gauge, Zap, Target, DoorClosed, TrendingUp } from "lucide-react";
 
 type Props = {
