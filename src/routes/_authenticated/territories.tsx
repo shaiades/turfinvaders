@@ -48,6 +48,21 @@ function TerritoriesPage() {
     },
   });
 
+  const pinsQuery = useQuery({
+    queryKey: ["territory_pins_today"],
+    queryFn: async () => {
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      const iso = today.toISOString().slice(0, 10);
+      const { data, error } = await supabase
+        .from("field_pins")
+        .select("id, pin_type, lat, lng, is_remote_drop, distance_m")
+        .eq("log_date", iso);
+      if (error) throw error;
+      return (data ?? []) as FieldPin[];
+    },
+  });
+  const remoteDropCount = (pinsQuery.data ?? []).filter((p) => p.is_remote_drop).length;
+
   const territories: Territory[] = useMemo(() => {
     return (territoriesQuery.data ?? []).map((t) => {
       const teamObj = (t as { teams?: { name?: string } | null }).teams;
