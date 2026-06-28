@@ -185,12 +185,13 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
   });
 
   const { today, week, month, monthRevenue, weekRevenue, weekPoints,
-          weekHours, hourlyRate, weekBase, weekCommission, monthCommission } = useMemo(() => {
-    const rows = (logsQuery.data ?? []) as unknown as Array<Record<string, number | null> & { log_date: string }>;
-    const t = todayISO(), w = startOfWeekISO();
-    const today = aggregate(rows.filter((r) => r.log_date === t));
-    const week  = aggregate(rows.filter((r) => r.log_date >= w));
-    const month = aggregate(rows);
+          weekHours, hourlyRate, weekBase, weekCommission, monthCommission, funnel } = useMemo(() => {
+    const allRows = (logsQuery.data ?? []) as unknown as Array<Record<string, number | null> & { log_date: string }>;
+    const t = todayISO(), w = startOfWeekISO(), m = startOfMonthISO();
+    const mtdRows = allRows.filter((r) => r.log_date >= m);
+    const today = aggregate(allRows.filter((r) => r.log_date === t));
+    const week  = aggregate(allRows.filter((r) => r.log_date >= w));
+    const month = aggregate(mtdRows);
 
     const sales = salesQuery.data ?? [];
     const monthRevenue = sales.reduce((a, r) => a + Number(r.sale_amount ?? 0), 0);
@@ -201,26 +202,50 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
       .filter((r) => new Date(r.created_at) >= wStart)
       .reduce((a, r) => a + Number(r.sale_amount ?? 0), 0);
 
-    // Weekly points: pitch-miss sit = 1, sale = 2 → demos_sits + sales.
     const weekPoints = week.demos_sits + week.sales;
-
-    // Auto-hours: unique log dates this week, weighted by Mon–Fri=7.5 / Sat=6.5.
-    const weekDates = new Set(rows.filter((r) => r.log_date >= w).map((r) => r.log_date));
+    const weekDates = new Set(allRows.filter((r) => r.log_date >= w).map((r) => r.log_date));
     const weekHours = Array.from(weekDates).reduce((sum, d) => sum + hoursForDate(d), 0);
-
-    // End-of-week threshold: <3 pts → $18/hr, ≥3 pts → $30/hr. Commission flat 1%.
     const hourlyRate = weekPoints >= POINTS_THRESHOLD ? HOURLY_HIGH : HOURLY_LOW;
     const weekBase = weekHours * hourlyRate;
     const weekCommission = weekRevenue * COMMISSION_RATE;
-
-    // Month commission estimate at flat 1%.
     const monthCommission = monthRevenue * COMMISSION_RATE;
+
+    // ===== Funnel math (reverse engineering) =====
+    // Personal conversion rates from last 60 days of logs (full sample).
+    const personalAgg = aggregate(allRows);
+    const personalDays = personalAgg.days_worked;
+    const personalAvgSale = sales.length > 0 ? monthRevenue / sales.length : 0;
+
+    const company = companyAvgQuery.data ?? { doors: 0, confirmed: 0, sits: 0, sales: 0, revenue: 0, salesCount: 0 };
+    const companyAvgSale = company.salesCount > 0 ? company.revenue / company.salesCount : 0;
+
+    // Fallback rule: <2 weeks (14 unique log days) → use company-wide averages.
+    const usePersonal = personalDays >= 14 && personalAgg.doors_knocked > 0;
+    const src = usePersonal
+      ? { doors: personalAgg.doors_knocked, confirmed: personalAgg.confirmed_leads, sits: personalAgg.demos_sits, sales: personalAgg.sales, avgSale: personalAvgSale }
+      : { doors: company.doors, confirmed: company.confirmed, sits: company.sits, sales: company.sales, avgSale: companyAvgSale };
+
+    const closeRate    = src.sits  > 0 ? src.sales / src.sits  : 0;        // sales per sit
+    const sitRate      = src.confirmed > 0 ? src.sits / src.confirmed : 0; // sits per confirmed lead
+    const leadDoorRate = src.doors > 0 ? src.confirmed / src.doors : 0;    // confirmed leads per door
+    const talkDoorRate = src.doors > 0 && usePersonal
+      ? (personalAgg.people_talked_to / personalAgg.doors_knocked)
+      : 0.27; // industry-typical fallback ~27%
+    const avgCommissionPerSale = src.avgSale * COMMISSION_RATE;
+
+    const funnel = {
+      usePersonal,
+      sampleDays: personalDays,
+      closeRate, sitRate, leadDoorRate, talkDoorRate,
+      avgSale: src.avgSale,
+      avgCommissionPerSale,
+    };
 
     return {
       today, week, month, monthRevenue, weekRevenue, weekPoints,
-      weekHours, hourlyRate, weekBase, weekCommission, monthCommission,
+      weekHours, hourlyRate, weekBase, weekCommission, monthCommission, funnel,
     };
-  }, [logsQuery.data, salesQuery.data]);
+  }, [logsQuery.data, salesQuery.data, companyAvgQuery.data]);
 
   const weeklyPay = weekBase + weekCommission;
 
