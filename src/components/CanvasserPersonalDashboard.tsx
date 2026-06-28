@@ -421,6 +421,40 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
             saving={saveGoal.isPending}
           />
         </TabsContent>
+
+        {/* ============ MY GOALS — Reverse-engineering funnel ============ */}
+        <TabsContent value="goals" className="mt-6 space-y-6">
+          <GoalInputPanel
+            goal={monthlyGoal}
+            onSave={(g) => saveGoal.mutate(g)}
+            saving={saveGoal.isPending}
+          />
+          <DailyMissionWidget
+            ready={mission.ready}
+            goal={monthlyGoal}
+            doorsPerDay={mission.doorsPerDay}
+            talksPerDay={mission.talksPerDay}
+            daysRemaining={mission.daysRemaining}
+            targetValuePerDoor={mission.targetValuePerDoor}
+          />
+          <FunnelBreakdown
+            ready={mission.ready}
+            goal={monthlyGoal}
+            avgSale={funnel.avgSale}
+            avgCommissionPerSale={funnel.avgCommissionPerSale}
+            closeRate={funnel.closeRate}
+            sitRate={funnel.sitRate}
+            leadDoorRate={funnel.leadDoorRate}
+            requiredSales={mission.requiredSales}
+            requiredSits={mission.requiredSits}
+            requiredConfirmed={mission.requiredConfirmed}
+            requiredDoors={mission.requiredDoors}
+            usePersonal={funnel.usePersonal}
+            sampleDays={funnel.sampleDays}
+            mtdDoors={month.doors_knocked}
+          />
+        </TabsContent>
+
       </Tabs>
     </div>
   );
