@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { ExternalLink, Pencil, Check, X } from "lucide-react";
 
 const STORAGE_KEY = "knockout.monday_form_url";
+const DEFAULT_URL = "https://wkf.ms/3mOAl1A";
 
 function isSafeUrl(u: string) {
   try {
@@ -22,10 +23,9 @@ export function MondayEmbed({ canEdit }: { canEdit: boolean }) {
   const [draft, setDraft] = useState("");
 
   useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY) ?? "";
+    const saved = localStorage.getItem(STORAGE_KEY) ?? DEFAULT_URL;
     setUrl(saved);
     setDraft(saved);
-    if (!saved && canEdit) setEditing(true);
   }, [canEdit]);
 
   const save = () => {
