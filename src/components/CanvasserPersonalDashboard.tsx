@@ -249,8 +249,8 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
           <div className="grid sm:grid-cols-2 gap-4">
             <BigStat
               label="Weekly Pay"
-              value={formatUSD(weekCommission)}
-              sub={`${(weekRate * 100).toFixed(0)}% tier · ${weekPoints} pts · ${formatUSD(weekRevenue)} confirmed sales`}
+              value={formatUSD(weeklyPay)}
+              sub={`${weekHours.toFixed(1)} hrs × $${hourlyRate}/hr + ${formatUSD(weekCommission)} commission`}
               icon={<DollarSign className="w-4 h-4" />}
               accent="var(--victory)"
             />
@@ -263,7 +263,14 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
             />
           </div>
 
-          <CommissionTierWidget points={weekPoints} threshold={COMMISSION_TIER_THRESHOLD} rate={weekRate} />
+          <PaycheckEngineWidget
+            points={weekPoints}
+            hours={weekHours}
+            hourlyRate={hourlyRate}
+            base={weekBase}
+            commission={weekCommission}
+            revenue={weekRevenue}
+          />
 
           <RankProgress
             current={current.label}
