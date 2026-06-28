@@ -264,7 +264,54 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
   const rankProgress = current === next ? 1 : Math.min(1, (month.sales - current.minSales) / rankSpan);
   const goalProgress = monthlyGoal > 0 ? Math.min(1, monthRevenue / monthlyGoal) : 0;
 
-  const [tab, setTab] = useState<"today" | "week" | "mtd">("today");
+  const [tab, setTab] = useState<"today" | "week" | "mtd" | "goals">("today");
+
+  // ===== Reverse-engineering funnel (drives My Goals tab & Value Per Door) =====
+  const mission = useMemo(() => {
+    const { closeRate, sitRate, leadDoorRate, talkDoorRate, avgCommissionPerSale } = funnel;
+    const ready = closeRate > 0 && sitRate > 0 && leadDoorRate > 0 && avgCommissionPerSale > 0 && monthlyGoal > 0;
+    if (!ready) {
+      return {
+        ready: false,
+        requiredSales: 0, requiredSits: 0, requiredConfirmed: 0, requiredDoors: 0,
+        requiredPeopleTalkedTo: 0,
+        daysRemaining: 0, doorsPerDay: 0, talksPerDay: 0,
+        targetValuePerDoor: 0,
+      };
+    }
+    const requiredSales     = monthlyGoal / (funnel.avgSale || 1);
+    const requiredSits      = requiredSales / closeRate;
+    const requiredConfirmed = requiredSits / sitRate;
+    const requiredDoors     = requiredConfirmed / leadDoorRate;
+    const requiredPeopleTalkedTo = requiredDoors * talkDoorRate;
+
+    // Remaining working days this month (Mon–Sat), today inclusive.
+    const now = new Date(); now.setHours(0,0,0,0);
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    let workdaysLeft = 0;
+    for (let d = new Date(now); d <= end; d.setDate(d.getDate() + 1)) {
+      const dow = d.getDay();
+      if (dow !== 0) workdaysLeft++; // exclude Sunday only
+    }
+
+    // Subtract progress already made this month.
+    const doorsRemaining   = Math.max(0, requiredDoors - month.doors_knocked);
+    const talksRemaining   = Math.max(0, requiredPeopleTalkedTo - month.people_talked_to);
+    const doorsPerDay = workdaysLeft > 0 ? doorsRemaining / workdaysLeft : doorsRemaining;
+    const talksPerDay = workdaysLeft > 0 ? talksRemaining / workdaysLeft : talksRemaining;
+
+    const targetValuePerDoor = requiredDoors > 0 ? monthlyGoal * COMMISSION_RATE / requiredDoors : 0;
+
+    return {
+      ready: true,
+      requiredSales, requiredSits, requiredConfirmed, requiredDoors,
+      requiredPeopleTalkedTo,
+      daysRemaining: workdaysLeft,
+      doorsPerDay, talksPerDay,
+      targetValuePerDoor,
+    };
+  }, [funnel, monthlyGoal, month.doors_knocked, month.people_talked_to]);
+
 
   const saveGoal = useMutation({
     mutationFn: async (newGoal: number) => {
