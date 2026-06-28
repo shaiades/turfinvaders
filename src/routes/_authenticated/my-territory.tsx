@@ -64,7 +64,7 @@ function MyTerritoryPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("field_pins")
-        .select("id, pin_type, lat, lng")
+        .select("id, pin_type, lat, lng, is_remote_drop, distance_m")
         .eq("canvasser_id", user!.id)
         .eq("log_date", todayISO());
       if (error) throw error;
