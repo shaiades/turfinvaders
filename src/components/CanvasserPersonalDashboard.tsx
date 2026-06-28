@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel } from "@/components/arcade";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { LiveLeadCounter } from "@/components/LiveLeadCounter";
+import { WeeklyPlaybook } from "@/components/WeeklyPlaybook";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -358,6 +359,7 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
 
   return (
     <div className="space-y-6">
+      <WeeklyPlaybook userId={userId} />
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
         <TabsList className="grid w-full grid-cols-4 bg-surface border border-border p-1 h-auto">
           <ArcadeTab value="today">Today</ArcadeTab>

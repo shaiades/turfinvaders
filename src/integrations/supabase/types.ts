@@ -356,6 +356,7 @@ export type Database = {
       profiles: {
         Row: {
           avatar_url: string | null
+          avg_commission: number
           created_at: string
           current_rank: string | null
           display_name: string
@@ -365,10 +366,12 @@ export type Database = {
           status: Database["public"]["Enums"]["canvasser_status"]
           team_id: string | null
           updated_at: string
+          weekly_income_goal: number
           xp: number
         }
         Insert: {
           avatar_url?: string | null
+          avg_commission?: number
           created_at?: string
           current_rank?: string | null
           display_name: string
@@ -378,10 +381,12 @@ export type Database = {
           status?: Database["public"]["Enums"]["canvasser_status"]
           team_id?: string | null
           updated_at?: string
+          weekly_income_goal?: number
           xp?: number
         }
         Update: {
           avatar_url?: string | null
+          avg_commission?: number
           created_at?: string
           current_rank?: string | null
           display_name?: string
@@ -391,6 +396,7 @@ export type Database = {
           status?: Database["public"]["Enums"]["canvasser_status"]
           team_id?: string | null
           updated_at?: string
+          weekly_income_goal?: number
           xp?: number
         }
         Relationships: [

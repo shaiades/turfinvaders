@@ -8,6 +8,7 @@ import { NeonMap, type Territory, type FieldPin, type LatLng } from "@/component
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { Home, MessageSquare, Sparkles, Crosshair } from "lucide-react";
+import { GratitudeGate } from "@/components/GratitudeGate";
 
 export const Route = createFileRoute("/_authenticated/my-territory")({
   head: () => ({ meta: [{ title: "My Territory — Knockout" }] }),
@@ -136,6 +137,7 @@ function MyTerritoryPage() {
   }, [pinsQuery.data]);
 
   return (
+    <GratitudeGate userId={user?.id}>
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h1 className="font-display text-2xl text-neon">MY TERRITORY</h1>
@@ -177,6 +179,7 @@ function MyTerritoryPage() {
         </ul>
       </ArcadePanel>
     </div>
+    </GratitudeGate>
   );
 }
 
