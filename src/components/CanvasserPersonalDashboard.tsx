@@ -132,11 +132,11 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
     },
   });
 
-  const { today, week, month, monthRevenue, weekRevenue, monthCommission, weekCommission } = useMemo(() => {
+  const { today, week, month, monthRevenue, weekRevenue, weekPoints, weekRate, monthCommission, weekCommission } = useMemo(() => {
     const rows = (logsQuery.data ?? []) as unknown as Array<Record<string, number | null> & { log_date: string }>;
     const t = todayISO(), w = startOfWeekISO();
-    const today = aggregate(rows.filter((r) => (r.log_date as unknown as string) === t));
-    const week  = aggregate(rows.filter((r) => (r.log_date as unknown as string) >= w));
+    const today = aggregate(rows.filter((r) => r.log_date === t));
+    const week  = aggregate(rows.filter((r) => r.log_date >= w));
     const month = aggregate(rows);
 
     const sales = salesQuery.data ?? [];
@@ -148,10 +148,20 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
       .filter((r) => new Date(r.created_at) >= wStart)
       .reduce((a, r) => a + Number(r.sale_amount ?? 0), 0);
 
+    // Tiered commission: weekly "points" = confirmed sales this week.
+    // Below threshold → 1%, at/above threshold → 2%.
+    const weekPoints = week.sales;
+    const weekRate = weekPoints >= COMMISSION_TIER_THRESHOLD ? COMMISSION_HIGH : COMMISSION_LOW;
+
+    // Month commission: average-ish — apply 1% baseline to all month revenue,
+    // plus 1% bonus only on revenue from weeks where the player hit threshold.
+    // Simple approximation: use the current week's rate for the month estimate.
+    const monthRate = weekRate;
+
     return {
-      today, week, month, monthRevenue, weekRevenue,
-      monthCommission: monthRevenue * COMMISSION_RATE,
-      weekCommission: weekRevenue * COMMISSION_RATE,
+      today, week, month, monthRevenue, weekRevenue, weekPoints, weekRate,
+      monthCommission: monthRevenue * monthRate,
+      weekCommission: weekRevenue * weekRate,
     };
   }, [logsQuery.data, salesQuery.data]);
 
@@ -168,9 +178,22 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
   const next = RANKS[Math.min(currentIdx + 1, RANKS.length - 1)];
   const rankSpan = Math.max(1, next.minSales - current.minSales);
   const rankProgress = current === next ? 1 : Math.min(1, (month.sales - current.minSales) / rankSpan);
-  const goalProgress = Math.min(1, monthRevenue / MONTHLY_GOAL);
+  const goalProgress = monthlyGoal > 0 ? Math.min(1, monthRevenue / monthlyGoal) : 0;
 
   const [tab, setTab] = useState<"today" | "week" | "mtd">("today");
+
+  const saveGoal = useMutation({
+    mutationFn: async (newGoal: number) => {
+      const { error } = await supabase
+        .from("profiles").update({ monthly_goal: newGoal }).eq("id", userId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Monthly goal updated");
+      qc.invalidateQueries({ queryKey: ["my_profile_goal", userId] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
 
   return (
     <div className="space-y-6">
@@ -184,9 +207,9 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
         {/* ============ TODAY ============ */}
         <TabsContent value="today" className="mt-6 space-y-6">
           <div className="grid sm:grid-cols-3 gap-4">
-            <GrindCounter label="Doors Knocked"    value={today.doors_knocked}    icon={<DoorOpen className="w-4 h-4" />} accent="var(--neon)" />
-            <GrindCounter label="People Talked To" value={today.people_talked_to} icon={<MessageCircle className="w-4 h-4" />} accent="var(--accent)" />
-            <GrindCounter label="Leads Called In"  value={today.leads_called_in}  icon={<PhoneCall className="w-4 h-4" />} accent="var(--warning)" />
+            <GrindCounter label="Leads Called In"          value={today.leads_called_in} icon={<PhoneCall className="w-4 h-4" />}     accent="var(--neon)" />
+            <GrindCounter label="Confirmed Next Day Leads" value={today.next_days}       icon={<CalendarClock className="w-4 h-4" />} accent="var(--victory)" />
+            <GrindCounter label="Confirmed Future Leads"   value={today.future_leads}    icon={<CalendarDays className="w-4 h-4" />}  accent="var(--accent)" />
           </div>
 
           <ValuePerDoorWidget
@@ -202,7 +225,7 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
             <BigStat
               label="Weekly Pay"
               value={formatUSD(weekCommission)}
-              sub={`${(COMMISSION_RATE * 100).toFixed(0)}% of ${formatUSD(weekRevenue)} confirmed sales`}
+              sub={`${(weekRate * 100).toFixed(0)}% tier · ${weekPoints} pts · ${formatUSD(weekRevenue)} confirmed sales`}
               icon={<DollarSign className="w-4 h-4" />}
               accent="var(--victory)"
             />
@@ -214,6 +237,8 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
               accent="var(--neon)"
             />
           </div>
+
+          <CommissionTierWidget points={weekPoints} threshold={COMMISSION_TIER_THRESHOLD} rate={weekRate} />
 
           <RankProgress
             current={current.label}
@@ -245,7 +270,13 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
             />
           </div>
 
-          <GoalBar revenue={monthRevenue} goal={MONTHLY_GOAL} pct={goalProgress} />
+          <GoalBar
+            revenue={monthRevenue}
+            goal={monthlyGoal}
+            pct={goalProgress}
+            onSave={(g) => saveGoal.mutate(g)}
+            saving={saveGoal.isPending}
+          />
         </TabsContent>
       </Tabs>
     </div>
