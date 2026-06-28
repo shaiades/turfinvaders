@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { Plus, Save, Send } from "lucide-react";
+import { MondayEmbed } from "@/components/MondayEmbed";
 
 export const Route = createFileRoute("/_authenticated/log")({
   head: () => ({ meta: [{ title: "Daily Log — Knockout" }] }),
@@ -159,6 +160,8 @@ function LogPage() {
       </ArcadePanel>
 
       <NewLeadCard userId={user?.id} teamId={teamId} />
+
+      <MondayEmbed canEdit={role === "owner" || role === "office_staff"} />
 
       <MyRecentLeads userId={user?.id} />
     </div>
