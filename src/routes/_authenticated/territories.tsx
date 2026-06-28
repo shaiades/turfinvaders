@@ -160,8 +160,16 @@ function TerritoriesPage() {
         </ArcadePanel>
       )}
 
+      {remoteDropCount > 0 && (
+        <div className="rounded border border-[#ff2d55]/60 bg-[#ff2d55]/10 px-3 py-2 font-display text-[10px] uppercase tracking-widest text-[#ff8fa3] flex items-center justify-between">
+          <span>⚠ {remoteDropCount} Remote Drop{remoteDropCount === 1 ? "" : "s"} flagged today (grey pins)</span>
+          <span className="opacity-70">Canvasser dropped pin &gt;20 yds from device</span>
+        </div>
+      )}
+
       <NeonMap
         territories={territories}
+        pins={pinsQuery.data ?? []}
         height={520}
         mode={drawing ? { kind: "draw", onComplete: (poly) => createTerritory.mutate(poly) } : { kind: "view" }}
       />
