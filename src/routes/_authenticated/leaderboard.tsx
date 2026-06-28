@@ -28,6 +28,7 @@ function Leaderboard() {
 
   return (
     <div className="space-y-6">
+      <LiveFeed />
       <div className="flex items-end justify-between flex-wrap gap-3">
         <h1 className="font-display text-2xl text-neon">LEADERBOARD</h1>
         <span className={`text-[10px] font-display uppercase tracking-widest px-2 py-1 rounded border ${
