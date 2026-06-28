@@ -144,8 +144,16 @@ export const Route = createFileRoute("/api/public/monday-webhook")({
         const outcomeRaw =
           body.outcome_status ?? body.outcome ?? body.status ?? fromEvent.outcome_status;
         const logDate = parseDate(body.date_of_action ?? body.date ?? fromEvent.date_of_action);
+        // Priority: exact Monday column "Sale Price", then aliases, then event-flat fields.
+        const rawAny = body as Record<string, unknown>;
         const salePrice = parseMoney(
-          body.sale_price ?? body.sale_amount ?? body.price ?? fromEvent.sale_price,
+          rawAny["Sale Price"] ??
+            rawAny["sale price"] ??
+            rawAny["SalePrice"] ??
+            body.sale_price ??
+            body.sale_amount ??
+            body.price ??
+            fromEvent.sale_price,
         );
 
         if (!canvasserName.trim()) return json({ error: "Missing canvasser name" }, 422);
