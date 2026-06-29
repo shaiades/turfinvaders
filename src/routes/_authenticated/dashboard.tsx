@@ -66,6 +66,7 @@ function VisibilityChip({ on }: { on: boolean }) {
 
 /* ============ OWNER ============ */
 function OwnerDashboard({ visibility }: { visibility: boolean }) {
+  const [importOpen, setImportOpen] = useState(false);
   const teams = DEMO_TEAMS.map((t) => ({ ...t, totals: teamTotals(t.id) }));
   const grand = teams.reduce((a, t) => ({
     doors: a.doors + t.totals.doors, sales: a.sales + t.totals.sales,
