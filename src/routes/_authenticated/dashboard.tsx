@@ -8,6 +8,7 @@ import { LiveLeadCounter } from "@/components/LiveLeadCounter";
 import { CommandCenter } from "@/components/CommandCenter";
 import { FleetManager } from "@/components/FleetManager";
 import { HistoricalImporter } from "@/components/HistoricalImporter";
+import { PerformanceMatrix } from "@/components/PerformanceMatrix";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -140,10 +141,12 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
       <Tabs defaultValue="command" className="space-y-4">
         <TabsList className="bg-surface">
           <TabsTrigger value="command">Command Center</TabsTrigger>
+          <TabsTrigger value="matrix">Performance Matrix</TabsTrigger>
           <TabsTrigger value="fleet">Fleet Manager</TabsTrigger>
           <TabsTrigger value="import">Historical Importer</TabsTrigger>
         </TabsList>
         <TabsContent value="command" className="mt-0"><CommandCenter /></TabsContent>
+        <TabsContent value="matrix" className="mt-0"><PerformanceMatrix /></TabsContent>
         <TabsContent value="fleet" className="mt-0"><FleetManager /></TabsContent>
         <TabsContent value="import" className="mt-0"><HistoricalImporter /></TabsContent>
       </Tabs>
