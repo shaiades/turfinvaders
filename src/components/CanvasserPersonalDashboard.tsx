@@ -359,6 +359,7 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
 
   return (
     <div className="space-y-6">
+      <SCCERankBanner userId={userId} />
       <WeeklyPlaybook userId={userId} />
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
         <TabsList className="grid w-full grid-cols-4 bg-surface border border-border p-1 h-auto">
