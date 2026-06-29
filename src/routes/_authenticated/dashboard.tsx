@@ -8,7 +8,6 @@ import { LiveLeadCounter } from "@/components/LiveLeadCounter";
 import { CommandCenter } from "@/components/CommandCenter";
 import { FleetManager } from "@/components/FleetManager";
 import { HistoricalImporter } from "@/components/HistoricalImporter";
-import { PerformanceMatrix } from "@/components/PerformanceMatrix";
 import { PayrollLedger } from "@/components/PayrollLedger";
 import { ExecutiveDashboard } from "@/components/ExecutiveDashboard";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -18,12 +17,19 @@ import { CanvasserPersonalDashboard } from "@/components/CanvasserPersonalDashbo
 import { SuspendedBadge, useCanvasserStatuses } from "@/components/SuspendedBadge";
 import { useTodayLeads } from "@/hooks/useTodayLeads";
 import { DEMO_TEAMS, demoCanvassers, teamTotals, formatCurrency } from "@/lib/demo-data";
-import { Trophy, Zap, DoorOpen, Target, TrendingUp, Building2, Truck, FileSpreadsheet } from "lucide-react";
+import { Trophy, Zap, DoorOpen, Target, TrendingUp, Truck, FileSpreadsheet } from "lucide-react";
+
+type OwnerTab = "executive" | "fleet" | "payroll";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — Knockout" }] }),
+  validateSearch: (s: Record<string, unknown>): { tab: OwnerTab } => {
+    const t = s.tab;
+    return { tab: t === "fleet" || t === "payroll" ? t : "executive" };
+  },
   component: Dashboard,
 });
+
 
 function Dashboard() {
   const { role, loading, teamId, displayName, user } = useAuth();
