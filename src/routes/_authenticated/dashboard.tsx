@@ -17,7 +17,7 @@ import { CanvasserPersonalDashboard } from "@/components/CanvasserPersonalDashbo
 import { SuspendedBadge, useCanvasserStatuses } from "@/components/SuspendedBadge";
 import { useTodayLeads } from "@/hooks/useTodayLeads";
 import { DEMO_TEAMS, demoCanvassers, teamTotals, formatCurrency } from "@/lib/demo-data";
-import { Trophy, Zap, DoorOpen, Target, TrendingUp, Truck, FileSpreadsheet } from "lucide-react";
+import { Zap, DoorOpen, Truck, FileSpreadsheet } from "lucide-react";
 
 type OwnerTab = "executive" | "fleet" | "payroll";
 
