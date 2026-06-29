@@ -71,14 +71,17 @@ export const upsertManualWeekly = createServerFn({ method: "POST" })
     const o = (data && typeof data === "object") ? data as Record<string, unknown> : {};
     const canvasser_id = typeof o.canvasser_id === "string" ? o.canvasser_id : "";
     const week_start = typeof o.week_start === "string" ? o.week_start : "";
-    const total_leads = Math.max(0, Number(o.total_leads ?? 0) | 0);
-    const total_sits = Math.max(0, Number(o.total_sits ?? 0) | 0);
-    const total_sales = Math.max(0, Number(o.total_sales ?? 0) | 0);
+    const raw_leads = Math.max(0, Number(o.total_leads ?? 0) | 0);
+    const raw_sits = Math.max(0, Number(o.total_sits ?? 0) | 0);
+    const raw_sales = Math.max(0, Number(o.total_sales ?? 0) | 0);
     if (!/^[0-9a-f-]{36}$/i.test(canvasser_id)) throw new Error("Invalid canvasser");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(week_start)) throw new Error("Invalid week");
-    if (total_sales > total_sits) throw new Error("Sales cannot exceed Sits");
-    if (total_sits > total_leads) throw new Error("Sits cannot exceed Leads");
+    // Auto-clamp instead of throwing so a typo doesn't blank the app.
+    const total_sales = raw_sales;
+    const total_sits = Math.max(raw_sits, total_sales);
+    const total_leads = Math.max(raw_leads, total_sits);
     return { canvasser_id, week_start, total_leads, total_sits, total_sales };
+
   })
   .handler(async ({ data, context }) => {
     const { data: roles } = await context.supabase
