@@ -105,12 +105,14 @@ export function PerformanceMatrix() {
         const totals = rollup(rows);
         const profile = profileById.get(cid);
         const team = profile?.team_id ? teamById.get(profile.team_id) : null;
+        const rank = (profile as any)?.current_rank ?? "Jr. Silver";
         return {
           id: cid,
           name: profile?.display_name ?? "Unknown",
           team,
           totals,
           rate: payRate(totals.points),
+          rank,
         };
       })
       .sort((a, b) => b.totals.points - a.totals.points);
