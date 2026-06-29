@@ -144,7 +144,7 @@ export function HistoricalImporter({ defaultTeamId }: { defaultTeamId?: string |
           .map((raw) => {
             const agent = pick(raw, "Agent");
             const date = pick(raw, "Date/Time") || pickContains(raw, "date");
-            const sale_price = pick(raw, "Sale Price");
+            const sale_price = pick(raw, ...SALE_PRICE_HEADERS);
             const lead_name = pick(raw, "Lead", "Customer", "Lead Name", "Customer Name");
             const outcome = detectOutcome(raw);
             return { agent, outcome, date, sale_price: sale_price || null, lead_name: lead_name || null };
