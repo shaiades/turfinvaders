@@ -92,15 +92,21 @@ export function HistoricalImporter({ defaultTeamId }: { defaultTeamId?: string |
         const rows: ParsedRow[] = [];
         for (const raw of res.data) {
           const agent = pick(raw, "Agent", "Canvasser", "Rep", "Sales Rep", "Name");
-          const outcome = pick(raw, "Outcome", "Status", "Result", "Outcome Status");
-          const date = pick(raw, "Date", "Date of Action", "Action Date", "Created");
+          // Outcome: detect from Monday.com per-column flags (BO/OL/RS/PM/Sale).
+          let outcome = detectOutcome(raw);
+          // Fallback to a legacy "Outcome" column if present.
+          if (!outcome) outcome = pick(raw, "Outcome", "Status", "Result", "Outcome Status");
+          // Date: prefer "Date/Time", else any header containing "Date".
+          let date = pick(raw, "Date/Time", "DateTime", "Date of Action", "Action Date");
+          if (!date) date = pickContains(raw, "date");
+          if (!date) date = pick(raw, "Created");
           const sale_price = pick(raw, "Sale Price", "SalePrice", "Price", "Amount", "Deal Value");
           const lead_name = pick(raw, "Lead", "Customer", "Lead Name", "Customer Name");
           if (!agent || !outcome || !date) continue;
           rows.push({ agent, outcome, date, sale_price: sale_price || null, lead_name: lead_name || null });
         }
         if (rows.length === 0) {
-          toast.error("No usable rows found. Need columns: Agent, Outcome, Date (+ optional Sale Price).");
+          toast.error("No usable rows found. Need an Agent column, a Date column, and at least one of BO/OL/RS/PM/Sale.");
           setPreview(null);
           return;
         }
