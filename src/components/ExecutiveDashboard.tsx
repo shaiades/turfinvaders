@@ -341,7 +341,9 @@ function WeeklyResults() {
         const cur = agg.get(l.canvasser_id) ?? { leads: 0, sits: 0, points: 0 };
         cur.leads += leadsSum(l);
         cur.sits += (l.demos_sits ?? 0) + (l.sales ?? 0);
-        cur.points += (l.demos_sits ?? 0) + 2 * (l.sales ?? 0);
+        // Points = Sit*1 + Sale*2. demos_sits already includes sale rows (each sale is also a sit),
+        // so total points = (demos_sits) + (sales) = PM*1 + SALE*(1+1) = SIT*1 + SALE*2.
+        cur.points += (l.demos_sits ?? 0) + (l.sales ?? 0);
         agg.set(l.canvasser_id, cur);
       }
 
