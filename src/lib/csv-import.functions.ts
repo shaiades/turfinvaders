@@ -54,12 +54,14 @@ function normalizeOutcome(raw: string | null | undefined): Outcome | null {
   const k = raw.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
   if (!k) return null;
   if (k === "bo" || k.includes("blowout")) return "BO";
+  if (k === "ctc" || k.includes("calltocancel") || k.includes("cancel")) return "BO"; // CTC counts as no-demo
   if (k === "ol" || k.includes("oneleg") || k.includes("1leg")) return "OL";
   if (k === "rs" || k.includes("reset")) return "RS";
   if (k === "pm" || k.includes("pitchmiss") || k.includes("demo") || k.includes("sit")) return "PM";
   if (k.includes("sale") || k.includes("sold") || k.includes("close") || k === "win") return "SALE";
   return null;
 }
+
 
 function parseMoney(v: unknown): number | null {
   if (v === null || v === undefined || v === "") return null;
@@ -200,21 +202,25 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
       const profile = await resolveProfile(b.profileKey);
       if (!profile) continue;
 
-      // Ensure row exists.
-      await supabaseAdmin
+      // Upsert row — return existing values so we can accumulate.
+      const { error: insErr } = await supabaseAdmin
         .from("daily_logs")
         .upsert(
           { canvasser_id: profile.id, team_id: profile.team_id, log_date: b.log_date },
           { onConflict: "canvasser_id,log_date", ignoreDuplicates: true },
         );
+      if (insErr) {
+        throw new Error(`daily_logs upsert failed for ${b.profileKey} on ${b.log_date}: ${insErr.message} (code=${insErr.code ?? "?"}, details=${insErr.details ?? ""}, hint=${insErr.hint ?? ""})`);
+      }
 
-      const { data: row } = await supabaseAdmin
+      const { data: row, error: selErr } = await supabaseAdmin
         .from("daily_logs")
         .select("id, no_demo, one_legs, future_leads, demos_sits, sales")
         .eq("canvasser_id", profile.id)
         .eq("log_date", b.log_date)
         .maybeSingle();
-      if (!row) continue;
+      if (selErr) throw new Error(`daily_logs select failed for ${b.profileKey}: ${selErr.message}`);
+      if (!row) throw new Error(`daily_logs row missing after upsert for ${b.profileKey} on ${b.log_date}`);
 
       const update = {
         no_demo: (row.no_demo ?? 0) + b.no_demo,
@@ -223,7 +229,10 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
         demos_sits: (row.demos_sits ?? 0) + b.demos_sits,
         sales: (row.sales ?? 0) + b.sales,
       };
-      await supabaseAdmin.from("daily_logs").update(update).eq("id", row.id);
+      const { error: updErr } = await supabaseAdmin.from("daily_logs").update(update).eq("id", row.id);
+      if (updErr) {
+        throw new Error(`daily_logs update failed for ${b.profileKey} on ${b.log_date}: ${updErr.message} (code=${updErr.code ?? "?"}, details=${updErr.details ?? ""}, hint=${updErr.hint ?? ""})`);
+      }
       updated_logs += 1;
 
       // Insert confirmed leads for each SALE → feeds Paycheck Engine commission.
@@ -237,9 +246,16 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
           is_sale: true,
           reviewed_at: new Date(`${b.log_date}T12:00:00Z`).toISOString(),
         });
-        if (lErr) errors.push({ row: 0, reason: `Lead insert failed for ${b.profileKey}: ${lErr.message}` });
-        else inserted_sales += 1;
+        if (lErr) {
+          errors.push({ row: 0, reason: `Lead insert failed for ${b.profileKey}: ${lErr.message} (code=${lErr.code ?? "?"}, hint=${lErr.hint ?? ""})` });
+        } else {
+          inserted_sales += 1;
+        }
       }
+    }
+
+    if (buckets.size > 0 && updated_logs === 0) {
+      throw new Error(`Parsed ${buckets.size} bucket(s) but wrote 0 daily_logs rows. First error: ${errors[0]?.reason ?? "unknown"}`);
     }
 
     return {
@@ -248,6 +264,8 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
       updated_logs,
       inserted_sales,
       bucket_count: buckets.size,
+      parsed_rows: data.rows.length,
       errors: errors.slice(0, 50),
     };
   });
+
