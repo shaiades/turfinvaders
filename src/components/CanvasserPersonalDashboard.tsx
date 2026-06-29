@@ -965,3 +965,53 @@ function SCCERankBanner({ userId }: { userId: string }) {
   );
 }
 
+/* ============ TAKE-HOME WIDGET (top of canvasser dashboard) ============ */
+function TakeHomeWidget({ userId, weeklyPay, hourlyRate, weekPoints }: {
+  userId: string;
+  weeklyPay: number;
+  hourlyRate: number;
+  weekPoints: number;
+}) {
+  const { data } = useQuery({
+    queryKey: ["takehome_rank", userId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("current_rank")
+        .eq("id", userId)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+  });
+  const rank = (data?.current_rank ?? "Jr. Silver") as string;
+
+  return (
+    <div className="rounded-xl border border-victory/40 bg-[color-mix(in_oklab,var(--victory)_8%,var(--surface))] p-5 sm:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-6">
+        <div>
+          <div className="text-[10px] font-display uppercase tracking-widest text-victory/80">
+            Est. Weekly Pay
+          </div>
+          <div className="mt-2 font-display text-4xl sm:text-5xl text-victory leading-none">
+            {formatUSD(weeklyPay)}
+          </div>
+          <div className="mt-2 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            ${hourlyRate}/hr · {weekPoints} pts this week
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            Current Rank
+          </div>
+          <div className="mt-2 flex justify-end">
+            <RankPill rank={rank} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+}
+
