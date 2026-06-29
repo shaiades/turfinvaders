@@ -116,8 +116,11 @@ export function HistoricalImporter({ defaultTeamId }: { defaultTeamId?: string |
             const lead_name = pick(raw, "Lead", "Customer", "Lead Name", "Customer Name");
             const outcome = detectOutcome(raw);
             return { agent, outcome, date, sale_price: sale_price || null, lead_name: lead_name || null };
-          });
+          })
+          // Skip blank-agent rows and rows with no detected outcome — no error toast, just ignore.
+          .filter((r) => r.agent && r.outcome);
         setPreview(rows);
+
       },
       error: (err) => toast.error(`CSV parse failed: ${err.message}`),
     });
