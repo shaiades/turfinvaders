@@ -73,6 +73,8 @@ const payloadSchema = z
     outcome_status: z.string().optional(),
     outcome: z.string().optional(),
     status: z.string().optional(),
+    // Confirmation Dept vocabulary: Submitted | Confirmed_Next_Day | Confirmed_Future | Blowout
+    lead_status: z.string().optional(),
     date_of_action: z.string().optional(),
     date: z.string().optional(),
     sale_price: z.union([z.string(), z.number()]).optional(),
@@ -82,6 +84,7 @@ const payloadSchema = z
     challenge: z.string().optional(),
   })
   .passthrough();
+
 
 function pickFromMondayEvent(ev: any) {
   if (!ev || typeof ev !== "object") return {};
