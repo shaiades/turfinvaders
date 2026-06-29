@@ -34,6 +34,7 @@ export function ExecutiveDashboard() {
   return (
     <div className="space-y-6">
       <ManualEntryBar />
+      <LiveDailyAction />
       <DatabaseCleanup />
       <RawDataTable />
       <LiveFleetStatus />
@@ -41,6 +42,141 @@ export function ExecutiveDashboard() {
     </div>
   );
 }
+
+/* ============ Live Daily Action (Today) ============ */
+
+function LiveDailyAction() {
+  const today = useMemo(() => toISODate(new Date()), []);
+  const qc = useQueryClient();
+
+  const q = useQuery({
+    queryKey: ["live_daily_action", today],
+    queryFn: async () => {
+      const [logsR, profilesR, vansR] = await Promise.all([
+        supabase
+          .from("daily_logs")
+          .select("canvasser_id, team_id, leads_called_in, next_days, future_leads, no_demo, confirmed_leads")
+          .eq("log_date", today),
+        supabase.from("profiles").select("id, display_name, team_id"),
+        supabase.from("teams").select("id, name, color"),
+      ]);
+      if (logsR.error) throw logsR.error;
+      if (profilesR.error) throw profilesR.error;
+      if (vansR.error) throw vansR.error;
+
+      const logs = logsR.data ?? [];
+      const totals = logs.reduce(
+        (acc, r) => ({
+          called: acc.called + (r.leads_called_in ?? 0),
+          nextDay: acc.nextDay + (r.next_days ?? 0),
+          future: acc.future + (r.future_leads ?? 0),
+          blowout: acc.blowout + (r.no_demo ?? 0),
+        }),
+        { called: 0, nextDay: 0, future: 0, blowout: 0 },
+      );
+
+      // Donut List: every canvasser on a Van who has NOT logged a
+      // Confirmed_Next_Day or Confirmed_Future ping today.
+      const confirmedToday = new Set(
+        logs
+          .filter((r) => (r.next_days ?? 0) > 0 || (r.future_leads ?? 0) > 0)
+          .map((r) => r.canvasser_id),
+      );
+      const vanById = new Map((vansR.data ?? []).map((v) => [v.id, v]));
+      const donut = (profilesR.data ?? [])
+        .filter((p) => p.team_id && !confirmedToday.has(p.id))
+        .map((p) => ({
+          id: p.id,
+          name: p.display_name ?? "Unknown",
+          van: p.team_id ? vanById.get(p.team_id) ?? null : null,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+      return { totals, donut };
+    },
+    refetchInterval: 15_000,
+  });
+
+  // Refresh when a new ping lands.
+  useMemo(() => {
+    const ch = supabase
+      .channel("live-daily-action")
+      .on("postgres_changes", { event: "*", schema: "public", table: "daily_logs" }, () => {
+        qc.invalidateQueries({ queryKey: ["live_daily_action", today] });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [qc, today]);
+
+  const t = q.data?.totals ?? { called: 0, nextDay: 0, future: 0, blowout: 0 };
+  const donut = q.data?.donut ?? [];
+
+  return (
+    <ArcadePanel
+      title="Live Daily Action · Today"
+      action={<span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">{today}</span>}
+    >
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <MetricTile label="Leads Called In" value={t.called} accent="neon" sub="Any webhook ping today" />
+        <MetricTile label="Confirmed · Tomorrow" value={t.nextDay} accent="victory" sub="Confirmed_Next_Day" />
+        <MetricTile label="Confirmed · Future" value={t.future} accent="accent" sub="Confirmed_Future" />
+        <MetricTile label="Blowouts / Not Good" value={t.blowout} accent="warning" sub="Blowout" />
+      </div>
+
+      <div className="mt-6 rounded-lg border border-border bg-surface p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-display text-xs uppercase tracking-widest text-[var(--warning)]">
+            🍩 Donut List · {donut.length}
+          </h3>
+          <span className="text-[10px] text-muted-foreground">
+            No Confirmed_Next_Day / Confirmed_Future today
+          </span>
+        </div>
+        {donut.length === 0 ? (
+          <div className="text-sm text-victory">🔥 Everyone on the board — no donuts today.</div>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {donut.map((d) => (
+              <div
+                key={d.id}
+                className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-[var(--warning)]/40 bg-[var(--warning)]/5"
+              >
+                <span className="text-sm font-medium">{d.name}</span>
+                {d.van && (
+                  <span
+                    className="text-[10px] font-display uppercase tracking-widest px-1.5 py-0.5 rounded"
+                    style={{ color: d.van.color, borderColor: d.van.color, borderWidth: 1 }}
+                  >
+                    {d.van.name}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </ArcadePanel>
+  );
+}
+
+function MetricTile({
+  label, value, sub, accent,
+}: { label: string; value: number; sub?: string; accent: "neon" | "victory" | "warning" | "accent" }) {
+  const color = {
+    neon: "text-neon",
+    victory: "text-victory",
+    warning: "text-[var(--warning)]",
+    accent: "text-[var(--accent)]",
+  }[accent];
+  return (
+    <div className="rounded-lg border border-border bg-surface p-4">
+      <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground font-display">{label}</div>
+      <div className={`mt-2 text-3xl font-display ${color}`}>{value}</div>
+      {sub && <div className="mt-1 text-[10px] text-muted-foreground">{sub}</div>}
+    </div>
+  );
+}
+
 
 /* ============ Manual Entry ============ */
 
