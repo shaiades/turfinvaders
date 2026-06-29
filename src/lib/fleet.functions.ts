@@ -32,3 +32,30 @@ export const deleteProfile = createServerFn({ method: "POST" })
     }
     return { ok: true };
   });
+
+/**
+ * Owner-only Van (team) deletion. FK constraints set profiles.team_id and
+ * daily_logs.team_id to NULL, so members survive as Unassigned.
+ */
+export const deleteVan = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => {
+    const obj = (data && typeof data === "object") ? data as Record<string, unknown> : {};
+    const id = typeof obj.id === "string" ? obj.id : "";
+    if (!/^[0-9a-f-]{36}$/i.test(id)) throw new Error("Invalid van id");
+    return { id };
+  })
+  .handler(async ({ data, context }) => {
+    const { data: roles, error: rolesErr } = await context.supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId);
+    if (rolesErr) throw rolesErr;
+    const isOwner = (roles ?? []).some((r) => r.role === "owner");
+    if (!isOwner) throw new Error("Only owners can delete vans");
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { error } = await supabaseAdmin.from("teams").delete().eq("id", data.id);
+    if (error) throw error;
+    return { ok: true };
+  });
