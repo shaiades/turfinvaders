@@ -54,12 +54,14 @@ function normalizeOutcome(raw: string | null | undefined): Outcome | null {
   const k = raw.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
   if (!k) return null;
   if (k === "bo" || k.includes("blowout")) return "BO";
+  if (k === "ctc" || k.includes("calltocancel") || k.includes("cancel")) return "BO"; // CTC counts as no-demo
   if (k === "ol" || k.includes("oneleg") || k.includes("1leg")) return "OL";
   if (k === "rs" || k.includes("reset")) return "RS";
   if (k === "pm" || k.includes("pitchmiss") || k.includes("demo") || k.includes("sit")) return "PM";
   if (k.includes("sale") || k.includes("sold") || k.includes("close") || k === "win") return "SALE";
   return null;
 }
+
 
 function parseMoney(v: unknown): number | null {
   if (v === null || v === undefined || v === "") return null;
