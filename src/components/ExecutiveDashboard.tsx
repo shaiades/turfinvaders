@@ -108,7 +108,6 @@ function LiveDailyAction() {
     return () => { supabase.removeChannel(ch); };
   }, [qc, today]);
 
-
   const t = q.data?.totals ?? { called: 0, nextDay: 0, future: 0, blowout: 0 };
   const donut = q.data?.donut ?? [];
 
@@ -117,91 +116,46 @@ function LiveDailyAction() {
     : "/api/public/monday-webhook";
 
   return (
-    <ArcadePanel
-      title="Live Daily Action · Today"
-      action={<span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">{today}</span>}
-    >
-      <div className="mb-4 rounded-lg border border-neon/40 bg-neon/5 p-3">
-        <div className="flex items-center justify-between gap-3 mb-1.5">
-          <span className="text-[10px] font-display uppercase tracking-widest text-neon">Monday.com Webhook Endpoint</span>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-7 px-2 text-[10px] font-display uppercase tracking-widest text-neon hover:bg-neon/10"
-            onClick={() => {
-              navigator.clipboard.writeText(webhookUrl);
-              toast.success("Webhook URL copied");
-            }}
-          >
-            Copy
-          </Button>
+    <section className="space-y-4">
+      <div className="flex items-baseline justify-between gap-4">
+        <div>
+          <h2 className="font-display text-sm uppercase tracking-widest text-foreground">Live Daily Action</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">{today}</p>
         </div>
-        <code className="block text-xs font-mono break-all text-foreground/90">{webhookUrl}</code>
-        <p className="mt-1.5 text-[10px] text-muted-foreground">
-          Paste into Monday.com integration. Add header <span className="font-mono text-foreground/80">x-monday-secret</span> with your <span className="font-mono text-foreground/80">MONDAY_WEBHOOK_SECRET</span>.
+        <button
+          onClick={() => {
+            navigator.clipboard.writeText(webhookUrl);
+            toast.success("Webhook URL copied");
+          }}
+          className="text-[10px] font-display uppercase tracking-widest text-neon hover:underline"
+        >
+          Copy Webhook URL
+        </button>
+      </div>
+
+      <div className="space-y-1 text-sm text-foreground">
+        <p>Leads Called In: <span className="text-neon font-medium">{t.called}</span></p>
+        <p>Confirmed Tomorrow: <span className="text-victory font-medium">{t.nextDay}</span></p>
+        <p>Confirmed Future: <span className="text-[var(--accent)] font-medium">{t.future}</span></p>
+        <p>Blowouts / Not Good: <span className="text-[var(--warning)] font-medium">{t.blowout}</span></p>
+      </div>
+
+      <div className="space-y-1">
+        <p className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+          Donut List ({donut.length})
         </p>
-      </div>
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <MetricTile label="Leads Called In" value={t.called} accent="neon" sub="Any status ping today" />
-        <MetricTile label="Confirmed · Tomorrow" value={t.nextDay} accent="victory" sub="'Confirmed'" />
-        <MetricTile label="Confirmed · Future" value={t.future} accent="accent" sub="'Future'" />
-        <MetricTile label="Blowouts / Not Good" value={t.blowout} accent="warning" sub="'Blowout' + 'Disconnected'" />
-      </div>
-
-      <div className="mt-6 rounded-lg border border-border bg-surface p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-display text-xs uppercase tracking-widest text-[var(--warning)]">
-            🍩 Donut List · {donut.length}
-          </h3>
-          <span className="text-[10px] text-muted-foreground">
-            No 'Confirmed' / 'Future' ping today
-          </span>
-        </div>
         {donut.length === 0 ? (
-          <div className="text-sm text-victory">🔥 Everyone on the board — no donuts today.</div>
+          <p className="text-sm text-victory">Everyone is on the board — no donuts today.</p>
         ) : (
-          <div className="flex flex-wrap gap-2">
-            {donut.map((d) => (
-              <div
-                key={d.id}
-                className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-[var(--warning)]/40 bg-[var(--warning)]/5"
-              >
-                <span className="text-sm font-medium">{d.name}</span>
-                {d.van && (
-                  <span
-                    className="text-[10px] font-display uppercase tracking-widest px-1.5 py-0.5 rounded"
-                    style={{ color: d.van.color, borderColor: d.van.color, borderWidth: 1 }}
-                  >
-                    {d.van.name}
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
+          <p className="text-sm text-foreground">
+            {donut.map((d) => d.name).join(", ")}
+          </p>
         )}
       </div>
-    </ArcadePanel>
+    </section>
   );
 }
 
-function MetricTile({
-  label, value, sub, accent,
-}: { label: string; value: number; sub?: string; accent: "neon" | "victory" | "warning" | "accent" }) {
-  const color = {
-    neon: "text-neon",
-    victory: "text-victory",
-    warning: "text-[var(--warning)]",
-    accent: "text-[var(--accent)]",
-  }[accent];
-  return (
-    <div className="rounded-lg border border-border bg-surface p-4">
-      <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground font-display">{label}</div>
-      <div className={`mt-2 text-3xl font-display ${color}`}>{value}</div>
-      {sub && <div className="mt-1 text-[10px] text-muted-foreground">{sub}</div>}
-    </div>
-  );
-}
 
 
 /* ============ Manual Entry ============ */
