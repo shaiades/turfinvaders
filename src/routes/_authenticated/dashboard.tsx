@@ -8,6 +8,7 @@ import { LiveLeadCounter } from "@/components/LiveLeadCounter";
 import { CommandCenter } from "@/components/CommandCenter";
 import { FleetManager } from "@/components/FleetManager";
 import { HistoricalImporter } from "@/components/HistoricalImporter";
+import { PerformanceMatrix } from "@/components/PerformanceMatrix";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
