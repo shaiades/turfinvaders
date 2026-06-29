@@ -78,7 +78,8 @@ function FieldActivityPage() {
       const { data } = await supabase.from("daily_logs")
         .select("demos_sits, sales").eq("canvasser_id", canvasserId).gte("log_date", weekStart);
       const rows = data ?? [];
-      return rows.reduce((a, r) => a + (r.demos_sits ?? 0) * 1 + (r.sales ?? 0) * 2, 0);
+      // Sit=1pt, Sale=2pt. demos_sits already includes sale rows, so points = demos_sits + sales.
+      return rows.reduce((a, r) => a + (r.demos_sits ?? 0) + (r.sales ?? 0), 0);
     },
   });
   const commissionRate = (pointsQuery.data ?? 0) >= 7 ? 0.02 : 0.01;
