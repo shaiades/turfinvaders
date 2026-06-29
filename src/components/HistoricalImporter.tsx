@@ -87,18 +87,33 @@ export function HistoricalImporter({ defaultTeamId }: { defaultTeamId?: string |
     mutationFn: async (rows: ParsedRow[]) =>
       importFn({ data: { rows, team_id: defaultTeamId ?? null } }),
     onSuccess: (res) => {
-      toast.success("Success: Data Imported!", {
-        description: `+${res.created_profiles} canvassers · ${res.updated_logs} days · ${res.inserted_sales} sales`,
-      });
+      if (res.updated_logs === 0) {
+        toast.error("Import wrote 0 rows to the database", {
+          description: `Parsed ${res.parsed_rows ?? 0} rows but nothing was saved. ${res.errors?.[0]?.reason ?? "No row-level errors reported."}`,
+          duration: 15000,
+        });
+      } else {
+        toast.success("Database write complete", {
+          description: `+${res.created_profiles} canvassers · ${res.updated_logs} daily_logs rows · ${res.inserted_sales} sales`,
+        });
+      }
       if (res.errors?.length) {
-        toast.warning(`${res.errors.length} row(s) had issues — first: ${res.errors[0].reason}`);
+        for (const e of res.errors.slice(0, 5)) {
+          toast.error(`Row ${e.row}: ${e.reason}`, { duration: 12000 });
+        }
       }
       setPreview(null);
       setFilename(null);
       qc.invalidateQueries();
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => {
+      toast.error("Database INSERT failed", {
+        description: e.message,
+        duration: 20000,
+      });
+    },
   });
+
 
   const handleFile = useCallback((file: File) => {
     setFilename(file.name);
