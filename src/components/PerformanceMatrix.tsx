@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel, StatCard, TeamBadge } from "@/components/arcade";
+import { RankPill } from "@/components/RankPill";
 
 type Row = {
   canvasser_id: string;
