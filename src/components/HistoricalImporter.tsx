@@ -16,11 +16,44 @@ type ParsedRow = {
   lead_name?: string | null;
 };
 
+function norm(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
 function pick(row: Record<string, unknown>, ...names: string[]): string {
   const keys = Object.keys(row);
   for (const n of names) {
-    const k = keys.find((kk) => kk.toLowerCase().replace(/[^a-z]/g, "") === n.toLowerCase().replace(/[^a-z]/g, ""));
+    const k = keys.find((kk) => norm(kk) === norm(n));
     if (k && row[k] != null && String(row[k]).trim() !== "") return String(row[k]).trim();
+  }
+  return "";
+}
+
+// Find a header that contains the substring (case/space/punctuation-insensitive).
+function pickContains(row: Record<string, unknown>, substr: string): string {
+  const keys = Object.keys(row);
+  const s = norm(substr);
+  const k = keys.find((kk) => norm(kk).includes(s));
+  if (k && row[k] != null && String(row[k]).trim() !== "") return String(row[k]).trim();
+  return "";
+}
+
+// Monday.com outcome columns — presence of any non-empty value means that outcome occurred.
+const OUTCOME_COLS = ["BO", "OL", "RS", "PM", "Sale"] as const;
+
+function detectOutcome(row: Record<string, unknown>): string {
+  const keys = Object.keys(row);
+  for (const col of OUTCOME_COLS) {
+    const target = norm(col);
+    const k = keys.find((kk) => norm(kk) === target);
+    if (!k) continue;
+    const v = row[k];
+    if (v == null) continue;
+    const s = String(v).trim();
+    if (!s) continue;
+    const low = s.toLowerCase();
+    if (low === "false" || low === "0" || low === "no" || low === "-") continue;
+    return col;
   }
   return "";
 }
@@ -59,15 +92,21 @@ export function HistoricalImporter({ defaultTeamId }: { defaultTeamId?: string |
         const rows: ParsedRow[] = [];
         for (const raw of res.data) {
           const agent = pick(raw, "Agent", "Canvasser", "Rep", "Sales Rep", "Name");
-          const outcome = pick(raw, "Outcome", "Status", "Result", "Outcome Status");
-          const date = pick(raw, "Date", "Date of Action", "Action Date", "Created");
+          // Outcome: detect from Monday.com per-column flags (BO/OL/RS/PM/Sale).
+          let outcome = detectOutcome(raw);
+          // Fallback to a legacy "Outcome" column if present.
+          if (!outcome) outcome = pick(raw, "Outcome", "Status", "Result", "Outcome Status");
+          // Date: prefer "Date/Time", else any header containing "Date".
+          let date = pick(raw, "Date/Time", "DateTime", "Date of Action", "Action Date");
+          if (!date) date = pickContains(raw, "date");
+          if (!date) date = pick(raw, "Created");
           const sale_price = pick(raw, "Sale Price", "SalePrice", "Price", "Amount", "Deal Value");
           const lead_name = pick(raw, "Lead", "Customer", "Lead Name", "Customer Name");
           if (!agent || !outcome || !date) continue;
           rows.push({ agent, outcome, date, sale_price: sale_price || null, lead_name: lead_name || null });
         }
         if (rows.length === 0) {
-          toast.error("No usable rows found. Need columns: Agent, Outcome, Date (+ optional Sale Price).");
+          toast.error("No usable rows found. Need an Agent column, a Date column, and at least one of BO/OL/RS/PM/Sale.");
           setPreview(null);
           return;
         }
