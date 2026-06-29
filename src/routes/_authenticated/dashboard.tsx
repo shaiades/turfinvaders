@@ -143,11 +143,13 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
         <TabsList className="bg-surface">
           <TabsTrigger value="command">Command Center</TabsTrigger>
           <TabsTrigger value="matrix">Performance Matrix</TabsTrigger>
+          <TabsTrigger value="payroll">Payroll Ledger</TabsTrigger>
           <TabsTrigger value="fleet">Fleet Manager</TabsTrigger>
           <TabsTrigger value="import">Historical Importer</TabsTrigger>
         </TabsList>
         <TabsContent value="command" className="mt-0"><CommandCenter /></TabsContent>
         <TabsContent value="matrix" className="mt-0"><PerformanceMatrix /></TabsContent>
+        <TabsContent value="payroll" className="mt-0"><PayrollLedger /></TabsContent>
         <TabsContent value="fleet" className="mt-0"><FleetManager /></TabsContent>
         <TabsContent value="import" className="mt-0"><HistoricalImporter /></TabsContent>
       </Tabs>
