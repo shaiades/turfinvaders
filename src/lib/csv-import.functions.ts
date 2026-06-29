@@ -122,12 +122,15 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
 
     for (let i = 0; i < data.rows.length; i++) {
       const r = data.rows[i];
-      const outcome = normalizeOutcome(r.outcome);
-      const logDate = parseDate(r.date);
-      if (!outcome) { errors.push({ row: i + 1, reason: `Unrecognized outcome: ${r.outcome}` }); continue; }
-      if (!logDate) { errors.push({ row: i + 1, reason: `Unparseable date: ${r.date}` }); continue; }
       const name = r.agent.trim();
-      if (!name) { errors.push({ row: i + 1, reason: "Missing agent name" }); continue; }
+      // Silently skip blank-agent rows (Monday exports often have spacer rows).
+      if (!name) continue;
+      const outcome = normalizeOutcome(r.outcome);
+      // Silently skip rows with no recognizable outcome — do not surface as error.
+      if (!outcome) continue;
+      const logDate = parseDate(r.date);
+      if (!logDate) { errors.push({ row: i + 1, reason: `Unparseable date for ${name}: ${r.date}` }); continue; }
+
 
       const key = `${name.toLowerCase()}|${logDate}`;
       let b = buckets.get(key);
