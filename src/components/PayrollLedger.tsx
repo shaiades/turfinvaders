@@ -201,14 +201,14 @@ export function PayrollLedger() {
       "Hourly Rate",
       "Assumed Hours",
       "Base Pay",
-      "Sale Price Total",
+      "Total Sales Volume ($)",
       "Commission Rate",
-      "Commission Earned",
+      "Commission Earned ($)",
       "Sit Bonus ($/sit)",
       "Sit Bonus",
       "Monster Bonus",
       "Bonuses Total",
-      "TOTAL WEEKLY PAY",
+      "Total Estimated Pay ($)",
     ];
     const lines = [headers.join(",")];
     for (const r of rows) {
