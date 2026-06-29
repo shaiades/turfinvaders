@@ -42,17 +42,26 @@ function pickContains(row: Record<string, unknown>, substr: string): string {
   return "";
 }
 
-// Monday.com outcome columns — Sale > PM > BO > OL > RS priority.
-const OUTCOME_COLS = ["Sale", "PM", "BO", "OL", "RS"] as const;
-
-// Map detected column → canonical enum the backend expects.
-const OUTCOME_ENUM: Record<(typeof OUTCOME_COLS)[number], string> = {
-  Sale: "SALE",
-  PM: "PM",
-  BO: "BO",
-  OL: "OL",
-  RS: "RS",
+// Canonical vocabulary: 'Blowout', 'CTC', 'Reset', 'Sit', 'Sale'.
+// Each term maps to the backend enum the importer already understands.
+const OUTCOME_TERMS: Record<string, string> = {
+  blowout: "BO",
+  bo: "BO",
+  ctc: "BO",                // "Call to cancel" rolls up as a no-demo
+  calltocancel: "BO",
+  reset: "RS",
+  rs: "RS",
+  sit: "PM",
+  pm: "PM",
+  sale: "SALE",
+  sold: "SALE",
 };
+
+const STATUS_HEADERS = [
+  "Lead Status", "Status", "Outcome", "Result", "Disposition", "Lead Outcome",
+];
+
+const SALE_PRICE_HEADERS = ["Sale Price", "Sale Amount", "Amount"];
 
 function isBlankCell(v: unknown): boolean {
   if (v === null || v === undefined) return true;
@@ -64,12 +73,20 @@ function isBlankCell(v: unknown): boolean {
 
 function detectOutcome(row: Record<string, unknown>): string {
   const keys = Object.keys(row);
-  for (const col of OUTCOME_COLS) {
+  // 1) Single status column carrying one of the canonical terms.
+  for (const header of STATUS_HEADERS) {
+    const k = keys.find((kk) => norm(kk) === norm(header));
+    if (!k || isBlankCell(row[k])) continue;
+    const term = norm(String(row[k]));
+    if (OUTCOME_TERMS[term]) return OUTCOME_TERMS[term];
+  }
+  // 2) Boolean-style columns named after the canonical terms.
+  //    Sale > Sit > Reset > CTC > Blowout priority.
+  for (const col of ["Sale", "Sit", "Reset", "CTC", "Blowout"]) {
     const target = norm(col);
     const k = keys.find((kk) => norm(kk) === target);
-    if (!k) continue;
-    if (isBlankCell(row[k])) continue;
-    return OUTCOME_ENUM[col];
+    if (!k || isBlankCell(row[k])) continue;
+    return OUTCOME_TERMS[norm(col)];
   }
   return "";
 }
@@ -127,7 +144,7 @@ export function HistoricalImporter({ defaultTeamId }: { defaultTeamId?: string |
           .map((raw) => {
             const agent = pick(raw, "Agent");
             const date = pick(raw, "Date/Time") || pickContains(raw, "date");
-            const sale_price = pick(raw, "Sale Price");
+            const sale_price = pick(raw, ...SALE_PRICE_HEADERS);
             const lead_name = pick(raw, "Lead", "Customer", "Lead Name", "Customer Name");
             const outcome = detectOutcome(raw);
             return { agent, outcome, date, sale_price: sale_price || null, lead_name: lead_name || null };
@@ -171,8 +188,9 @@ export function HistoricalImporter({ defaultTeamId }: { defaultTeamId?: string |
         <Upload className="w-8 h-8 mx-auto text-neon mb-3" />
         <div className="font-display text-sm text-neon">DROP MONDAY.COM CSV HERE</div>
         <div className="text-xs text-muted-foreground mt-2">
-          Any CSV accepted. Uses <span className="text-foreground">Agent · Date/Time · Sale Price</span>, then detects{" "}
-          <span className="text-foreground">BO · OL · RS · PM · Sale</span> cells.
+          Any CSV accepted. Uses <span className="text-foreground">Agent · Date · Sale Price/Amount</span>, then detects{" "}
+          <span className="text-foreground">Blowout · CTC · Reset · Sit · Sale</span>.
+
         </div>
         <div className="text-[10px] text-muted-foreground mt-1">or click to browse</div>
       </div>

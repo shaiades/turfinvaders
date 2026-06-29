@@ -197,7 +197,35 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
       return v;
     }
 
-    // Apply buckets.
+    // === REFRESH MODE ===
+    // Wipe existing daily_logs + confirmed sale leads for each affected
+    // (canvasser, date) so re-uploading a CSV for the same week never
+    // double-counts. Re-uploading is the canonical "fix" workflow.
+    const datesByProfile = new Map<string, Set<string>>();
+    for (const b of buckets.values()) {
+      const profile = await resolveProfile(b.profileKey);
+      if (!profile) continue;
+      const set = datesByProfile.get(profile.id) ?? new Set<string>();
+      set.add(b.log_date);
+      datesByProfile.set(profile.id, set);
+    }
+    for (const [pid, dates] of datesByProfile.entries()) {
+      const dateArr = Array.from(dates);
+      await supabaseAdmin.from("daily_logs").delete().eq("canvasser_id", pid).in("log_date", dateArr);
+      // Confirmed sale leads keyed by reviewed_at::date — strip the day window.
+      for (const d of dateArr) {
+        await supabaseAdmin
+          .from("leads")
+          .delete()
+          .eq("canvasser_id", pid)
+          .eq("status", "confirmed")
+          .eq("is_sale", true)
+          .gte("reviewed_at", `${d}T00:00:00Z`)
+          .lte("reviewed_at", `${d}T23:59:59Z`);
+      }
+    }
+
+
     for (const b of buckets.values()) {
       const profile = await resolveProfile(b.profileKey);
       if (!profile) continue;

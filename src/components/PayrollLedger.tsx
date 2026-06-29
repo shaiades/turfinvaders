@@ -201,14 +201,14 @@ export function PayrollLedger() {
       "Hourly Rate",
       "Assumed Hours",
       "Base Pay",
-      "Sale Price Total",
+      "Total Sales Volume ($)",
       "Commission Rate",
-      "Commission Earned",
+      "Commission Earned ($)",
       "Sit Bonus ($/sit)",
       "Sit Bonus",
       "Monster Bonus",
       "Bonuses Total",
-      "TOTAL WEEKLY PAY",
+      "Total Estimated Pay ($)",
     ];
     const lines = [headers.join(",")];
     for (const r of rows) {
@@ -324,9 +324,10 @@ export function PayrollLedger() {
                   <th className="text-right py-2 pr-3">Sits</th>
                   <th className="text-right py-2 pr-3">Pts</th>
                   <th className="text-right py-2 pr-3">Rate</th>
-                  <th className="text-right py-2 pr-3">Commission</th>
+                  <th className="text-right py-2 pr-3">Total Sales Volume ($)</th>
+                  <th className="text-right py-2 pr-3">Commission Earned ($)</th>
                   <th className="text-right py-2 pr-3">Bonuses</th>
-                  <th className="text-right py-2 pr-1">Total Pay</th>
+                  <th className="text-right py-2 pr-1">Total Estimated Pay ($)</th>
                 </tr>
               </thead>
               <tbody>
@@ -348,10 +349,13 @@ export function PayrollLedger() {
                         ${r.rate}
                       </span>
                     </td>
+                    <td className="py-2.5 pr-3 text-right font-display text-victory">
+                      ${r.sale_amount.toFixed(2)}
+                    </td>
                     <td className="py-2.5 pr-3 text-right">
                       <div>${r.commission.toFixed(2)}</div>
                       <div className="text-[9px] text-muted-foreground">
-                        {(r.commRate * 100).toFixed(0)}% of ${r.sale_amount.toFixed(0)}
+                        {(r.commRate * 100).toFixed(0)}% commission tier
                       </div>
                     </td>
                     <td className="py-2.5 pr-3 text-right">
@@ -370,7 +374,7 @@ export function PayrollLedger() {
               </tbody>
               <tfoot>
                 <tr className="border-t border-neon/40">
-                  <td colSpan={10} className="py-3 text-right text-[10px] font-display uppercase tracking-widest text-muted-foreground">Grand Total</td>
+                  <td colSpan={11} className="py-3 text-right text-[10px] font-display uppercase tracking-widest text-muted-foreground">Grand Total · Estimated Pay</td>
                   <td className="py-3 pr-1 text-right font-display text-victory text-base">${grandTotal.toFixed(2)}</td>
                 </tr>
               </tfoot>
