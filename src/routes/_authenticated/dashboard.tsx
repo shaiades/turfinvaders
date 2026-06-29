@@ -10,6 +10,7 @@ import { FleetManager } from "@/components/FleetManager";
 import { HistoricalImporter } from "@/components/HistoricalImporter";
 import { PerformanceMatrix } from "@/components/PerformanceMatrix";
 import { PayrollLedger } from "@/components/PayrollLedger";
+import { ExecutiveDashboard } from "@/components/ExecutiveDashboard";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
