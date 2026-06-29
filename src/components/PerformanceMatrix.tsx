@@ -65,7 +65,7 @@ export function PerformanceMatrix() {
           .select("canvasser_id, team_id, no_demo, one_legs, future_leads, demos_sits, sales, log_date")
           .gte("log_date", start)
           .lte("log_date", end),
-        supabase.from("profiles").select("id, display_name, team_id"),
+        supabase.from("profiles").select("id, display_name, team_id, current_rank"),
         supabase.from("teams").select("id, name, color"),
       ]);
       if (logsRes.error) throw logsRes.error;
