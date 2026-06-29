@@ -349,10 +349,13 @@ export function PayrollLedger() {
                         ${r.rate}
                       </span>
                     </td>
+                    <td className="py-2.5 pr-3 text-right font-display text-victory">
+                      ${r.sale_amount.toFixed(2)}
+                    </td>
                     <td className="py-2.5 pr-3 text-right">
                       <div>${r.commission.toFixed(2)}</div>
                       <div className="text-[9px] text-muted-foreground">
-                        {(r.commRate * 100).toFixed(0)}% of ${r.sale_amount.toFixed(0)}
+                        {(r.commRate * 100).toFixed(0)}% commission tier
                       </div>
                     </td>
                     <td className="py-2.5 pr-3 text-right">
