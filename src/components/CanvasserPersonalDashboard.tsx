@@ -360,8 +360,10 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
 
   return (
     <div className="space-y-6">
+      <TakeHomeWidget userId={userId} weeklyPay={weeklyPay} hourlyRate={hourlyRate} weekPoints={weekPoints} />
       <SCCERankBanner userId={userId} />
       <WeeklyPlaybook userId={userId} />
+
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
         <TabsList className="grid w-full grid-cols-4 bg-surface border border-border p-1 h-auto">
           <ArcadeTab value="today">Today</ArcadeTab>
@@ -958,6 +960,54 @@ function SCCERankBanner({ userId }: { userId: string }) {
         <span>7+ sits wks · <span className="text-victory">{data?.consecutive_weeks_7_plus_sits ?? 0}</span></span>
         <span>4-wk avg · <span className="text-accent">{(data?.rolling_4_week_sit_avg ?? 0).toFixed(1)}</span></span>
         <span>recruits · <span className="text-foreground">{data?.recruits_count ?? 0}</span></span>
+      </div>
+    </div>
+  );
+}
+
+/* ============ TAKE-HOME WIDGET (top of canvasser dashboard) ============ */
+function TakeHomeWidget({ userId, weeklyPay, hourlyRate, weekPoints }: {
+  userId: string;
+  weeklyPay: number;
+  hourlyRate: number;
+  weekPoints: number;
+}) {
+  const { data } = useQuery({
+    queryKey: ["takehome_rank", userId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("current_rank")
+        .eq("id", userId)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+  });
+  const rank = (data?.current_rank ?? "Jr. Silver") as string;
+
+  return (
+    <div className="rounded-xl border border-victory/40 bg-[color-mix(in_oklab,var(--victory)_8%,var(--surface))] p-5 sm:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-6">
+        <div>
+          <div className="text-[10px] font-display uppercase tracking-widest text-victory/80">
+            Est. Weekly Pay
+          </div>
+          <div className="mt-2 font-display text-4xl sm:text-5xl text-victory leading-none">
+            {formatUSD(weeklyPay)}
+          </div>
+          <div className="mt-2 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            ${hourlyRate}/hr · {weekPoints} pts this week
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            Current Rank
+          </div>
+          <div className="mt-2 flex justify-end">
+            <RankPill rank={rank} />
+          </div>
+        </div>
       </div>
     </div>
   );

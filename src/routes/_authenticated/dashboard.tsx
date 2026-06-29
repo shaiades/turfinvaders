@@ -122,7 +122,7 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
         <TabsList className="bg-surface">
           <TabsTrigger value="executive">Executive Dashboard</TabsTrigger>
           <TabsTrigger value="fleet">Fleet Manager</TabsTrigger>
-          <TabsTrigger value="payroll">Payroll Ledger</TabsTrigger>
+          <TabsTrigger value="payroll">Payroll</TabsTrigger>
         </TabsList>
         <TabsContent value="executive" className="mt-0"><ExecutiveDashboard /></TabsContent>
         <TabsContent value="fleet" className="mt-0"><FleetManager /></TabsContent>
