@@ -155,7 +155,7 @@ function LiveDailyAction() {
             🍩 Donut List · {donut.length}
           </h3>
           <span className="text-[10px] text-muted-foreground">
-            No Confirmed_Next_Day / Confirmed_Future today
+            No 'Confirmed' / 'Future' ping today
           </span>
         </div>
         {donut.length === 0 ? (
