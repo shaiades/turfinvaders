@@ -210,59 +210,39 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
 }
 
 /* ============ CANVASSER ============ */
-function CanvasserDashboard({ displayName, teamId, userId, visibility }: { displayName: string | null; teamId: string | null; userId?: string; visibility: boolean }) {
+function CanvasserDashboard({ displayName, teamId, userId, visibility: _v }: { displayName: string | null; teamId: string | null; userId?: string; visibility: boolean }) {
   const myTeam = DEMO_TEAMS.find((t) => t.id === teamId) ?? DEMO_TEAMS[0] ?? { id: "", name: "Unassigned", color: "#10b981", captain: "" };
-  const peers = demoCanvassers().sort((a, b) => b.salesClosed - a.salesClosed).slice(0, 6);
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Player Card</div>
-          <h1 className="font-display text-2xl text-neon mt-1">{(displayName ?? "You").toUpperCase()}</h1>
+    <div className="space-y-6">
+      <div>
+        <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Player</div>
+        <h1 className="font-display text-2xl text-foreground mt-1">{(displayName ?? "You").toUpperCase()}</h1>
+        {myTeam.id && (
           <div className="mt-2 flex items-center gap-2">
             <TeamBadge name={myTeam.name} color={myTeam.color} />
           </div>
-        </div>
-        <VisibilityChip on={visibility} />
+        )}
       </div>
+
+      {/* Massive primary CTA — log a door */}
+      <Link
+        to="/my-territory"
+        className="block w-full rounded-xl bg-victory text-background font-display text-xl sm:text-2xl uppercase tracking-widest text-center py-8 sm:py-10 shadow-[0_0_36px_-6px_color-mix(in_oklab,var(--victory)_70%,transparent)] hover:opacity-95 active:scale-[0.99] transition"
+      >
+        <DoorOpen className="inline w-7 h-7 mr-3 -mt-1" />
+        Log a Door
+      </Link>
 
       {userId ? (
         <CanvasserPersonalDashboard userId={userId} />
       ) : (
         <div className="text-sm text-muted-foreground">Loading your dashboard…</div>
       )}
-
-      {visibility ? (
-        <ArcadePanel title="Player Leaderboard" action={<Link to="/leaderboard" className="text-xs text-neon">View all →</Link>}>
-          <ol className="divide-y divide-border">
-            {peers.map((p, i) => {
-              const team = DEMO_TEAMS.find((t) => t.id === p.teamId)!;
-              return (
-                <li key={p.id} className="flex items-center justify-between py-3">
-                  <div className="flex items-center gap-3">
-                    <span className="font-display text-xs text-muted-foreground w-6">{String(i + 1).padStart(2, "0")}</span>
-                    <Link to="/canvassers/$canvasserId" params={{ canvasserId: p.id }} className="font-medium hover:text-neon">{p.name}</Link>
-                    <TeamBadge name={team.name} color={team.color} />
-                  </div>
-                  <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                    <span><DoorOpen className="inline w-3 h-3 mr-1" />{p.doorsKnocked}</span>
-                    <span><Target className="inline w-3 h-3 mr-1" />{p.salesClosed}</span>
-                    <span className="text-victory"><TrendingUp className="inline w-3 h-3 mr-1" />{formatCurrency(p.revenueGenerated)}</span>
-                  </div>
-                </li>
-              );
-            })}
-          </ol>
-        </ArcadePanel>
-      ) : (
-        <div className="arcade-card p-5 text-sm text-muted-foreground flex items-center gap-2">
-          <Trophy className="w-4 h-4" /> Global Visibility is off. Focus mode — only your own stats are shown.
-        </div>
-      )}
     </div>
   );
 }
+
 
 function Mini({ label, value }: { label: string; value: string }) {
   return (
