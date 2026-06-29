@@ -12,22 +12,14 @@ export type DemoCanvasser = {
   level: number;
 };
 
-const NAMES = [
-  "Alex Storm", "Riley Vance", "Jordan Blaze", "Sam Pixel", "Casey Nova",
-  "Morgan Reign", "Drew Cipher", "Taylor Phoenix", "Cameron Flux", "Jamie Quark",
-  "Avery Ace", "Reese Rocket",
-];
+const NAMES: string[] = [];
 
 function seed(id: string) {
   let h = 0; for (const c of id) h = (h * 31 + c.charCodeAt(0)) | 0;
   return () => { h = (h * 1103515245 + 12345) & 0x7fffffff; return h / 0x7fffffff; };
 }
 
-export const DEMO_TEAMS = [
-  { id: "11111111-1111-1111-1111-111111111111", name: "Red Vipers", color: "#ef4444", captain: "Riley Vance" },
-  { id: "22222222-2222-2222-2222-222222222222", name: "Blue Bolts", color: "#3b82f6", captain: "Jordan Blaze" },
-  { id: "33333333-3333-3333-3333-333333333333", name: "Gold Gladiators", color: "#f59e0b", captain: "Casey Nova" },
-];
+export const DEMO_TEAMS: { id: string; name: string; color: string; captain: string }[] = [];
 
 export function demoCanvassers(): DemoCanvasser[] {
   return NAMES.map((name, i) => {
