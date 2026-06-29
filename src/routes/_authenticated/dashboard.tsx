@@ -95,7 +95,32 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
           <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Owner View</div>
           <h1 className="font-display text-2xl text-neon mt-1">COMPANY HQ</h1>
         </div>
-        <VisibilityChip on={visibility} />
+        <div className="flex items-center gap-3">
+          <VisibilityChip on={visibility} />
+          <Dialog open={importOpen} onOpenChange={setImportOpen}>
+            <DialogTrigger asChild>
+              <Button
+                size="lg"
+                className="bg-victory text-background hover:bg-victory/90 font-display text-xs tracking-widest uppercase shadow-[0_0_24px_color-mix(in_oklab,var(--victory)_45%,transparent)]"
+              >
+                <FileSpreadsheet className="w-4 h-4 mr-2" />
+                Import Monday.com CSV
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-3xl bg-background border-neon/40">
+              <DialogHeader>
+                <DialogTitle className="font-display text-neon uppercase tracking-widest text-sm">
+                  Import Monday.com CSV
+                </DialogTitle>
+                <DialogDescription>
+                  Drop a Monday.com export below. Rows are parsed (Agent · Outcome · Date · Sale Price),
+                  unknown canvassers auto-created, and totals piped through the Paycheck Engine.
+                </DialogDescription>
+              </DialogHeader>
+              <HistoricalImporter />
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
       {/* Master Live Lead Counter — company-wide leads today */}
