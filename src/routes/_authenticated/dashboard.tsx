@@ -5,6 +5,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { StatCard, ArcadePanel, TeamBadge } from "@/components/arcade";
 import { LiveLeadCounter } from "@/components/LiveLeadCounter";
 import { CommandCenter } from "@/components/CommandCenter";
+import { FleetManager } from "@/components/FleetManager";
+import { HistoricalImporter } from "@/components/HistoricalImporter";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { CanvasserPersonalDashboard } from "@/components/CanvasserPersonalDashboard";
 import { SuspendedBadge, useCanvasserStatuses } from "@/components/SuspendedBadge";
 import { useTodayLeads } from "@/hooks/useTodayLeads";
@@ -105,7 +108,16 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
         <LiveLeadCounter value={leads.total} size="lg" accent="victory" label="LEADS · TODAY" />
       </div>
 
-      <CommandCenter />
+      <Tabs defaultValue="command" className="space-y-4">
+        <TabsList className="bg-surface">
+          <TabsTrigger value="command">Command Center</TabsTrigger>
+          <TabsTrigger value="fleet">Fleet Manager</TabsTrigger>
+          <TabsTrigger value="import">Historical Importer</TabsTrigger>
+        </TabsList>
+        <TabsContent value="command" className="mt-0"><CommandCenter /></TabsContent>
+        <TabsContent value="fleet" className="mt-0"><FleetManager /></TabsContent>
+        <TabsContent value="import" className="mt-0"><HistoricalImporter /></TabsContent>
+      </Tabs>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard label="Total Revenue" value={formatCurrency(grand.revenue)} accent="victory" />
