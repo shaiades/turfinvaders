@@ -159,14 +159,30 @@ export const Route = createFileRoute("/api/public/monday-webhook")({
         if (presented !== expected) return json({ error: "Unauthorized" }, 401);
 
         const fromEvent = pickFromMondayEvent(body.event);
+        const rawAny = body as Record<string, unknown>;
         const canvasserName =
-          body.canvasser_name ?? body.agent ?? fromEvent.canvasser_name ?? "";
+          body.canvasser_name ??
+          body.agent ??
+          (rawAny["Canvasser Name"] as string | undefined) ??
+          (rawAny["canvasserName"] as string | undefined) ??
+          fromEvent.canvasser_name ??
+          "";
         const leadName = body.lead_name ?? fromEvent.lead_name ?? null;
         const outcomeRaw =
-          body.outcome_status ?? body.outcome ?? body.status ?? fromEvent.outcome_status;
-        const logDate = parseDate(body.date_of_action ?? body.date ?? fromEvent.date_of_action);
+          body.lead_status ??
+          (rawAny["Lead Status"] as string | undefined) ??
+          (rawAny["leadStatus"] as string | undefined) ??
+          body.outcome_status ??
+          body.outcome ??
+          body.status ??
+          fromEvent.outcome_status;
+        const logDate = parseDate(
+          body.date_of_action ??
+            body.date ??
+            (rawAny["Date"] as string | undefined) ??
+            fromEvent.date_of_action,
+        );
         // Priority: exact Monday column "Sale Price", then aliases, then event-flat fields.
-        const rawAny = body as Record<string, unknown>;
         const salePrice = parseMoney(
           rawAny["Sale Price"] ??
             rawAny["sale price"] ??
@@ -202,11 +218,16 @@ export const Route = createFileRoute("/api/public/monday-webhook")({
         if (upErr) return json({ error: upErr.message }, 500);
 
         // Build per-outcome increment map.
+        // EVERY webhook ping increments leads_called_in (Total Leads Called In
+        // = count of any status received today, per Confirmation Dept spec).
         const inc: Partial<Record<
-          "no_demo" | "one_legs" | "future_leads" | "demos_sits" | "sales",
+          "no_demo" | "one_legs" | "future_leads" | "demos_sits" | "sales" | "next_days" | "confirmed_leads" | "leads_called_in",
           number
-        >> = {};
+        >> = { leads_called_in: 1 };
         switch (outcome) {
+          case "SUBMITTED": break; // raw ping, no bucket increment
+          case "CONFIRMED_NEXT_DAY": inc.next_days = 1; inc.confirmed_leads = 1; break;
+          case "CONFIRMED_FUTURE": inc.future_leads = 1; inc.confirmed_leads = 1; break;
           case "BO": inc.no_demo = 1; break;
           case "CTC": inc.no_demo = 1; break;
           case "OL": inc.one_legs = 1; break;
@@ -214,6 +235,7 @@ export const Route = createFileRoute("/api/public/monday-webhook")({
           case "PM": inc.demos_sits = 1; break;
           case "SALE": inc.demos_sits = 1; inc.sales = 1; break;
         }
+
 
         // Read current values, apply increments, write back.
         const fields = Object.keys(inc) as (keyof typeof inc)[];
