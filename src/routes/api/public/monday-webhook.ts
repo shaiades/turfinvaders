@@ -41,15 +41,19 @@ const json = (body: unknown, status = 200) =>
     headers: { "Content-Type": "application/json", ...CORS },
   });
 
-type Outcome = "BO" | "CTC" | "OL" | "RS" | "PM" | "SALE";
+type Outcome = "BO" | "CTC" | "OL" | "RS" | "PM" | "SALE" | "SUBMITTED" | "CONFIRMED_NEXT_DAY" | "CONFIRMED_FUTURE";
 
 /** Normalize free-text status into the canonical acronym. */
 function normalizeOutcome(raw: string | null | undefined): Outcome | null {
   if (!raw) return null;
   const k = raw.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
   if (!k) return null;
+  // Confirmation Dept lead-status vocabulary (takes precedence — most specific first).
+  if (k === "confirmednextday" || k.includes("nextday") || k.includes("tomorrow")) return "CONFIRMED_NEXT_DAY";
+  if (k === "confirmedfuture" || (k.startsWith("confirmed") && k.includes("future")) || k.includes("futureconfirmed")) return "CONFIRMED_FUTURE";
+  if (k === "submitted" || k === "pending" || k === "new") return "SUBMITTED";
+  if (k === "blowout" || k === "bo" || k.includes("blowout") || k === "notgood" || k.includes("notgood")) return "BO";
   if (["ctc", "calltocancel", "cancel", "cancelled", "canceled"].includes(k) || k.includes("calltocancel") || k.includes("cancel")) return "CTC";
-  if (["bo", "blowout"].includes(k) || k.includes("blowout")) return "BO";
   if (["ol", "1leg", "oneleg", "onelegs"].includes(k) || k.includes("oneleg") || k.includes("1leg")) return "OL";
   if (["rs", "reset", "resets", "futurelead", "futureleads"].includes(k) || k.includes("reset")) return "RS";
   if (["pm", "pitchmiss", "demo", "sit", "demosit", "demositting"].includes(k) || k.includes("pitchmiss") || k.includes("demo") || k.includes("sit")) return "PM";
@@ -58,7 +62,8 @@ function normalizeOutcome(raw: string | null | undefined): Outcome | null {
 }
 
 /** LOCKED point values. Do not change without updating the Paycheck Engine. */
-const POINTS: Record<Outcome, number> = { BO: 0, CTC: 0, OL: 0, RS: 0, PM: 1, SALE: 2 };
+const POINTS: Record<Outcome, number> = { BO: 0, CTC: 0, OL: 0, RS: 0, PM: 1, SALE: 2, SUBMITTED: 0, CONFIRMED_NEXT_DAY: 0, CONFIRMED_FUTURE: 0 };
+
 
 const payloadSchema = z
   .object({
