@@ -925,3 +925,41 @@ function FunnelBreakdown({
   );
 }
 
+function SCCERankBanner({ userId }: { userId: string }) {
+  const { data } = useQuery({
+    queryKey: ["scce_rank", userId],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("profiles")
+        .select("current_rank, consecutive_weeks_3_plus_sits, consecutive_weeks_7_plus_sits, rolling_4_week_sit_avg, recruits_count")
+        .eq("id", userId)
+        .maybeSingle();
+      return data as {
+        current_rank: string | null;
+        consecutive_weeks_3_plus_sits: number;
+        consecutive_weeks_7_plus_sits: number;
+        rolling_4_week_sit_avg: number;
+        recruits_count: number;
+      } | null;
+    },
+  });
+  const rank = data?.current_rank ?? "Jr. Silver";
+  return (
+    <div className="arcade-card p-4 flex flex-wrap items-center justify-between gap-4">
+      <div className="flex items-center gap-3 min-w-0">
+        <RankPill rank={rank} size="md" />
+        <div className="min-w-0">
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">SCCE Rank</div>
+          <div className="text-xs text-muted-foreground truncate">{RANK_PERKS[rank] ?? ""}</div>
+        </div>
+      </div>
+      <div className="flex items-center gap-4 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+        <span>3+ sits wks · <span className="text-neon">{data?.consecutive_weeks_3_plus_sits ?? 0}</span></span>
+        <span>7+ sits wks · <span className="text-victory">{data?.consecutive_weeks_7_plus_sits ?? 0}</span></span>
+        <span>4-wk avg · <span className="text-accent">{(data?.rolling_4_week_sit_avg ?? 0).toFixed(1)}</span></span>
+        <span>recruits · <span className="text-foreground">{data?.recruits_count ?? 0}</span></span>
+      </div>
+    </div>
+  );
+}
+
