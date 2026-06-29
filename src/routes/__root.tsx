@@ -51,8 +51,16 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Knockout — Canvassing Leaderboard" },
+      { title: "Canvassing Leaderboard" },
       { name: "description", content: "Track teams, climb the leaderboard, and level up your canvassing game." },
+      { property: "og:title", content: "Canvassing Leaderboard" },
+      { name: "twitter:title", content: "Canvassing Leaderboard" },
+      { property: "og:description", content: "Track teams, climb the leaderboard, and level up your canvassing game." },
+      { name: "twitter:description", content: "Track teams, climb the leaderboard, and level up your canvassing game." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/067fc210-d68b-49bf-a597-6a57bb161b09/id-preview-c6c32db1--885bcb26-aa73-40c4-aa77-ab6257e76d48.lovable.app-1782773622295.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/067fc210-d68b-49bf-a597-6a57bb161b09/id-preview-c6c32db1--885bcb26-aa73-40c4-aa77-ab6257e76d48.lovable.app-1782773622295.png" },
+      { name: "twitter:card", content: "summary_large_image" },
+      { property: "og:type", content: "website" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
