@@ -1,10 +1,26 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useMemo } from "react";
 import Papa from "papaparse";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { importHistoricalCsv } from "@/lib/csv-import.functions";
 import { ArcadePanel } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Upload, FileSpreadsheet, CheckCircle2, AlertTriangle } from "lucide-react";
 
@@ -20,34 +36,11 @@ function norm(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-function pick(row: Record<string, unknown>, ...names: string[]): string {
-  const keys = Object.keys(row);
-  for (const n of names) {
-    const k = keys.find((kk) => norm(kk) === norm(n));
-    if (k && row[k] != null && String(row[k]).trim() !== "") return String(row[k]).trim();
-  }
-  return "";
-}
-
-function hasAnyValue(row: Record<string, unknown>): boolean {
-  return Object.values(row).some((v) => v != null && String(v).trim() !== "");
-}
-
-// Find a header that contains the substring (case/space/punctuation-insensitive).
-function pickContains(row: Record<string, unknown>, substr: string): string {
-  const keys = Object.keys(row);
-  const s = norm(substr);
-  const k = keys.find((kk) => norm(kk).includes(s));
-  if (k && row[k] != null && String(row[k]).trim() !== "") return String(row[k]).trim();
-  return "";
-}
-
 // Canonical vocabulary: 'Blowout', 'CTC', 'Reset', 'Sit', 'Sale'.
-// Each term maps to the backend enum the importer already understands.
 const OUTCOME_TERMS: Record<string, string> = {
   blowout: "BO",
   bo: "BO",
-  ctc: "BO",                // "Call to cancel" rolls up as a no-demo
+  ctc: "BO",
   calltocancel: "BO",
   reset: "RS",
   rs: "RS",
@@ -57,47 +50,46 @@ const OUTCOME_TERMS: Record<string, string> = {
   sold: "SALE",
 };
 
-const STATUS_HEADERS = [
-  "Lead Status", "Status", "Outcome", "Result", "Disposition", "Lead Outcome",
-];
-
-const SALE_PRICE_HEADERS = ["Sale Price"];
-
-function isBlankCell(v: unknown): boolean {
-  if (v === null || v === undefined) return true;
-  const s = String(v).trim();
-  if (!s) return true;
-  const low = s.toLowerCase();
-  return low === "false" || low === "0" || low === "no" || low === "-" || low === "null" || low === "n/a";
+function mapOutcome(raw: unknown): string {
+  if (raw === null || raw === undefined) return "";
+  const s = String(raw).trim();
+  if (!s) return "";
+  const term = norm(s);
+  return OUTCOME_TERMS[term] ?? "";
 }
 
-function detectOutcome(row: Record<string, unknown>): string {
-  const keys = Object.keys(row);
-  // 1) Single status column carrying one of the canonical terms.
-  for (const header of STATUS_HEADERS) {
-    const k = keys.find((kk) => norm(kk) === norm(header));
-    if (!k || isBlankCell(row[k])) continue;
-    const term = norm(String(row[k]));
-    if (OUTCOME_TERMS[term]) return OUTCOME_TERMS[term];
+const NONE = "__none__";
+
+// Heuristic best-guess for each dropdown given the detected headers.
+function guess(headers: string[], needles: string[]): string {
+  for (const n of needles) {
+    const target = norm(n);
+    const exact = headers.find((h) => norm(h) === target);
+    if (exact) return exact;
   }
-  // 2) Boolean-style columns named after the canonical terms.
-  //    Sale > Sit > Reset > CTC > Blowout priority.
-  for (const col of ["Sale", "Sit", "Reset", "CTC", "Blowout"]) {
-    const target = norm(col);
-    const k = keys.find((kk) => norm(kk) === target);
-    if (!k || isBlankCell(row[k])) continue;
-    return OUTCOME_TERMS[norm(col)];
+  for (const n of needles) {
+    const target = norm(n);
+    const contains = headers.find((h) => norm(h).includes(target));
+    if (contains) return contains;
   }
   return "";
 }
-
 
 export function HistoricalImporter({ defaultTeamId }: { defaultTeamId?: string | null }) {
   const qc = useQueryClient();
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
-  const [preview, setPreview] = useState<ParsedRow[] | null>(null);
   const [filename, setFilename] = useState<string | null>(null);
+
+  // Raw parse result + mapping state
+  const [rawRows, setRawRows] = useState<Record<string, unknown>[] | null>(null);
+  const [headers, setHeaders] = useState<string[]>([]);
+  const [mapOpen, setMapOpen] = useState(false);
+  const [colAgent, setColAgent] = useState<string>("");
+  const [colStatus, setColStatus] = useState<string>("");
+  const [colSalePrice, setColSalePrice] = useState<string>("");
+  const [colDate, setColDate] = useState<string>("");
+
   const importFn = useServerFn(importHistoricalCsv);
 
   const importMut = useMutation({
@@ -119,8 +111,7 @@ export function HistoricalImporter({ defaultTeamId }: { defaultTeamId?: string |
           toast.error(`Row ${e.row}: ${e.reason}`, { duration: 12000 });
         }
       }
-      setPreview(null);
-      setFilename(null);
+      resetAll();
       qc.invalidateQueries();
     },
     onError: (e: Error) => {
@@ -131,28 +122,36 @@ export function HistoricalImporter({ defaultTeamId }: { defaultTeamId?: string |
     },
   });
 
+  const resetAll = () => {
+    setRawRows(null);
+    setHeaders([]);
+    setFilename(null);
+    setMapOpen(false);
+    setColAgent("");
+    setColStatus("");
+    setColSalePrice("");
+    setColDate("");
+  };
 
   const handleFile = useCallback((file: File) => {
     setFilename(file.name);
-    setPreview(null);
     Papa.parse<Record<string, unknown>>(file, {
       header: true,
       skipEmptyLines: true,
       complete: (res) => {
-        const rows: ParsedRow[] = res.data
-          .filter(hasAnyValue)
-          .map((raw) => {
-            const agent = pick(raw, "Agent");
-            const date = pick(raw, "Date/Time") || pickContains(raw, "date");
-            const sale_price = pick(raw, ...SALE_PRICE_HEADERS);
-            const lead_name = pick(raw, "Lead", "Customer", "Lead Name", "Customer Name");
-            const outcome = detectOutcome(raw);
-            return { agent, outcome, date, sale_price: sale_price || null, lead_name: lead_name || null };
-          })
-          // Skip blank-agent rows and rows with no detected outcome — no error toast, just ignore.
-          .filter((r) => r.agent && r.outcome);
-        setPreview(rows);
-
+        const detected = (res.meta.fields ?? []).filter((h) => h && h.trim() !== "");
+        if (detected.length === 0) {
+          toast.error("CSV has no readable headers");
+          return;
+        }
+        setHeaders(detected);
+        setRawRows(res.data);
+        // Best-guess defaults — user can override.
+        setColAgent(guess(detected, ["Agent", "Canvasser", "Rep", "Salesperson", "Name"]));
+        setColStatus(guess(detected, ["Lead Status", "Status", "Outcome", "Result", "Disposition"]));
+        setColSalePrice(guess(detected, ["Sale Price", "Sale Amount", "Amount", "Price"]));
+        setColDate(guess(detected, ["Date/Time", "Date", "Created", "Submitted"]));
+        setMapOpen(true);
       },
       error: (err) => toast.error(`CSV parse failed: ${err.message}`),
     });
@@ -164,6 +163,31 @@ export function HistoricalImporter({ defaultTeamId }: { defaultTeamId?: string |
     const f = e.dataTransfer.files?.[0];
     if (f) handleFile(f);
   };
+
+  const mappedPreview: ParsedRow[] = useMemo(() => {
+    if (!rawRows || !colAgent || !colStatus) return [];
+    return rawRows
+      .map((raw) => {
+        const agent = String(raw[colAgent] ?? "").trim();
+        const outcome = mapOutcome(raw[colStatus]);
+        const date =
+          colDate && colDate !== NONE ? String(raw[colDate] ?? "").trim() : "";
+        const sale_price =
+          colSalePrice && colSalePrice !== NONE
+            ? String(raw[colSalePrice] ?? "").trim()
+            : "";
+        return {
+          agent,
+          outcome,
+          date,
+          sale_price: sale_price || null,
+          lead_name: null,
+        };
+      })
+      .filter((r) => r.agent && r.outcome);
+  }, [rawRows, colAgent, colStatus, colSalePrice, colDate]);
+
+  const canConfirm = !!colAgent && !!colStatus && mappedPreview.length > 0;
 
   return (
     <ArcadePanel title="Historical Data Importer">
@@ -188,98 +212,162 @@ export function HistoricalImporter({ defaultTeamId }: { defaultTeamId?: string |
         <Upload className="w-8 h-8 mx-auto text-neon mb-3" />
         <div className="font-display text-sm text-neon">DROP MONDAY.COM CSV HERE</div>
         <div className="text-xs text-muted-foreground mt-2">
-          Any CSV accepted. Uses <span className="text-foreground">Agent · Date · Sale Price</span>, then detects{" "}
-          <span className="text-foreground">Blowout · CTC · Reset · Sit · Sale</span>.
-
+          Any CSV accepted. You'll map columns to{" "}
+          <span className="text-foreground">Canvasser · Status · Sale Price</span> in the next step.
         </div>
         <div className="text-[10px] text-muted-foreground mt-1">or click to browse</div>
       </div>
-
-      <Button
-        size="lg"
-        disabled={!preview || importMut.isPending}
-        onClick={() => preview && importMut.mutate(preview)}
-        className={`mt-4 w-full font-display tracking-widest text-base h-14 transition-all ${
-          preview && !importMut.isPending
-            ? "bg-neon text-background hover:bg-neon/90 shadow-[0_0_20px_var(--neon),0_0_40px_var(--neon)] animate-pulse"
-            : "bg-surface text-muted-foreground border border-border cursor-not-allowed"
-        }`}
-      >
-        {importMut.isPending ? (
-          <span className="flex items-center gap-2">
-            <span className="w-4 h-4 border-2 border-background border-t-transparent rounded-full animate-spin" />
-            PROCESSING…
-          </span>
-        ) : (
-          <span className="flex items-center gap-2">
-            <CheckCircle2 className="w-5 h-5" /> PROCESS CSV
-          </span>
-        )}
-      </Button>
 
       {filename && (
         <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
           <FileSpreadsheet className="w-4 h-4 text-neon" />
           <span className="text-foreground">{filename}</span>
-          {preview && <span>· accepted · {preview.length} row(s) scanned</span>}
+          {rawRows && <span>· {rawRows.length} raw row(s) parsed</span>}
         </div>
       )}
 
-      {preview && (
-        <>
-          <div className="mt-4 max-h-56 overflow-auto rounded border border-border">
-            <table className="w-full text-xs">
-              <thead className="bg-surface sticky top-0">
-                <tr className="text-left text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-                  <th className="px-2 py-1.5">Agent</th>
-                  <th className="px-2 py-1.5">Date</th>
-                  <th className="px-2 py-1.5">Outcome</th>
-                  <th className="px-2 py-1.5 text-right">Sale $</th>
-                </tr>
-              </thead>
-              <tbody>
-                {preview.slice(0, 25).map((r, i) => (
-                  <tr key={i} className="border-t border-border/50">
-                    <td className="px-2 py-1">{r.agent}</td>
-                    <td className="px-2 py-1 text-muted-foreground">{r.date}</td>
-                    <td className="px-2 py-1 uppercase text-neon">{r.outcome}</td>
-                    <td className="px-2 py-1 text-right text-victory">
-                      {r.sale_price ? `$${Number(String(r.sale_price).replace(/[^0-9.]/g, "")).toLocaleString()}` : "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {preview.length > 25 && (
-              <div className="text-[10px] text-muted-foreground p-2 border-t border-border">
-                + {preview.length - 25} more rows…
-              </div>
-            )}
+      <Dialog open={mapOpen} onOpenChange={(o) => { if (!o) resetAll(); }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="font-display tracking-widest text-neon">
+              Map Your Columns
+            </DialogTitle>
+            <DialogDescription>
+              Pick which column in your CSV holds each field. Rows are processed strictly from your selections.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4 py-2">
+            <FieldMap
+              label="Which column holds the Canvasser Name?"
+              value={colAgent}
+              onChange={setColAgent}
+              headers={headers}
+              required
+            />
+            <FieldMap
+              label="Which column holds the Lead Status / Outcome?"
+              value={colStatus}
+              onChange={setColStatus}
+              headers={headers}
+              required
+              hint="Cells should contain: Blowout · CTC · Reset · Sit · Sale"
+            />
+            <FieldMap
+              label="Which column holds the Sale Price?"
+              value={colSalePrice}
+              onChange={setColSalePrice}
+              headers={headers}
+              optional
+            />
+            <FieldMap
+              label="Which column holds the Date? (optional)"
+              value={colDate}
+              onChange={setColDate}
+              headers={headers}
+              optional
+            />
           </div>
 
-          <div className="mt-4 flex items-center justify-between gap-3 flex-wrap">
-            <div className="text-[11px] text-muted-foreground flex items-center gap-2">
-              <AlertTriangle className="w-3.5 h-3.5 text-warning" />
-              Unknown agents will be auto-created as Canvassers.
-            </div>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => { setPreview(null); setFilename(null); }}>
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                disabled={importMut.isPending}
-                onClick={() => importMut.mutate(preview)}
-                className="bg-victory text-background hover:bg-victory/90"
-              >
-                {importMut.isPending ? "Running Paycheck Engine…" : (
-                  <span className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4" /> Run Import</span>
-                )}
-              </Button>
-            </div>
+          <div className="rounded border border-border bg-surface/40 px-3 py-2 text-[11px] text-muted-foreground flex items-center gap-2">
+            <AlertTriangle className="w-3.5 h-3.5 text-warning" />
+            {mappedPreview.length > 0
+              ? `Preview: ${mappedPreview.length} mappable row(s) detected with your current selections.`
+              : "No mappable rows yet — pick the Canvasser and Status columns."}
           </div>
-        </>
-      )}
+
+          {mappedPreview.length > 0 && (
+            <div className="max-h-48 overflow-auto rounded border border-border">
+              <table className="w-full text-xs">
+                <thead className="bg-surface sticky top-0">
+                  <tr className="text-left text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                    <th className="px-2 py-1.5">Agent</th>
+                    <th className="px-2 py-1.5">Date</th>
+                    <th className="px-2 py-1.5">Outcome</th>
+                    <th className="px-2 py-1.5 text-right">Sale $</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {mappedPreview.slice(0, 15).map((r, i) => (
+                    <tr key={i} className="border-t border-border/50">
+                      <td className="px-2 py-1">{r.agent}</td>
+                      <td className="px-2 py-1 text-muted-foreground">{r.date || "—"}</td>
+                      <td className="px-2 py-1 uppercase text-neon">{r.outcome}</td>
+                      <td className="px-2 py-1 text-right text-victory">
+                        {r.sale_price
+                          ? `$${Number(String(r.sale_price).replace(/[^0-9.]/g, "")).toLocaleString()}`
+                          : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={resetAll}>Cancel</Button>
+            <Button
+              disabled={!canConfirm || importMut.isPending}
+              onClick={() => importMut.mutate(mappedPreview)}
+              className="bg-victory text-background hover:bg-victory/90"
+            >
+              {importMut.isPending ? (
+                <span className="flex items-center gap-2">
+                  <span className="w-4 h-4 border-2 border-background border-t-transparent rounded-full animate-spin" />
+                  Importing…
+                </span>
+              ) : (
+                <span className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4" /> Confirm & Import
+                </span>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </ArcadePanel>
+  );
+}
+
+function FieldMap({
+  label,
+  value,
+  onChange,
+  headers,
+  required,
+  optional,
+  hint,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  headers: string[];
+  required?: boolean;
+  optional?: boolean;
+  hint?: string;
+}) {
+  return (
+    <div className="grid gap-1.5">
+      <Label className="text-xs">
+        {label}
+        {required && <span className="text-destructive ml-1">*</span>}
+      </Label>
+      <Select
+        value={value || (optional ? NONE : undefined)}
+        onValueChange={(v) => onChange(v === NONE ? "" : v)}
+      >
+        <SelectTrigger>
+          <SelectValue placeholder="Select a column…" />
+        </SelectTrigger>
+        <SelectContent>
+          {optional && <SelectItem value={NONE}>— None —</SelectItem>}
+          {headers.map((h) => (
+            <SelectItem key={h} value={h}>{h}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {hint && <div className="text-[10px] text-muted-foreground">{hint}</div>}
+    </div>
   );
 }
