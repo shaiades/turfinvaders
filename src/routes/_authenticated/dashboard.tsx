@@ -325,7 +325,7 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
 
 /* ============ CANVASSER ============ */
 function CanvasserDashboard({ displayName, teamId, userId, visibility }: { displayName: string | null; teamId: string | null; userId?: string; visibility: boolean }) {
-  const myTeam = DEMO_TEAMS.find((t) => t.id === teamId) ?? DEMO_TEAMS[0];
+  const myTeam = DEMO_TEAMS.find((t) => t.id === teamId) ?? DEMO_TEAMS[0] ?? { id: "", name: "Unassigned", color: "#10b981", captain: "" };
   const peers = demoCanvassers().sort((a, b) => b.salesClosed - a.salesClosed).slice(0, 6);
 
   return (
