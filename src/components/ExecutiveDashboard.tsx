@@ -112,16 +112,41 @@ function LiveDailyAction() {
   const t = q.data?.totals ?? { called: 0, nextDay: 0, future: 0, blowout: 0 };
   const donut = q.data?.donut ?? [];
 
+  const webhookUrl = typeof window !== "undefined"
+    ? `${window.location.origin}/api/public/monday-webhook`
+    : "/api/public/monday-webhook";
+
   return (
     <ArcadePanel
       title="Live Daily Action · Today"
       action={<span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">{today}</span>}
     >
+      <div className="mb-4 rounded-lg border border-neon/40 bg-neon/5 p-3">
+        <div className="flex items-center justify-between gap-3 mb-1.5">
+          <span className="text-[10px] font-display uppercase tracking-widest text-neon">Monday.com Webhook Endpoint</span>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 px-2 text-[10px] font-display uppercase tracking-widest text-neon hover:bg-neon/10"
+            onClick={() => {
+              navigator.clipboard.writeText(webhookUrl);
+              toast.success("Webhook URL copied");
+            }}
+          >
+            Copy
+          </Button>
+        </div>
+        <code className="block text-xs font-mono break-all text-foreground/90">{webhookUrl}</code>
+        <p className="mt-1.5 text-[10px] text-muted-foreground">
+          Paste into Monday.com integration. Add header <span className="font-mono text-foreground/80">x-monday-secret</span> with your <span className="font-mono text-foreground/80">MONDAY_WEBHOOK_SECRET</span>.
+        </p>
+      </div>
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <MetricTile label="Leads Called In" value={t.called} accent="neon" sub="Any webhook ping today" />
-        <MetricTile label="Confirmed · Tomorrow" value={t.nextDay} accent="victory" sub="Confirmed_Next_Day" />
-        <MetricTile label="Confirmed · Future" value={t.future} accent="accent" sub="Confirmed_Future" />
-        <MetricTile label="Blowouts / Not Good" value={t.blowout} accent="warning" sub="Blowout" />
+        <MetricTile label="Leads Called In" value={t.called} accent="neon" sub="Any status ping today" />
+        <MetricTile label="Confirmed · Tomorrow" value={t.nextDay} accent="victory" sub="'Confirmed'" />
+        <MetricTile label="Confirmed · Future" value={t.future} accent="accent" sub="'Future'" />
+        <MetricTile label="Blowouts / Not Good" value={t.blowout} accent="warning" sub="'Blowout' + 'Disconnected'" />
       </div>
 
       <div className="mt-6 rounded-lg border border-border bg-surface p-4">
