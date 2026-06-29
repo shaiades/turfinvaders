@@ -33,10 +33,177 @@ function leadsSum(r: { demos_sits?: number | null; sales?: number | null; no_dem
 export function ExecutiveDashboard() {
   return (
     <div className="space-y-6">
+      <ManualEntryBar />
       <DatabaseCleanup />
+      <RawDataTable />
       <LiveFleetStatus />
       <WeeklyResults />
     </div>
+  );
+}
+
+/* ============ Manual Entry ============ */
+
+function startOfWeekMonISO(d: Date) {
+  const x = new Date(d); x.setHours(0,0,0,0);
+  const day = x.getDay() === 0 ? 7 : x.getDay();
+  x.setDate(x.getDate() - (day - 1));
+  return x.toISOString().slice(0, 10);
+}
+
+function ManualEntryBar() {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [canvasserId, setCanvasserId] = useState<string>("");
+  const [weekStart, setWeekStart] = useState<string>(startOfWeekMonISO(new Date()));
+  const [leads, setLeads] = useState<string>("0");
+  const [sits, setSits] = useState<string>("0");
+  const [sales, setSales] = useState<string>("0");
+  const upsertFn = useServerFn(upsertManualWeekly);
+
+  const peopleQ = useQuery({
+    queryKey: ["all_canvassers_simple"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("profiles").select("id, display_name").order("display_name");
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const save = useMutation({
+    mutationFn: async () => {
+      await upsertFn({ data: {
+        canvasser_id: canvasserId,
+        week_start: weekStart,
+        total_leads: Number(leads),
+        total_sits: Number(sits),
+        total_sales: Number(sales),
+      }});
+    },
+    onSuccess: () => {
+      toast.success("Saved · Paycheck engine updated");
+      qc.invalidateQueries({ queryKey: ["weekly_results"] });
+      qc.invalidateQueries({ queryKey: ["fleet_status"] });
+      qc.invalidateQueries({ queryKey: ["raw_daily_logs"] });
+      setOpen(false);
+      setLeads("0"); setSits("0"); setSales("0");
+    },
+    onError: (e: Error) => toast.error(e.message ?? "Failed to save"),
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button size="lg" className="w-full h-14 text-base font-display uppercase tracking-widest bg-victory text-background hover:bg-victory/90">
+          <Plus className="w-5 h-5 mr-2" /> Manual Data Entry
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader><DialogTitle className="font-display uppercase tracking-widest text-neon">Manual Weekly Entry</DialogTitle></DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <Label>Canvasser</Label>
+            <Select value={canvasserId} onValueChange={setCanvasserId}>
+              <SelectTrigger><SelectValue placeholder="Select canvasser…" /></SelectTrigger>
+              <SelectContent>
+                {(peopleQ.data ?? []).map((p) => (
+                  <SelectItem key={p.id} value={p.id}>{p.display_name ?? "Unknown"}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Week (Monday)</Label>
+            <Input type="date" value={weekStart} onChange={(e) => setWeekStart(startOfWeekMonISO(new Date(e.target.value)))} />
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="space-y-1.5"><Label>Total Leads</Label><Input type="number" min={0} value={leads} onChange={(e) => setLeads(e.target.value)} /></div>
+            <div className="space-y-1.5"><Label>Total Sits</Label><Input type="number" min={0} value={sits} onChange={(e) => setSits(e.target.value)} /></div>
+            <div className="space-y-1.5"><Label>Total Sales</Label><Input type="number" min={0} value={sales} onChange={(e) => setSales(e.target.value)} /></div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Points = Sits + Sales. Pay auto-calculated by the Paycheck Engine and shown in <em>Last Week's Results</em>.
+          </p>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button onClick={() => save.mutate()} disabled={!canvasserId || save.isPending} className="bg-victory text-background hover:bg-victory/90">
+            {save.isPending ? "Saving…" : "Save"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ============ Raw Data Table ============ */
+
+function RawDataTable() {
+  const q = useQuery({
+    queryKey: ["raw_daily_logs"],
+    queryFn: async () => {
+      const [logsR, profilesR] = await Promise.all([
+        supabase.from("daily_logs")
+          .select("id, canvasser_id, team_id, log_date, demos_sits, sales, no_demo, one_legs, future_leads, people_talked_to, leads_called_in, confirmed_leads")
+          .order("log_date", { ascending: false })
+          .limit(500),
+        supabase.from("profiles").select("id, display_name"),
+      ]);
+      if (logsR.error) throw logsR.error;
+      if (profilesR.error) throw profilesR.error;
+      const nameById = new Map((profilesR.data ?? []).map((p) => [p.id, p.display_name ?? "Unknown"]));
+      return (logsR.data ?? []).map((r) => ({ ...r, name: nameById.get(r.canvasser_id) ?? r.canvasser_id.slice(0,8) }));
+    },
+  });
+
+  return (
+    <ArcadePanel
+      title={`All Database Records · daily_logs (${q.data?.length ?? 0})`}
+      action={<span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Raw · Newest First</span>}
+    >
+      {q.isLoading ? (
+        <div className="text-sm text-muted-foreground">Loading…</div>
+      ) : (q.data?.length ?? 0) === 0 ? (
+        <div className="text-sm text-destructive font-medium">
+          ⚠ The database table is EMPTY. No CSV rows saved. Use Manual Data Entry above to add records.
+        </div>
+      ) : (
+        <div className="overflow-x-auto -mx-4 sm:mx-0">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                <th className="px-3 py-2">Date</th>
+                <th className="px-3 py-2">Canvasser</th>
+                <th className="px-3 py-2 text-right">Sits</th>
+                <th className="px-3 py-2 text-right">Sales</th>
+                <th className="px-3 py-2 text-right">No Demo</th>
+                <th className="px-3 py-2 text-right">One Legs</th>
+                <th className="px-3 py-2 text-right">Future</th>
+                <th className="px-3 py-2 text-right">Talked</th>
+                <th className="px-3 py-2 text-right">Called In</th>
+                <th className="px-3 py-2 text-right">Confirmed</th>
+              </tr>
+            </thead>
+            <tbody>
+              {q.data!.map((r) => (
+                <tr key={r.id} className="border-t border-border">
+                  <td className="px-3 py-1.5 font-mono">{r.log_date}</td>
+                  <td className="px-3 py-1.5">{r.name}</td>
+                  <td className="px-3 py-1.5 text-right font-mono">{r.demos_sits}</td>
+                  <td className="px-3 py-1.5 text-right font-mono text-victory">{r.sales}</td>
+                  <td className="px-3 py-1.5 text-right font-mono">{r.no_demo}</td>
+                  <td className="px-3 py-1.5 text-right font-mono">{r.one_legs}</td>
+                  <td className="px-3 py-1.5 text-right font-mono">{r.future_leads}</td>
+                  <td className="px-3 py-1.5 text-right font-mono">{r.people_talked_to}</td>
+                  <td className="px-3 py-1.5 text-right font-mono">{r.leads_called_in}</td>
+                  <td className="px-3 py-1.5 text-right font-mono">{r.confirmed_leads}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </ArcadePanel>
   );
 }
 
