@@ -59,3 +59,47 @@ export const deleteVan = createServerFn({ method: "POST" })
     if (error) throw error;
     return { ok: true };
   });
+
+/**
+ * Owner-only manual weekly entry. Writes a single daily_logs row on the
+ * selected week's Monday using admin client to bypass canvasser-self RLS.
+ * Maps: sales -> sales, demos_sits = sits - sales, no_demo = leads - sits.
+ */
+export const upsertManualWeekly = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => {
+    const o = (data && typeof data === "object") ? data as Record<string, unknown> : {};
+    const canvasser_id = typeof o.canvasser_id === "string" ? o.canvasser_id : "";
+    const week_start = typeof o.week_start === "string" ? o.week_start : "";
+    const total_leads = Math.max(0, Number(o.total_leads ?? 0) | 0);
+    const total_sits = Math.max(0, Number(o.total_sits ?? 0) | 0);
+    const total_sales = Math.max(0, Number(o.total_sales ?? 0) | 0);
+    if (!/^[0-9a-f-]{36}$/i.test(canvasser_id)) throw new Error("Invalid canvasser");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(week_start)) throw new Error("Invalid week");
+    if (total_sales > total_sits) throw new Error("Sales cannot exceed Sits");
+    if (total_sits > total_leads) throw new Error("Sits cannot exceed Leads");
+    return { canvasser_id, week_start, total_leads, total_sits, total_sales };
+  })
+  .handler(async ({ data, context }) => {
+    const { data: roles } = await context.supabase
+      .from("user_roles").select("role").eq("user_id", context.userId);
+    if (!(roles ?? []).some((r) => r.role === "owner")) throw new Error("Only owners");
+
+    const demos_sits = data.total_sits - data.total_sales;
+    const no_demo = data.total_leads - data.total_sits;
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: prof } = await supabaseAdmin
+      .from("profiles").select("team_id").eq("id", data.canvasser_id).maybeSingle();
+
+    const { error } = await supabaseAdmin.from("daily_logs").upsert({
+      canvasser_id: data.canvasser_id,
+      team_id: prof?.team_id ?? null,
+      log_date: data.week_start,
+      demos_sits,
+      sales: data.total_sales,
+      no_demo,
+    }, { onConflict: "canvasser_id,log_date" });
+    if (error) throw error;
+    return { ok: true };
+  });
