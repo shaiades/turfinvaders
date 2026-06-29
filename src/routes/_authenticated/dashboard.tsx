@@ -76,54 +76,36 @@ function VisibilityChip({ on }: { on: boolean }) {
 /* ============ OWNER ============ */
 function OwnerDashboard({ visibility }: { visibility: boolean }) {
   const [importOpen, setImportOpen] = useState(false);
-  const teams = DEMO_TEAMS.map((t) => ({ ...t, totals: teamTotals(t.id) }));
-  const grand = teams.reduce((a, t) => ({
-    doors: a.doors + t.totals.doors, sales: a.sales + t.totals.sales,
-    revenue: a.revenue + t.totals.revenue, members: a.members + t.totals.members,
-  }), { doors: 0, sales: 0, revenue: 0, members: 0 });
-
-  const { data: leads } = useTodayLeads();
-
-  const offices = useQuery({
-    queryKey: ["offices", "with-teams"],
-    queryFn: async () => {
-      const [officesRes, teamsRes] = await Promise.all([
-        supabase.from("offices").select("id, name, color").order("name"),
-        supabase.from("teams").select("id, name, color, office_id").order("name"),
-      ]);
-      if (officesRes.error) throw officesRes.error;
-      if (teamsRes.error) throw teamsRes.error;
-      return { offices: officesRes.data ?? [], teams: teamsRes.data ?? [] };
-    },
-  });
+  const { tab } = Route.useSearch();
+  const navigate = Route.useNavigate();
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Owner View</div>
-          <h1 className="font-display text-2xl text-neon mt-1">COMPANY HQ</h1>
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Owner</div>
+          <h1 className="font-display text-2xl text-foreground mt-1">COMMAND</h1>
         </div>
         <div className="flex items-center gap-3">
           <VisibilityChip on={visibility} />
           <Dialog open={importOpen} onOpenChange={setImportOpen}>
             <DialogTrigger asChild>
               <Button
-                size="lg"
-                className="bg-victory text-background hover:bg-victory/90 font-display text-xs tracking-widest uppercase shadow-[0_0_24px_color-mix(in_oklab,var(--victory)_45%,transparent)]"
+                size="sm"
+                variant="outline"
+                className="font-display text-[10px] tracking-widest uppercase"
               >
-                <FileSpreadsheet className="w-4 h-4 mr-2" />
-                Import Monday.com CSV
+                <FileSpreadsheet className="w-3.5 h-3.5 mr-2" />
+                Import CSV
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-3xl bg-background border-neon/40">
+            <DialogContent className="max-w-3xl">
               <DialogHeader>
-                <DialogTitle className="font-display text-neon uppercase tracking-widest text-sm">
+                <DialogTitle className="font-display uppercase tracking-widest text-sm">
                   Import Monday.com CSV
                 </DialogTitle>
                 <DialogDescription>
-                  Drop any Monday.com CSV below. The importer scans headers dynamically, detects BO/OL/RS/PM/Sale outcomes,
-                  auto-creates unknown canvassers, and pipes totals through the Paycheck Engine.
+                  Auto-detects BO/OL/RS/PM/Sale outcomes and pipes totals into the Paycheck Engine.
                 </DialogDescription>
               </DialogHeader>
               <HistoricalImporter />
@@ -132,129 +114,24 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
         </div>
       </div>
 
-      {/* Master Live Lead Counter — company-wide leads today */}
-      <div className="arcade-card p-6 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-        <div>
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-            Live · All Offices
-          </div>
-          <h2 className="font-display text-lg text-neon mt-1">TOTAL LEADS TODAY</h2>
-          <p className="text-xs text-muted-foreground mt-1">
-            Auto-summed from every Van across the company. Updates in real time.
-          </p>
-        </div>
-        <LiveLeadCounter value={leads.total} size="lg" accent="victory" label="LEADS · TODAY" />
-      </div>
-
-      <Tabs defaultValue="executive" className="space-y-4">
+      <Tabs
+        value={tab}
+        onValueChange={(v) => navigate({ search: { tab: v as OwnerTab }, replace: true })}
+        className="space-y-4"
+      >
         <TabsList className="bg-surface">
-          <TabsTrigger value="executive">Executive</TabsTrigger>
-          <TabsTrigger value="command">Command Center</TabsTrigger>
-          <TabsTrigger value="matrix">Performance Matrix</TabsTrigger>
-          <TabsTrigger value="payroll">Payroll Ledger</TabsTrigger>
+          <TabsTrigger value="executive">Executive Dashboard</TabsTrigger>
           <TabsTrigger value="fleet">Fleet Manager</TabsTrigger>
-          <TabsTrigger value="import">Historical Importer</TabsTrigger>
+          <TabsTrigger value="payroll">Payroll Ledger</TabsTrigger>
         </TabsList>
         <TabsContent value="executive" className="mt-0"><ExecutiveDashboard /></TabsContent>
-        <TabsContent value="command" className="mt-0"><CommandCenter /></TabsContent>
-        <TabsContent value="matrix" className="mt-0"><PerformanceMatrix /></TabsContent>
-        <TabsContent value="payroll" className="mt-0"><PayrollLedger /></TabsContent>
         <TabsContent value="fleet" className="mt-0"><FleetManager /></TabsContent>
-        <TabsContent value="import" className="mt-0"><HistoricalImporter /></TabsContent>
+        <TabsContent value="payroll" className="mt-0"><PayrollLedger /></TabsContent>
       </Tabs>
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard label="Total Revenue" value={formatCurrency(grand.revenue)} accent="victory" />
-        <StatCard label="Doors Knocked" value={grand.doors.toLocaleString()} accent="neon" />
-        <StatCard label="Sales Closed" value={grand.sales.toLocaleString()} accent="accent" />
-        <StatCard label="Active Players" value={grand.members} accent="warning" />
-      </div>
-
-      <ArcadePanel title="Offices">
-        {offices.isLoading ? (
-          <div className="text-sm text-muted-foreground">Loading offices…</div>
-        ) : (offices.data?.offices.length ?? 0) === 0 ? (
-          <div className="text-sm text-muted-foreground">No offices yet.</div>
-        ) : (
-          <div className="space-y-5">
-            {offices.data!.offices.map((o) => {
-              const vans = offices.data!.teams.filter((t) => t.office_id === o.id);
-              return (
-                <div key={o.id} className="border border-border rounded-lg p-4">
-                  <div className="flex items-center justify-between gap-4 flex-wrap">
-                    <div className="flex items-center gap-3">
-                      <span
-                        className="w-9 h-9 rounded-md grid place-items-center"
-                        style={{ background: `color-mix(in oklab, ${o.color} 18%, transparent)`, color: o.color }}
-                      >
-                        <Building2 className="w-5 h-5" />
-                      </span>
-                      <div>
-                        <div className="font-display text-sm" style={{ color: o.color }}>{o.name}</div>
-                        <div className="text-xs text-muted-foreground">{vans.length} vans</div>
-                      </div>
-                    </div>
-                    <LiveLeadCounter
-                      value={leads.byOffice[o.id] ?? 0}
-                      size="md"
-                      label={`${o.name} · LEADS`}
-                    />
-                  </div>
-                  {vans.length > 0 && (
-                    <div className="mt-4 grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                      {vans.map((v) => (
-                        <Link
-                          key={v.id}
-                          to="/teams/$teamId"
-                          params={{ teamId: v.id }}
-                          className="arcade-card p-3 flex items-center justify-between gap-3 hover:arcade-card-glow transition-shadow"
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <Truck className="w-4 h-4 shrink-0" style={{ color: v.color }} />
-                            <TeamBadge name={v.name} color={v.color} />
-                          </div>
-                          <LiveLeadCounter
-                            value={leads.byTeam[v.id] ?? 0}
-                            size="sm"
-                            label="LEADS"
-                          />
-                        </Link>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </ArcadePanel>
-
-      <ArcadePanel title="All Teams (Legacy Mock)">
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {teams.map((t) => (
-            <Link key={t.id} to="/teams/$teamId" params={{ teamId: t.id }} className="arcade-card p-5 hover:arcade-card-glow transition-shadow">
-              <div className="flex items-center justify-between">
-                <TeamBadge name={t.name} color={t.color} />
-                <span className="text-xs text-muted-foreground">{t.totals.members} players</span>
-              </div>
-              <div className="mt-4 grid grid-cols-3 gap-2 text-center">
-                <Mini label="Doors" value={t.totals.doors.toLocaleString()} />
-                <Mini label="Sales" value={t.totals.sales.toLocaleString()} />
-                <Mini label="Rev" value={formatCurrency(t.totals.revenue)} />
-              </div>
-              <div className="mt-4 text-xs text-muted-foreground">Captain · <span className="text-foreground">{t.captain}</span></div>
-            </Link>
-          ))}
-        </div>
-      </ArcadePanel>
     </div>
   );
 }
 
-/* ============ CAPTAIN ============ */
-function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visibility: boolean }) {
-  const PLACEHOLDER_TEAM = { id: "", name: "Unassigned", color: "#10b981", captain: "" };
-  const myTeamId = teamId ?? DEMO_TEAMS[0]?.id ?? "";
   const myTeam = DEMO_TEAMS.find((t) => t.id === myTeamId) ?? DEMO_TEAMS[0] ?? PLACEHOLDER_TEAM;
   const members = demoCanvassers().filter((c) => c.teamId === myTeam.id).sort((a, b) => b.revenueGenerated - a.revenueGenerated);
   const totals = teamTotals(myTeam.id);
