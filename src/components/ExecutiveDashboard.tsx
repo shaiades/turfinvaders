@@ -29,9 +29,9 @@ function leadsSum(r: { demos_sits?: number | null; sales?: number | null; no_dem
 export function ExecutiveDashboard() {
   return (
     <div className="space-y-6">
+      <DatabaseCleanup />
       <LiveFleetStatus />
       <WeeklyResults />
-      <DatabaseCleanup />
     </div>
   );
 }
