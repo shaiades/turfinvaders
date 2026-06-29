@@ -247,8 +247,9 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
 
 /* ============ CAPTAIN ============ */
 function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visibility: boolean }) {
-  const myTeamId = teamId ?? DEMO_TEAMS[0].id; // demo fallback
-  const myTeam = DEMO_TEAMS.find((t) => t.id === myTeamId) ?? DEMO_TEAMS[0];
+  const PLACEHOLDER_TEAM = { id: "", name: "Unassigned", color: "#10b981", captain: "" };
+  const myTeamId = teamId ?? DEMO_TEAMS[0]?.id ?? "";
+  const myTeam = DEMO_TEAMS.find((t) => t.id === myTeamId) ?? DEMO_TEAMS[0] ?? PLACEHOLDER_TEAM;
   const members = demoCanvassers().filter((c) => c.teamId === myTeam.id).sort((a, b) => b.revenueGenerated - a.revenueGenerated);
   const totals = teamTotals(myTeam.id);
   const { data: leads } = useTodayLeads();
