@@ -48,11 +48,20 @@ function normalizeOutcome(raw: string | null | undefined): Outcome | null {
   if (!raw) return null;
   const k = raw.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
   if (!k) return null;
-  // Confirmation Dept lead-status vocabulary (takes precedence — most specific first).
+  // EXACT Monday.com Lead Status strings (authoritative):
+  // 'N/A' / 'N/A x2' / 'N/A x3' / 'N/A x4' → SUBMITTED (Leads Called In only)
+  // 'Confirmed' → CONFIRMED_NEXT_DAY (Confirmed for Tomorrow)
+  // 'Future' → CONFIRMED_FUTURE (Confirmed for Future)
+  // 'Blowout' / 'Disconnected' → BO (Blowouts / Not Good)
+  if (/^na(x\d+)?$/.test(k)) return "SUBMITTED";
+  if (k === "confirmed") return "CONFIRMED_NEXT_DAY";
+  if (k === "future") return "CONFIRMED_FUTURE";
+  if (k === "blowout" || k === "disconnected" || k === "disconnect") return "BO";
+  // Legacy / alternate vocabulary fallbacks.
   if (k === "confirmednextday" || k.includes("nextday") || k.includes("tomorrow")) return "CONFIRMED_NEXT_DAY";
   if (k === "confirmedfuture" || (k.startsWith("confirmed") && k.includes("future")) || k.includes("futureconfirmed")) return "CONFIRMED_FUTURE";
   if (k === "submitted" || k === "pending" || k === "new") return "SUBMITTED";
-  if (k === "blowout" || k === "bo" || k.includes("blowout") || k === "notgood" || k.includes("notgood")) return "BO";
+  if (k === "bo" || k.includes("blowout") || k.includes("disconnect") || k === "notgood" || k.includes("notgood")) return "BO";
   if (["ctc", "calltocancel", "cancel", "cancelled", "canceled"].includes(k) || k.includes("calltocancel") || k.includes("cancel")) return "CTC";
   if (["ol", "1leg", "oneleg", "onelegs"].includes(k) || k.includes("oneleg") || k.includes("1leg")) return "OL";
   if (["rs", "reset", "resets", "futurelead", "futureleads"].includes(k) || k.includes("reset")) return "RS";
