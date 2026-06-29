@@ -61,7 +61,7 @@ const STATUS_HEADERS = [
   "Lead Status", "Status", "Outcome", "Result", "Disposition", "Lead Outcome",
 ];
 
-const SALE_PRICE_HEADERS = ["Sale Price", "Sale Amount", "Amount"];
+const SALE_PRICE_HEADERS = ["Sale Price"];
 
 function isBlankCell(v: unknown): boolean {
   if (v === null || v === undefined) return true;
@@ -188,7 +188,7 @@ export function HistoricalImporter({ defaultTeamId }: { defaultTeamId?: string |
         <Upload className="w-8 h-8 mx-auto text-neon mb-3" />
         <div className="font-display text-sm text-neon">DROP MONDAY.COM CSV HERE</div>
         <div className="text-xs text-muted-foreground mt-2">
-          Any CSV accepted. Uses <span className="text-foreground">Agent · Date · Sale Price/Amount</span>, then detects{" "}
+          Any CSV accepted. Uses <span className="text-foreground">Agent · Date · Sale Price</span>, then detects{" "}
           <span className="text-foreground">Blowout · CTC · Reset · Sit · Sale</span>.
 
         </div>
