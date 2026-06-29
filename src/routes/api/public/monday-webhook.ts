@@ -41,15 +41,19 @@ const json = (body: unknown, status = 200) =>
     headers: { "Content-Type": "application/json", ...CORS },
   });
 
-type Outcome = "BO" | "CTC" | "OL" | "RS" | "PM" | "SALE";
+type Outcome = "BO" | "CTC" | "OL" | "RS" | "PM" | "SALE" | "SUBMITTED" | "CONFIRMED_NEXT_DAY" | "CONFIRMED_FUTURE";
 
 /** Normalize free-text status into the canonical acronym. */
 function normalizeOutcome(raw: string | null | undefined): Outcome | null {
   if (!raw) return null;
   const k = raw.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
   if (!k) return null;
+  // Confirmation Dept lead-status vocabulary (takes precedence — most specific first).
+  if (k === "confirmednextday" || k.includes("nextday") || k.includes("tomorrow")) return "CONFIRMED_NEXT_DAY";
+  if (k === "confirmedfuture" || (k.startsWith("confirmed") && k.includes("future")) || k.includes("futureconfirmed")) return "CONFIRMED_FUTURE";
+  if (k === "submitted" || k === "pending" || k === "new") return "SUBMITTED";
+  if (k === "blowout" || k === "bo" || k.includes("blowout") || k === "notgood" || k.includes("notgood")) return "BO";
   if (["ctc", "calltocancel", "cancel", "cancelled", "canceled"].includes(k) || k.includes("calltocancel") || k.includes("cancel")) return "CTC";
-  if (["bo", "blowout"].includes(k) || k.includes("blowout")) return "BO";
   if (["ol", "1leg", "oneleg", "onelegs"].includes(k) || k.includes("oneleg") || k.includes("1leg")) return "OL";
   if (["rs", "reset", "resets", "futurelead", "futureleads"].includes(k) || k.includes("reset")) return "RS";
   if (["pm", "pitchmiss", "demo", "sit", "demosit", "demositting"].includes(k) || k.includes("pitchmiss") || k.includes("demo") || k.includes("sit")) return "PM";
@@ -58,7 +62,8 @@ function normalizeOutcome(raw: string | null | undefined): Outcome | null {
 }
 
 /** LOCKED point values. Do not change without updating the Paycheck Engine. */
-const POINTS: Record<Outcome, number> = { BO: 0, CTC: 0, OL: 0, RS: 0, PM: 1, SALE: 2 };
+const POINTS: Record<Outcome, number> = { BO: 0, CTC: 0, OL: 0, RS: 0, PM: 1, SALE: 2, SUBMITTED: 0, CONFIRMED_NEXT_DAY: 0, CONFIRMED_FUTURE: 0 };
+
 
 const payloadSchema = z
   .object({
@@ -68,6 +73,8 @@ const payloadSchema = z
     outcome_status: z.string().optional(),
     outcome: z.string().optional(),
     status: z.string().optional(),
+    // Confirmation Dept vocabulary: Submitted | Confirmed_Next_Day | Confirmed_Future | Blowout
+    lead_status: z.string().optional(),
     date_of_action: z.string().optional(),
     date: z.string().optional(),
     sale_price: z.union([z.string(), z.number()]).optional(),
@@ -77,6 +84,7 @@ const payloadSchema = z
     challenge: z.string().optional(),
   })
   .passthrough();
+
 
 function pickFromMondayEvent(ev: any) {
   if (!ev || typeof ev !== "object") return {};
@@ -151,14 +159,30 @@ export const Route = createFileRoute("/api/public/monday-webhook")({
         if (presented !== expected) return json({ error: "Unauthorized" }, 401);
 
         const fromEvent = pickFromMondayEvent(body.event);
+        const rawAny = body as Record<string, unknown>;
         const canvasserName =
-          body.canvasser_name ?? body.agent ?? fromEvent.canvasser_name ?? "";
+          body.canvasser_name ??
+          body.agent ??
+          (rawAny["Canvasser Name"] as string | undefined) ??
+          (rawAny["canvasserName"] as string | undefined) ??
+          fromEvent.canvasser_name ??
+          "";
         const leadName = body.lead_name ?? fromEvent.lead_name ?? null;
         const outcomeRaw =
-          body.outcome_status ?? body.outcome ?? body.status ?? fromEvent.outcome_status;
-        const logDate = parseDate(body.date_of_action ?? body.date ?? fromEvent.date_of_action);
+          body.lead_status ??
+          (rawAny["Lead Status"] as string | undefined) ??
+          (rawAny["leadStatus"] as string | undefined) ??
+          body.outcome_status ??
+          body.outcome ??
+          body.status ??
+          fromEvent.outcome_status;
+        const logDate = parseDate(
+          body.date_of_action ??
+            body.date ??
+            (rawAny["Date"] as string | undefined) ??
+            fromEvent.date_of_action,
+        );
         // Priority: exact Monday column "Sale Price", then aliases, then event-flat fields.
-        const rawAny = body as Record<string, unknown>;
         const salePrice = parseMoney(
           rawAny["Sale Price"] ??
             rawAny["sale price"] ??
@@ -194,11 +218,16 @@ export const Route = createFileRoute("/api/public/monday-webhook")({
         if (upErr) return json({ error: upErr.message }, 500);
 
         // Build per-outcome increment map.
+        // EVERY webhook ping increments leads_called_in (Total Leads Called In
+        // = count of any status received today, per Confirmation Dept spec).
         const inc: Partial<Record<
-          "no_demo" | "one_legs" | "future_leads" | "demos_sits" | "sales",
+          "no_demo" | "one_legs" | "future_leads" | "demos_sits" | "sales" | "next_days" | "confirmed_leads" | "leads_called_in",
           number
-        >> = {};
+        >> = { leads_called_in: 1 };
         switch (outcome) {
+          case "SUBMITTED": break; // raw ping, no bucket increment
+          case "CONFIRMED_NEXT_DAY": inc.next_days = 1; inc.confirmed_leads = 1; break;
+          case "CONFIRMED_FUTURE": inc.future_leads = 1; inc.confirmed_leads = 1; break;
           case "BO": inc.no_demo = 1; break;
           case "CTC": inc.no_demo = 1; break;
           case "OL": inc.one_legs = 1; break;
@@ -206,6 +235,7 @@ export const Route = createFileRoute("/api/public/monday-webhook")({
           case "PM": inc.demos_sits = 1; break;
           case "SALE": inc.demos_sits = 1; inc.sales = 1; break;
         }
+
 
         // Read current values, apply increments, write back.
         const fields = Object.keys(inc) as (keyof typeof inc)[];
