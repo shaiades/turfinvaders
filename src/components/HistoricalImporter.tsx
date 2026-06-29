@@ -16,11 +16,44 @@ type ParsedRow = {
   lead_name?: string | null;
 };
 
+function norm(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
 function pick(row: Record<string, unknown>, ...names: string[]): string {
   const keys = Object.keys(row);
   for (const n of names) {
-    const k = keys.find((kk) => kk.toLowerCase().replace(/[^a-z]/g, "") === n.toLowerCase().replace(/[^a-z]/g, ""));
+    const k = keys.find((kk) => norm(kk) === norm(n));
     if (k && row[k] != null && String(row[k]).trim() !== "") return String(row[k]).trim();
+  }
+  return "";
+}
+
+// Find a header that contains the substring (case/space/punctuation-insensitive).
+function pickContains(row: Record<string, unknown>, substr: string): string {
+  const keys = Object.keys(row);
+  const s = norm(substr);
+  const k = keys.find((kk) => norm(kk).includes(s));
+  if (k && row[k] != null && String(row[k]).trim() !== "") return String(row[k]).trim();
+  return "";
+}
+
+// Monday.com outcome columns — presence of any non-empty value means that outcome occurred.
+const OUTCOME_COLS = ["BO", "OL", "RS", "PM", "Sale"] as const;
+
+function detectOutcome(row: Record<string, unknown>): string {
+  const keys = Object.keys(row);
+  for (const col of OUTCOME_COLS) {
+    const target = norm(col);
+    const k = keys.find((kk) => norm(kk) === target);
+    if (!k) continue;
+    const v = row[k];
+    if (v == null) continue;
+    const s = String(v).trim();
+    if (!s) continue;
+    const low = s.toLowerCase();
+    if (low === "false" || low === "0" || low === "no" || low === "-") continue;
+    return col;
   }
   return "";
 }
