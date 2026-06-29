@@ -10,12 +10,19 @@ import { z } from "zod";
  * Monday handshake on first save: POST `{ challenge }` → echo back.
  *
  * Translation Dictionary (Outcome_Status → Daily Log + Points):
- *   BO   (Blow Out)    → no_demo +1                                   (0 pts)
- *   OL   (One Leg)     → one_legs +1                                  (0 pts)
- *   RS   (Reset)       → future_leads +1                              (0 pts)
- *   PM   (Pitch Miss)  → demos_sits +1                                (+1 pt)
- *   Sale               → demos_sits +1, sales +1, insert confirmed
- *                        lead with sale_amount = Sale_Price           (+2 pts)
+ *   BO   (Blow Out)        → no_demo +1                                  (0 pts)
+ *   CTC  (Call to Cancel)  → no_demo +1                                  (0 pts)
+ *   OL   (One Leg)         → one_legs +1                                 (0 pts)
+ *   RS   (Reset)           → future_leads +1                             (0 pts)
+ *   PM   (Sit / Pitch Miss)→ demos_sits +1                               (+1 pt)
+ *   Sale                   → demos_sits +1, sales +1, insert confirmed
+ *                            lead with sale_amount = Sale_Price          (+2 pts)
+ *
+ * LOCKED POINT VALUES (Paycheck Engine source of truth):
+ *   Sale = 2, Sit = 1, Blowout = 0, CTC = 0, Reset = 0, One Leg = 0.
+ *   Total Points = (Sit Count * 1) + (Sale Count * 2).
+ *   Hourly base pay tier ($18 / $30 / $35) is driven exclusively by
+ *   Total Points (see calc_weekly_paycheck).
  *
  * Commission is computed downstream by the Paycheck Engine from
  * leads.sale_amount and the canvasser's weekly point tier (1% / 2%).
@@ -34,13 +41,14 @@ const json = (body: unknown, status = 200) =>
     headers: { "Content-Type": "application/json", ...CORS },
   });
 
-type Outcome = "BO" | "OL" | "RS" | "PM" | "SALE";
+type Outcome = "BO" | "CTC" | "OL" | "RS" | "PM" | "SALE";
 
 /** Normalize free-text status into the canonical acronym. */
 function normalizeOutcome(raw: string | null | undefined): Outcome | null {
   if (!raw) return null;
   const k = raw.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
   if (!k) return null;
+  if (["ctc", "calltocancel", "cancel", "cancelled", "canceled"].includes(k) || k.includes("calltocancel") || k.includes("cancel")) return "CTC";
   if (["bo", "blowout"].includes(k) || k.includes("blowout")) return "BO";
   if (["ol", "1leg", "oneleg", "onelegs"].includes(k) || k.includes("oneleg") || k.includes("1leg")) return "OL";
   if (["rs", "reset", "resets", "futurelead", "futureleads"].includes(k) || k.includes("reset")) return "RS";
@@ -49,8 +57,8 @@ function normalizeOutcome(raw: string | null | undefined): Outcome | null {
   return null;
 }
 
-/** Points per outcome. */
-const POINTS: Record<Outcome, number> = { BO: 0, OL: 0, RS: 0, PM: 1, SALE: 2 };
+/** LOCKED point values. Do not change without updating the Paycheck Engine. */
+const POINTS: Record<Outcome, number> = { BO: 0, CTC: 0, OL: 0, RS: 0, PM: 1, SALE: 2 };
 
 const payloadSchema = z
   .object({
@@ -192,6 +200,7 @@ export const Route = createFileRoute("/api/public/monday-webhook")({
         >> = {};
         switch (outcome) {
           case "BO": inc.no_demo = 1; break;
+          case "CTC": inc.no_demo = 1; break;
           case "OL": inc.one_legs = 1; break;
           case "RS": inc.future_leads = 1; break;
           case "PM": inc.demos_sits = 1; break;
