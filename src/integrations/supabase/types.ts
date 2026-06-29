@@ -525,6 +525,39 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      calc_monthly_paycheck: {
+        Args: { _canvasser_id: string; _month_start: string }
+        Returns: {
+          month_end: string
+          month_start: string
+          sale_price_total: number
+          total_pay: number
+          total_points: number
+          total_sales: number
+          total_sits: number
+          volume_bonus: number
+          weekly_pay_total: number
+        }[]
+      }
+      calc_weekly_paycheck: {
+        Args: { _canvasser_id: string; _week_start: string }
+        Returns: {
+          base_pay: number
+          commission: number
+          commission_rate: number
+          hourly_rate: number
+          hours: number
+          monster_bonus: number
+          points: number
+          sale_price_total: number
+          sales: number
+          sit_bonus: number
+          sits: number
+          total_pay: number
+          week_end: string
+          week_start: string
+        }[]
+      }
       evaluate_canvasser_suspension: {
         Args: { _canvasser_id: string }
         Returns: undefined
