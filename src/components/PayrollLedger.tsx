@@ -7,6 +7,7 @@ import { ArcadePanel, TeamBadge } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { RankPill } from "@/components/RankPill";
 import { cn } from "@/lib/utils";
 
 type LogRow = {
@@ -101,7 +102,7 @@ export function PayrollLedger() {
           .eq("status", "confirmed")
           .gte("created_at", `${startStr}T00:00:00Z`)
           .lte("created_at", `${endStr}T23:59:59Z`),
-        supabase.from("profiles").select("id, display_name, team_id"),
+        supabase.from("profiles").select("id, display_name, team_id, current_rank"),
         supabase.from("teams").select("id, name, color"),
       ]);
       if (logsRes.error) throw logsRes.error;
@@ -147,11 +148,15 @@ export function PayrollLedger() {
         a.total = a.bo + a.ol + a.rs + a.pm + a.sales;
         const profile = profileById.get(cid);
         const team = profile?.team_id ? teamById.get(profile.team_id) : null;
-        const rate = payRate(a.points);
-        const commRate = commissionRate(a.points);
+        const rank = (profile as any)?.current_rank ?? "Jr. Silver";
+        const isDiamondLock = rank === "Jr. Diamond" || rank === "Sr. Diamond" || rank === "Captain";
+        const isSrGoldPlus = isDiamondLock || rank === "Sr. Gold";
+        const rate = isDiamondLock ? 35 : payRate(a.points);
+        const commRate = isDiamondLock ? 0.02 : commissionRate(a.points);
+        const sitBonusPer = isSrGoldPlus ? 75 : 50;
         const base = ASSUMED_HOURS * rate;
         const commission = a.sale_amount * commRate;
-        const sitBonus = Math.max(0, a.sits - 3) * 50;
+        const sitBonus = Math.max(0, a.sits - 3) * sitBonusPer;
         const monster = a.points >= 10 ? 500 : 0;
         const bonuses = sitBonus + monster;
         const total = base + commission + bonuses;
@@ -159,12 +164,14 @@ export function PayrollLedger() {
           id: cid,
           name: profile?.display_name ?? "Unknown",
           team,
+          rank,
           ...a,
           rate,
           commRate,
           base,
           commission,
           sitBonus,
+          sitBonusPer,
           monster,
           bonuses,
           totalPay: total,
@@ -185,6 +192,7 @@ export function PayrollLedger() {
   function exportCsv() {
     const headers = [
       "Agent Name",
+      "Rank",
       "Van / Team",
       "Total Leads",
       "Results Breakdown",
@@ -196,6 +204,7 @@ export function PayrollLedger() {
       "Sale Price Total",
       "Commission Rate",
       "Commission Earned",
+      "Sit Bonus ($/sit)",
       "Sit Bonus",
       "Monster Bonus",
       "Bonuses Total",
@@ -206,6 +215,7 @@ export function PayrollLedger() {
       const breakdown = `${r.bo} BO, ${r.ol} OL, ${r.rs} RS, ${r.pm} PM, ${r.sales} Sale`;
       const cells = [
         r.name,
+        r.rank,
         r.team?.name ?? "Unassigned",
         r.total,
         breakdown,
@@ -217,6 +227,7 @@ export function PayrollLedger() {
         r.sale_amount.toFixed(2),
         `${(r.commRate * 100).toFixed(0)}%`,
         r.commission.toFixed(2),
+        `$${r.sitBonusPer}`,
         r.sitBonus.toFixed(2),
         r.monster.toFixed(2),
         r.bonuses.toFixed(2),
@@ -306,6 +317,7 @@ export function PayrollLedger() {
               <thead>
                 <tr className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border">
                   <th className="text-left py-2 pr-3">Agent</th>
+                  <th className="text-left py-2 pr-3">Rank</th>
                   <th className="text-left py-2 pr-3">Van</th>
                   <th className="text-right py-2 pr-3">Leads</th>
                   <th className="text-left py-2 pr-3">Breakdown</th>
@@ -321,6 +333,7 @@ export function PayrollLedger() {
                 {rows.map((r) => (
                   <tr key={r.id} className="border-b border-border/40 hover:bg-surface-elevated">
                     <td className="py-2.5 pr-3 font-medium">{r.name}</td>
+                    <td className="py-2.5 pr-3"><RankPill rank={r.rank} /></td>
                     <td className="py-2.5 pr-3">
                       {r.team ? <TeamBadge name={r.team.name} color={r.team.color} /> : <span className="text-xs text-muted-foreground">—</span>}
                     </td>
@@ -357,7 +370,7 @@ export function PayrollLedger() {
               </tbody>
               <tfoot>
                 <tr className="border-t border-neon/40">
-                  <td colSpan={9} className="py-3 text-right text-[10px] font-display uppercase tracking-widest text-muted-foreground">Grand Total</td>
+                  <td colSpan={10} className="py-3 text-right text-[10px] font-display uppercase tracking-widest text-muted-foreground">Grand Total</td>
                   <td className="py-3 pr-1 text-right font-display text-victory text-base">${grandTotal.toFixed(2)}</td>
                 </tr>
               </tfoot>

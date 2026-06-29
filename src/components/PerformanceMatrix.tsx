@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel, StatCard, TeamBadge } from "@/components/arcade";
+import { RankPill } from "@/components/RankPill";
 
 type Row = {
   canvasser_id: string;
@@ -65,7 +66,7 @@ export function PerformanceMatrix() {
           .select("canvasser_id, team_id, no_demo, one_legs, future_leads, demos_sits, sales, log_date")
           .gte("log_date", start)
           .lte("log_date", end),
-        supabase.from("profiles").select("id, display_name, team_id"),
+        supabase.from("profiles").select("id, display_name, team_id, current_rank"),
         supabase.from("teams").select("id, name, color"),
       ]);
       if (logsRes.error) throw logsRes.error;
@@ -105,12 +106,14 @@ export function PerformanceMatrix() {
         const totals = rollup(rows);
         const profile = profileById.get(cid);
         const team = profile?.team_id ? teamById.get(profile.team_id) : null;
+        const rank = (profile as any)?.current_rank ?? "Jr. Silver";
         return {
           id: cid,
           name: profile?.display_name ?? "Unknown",
           team,
           totals,
           rate: payRate(totals.points),
+          rank,
         };
       })
       .sort((a, b) => b.totals.points - a.totals.points);
@@ -174,6 +177,7 @@ export function PerformanceMatrix() {
               <tr className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border">
                 <th className="text-left py-2">Canvasser</th>
                 <th className="text-left py-2">Van</th>
+                <th className="text-left py-2">Rank</th>
                 <th className="text-right py-2">Leads</th>
                 <th className="text-right py-2">BO</th>
                 <th className="text-right py-2">OL</th>
@@ -191,6 +195,7 @@ export function PerformanceMatrix() {
                   <td className="py-2.5">
                     {c.team ? <TeamBadge name={c.team.name} color={c.team.color} /> : <span className="text-xs text-muted-foreground">—</span>}
                   </td>
+                  <td className="py-2.5"><RankPill rank={c.rank} /></td>
                   <td className="py-2.5 text-right text-victory">{c.totals.total}</td>
                   <td className="py-2.5 text-right">{c.totals.bo}</td>
                   <td className="py-2.5 text-right">{c.totals.ol}</td>
@@ -207,7 +212,7 @@ export function PerformanceMatrix() {
               ))}
               {view.canvassers.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="py-6 text-center text-sm text-muted-foreground">
+                  <td colSpan={11} className="py-6 text-center text-sm text-muted-foreground">
                     No canvasser activity this week.
                   </td>
                 </tr>
