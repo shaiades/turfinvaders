@@ -148,11 +148,15 @@ export function PayrollLedger() {
         a.total = a.bo + a.ol + a.rs + a.pm + a.sales;
         const profile = profileById.get(cid);
         const team = profile?.team_id ? teamById.get(profile.team_id) : null;
-        const rate = payRate(a.points);
-        const commRate = commissionRate(a.points);
+        const rank = (profile as any)?.current_rank ?? "Jr. Silver";
+        const isDiamondLock = rank === "Jr. Diamond" || rank === "Sr. Diamond" || rank === "Captain";
+        const isSrGoldPlus = isDiamondLock || rank === "Sr. Gold";
+        const rate = isDiamondLock ? 35 : payRate(a.points);
+        const commRate = isDiamondLock ? 0.02 : commissionRate(a.points);
+        const sitBonusPer = isSrGoldPlus ? 75 : 50;
         const base = ASSUMED_HOURS * rate;
         const commission = a.sale_amount * commRate;
-        const sitBonus = Math.max(0, a.sits - 3) * 50;
+        const sitBonus = Math.max(0, a.sits - 3) * sitBonusPer;
         const monster = a.points >= 10 ? 500 : 0;
         const bonuses = sitBonus + monster;
         const total = base + commission + bonuses;
@@ -160,12 +164,14 @@ export function PayrollLedger() {
           id: cid,
           name: profile?.display_name ?? "Unknown",
           team,
+          rank,
           ...a,
           rate,
           commRate,
           base,
           commission,
           sitBonus,
+          sitBonusPer,
           monster,
           bonuses,
           totalPay: total,
