@@ -200,6 +200,7 @@ export const Route = createFileRoute("/api/public/monday-webhook")({
         >> = {};
         switch (outcome) {
           case "BO": inc.no_demo = 1; break;
+          case "CTC": inc.no_demo = 1; break;
           case "OL": inc.one_legs = 1; break;
           case "RS": inc.future_leads = 1; break;
           case "PM": inc.demos_sits = 1; break;
