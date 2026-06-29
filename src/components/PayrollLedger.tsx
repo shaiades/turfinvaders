@@ -7,6 +7,7 @@ import { ArcadePanel, TeamBadge } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { RankPill } from "@/components/RankPill";
 import { cn } from "@/lib/utils";
 
 type LogRow = {
