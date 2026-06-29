@@ -192,6 +192,7 @@ export function PayrollLedger() {
   function exportCsv() {
     const headers = [
       "Agent Name",
+      "Rank",
       "Van / Team",
       "Total Leads",
       "Results Breakdown",
@@ -203,6 +204,7 @@ export function PayrollLedger() {
       "Sale Price Total",
       "Commission Rate",
       "Commission Earned",
+      "Sit Bonus ($/sit)",
       "Sit Bonus",
       "Monster Bonus",
       "Bonuses Total",
@@ -213,6 +215,7 @@ export function PayrollLedger() {
       const breakdown = `${r.bo} BO, ${r.ol} OL, ${r.rs} RS, ${r.pm} PM, ${r.sales} Sale`;
       const cells = [
         r.name,
+        r.rank,
         r.team?.name ?? "Unassigned",
         r.total,
         breakdown,
@@ -224,6 +227,7 @@ export function PayrollLedger() {
         r.sale_amount.toFixed(2),
         `${(r.commRate * 100).toFixed(0)}%`,
         r.commission.toFixed(2),
+        `$${r.sitBonusPer}`,
         r.sitBonus.toFixed(2),
         r.monster.toFixed(2),
         r.bonuses.toFixed(2),
