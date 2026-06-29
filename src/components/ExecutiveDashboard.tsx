@@ -98,7 +98,7 @@ function LiveDailyAction() {
   });
 
   // Refresh when a new ping lands.
-  useMemo(() => {
+  useEffect(() => {
     const ch = supabase
       .channel("live-daily-action")
       .on("postgres_changes", { event: "*", schema: "public", table: "daily_logs" }, () => {
@@ -107,6 +107,7 @@ function LiveDailyAction() {
       .subscribe();
     return () => { supabase.removeChannel(ch); };
   }, [qc, today]);
+
 
   const t = q.data?.totals ?? { called: 0, nextDay: 0, future: 0, blowout: 0 };
   const donut = q.data?.donut ?? [];
