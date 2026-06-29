@@ -317,6 +317,7 @@ export function PayrollLedger() {
               <thead>
                 <tr className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border">
                   <th className="text-left py-2 pr-3">Agent</th>
+                  <th className="text-left py-2 pr-3">Rank</th>
                   <th className="text-left py-2 pr-3">Van</th>
                   <th className="text-right py-2 pr-3">Leads</th>
                   <th className="text-left py-2 pr-3">Breakdown</th>
@@ -332,6 +333,7 @@ export function PayrollLedger() {
                 {rows.map((r) => (
                   <tr key={r.id} className="border-b border-border/40 hover:bg-surface-elevated">
                     <td className="py-2.5 pr-3 font-medium">{r.name}</td>
+                    <td className="py-2.5 pr-3"><RankPill rank={r.rank} /></td>
                     <td className="py-2.5 pr-3">
                       {r.team ? <TeamBadge name={r.team.name} color={r.team.color} /> : <span className="text-xs text-muted-foreground">—</span>}
                     </td>
