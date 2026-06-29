@@ -42,17 +42,26 @@ function pickContains(row: Record<string, unknown>, substr: string): string {
   return "";
 }
 
-// Monday.com outcome columns — Sale > PM > BO > OL > RS priority.
-const OUTCOME_COLS = ["Sale", "PM", "BO", "OL", "RS"] as const;
-
-// Map detected column → canonical enum the backend expects.
-const OUTCOME_ENUM: Record<(typeof OUTCOME_COLS)[number], string> = {
-  Sale: "SALE",
-  PM: "PM",
-  BO: "BO",
-  OL: "OL",
-  RS: "RS",
+// Canonical vocabulary: 'Blowout', 'CTC', 'Reset', 'Sit', 'Sale'.
+// Each term maps to the backend enum the importer already understands.
+const OUTCOME_TERMS: Record<string, string> = {
+  blowout: "BO",
+  bo: "BO",
+  ctc: "BO",                // "Call to cancel" rolls up as a no-demo
+  calltocancel: "BO",
+  reset: "RS",
+  rs: "RS",
+  sit: "PM",
+  pm: "PM",
+  sale: "SALE",
+  sold: "SALE",
 };
+
+const STATUS_HEADERS = [
+  "Lead Status", "Status", "Outcome", "Result", "Disposition", "Lead Outcome",
+];
+
+const SALE_PRICE_HEADERS = ["Sale Price", "Sale Amount", "Amount"];
 
 function isBlankCell(v: unknown): boolean {
   if (v === null || v === undefined) return true;
@@ -64,12 +73,20 @@ function isBlankCell(v: unknown): boolean {
 
 function detectOutcome(row: Record<string, unknown>): string {
   const keys = Object.keys(row);
-  for (const col of OUTCOME_COLS) {
+  // 1) Single status column carrying one of the canonical terms.
+  for (const header of STATUS_HEADERS) {
+    const k = keys.find((kk) => norm(kk) === norm(header));
+    if (!k || isBlankCell(row[k])) continue;
+    const term = norm(String(row[k]));
+    if (OUTCOME_TERMS[term]) return OUTCOME_TERMS[term];
+  }
+  // 2) Boolean-style columns named after the canonical terms.
+  //    Sale > Sit > Reset > CTC > Blowout priority.
+  for (const col of ["Sale", "Sit", "Reset", "CTC", "Blowout"]) {
     const target = norm(col);
     const k = keys.find((kk) => norm(kk) === target);
-    if (!k) continue;
-    if (isBlankCell(row[k])) continue;
-    return OUTCOME_ENUM[col];
+    if (!k || isBlankCell(row[k])) continue;
+    return OUTCOME_TERMS[norm(col)];
   }
   return "";
 }
