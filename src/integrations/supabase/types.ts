@@ -357,12 +357,16 @@ export type Database = {
         Row: {
           avatar_url: string | null
           avg_commission: number
+          consecutive_weeks_3_plus_sits: number
+          consecutive_weeks_7_plus_sits: number
           created_at: string
           current_rank: string | null
           display_name: string
           id: string
           level: number
           monthly_goal: number
+          recruits_count: number
+          rolling_4_week_sit_avg: number
           status: Database["public"]["Enums"]["canvasser_status"]
           team_id: string | null
           updated_at: string
@@ -372,12 +376,16 @@ export type Database = {
         Insert: {
           avatar_url?: string | null
           avg_commission?: number
+          consecutive_weeks_3_plus_sits?: number
+          consecutive_weeks_7_plus_sits?: number
           created_at?: string
           current_rank?: string | null
           display_name: string
           id: string
           level?: number
           monthly_goal?: number
+          recruits_count?: number
+          rolling_4_week_sit_avg?: number
           status?: Database["public"]["Enums"]["canvasser_status"]
           team_id?: string | null
           updated_at?: string
@@ -387,12 +395,16 @@ export type Database = {
         Update: {
           avatar_url?: string | null
           avg_commission?: number
+          consecutive_weeks_3_plus_sits?: number
+          consecutive_weeks_7_plus_sits?: number
           created_at?: string
           current_rank?: string | null
           display_name?: string
           id?: string
           level?: number
           monthly_goal?: number
+          recruits_count?: number
+          rolling_4_week_sit_avg?: number
           status?: Database["public"]["Enums"]["canvasser_status"]
           team_id?: string | null
           updated_at?: string
@@ -549,6 +561,7 @@ export type Database = {
           hours: number
           monster_bonus: number
           points: number
+          rank: string
           sale_price_total: number
           sales: number
           sit_bonus: number
@@ -571,6 +584,10 @@ export type Database = {
         Returns: boolean
       }
       my_team_id: { Args: { _user_id: string }; Returns: string }
+      refresh_canvasser_rank: {
+        Args: { _canvasser_id: string }
+        Returns: string
+      }
     }
     Enums: {
       app_role: "owner" | "captain" | "canvasser" | "office_staff"
