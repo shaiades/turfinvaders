@@ -37,9 +37,9 @@ export function HistoricalImporter({ defaultTeamId }: { defaultTeamId?: string |
     mutationFn: async (rows: ParsedRow[]) =>
       importFn({ data: { rows, team_id: defaultTeamId ?? null } }),
     onSuccess: (res) => {
-      toast.success(
-        `Imported · +${res.created_profiles} canvassers · ${res.updated_logs} days · ${res.inserted_sales} sales`,
-      );
+      toast.success("Success: Data Imported!", {
+        description: `+${res.created_profiles} canvassers · ${res.updated_logs} days · ${res.inserted_sales} sales`,
+      });
       if (res.errors?.length) {
         toast.warning(`${res.errors.length} row(s) had issues — first: ${res.errors[0].reason}`);
       }
