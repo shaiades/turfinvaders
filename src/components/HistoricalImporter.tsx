@@ -42,8 +42,25 @@ function pickContains(row: Record<string, unknown>, substr: string): string {
   return "";
 }
 
-// Monday.com outcome columns — presence of any non-empty value means that outcome occurred.
-const OUTCOME_COLS = ["BO", "OL", "RS", "PM", "Sale"] as const;
+// Monday.com outcome columns — Sale > PM > BO > OL > RS priority.
+const OUTCOME_COLS = ["Sale", "PM", "BO", "OL", "RS"] as const;
+
+// Map detected column → canonical enum the backend expects.
+const OUTCOME_ENUM: Record<(typeof OUTCOME_COLS)[number], string> = {
+  Sale: "SALE",
+  PM: "PM",
+  BO: "BO",
+  OL: "OL",
+  RS: "RS",
+};
+
+function isBlankCell(v: unknown): boolean {
+  if (v === null || v === undefined) return true;
+  const s = String(v).trim();
+  if (!s) return true;
+  const low = s.toLowerCase();
+  return low === "false" || low === "0" || low === "no" || low === "-" || low === "null" || low === "n/a";
+}
 
 function detectOutcome(row: Record<string, unknown>): string {
   const keys = Object.keys(row);
@@ -51,16 +68,12 @@ function detectOutcome(row: Record<string, unknown>): string {
     const target = norm(col);
     const k = keys.find((kk) => norm(kk) === target);
     if (!k) continue;
-    const v = row[k];
-    if (v == null) continue;
-    const s = String(v).trim();
-    if (!s) continue;
-    const low = s.toLowerCase();
-    if (low === "false" || low === "0" || low === "no" || low === "-") continue;
-    return col;
+    if (isBlankCell(row[k])) continue;
+    return OUTCOME_ENUM[col];
   }
   return "";
 }
+
 
 export function HistoricalImporter({ defaultTeamId }: { defaultTeamId?: string | null }) {
   const qc = useQueryClient();
@@ -103,8 +116,11 @@ export function HistoricalImporter({ defaultTeamId }: { defaultTeamId?: string |
             const lead_name = pick(raw, "Lead", "Customer", "Lead Name", "Customer Name");
             const outcome = detectOutcome(raw);
             return { agent, outcome, date, sale_price: sale_price || null, lead_name: lead_name || null };
-          });
+          })
+          // Skip blank-agent rows and rows with no detected outcome — no error toast, just ignore.
+          .filter((r) => r.agent && r.outcome);
         setPreview(rows);
+
       },
       error: (err) => toast.error(`CSV parse failed: ${err.message}`),
     });
