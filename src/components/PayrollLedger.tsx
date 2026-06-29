@@ -370,7 +370,7 @@ export function PayrollLedger() {
               </tbody>
               <tfoot>
                 <tr className="border-t border-neon/40">
-                  <td colSpan={9} className="py-3 text-right text-[10px] font-display uppercase tracking-widest text-muted-foreground">Grand Total</td>
+                  <td colSpan={10} className="py-3 text-right text-[10px] font-display uppercase tracking-widest text-muted-foreground">Grand Total</td>
                   <td className="py-3 pr-1 text-right font-display text-victory text-base">${grandTotal.toFixed(2)}</td>
                 </tr>
               </tfoot>
