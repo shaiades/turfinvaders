@@ -1013,5 +1013,3 @@ function TakeHomeWidget({ userId, weeklyPay, hourlyRate, weekPoints }: {
   );
 }
 
-}
-
