@@ -113,6 +113,28 @@ export function HistoricalImporter({ defaultTeamId }: { defaultTeamId?: string |
         <div className="text-[10px] text-muted-foreground mt-1">or click to browse</div>
       </div>
 
+      <Button
+        size="lg"
+        disabled={!preview || importMut.isPending}
+        onClick={() => preview && importMut.mutate(preview)}
+        className={`mt-4 w-full font-display tracking-widest text-base h-14 transition-all ${
+          preview && !importMut.isPending
+            ? "bg-neon text-background hover:bg-neon/90 shadow-[0_0_20px_var(--neon),0_0_40px_var(--neon)] animate-pulse"
+            : "bg-surface text-muted-foreground border border-border cursor-not-allowed"
+        }`}
+      >
+        {importMut.isPending ? (
+          <span className="flex items-center gap-2">
+            <span className="w-4 h-4 border-2 border-background border-t-transparent rounded-full animate-spin" />
+            PROCESSING…
+          </span>
+        ) : (
+          <span className="flex items-center gap-2">
+            <CheckCircle2 className="w-5 h-5" /> PROCESS CSV
+          </span>
+        )}
+      </Button>
+
       {filename && (
         <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
           <FileSpreadsheet className="w-4 h-4 text-neon" />
