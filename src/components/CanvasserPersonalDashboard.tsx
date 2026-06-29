@@ -281,7 +281,7 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
       const newRank = current.key;
       // Skip first-ever stamp (no level-up alert when seeding).
       if (stored === newRank) return;
-      await supabase.from("profiles").update({ current_rank: newRank } as never).eq("id", userId);
+      // SCCE Rank Engine owns profiles.current_rank server-side — do not overwrite from legacy ladder.
       if (stored && stored !== newRank) {
         await supabase.from("hype_events").insert({
           kind: "level_up",
