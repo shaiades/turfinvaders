@@ -10,6 +10,7 @@ import { FleetManager } from "@/components/FleetManager";
 import { HistoricalImporter } from "@/components/HistoricalImporter";
 import { PerformanceMatrix } from "@/components/PerformanceMatrix";
 import { PayrollLedger } from "@/components/PayrollLedger";
+import { ExecutiveDashboard } from "@/components/ExecutiveDashboard";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -139,14 +140,16 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
         <LiveLeadCounter value={leads.total} size="lg" accent="victory" label="LEADS · TODAY" />
       </div>
 
-      <Tabs defaultValue="command" className="space-y-4">
+      <Tabs defaultValue="executive" className="space-y-4">
         <TabsList className="bg-surface">
+          <TabsTrigger value="executive">Executive</TabsTrigger>
           <TabsTrigger value="command">Command Center</TabsTrigger>
           <TabsTrigger value="matrix">Performance Matrix</TabsTrigger>
           <TabsTrigger value="payroll">Payroll Ledger</TabsTrigger>
           <TabsTrigger value="fleet">Fleet Manager</TabsTrigger>
           <TabsTrigger value="import">Historical Importer</TabsTrigger>
         </TabsList>
+        <TabsContent value="executive" className="mt-0"><ExecutiveDashboard /></TabsContent>
         <TabsContent value="command" className="mt-0"><CommandCenter /></TabsContent>
         <TabsContent value="matrix" className="mt-0"><PerformanceMatrix /></TabsContent>
         <TabsContent value="payroll" className="mt-0"><PayrollLedger /></TabsContent>
