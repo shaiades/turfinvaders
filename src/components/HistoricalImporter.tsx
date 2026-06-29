@@ -61,7 +61,7 @@ const STATUS_HEADERS = [
   "Lead Status", "Status", "Outcome", "Result", "Disposition", "Lead Outcome",
 ];
 
-const SALE_PRICE_HEADERS = ["Sale Price", "Sale Amount", "Amount"];
+const SALE_PRICE_HEADERS = ["Sale Price"];
 
 function isBlankCell(v: unknown): boolean {
   if (v === null || v === undefined) return true;
