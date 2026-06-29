@@ -113,8 +113,8 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
                   Import Monday.com CSV
                 </DialogTitle>
                 <DialogDescription>
-                  Drop a Monday.com export below. Rows are parsed (Agent · Outcome · Date · Sale Price),
-                  unknown canvassers auto-created, and totals piped through the Paycheck Engine.
+                  Drop any Monday.com CSV below. The importer scans headers dynamically, detects BO/OL/RS/PM/Sale outcomes,
+                  auto-creates unknown canvassers, and pipes totals through the Paycheck Engine.
                 </DialogDescription>
               </DialogHeader>
               <HistoricalImporter />

@@ -29,6 +29,10 @@ function pick(row: Record<string, unknown>, ...names: string[]): string {
   return "";
 }
 
+function hasAnyValue(row: Record<string, unknown>): boolean {
+  return Object.values(row).some((v) => v != null && String(v).trim() !== "");
+}
+
 // Find a header that contains the substring (case/space/punctuation-insensitive).
 function pickContains(row: Record<string, unknown>, substr: string): string {
   const keys = Object.keys(row);
@@ -85,31 +89,21 @@ export function HistoricalImporter({ defaultTeamId }: { defaultTeamId?: string |
 
   const handleFile = useCallback((file: File) => {
     setFilename(file.name);
+    setPreview(null);
     Papa.parse<Record<string, unknown>>(file, {
       header: true,
       skipEmptyLines: true,
       complete: (res) => {
-        const rows: ParsedRow[] = [];
-        for (const raw of res.data) {
-          const agent = pick(raw, "Agent", "Canvasser", "Rep", "Sales Rep", "Name");
-          // Outcome: detect from Monday.com per-column flags (BO/OL/RS/PM/Sale).
-          let outcome = detectOutcome(raw);
-          // Fallback to a legacy "Outcome" column if present.
-          if (!outcome) outcome = pick(raw, "Outcome", "Status", "Result", "Outcome Status");
-          // Date: prefer "Date/Time", else any header containing "Date".
-          let date = pick(raw, "Date/Time", "DateTime", "Date of Action", "Action Date");
-          if (!date) date = pickContains(raw, "date");
-          if (!date) date = pick(raw, "Created");
-          const sale_price = pick(raw, "Sale Price", "SalePrice", "Price", "Amount", "Deal Value");
-          const lead_name = pick(raw, "Lead", "Customer", "Lead Name", "Customer Name");
-          if (!agent || !outcome || !date) continue;
-          rows.push({ agent, outcome, date, sale_price: sale_price || null, lead_name: lead_name || null });
-        }
-        if (rows.length === 0) {
-          toast.error("No usable rows found. Need an Agent column, a Date column, and at least one of BO/OL/RS/PM/Sale.");
-          setPreview(null);
-          return;
-        }
+        const rows: ParsedRow[] = res.data
+          .filter(hasAnyValue)
+          .map((raw) => {
+            const agent = pick(raw, "Agent");
+            const date = pick(raw, "Date/Time") || pickContains(raw, "date");
+            const sale_price = pick(raw, "Sale Price");
+            const lead_name = pick(raw, "Lead", "Customer", "Lead Name", "Customer Name");
+            const outcome = detectOutcome(raw);
+            return { agent, outcome, date, sale_price: sale_price || null, lead_name: lead_name || null };
+          });
         setPreview(rows);
       },
       error: (err) => toast.error(`CSV parse failed: ${err.message}`),
@@ -146,8 +140,8 @@ export function HistoricalImporter({ defaultTeamId }: { defaultTeamId?: string |
         <Upload className="w-8 h-8 mx-auto text-neon mb-3" />
         <div className="font-display text-sm text-neon">DROP MONDAY.COM CSV HERE</div>
         <div className="text-xs text-muted-foreground mt-2">
-          Required columns: <span className="text-foreground">Agent · Outcome · Date</span> ·{" "}
-          <span className="text-foreground">Sale Price</span> (optional)
+          Any CSV accepted. Uses <span className="text-foreground">Agent · Date/Time · Sale Price</span>, then detects{" "}
+          <span className="text-foreground">BO · OL · RS · PM · Sale</span> cells.
         </div>
         <div className="text-[10px] text-muted-foreground mt-1">or click to browse</div>
       </div>
@@ -178,7 +172,7 @@ export function HistoricalImporter({ defaultTeamId }: { defaultTeamId?: string |
         <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
           <FileSpreadsheet className="w-4 h-4 text-neon" />
           <span className="text-foreground">{filename}</span>
-          {preview && <span>· {preview.length} row(s) parsed</span>}
+          {preview && <span>· accepted · {preview.length} row(s) scanned</span>}
         </div>
       )}
 

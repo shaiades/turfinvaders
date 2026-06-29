@@ -1,6 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { z } from "zod";
 
 /**
  * Historical CSV import → Paycheck Engine.
@@ -12,6 +11,43 @@ import { z } from "zod";
  */
 
 type Outcome = "BO" | "OL" | "RS" | "PM" | "SALE";
+
+type CsvImportRow = {
+  agent: string;
+  outcome: string;
+  date: string;
+  sale_price: string | number | null;
+  lead_name: string | null;
+};
+
+type CsvImportInput = {
+  rows: CsvImportRow[];
+  team_id: string | null;
+};
+
+function toStringValue(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  return String(v).trim();
+}
+
+function coerceCsvImportInput(data: unknown): CsvImportInput {
+  const input = data && typeof data === "object" ? data as Record<string, unknown> : {};
+  const rows = Array.isArray(input.rows) ? input.rows : [];
+  const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  return {
+    rows: rows.slice(0, 5000).map((raw) => {
+      const row = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+      return {
+        agent: toStringValue(row.agent),
+        outcome: toStringValue(row.outcome),
+        date: toStringValue(row.date),
+        sale_price: row.sale_price === null || row.sale_price === undefined ? null : toStringValue(row.sale_price),
+        lead_name: toStringValue(row.lead_name) || null,
+      };
+    }),
+    team_id: typeof input.team_id === "string" && uuidLike.test(input.team_id) ? input.team_id : null,
+  };
+}
 
 function normalizeOutcome(raw: string | null | undefined): Outcome | null {
   if (!raw) return null;
@@ -51,22 +87,9 @@ function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 40) || "agent";
 }
 
-const rowSchema = z.object({
-  agent: z.string().min(1),
-  outcome: z.string().min(1),
-  date: z.string().min(1),
-  sale_price: z.union([z.string(), z.number()]).nullable().optional(),
-  lead_name: z.string().nullable().optional(),
-});
-
-const inputSchema = z.object({
-  rows: z.array(rowSchema).min(1).max(5000),
-  team_id: z.string().uuid().nullable().optional(),
-});
-
 export const importHistoricalCsv = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => inputSchema.parse(data))
+  .inputValidator(coerceCsvImportInput)
   .handler(async ({ data, context }) => {
     // Owner gate
     const { data: isOwner, error: roleErr } = await context.supabase.rpc("has_role", {
