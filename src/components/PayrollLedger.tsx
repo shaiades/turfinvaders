@@ -324,9 +324,10 @@ export function PayrollLedger() {
                   <th className="text-right py-2 pr-3">Sits</th>
                   <th className="text-right py-2 pr-3">Pts</th>
                   <th className="text-right py-2 pr-3">Rate</th>
-                  <th className="text-right py-2 pr-3">Commission</th>
+                  <th className="text-right py-2 pr-3">Total Sales Volume ($)</th>
+                  <th className="text-right py-2 pr-3">Commission Earned ($)</th>
                   <th className="text-right py-2 pr-3">Bonuses</th>
-                  <th className="text-right py-2 pr-1">Total Pay</th>
+                  <th className="text-right py-2 pr-1">Total Estimated Pay ($)</th>
                 </tr>
               </thead>
               <tbody>
