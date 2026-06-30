@@ -570,6 +570,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      auto_clock_out_expired: { Args: never; Returns: number }
       calc_monthly_paycheck: {
         Args: { _canvasser_id: string; _month_start: string }
         Returns: {
