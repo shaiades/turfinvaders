@@ -1,11 +1,10 @@
 // Supabase Edge Function: monday-live-dispatch
-// Raw Monday.com webhook receiver. Returns naked JSON for challenge handshake.
+// Monday.com webhook receiver. Handles challenge handshake, then resolves
+// the canvasser name via a GraphQL callback (Monday payloads only contain
+// pulseId + status, not the agent name) and upserts daily_metrics.
 //
 // Endpoint: https://<project-ref>.supabase.co/functions/v1/monday-live-dispatch
 // Auth: verify_jwt = false (see supabase/config.toml)
-//
-// POST body: { canvasser_name: string, status: string }
-// Optional security header: x-monday-secret: <MONDAY_WEBHOOK_SECRET>
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-nocheck
@@ -50,15 +49,52 @@ function mapStatus(raw: string): Bucket {
   return "pending";
 }
 
+function extractEvent(parsed: any): { pulseId?: number; status?: string } {
+  const ev = parsed?.event ?? {};
+  const pulseId =
+    typeof ev.pulseId === "number"
+      ? ev.pulseId
+      : typeof ev.pulseId === "string"
+        ? Number(ev.pulseId)
+        : undefined;
+  const status =
+    ev?.value?.label?.text ??
+    ev?.value?.label ??
+    ev?.value?.text ??
+    (typeof parsed?.status === "string" ? parsed.status : undefined);
+  return { pulseId, status };
+}
+
+async function fetchCanvasserNameFromMonday(
+  pulseId: number,
+  token: string,
+): Promise<{ name: string | null; raw: unknown }> {
+  const query = `query { items (ids: [${pulseId}]) { column_values { column { title } text } } }`;
+  const res = await fetch("https://api.monday.com/v2", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: token,
+    },
+    body: JSON.stringify({ query }),
+  });
+  const raw = await res.json().catch(() => ({}));
+  const cols = raw?.data?.items?.[0]?.column_values ?? [];
+  const hit = cols.find((c: any) => {
+    const t = (c?.column?.title ?? "").toLowerCase();
+    return t.includes("agent") || t.includes("canvasser") || t.includes("rep");
+  });
+  const name = typeof hit?.text === "string" && hit.text.trim() ? hit.text.trim() : null;
+  return { name, raw };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: CORS });
   }
-
   if (req.method === "GET") {
     return json({ ok: true, endpoint: "monday-live-dispatch", method: "GET" });
   }
-
   if (req.method !== "POST") {
     return json({ error: "Method not allowed" }, 405);
   }
@@ -70,7 +106,7 @@ Deno.serve(async (req) => {
     return json({ error: "Invalid JSON" }, 400);
   }
 
-  // Monday handshake — naked JSON response, no auth, no DB, nothing.
+  // Monday handshake — naked JSON, no auth, no DB.
   if (
     parsed &&
     typeof parsed === "object" &&
@@ -89,7 +125,7 @@ Deno.serve(async (req) => {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-  // X-RAY log every incoming payload.
+  // X-RAY log
   await admin.from("webhook_logs").insert({
     source: "monday-live-dispatch",
     raw_payload: parsed as never,
@@ -103,16 +139,76 @@ Deno.serve(async (req) => {
     return json({ error: "Unauthorized" }, 401);
   }
 
-  const obj = parsed as Record<string, unknown>;
-  const canvasser_name = typeof obj.canvasser_name === "string" ? obj.canvasser_name : "";
-  const status = typeof obj.status === "string" ? obj.status : "";
+  // ---- Resolve canvasser_name + status ----
+  // Support: (1) legacy body { canvasser_name, status } and
+  // (2) Monday event body { event: { pulseId, value: { label: { text } } } }
+  const obj = parsed as Record<string, any>;
+  let canvasser_name: string | null =
+    typeof obj.canvasser_name === "string" && obj.canvasser_name.trim()
+      ? obj.canvasser_name.trim()
+      : null;
+  const { pulseId, status: evStatus } = extractEvent(obj);
+  const status =
+    typeof obj.status === "string" && obj.status.trim()
+      ? obj.status.trim()
+      : evStatus ?? "";
+
+  if (!canvasser_name && pulseId) {
+    // Fetch token from system_settings, then call Monday GraphQL.
+    const { data: settings } = await admin
+      .from("system_settings")
+      .select("monday_api_token")
+      .eq("id", true)
+      .maybeSingle();
+    const token = settings?.monday_api_token as string | undefined;
+
+    if (!token) {
+      await admin.from("webhook_logs").insert({
+        source: "monday-live-dispatch:no_token",
+        raw_payload: {
+          error: "missing_monday_api_token",
+          pulseId,
+          status,
+        } as never,
+      });
+      return json(
+        { error: "Monday API token not configured in system_settings" },
+        500,
+      );
+    }
+
+    try {
+      const { name, raw } = await fetchCanvasserNameFromMonday(pulseId, token);
+      canvasser_name = name;
+      await admin.from("webhook_logs").insert({
+        source: "monday-live-dispatch:graphql",
+        raw_payload: { pulseId, resolved_name: name, monday_response: raw } as never,
+      });
+    } catch (err) {
+      await admin.from("webhook_logs").insert({
+        source: "monday-live-dispatch:graphql_error",
+        raw_payload: { pulseId, error: String(err) } as never,
+      });
+      return json({ error: "Monday GraphQL fetch failed", details: String(err) }, 502);
+    }
+  }
+
   if (!canvasser_name || !status) {
-    return json({ error: "Invalid payload: canvasser_name & status required" }, 400);
+    return json(
+      {
+        error: "Could not resolve canvasser_name or status",
+        canvasser_name,
+        status,
+        pulseId,
+      },
+      400,
+    );
   }
 
   const bucket = mapStatus(status);
   const isSubmittedOnly = status.trim().toLowerCase() === "submitted";
 
+  // Smart fuzzy lookup
   const wanted = normalizeName(canvasser_name);
   const { data: profiles, error: profErr } = await admin
     .from("profiles")
@@ -141,6 +237,7 @@ Deno.serve(async (req) => {
         canvasser_name,
         normalized: wanted,
         status,
+        pulseId,
         original_payload: parsed,
       } as never,
     });
@@ -188,6 +285,8 @@ Deno.serve(async (req) => {
     ok: true,
     canvasser_id: match.id,
     canvasser_name: match.display_name,
+    resolved_from: pulseId ? "monday_graphql" : "payload",
+    pulseId,
     metric_date,
     status_received: status,
     bucket: bucket ?? "submitted_only",
