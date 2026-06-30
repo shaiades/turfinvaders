@@ -24,6 +24,8 @@ type CsvImportRow = {
 type CsvImportInput = {
   rows: CsvImportRow[];
   team_id: string | null;
+  refresh_existing: boolean;
+  refresh_rows: CsvImportRow[] | null;
 };
 
 function toStringValue(v: unknown): string {
@@ -33,10 +35,9 @@ function toStringValue(v: unknown): string {
 
 function coerceCsvImportInput(data: unknown): CsvImportInput {
   const input = data && typeof data === "object" ? data as Record<string, unknown> : {};
-  const rows = Array.isArray(input.rows) ? input.rows : [];
-  const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  return {
-    rows: rows.slice(0, 5000).map((raw) => {
+  const coerceRows = (value: unknown): CsvImportRow[] => {
+    const rows = Array.isArray(value) ? value : [];
+    return rows.slice(0, 5000).map((raw) => {
       const row = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
       return {
         agent: toStringValue(row.agent),
@@ -46,8 +47,14 @@ function coerceCsvImportInput(data: unknown): CsvImportInput {
         lead_name: toStringValue(row.lead_name) || null,
         van: toStringValue(row.van) || null,
       };
-    }),
+    });
+  };
+  const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  return {
+    rows: coerceRows(input.rows),
     team_id: typeof input.team_id === "string" && uuidLike.test(input.team_id) ? input.team_id : null,
+    refresh_existing: input.refresh_existing !== false,
+    refresh_rows: Array.isArray(input.refresh_rows) ? coerceRows(input.refresh_rows) : null,
   };
 }
 
@@ -127,6 +134,8 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
     // Capture the most recent non-empty Van label per agent so we can
     // permanently assign them to that team in profiles.team_id.
     const vanByAgent = new Map<string, string>();
+
+    const rowsForRefresh = data.refresh_rows ?? data.rows;
 
     for (let i = 0; i < data.rows.length; i++) {
       const r = data.rows[i];
@@ -227,6 +236,12 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
     // Apply Van assignments captured during row scan → permanently
     // overwrites profiles.team_id so the Payroll Ledger shows the Van label
     // even when later CSVs leave the Van column blank.
+    for (const r of rowsForRefresh) {
+      const name = r.agent.trim();
+      const vanRaw = (r.van ?? "").trim();
+      if (name && vanRaw) vanByAgent.set(name.toLowerCase(), vanRaw);
+    }
+
     for (const [agentKey, vanName] of vanByAgent.entries()) {
       const profile = await resolveProfile(agentKey);
       if (!profile) continue;
@@ -243,27 +258,33 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
     // Wipe existing daily_logs + confirmed sale leads for each affected
     // (canvasser, date) so re-uploading a CSV for the same week never
     // double-counts. Re-uploading is the canonical "fix" workflow.
-    const datesByProfile = new Map<string, Set<string>>();
-    for (const b of buckets.values()) {
-      const profile = await resolveProfile(b.profileKey);
-      if (!profile) continue;
-      const set = datesByProfile.get(profile.id) ?? new Set<string>();
-      set.add(b.log_date);
-      datesByProfile.set(profile.id, set);
-    }
-    for (const [pid, dates] of datesByProfile.entries()) {
-      const dateArr = Array.from(dates);
-      await supabaseAdmin.from("daily_logs").delete().eq("canvasser_id", pid).in("log_date", dateArr);
-      // Confirmed sale leads keyed by reviewed_at::date — strip the day window.
-      for (const d of dateArr) {
-        await supabaseAdmin
-          .from("leads")
-          .delete()
-          .eq("canvasser_id", pid)
-          .eq("status", "confirmed")
-          .eq("is_sale", true)
-          .gte("reviewed_at", `${d}T00:00:00Z`)
-          .lte("reviewed_at", `${d}T23:59:59Z`);
+    if (data.refresh_existing) {
+      const datesByProfile = new Map<string, Set<string>>();
+      for (const r of rowsForRefresh) {
+        const name = r.agent.trim();
+        if (!name) continue;
+        const logDate = parseDate(r.date);
+        if (!logDate) continue;
+        const profile = await resolveProfile(name);
+        if (!profile) continue;
+        const set = datesByProfile.get(profile.id) ?? new Set<string>();
+        set.add(logDate);
+        datesByProfile.set(profile.id, set);
+      }
+      for (const [pid, dates] of datesByProfile.entries()) {
+        const dateArr = Array.from(dates);
+        await supabaseAdmin.from("daily_logs").delete().eq("canvasser_id", pid).in("log_date", dateArr);
+        // Confirmed sale leads keyed by reviewed_at::date — strip the day window.
+        for (const d of dateArr) {
+          await supabaseAdmin
+            .from("leads")
+            .delete()
+            .eq("canvasser_id", pid)
+            .eq("status", "confirmed")
+            .eq("is_sale", true)
+            .gte("reviewed_at", `${d}T00:00:00Z`)
+            .lte("reviewed_at", `${d}T23:59:59Z`);
+        }
       }
     }
 

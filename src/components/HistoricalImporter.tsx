@@ -62,36 +62,11 @@ function isMarked(v: unknown): boolean {
   return /[a-zA-Z0-9]/.test(String(v ?? ""));
 }
 
-function chunkRowsByDailyBucket(rows: ParsedRow[], size = IMPORT_BATCH_SIZE): ParsedRow[][] {
-  const groups = new Map<string, ParsedRow[]>();
-  const order: string[] = [];
-
-  for (const row of rows) {
-    const key = `${norm(row.agent)}|${row.date}`;
-    if (!groups.has(key)) {
-      groups.set(key, []);
-      order.push(key);
-    }
-    groups.get(key)?.push(row);
-  }
-
+function chunkRows(rows: ParsedRow[], size = IMPORT_BATCH_SIZE): ParsedRow[][] {
   const batches: ParsedRow[][] = [];
-  let batch: ParsedRow[] = [];
-
-  for (const key of order) {
-    const group = groups.get(key) ?? [];
-    if (batch.length > 0 && batch.length + group.length > size) {
-      batches.push(batch);
-      batch = [];
-    }
-    batch.push(...group);
-    if (batch.length >= size) {
-      batches.push(batch);
-      batch = [];
-    }
+  for (let i = 0; i < rows.length; i += size) {
+    batches.push(rows.slice(i, i + size));
   }
-
-  if (batch.length > 0) batches.push(batch);
   return batches;
 }
 
@@ -208,7 +183,7 @@ export function HistoricalImporter({
 
   const importMut = useMutation({
     mutationFn: async (rows: ParsedRow[]) => {
-      const batches = chunkRowsByDailyBucket(rows, IMPORT_BATCH_SIZE);
+      const batches = chunkRows(rows, IMPORT_BATCH_SIZE);
       let total: ImportResult = {
         ok: true,
         created_profiles: 0,
@@ -223,7 +198,14 @@ export function HistoricalImporter({
           const batch = batches[i];
           setImportProgress(`Batch ${i + 1}/${batches.length} · ${batch.length} rows`);
           const res = await withTimeout(
-            importFn({ data: { rows: batch, team_id: defaultTeamId ?? null } }) as Promise<ImportResult>,
+            importFn({
+              data: {
+                rows: batch,
+                team_id: defaultTeamId ?? null,
+                refresh_existing: i === 0,
+                refresh_rows: i === 0 ? rows : null,
+              },
+            }) as Promise<ImportResult>,
             IMPORT_TIMEOUT_MS,
             `Batch ${i + 1}/${batches.length} timed out after 30 seconds while Running Paycheck Engine.`,
           );
