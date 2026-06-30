@@ -332,9 +332,9 @@ export function HistoricalImporter({
         <Upload className="w-8 h-8 mx-auto text-neon mb-3" />
         <div className="font-display text-sm text-neon">DROP MONDAY.COM CSV HERE</div>
         <div className="text-xs text-muted-foreground mt-2">
-          Reads <span className="text-foreground">Agent</span>, <span className="text-foreground">Sale Price</span>,
-          and the 5 outcome columns:{" "}
-          <span className="text-foreground">BO · OL · Sale · CTC · Reset</span>.
+          Reads <span className="text-foreground">Agent</span>, <span className="text-foreground">Van</span>,{" "}
+          <span className="text-foreground">Sale Price</span>, and the outcome columns:{" "}
+          <span className="text-foreground">Sale · PM · Reset · BO · CTC · OL</span>.
         </div>
         <div className="text-[10px] text-muted-foreground mt-1">or click to browse</div>
       </div>
