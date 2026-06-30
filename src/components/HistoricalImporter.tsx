@@ -142,8 +142,23 @@ export function HistoricalImporter({
   const importFn = useServerFn(importHistoricalCsv);
 
   const importMut = useMutation({
-    mutationFn: async (rows: ParsedRow[]) =>
-      importFn({ data: { rows, team_id: defaultTeamId ?? null } }),
+    mutationFn: async (rows: ParsedRow[]) => {
+      try {
+        const res = await importFn({ data: { rows, team_id: defaultTeamId ?? null } });
+        return res;
+      } catch (err: unknown) {
+        // Normalize server errors so onError always sees an Error w/ message.
+        const msg =
+          err instanceof Error
+            ? err.message
+            : typeof err === "string"
+              ? err
+              : (() => {
+                  try { return JSON.stringify(err); } catch { return "Unknown server error"; }
+                })();
+        throw new Error(msg);
+      }
+    },
     onSuccess: (res) => {
       if (res.updated_logs === 0) {
         toast.error("Import wrote 0 rows to the database", {
@@ -154,20 +169,32 @@ export function HistoricalImporter({
         toast.success("Database write complete", {
           description: `+${res.created_profiles} canvassers · ${res.updated_logs} daily_logs rows · ${res.inserted_sales} sales`,
         });
+        // Auto-close the import modal/panel only on a real write.
+        setPreview(null);
+        setFilename(null);
+        setMissingColumns([]);
+        onImported?.();
       }
       if (res.errors?.length) {
         for (const e of res.errors.slice(0, 5)) {
           toast.error(`Row ${e.row}: ${e.reason}`, { duration: 12000 });
         }
       }
-      setPreview(null);
-      setFilename(null);
-      setMissingColumns([]);
+      // Always refresh downstream queries (Payroll Ledger, Performance Matrix, etc.)
       qc.invalidateQueries();
-      if (res.updated_logs > 0) onImported?.();
     },
     onError: (e: Error) => {
-      toast.error("Database INSERT failed", { description: e.message, duration: 20000 });
+      toast.error("Database INSERT failed — see details", {
+        description: e?.message ?? "Unknown error (no message returned from server).",
+        duration: 20000,
+      });
+    },
+    // Belt & suspenders: react-query already flips isPending off on success/error,
+    // but onSettled guarantees the button text resets even if a handler throws.
+    onSettled: () => {
+      // No-op state writes here force a re-render so `importMut.isPending`
+      // is read fresh by the button. Keeps the UI from appearing stuck.
+      setDragOver((d) => d);
     },
   });
 
