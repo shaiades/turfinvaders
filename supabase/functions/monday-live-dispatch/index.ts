@@ -68,24 +68,51 @@ function extractEvent(parsed: any): { pulseId?: number; status?: string } {
 async function fetchCanvasserNameFromMonday(
   pulseId: number,
   token: string,
-): Promise<{ name: string | null; raw: unknown }> {
+  admin: any,
+): Promise<{ name: string | null; raw: unknown; ok: boolean; status: number }> {
   const query = `query { items (ids: [${pulseId}]) { column_values { column { title } text } } }`;
-  const res = await fetch("https://api.monday.com/v2", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: token,
-    },
-    body: JSON.stringify({ query }),
+  let res: Response;
+  let raw: any = {};
+  try {
+    res = await fetch("https://api.monday.com/v2", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: token,
+        "API-Version": "2024-01",
+      },
+      body: JSON.stringify({ query }),
+    });
+    raw = await res.json().catch(() => ({}));
+  } catch (err) {
+    await admin.from("webhook_logs").insert({
+      source: "monday-live-dispatch:monday_fetch_exception",
+      raw_payload: { pulseId, error: String(err) } as never,
+    });
+    throw err;
+  }
+
+  // Verbose log of every Monday API response (success or failure).
+  await admin.from("webhook_logs").insert({
+    source: res.ok && !raw?.errors
+      ? "monday-live-dispatch:monday_response"
+      : "monday-live-dispatch:monday_error",
+    raw_payload: {
+      pulseId,
+      http_status: res.status,
+      ok: res.ok,
+      response: raw,
+    } as never,
   });
-  const raw = await res.json().catch(() => ({}));
+
   const cols = raw?.data?.items?.[0]?.column_values ?? [];
+  // Strict: column title must contain 'agent' (case-insensitive).
   const hit = cols.find((c: any) => {
     const t = (c?.column?.title ?? "").toLowerCase();
-    return t.includes("agent") || t.includes("canvasser") || t.includes("rep");
+    return t.includes("agent");
   });
   const name = typeof hit?.text === "string" && hit.text.trim() ? hit.text.trim() : null;
-  return { name, raw };
+  return { name, raw, ok: res.ok && !raw?.errors, status: res.status };
 }
 
 Deno.serve(async (req) => {
