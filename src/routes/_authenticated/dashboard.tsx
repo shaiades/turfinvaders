@@ -127,11 +127,13 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
         className="space-y-4"
       >
         <TabsList className="bg-surface">
+          <TabsTrigger value="dispatch">Live Dispatch</TabsTrigger>
           <TabsTrigger value="executive">Executive Dashboard</TabsTrigger>
           <TabsTrigger value="fleet">Fleet Manager</TabsTrigger>
           <TabsTrigger value="timesheets">Timesheets</TabsTrigger>
           <TabsTrigger value="payroll">Payroll</TabsTrigger>
         </TabsList>
+        <TabsContent value="dispatch" className="mt-0"><LiveDispatch /></TabsContent>
         <TabsContent value="executive" className="mt-0"><ExecutiveDashboard /></TabsContent>
         <TabsContent value="fleet" className="mt-0"><FleetManager /></TabsContent>
         <TabsContent value="timesheets" className="mt-0"><TimesheetEditor /></TabsContent>
