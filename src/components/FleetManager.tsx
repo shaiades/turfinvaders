@@ -7,8 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Truck, Plus, Building2, Trash2, UserMinus, GripVertical } from "lucide-react";
-import { deleteProfile } from "@/lib/fleet.functions";
+import { Truck, Plus, Building2, Trash2, UserMinus, GripVertical, Pencil, Check, X } from "lucide-react";
+import { deleteProfile, deleteVan } from "@/lib/fleet.functions";
 
 const VAN_COLORS = ["#ff007a", "#00f0ff", "#a855f7", "#f59e0b", "#22c55e", "#ef4444", "#3b82f6", "#eab308"];
 
