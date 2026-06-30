@@ -42,16 +42,15 @@ function hasAnyValue(row: Record<string, unknown>): boolean {
   return Object.values(row).some((v) => v != null && String(v).trim() !== "");
 }
 
-// Cells we treat as "unmarked". Anything else (✓, x, 1, "yes", a date, any text)
-// counts as the column being marked for that row.
+// Strict CSV marker rule: Monday.com sometimes exports hidden spaces or "-"
+// placeholders in empty cells. A cell is marked only when its trimmed value
+// contains at least one alphanumeric character (v, x, 1, yes, etc.).
 function isMarked(v: unknown): boolean {
   if (v === null || v === undefined) return false;
   const s = String(v).trim();
   if (!s) return false;
-  const low = s.toLowerCase();
-  if (low === "false" || low === "0" || low === "no" || low === "-" ||
-      low === "null" || low === "n/a" || low === "na") return false;
-  return true;
+  if (s === "-") return false;
+  return /[a-z0-9]/i.test(s);
 }
 
 // Canonical outcome columns from Monday.com → backend outcome enum.
@@ -137,12 +136,21 @@ export function HistoricalImporter({
   const [preview, setPreview] = useState<ParsedRow[] | null>(null);
   const [filename, setFilename] = useState<string | null>(null);
   const [missingColumns, setMissingColumns] = useState<string[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const importFn = useServerFn(importHistoricalCsv);
 
   const importMut = useMutation({
     mutationFn: async (rows: ParsedRow[]) => {
+      const timeoutMs = 5000;
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
       try {
-        const res = await importFn({ data: { rows, team_id: defaultTeamId ?? null } });
+        const request = importFn({ data: { rows, team_id: defaultTeamId ?? null } });
+        const timeout = new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            reject(new Error("Request timed out after 5 seconds while Running Paycheck Engine."));
+          }, timeoutMs);
+        });
+        const res = await Promise.race([request, timeout]);
         return res;
       } catch (err: unknown) {
         // Normalize server errors so onError always sees an Error w/ message.
@@ -155,7 +163,12 @@ export function HistoricalImporter({
                   try { return JSON.stringify(err); } catch { return "Unknown server error"; }
                 })();
         throw new Error(msg);
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
       }
+    },
+    onMutate: () => {
+      setIsSubmitting(true);
     },
     onSuccess: (res) => {
       if (res.updated_logs === 0) {
@@ -190,6 +203,7 @@ export function HistoricalImporter({
     // Belt & suspenders: react-query already flips isPending off on success/error,
     // but onSettled guarantees the button text resets even if a handler throws.
     onSettled: () => {
+      setIsSubmitting(false);
       // No-op state writes here force a re-render so `importMut.isPending`
       // is read fresh by the button. Keeps the UI from appearing stuck.
       setDragOver((d) => d);
@@ -415,11 +429,11 @@ export function HistoricalImporter({
               </Button>
               <Button
                 size="sm"
-                disabled={importMut.isPending}
+                disabled={isSubmitting}
                 onClick={() => importMut.mutate(preview)}
                 className="bg-victory text-background hover:bg-victory/90"
               >
-                {importMut.isPending ? "Running Paycheck Engine…" : (
+                {isSubmitting ? "Running Paycheck Engine…" : (
                   <span className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4" /> Confirm & Import</span>
                 )}
               </Button>
