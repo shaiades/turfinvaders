@@ -11,6 +11,7 @@ import { HistoricalImporter } from "@/components/HistoricalImporter";
 import { PayrollLedger } from "@/components/PayrollLedger";
 import { ExecutiveDashboard } from "@/components/ExecutiveDashboard";
 import { TimesheetEditor } from "@/components/TimesheetEditor";
+import { LiveDispatch } from "@/components/LiveDispatch";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -20,13 +21,18 @@ import { useTodayLeads } from "@/hooks/useTodayLeads";
 import { DEMO_TEAMS, demoCanvassers, teamTotals, formatCurrency } from "@/lib/demo-data";
 import { Zap, DoorOpen, Truck, FileSpreadsheet } from "lucide-react";
 
-type OwnerTab = "executive" | "fleet" | "timesheets" | "payroll";
+type OwnerTab = "dispatch" | "executive" | "fleet" | "timesheets" | "payroll";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — Knockout" }] }),
   validateSearch: (s: Record<string, unknown>): { tab: OwnerTab } => {
     const t = s.tab;
-    return { tab: t === "fleet" || t === "payroll" || t === "timesheets" ? t : "executive" };
+    return {
+      tab:
+        t === "fleet" || t === "payroll" || t === "timesheets" || t === "executive"
+          ? t
+          : "dispatch",
+    };
   },
   component: Dashboard,
 });
@@ -121,11 +127,13 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
         className="space-y-4"
       >
         <TabsList className="bg-surface">
+          <TabsTrigger value="dispatch">Live Dispatch</TabsTrigger>
           <TabsTrigger value="executive">Executive Dashboard</TabsTrigger>
           <TabsTrigger value="fleet">Fleet Manager</TabsTrigger>
           <TabsTrigger value="timesheets">Timesheets</TabsTrigger>
           <TabsTrigger value="payroll">Payroll</TabsTrigger>
         </TabsList>
+        <TabsContent value="dispatch" className="mt-0"><LiveDispatch /></TabsContent>
         <TabsContent value="executive" className="mt-0"><ExecutiveDashboard /></TabsContent>
         <TabsContent value="fleet" className="mt-0"><FleetManager /></TabsContent>
         <TabsContent value="timesheets" className="mt-0"><TimesheetEditor /></TabsContent>
