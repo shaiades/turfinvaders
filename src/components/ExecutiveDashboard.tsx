@@ -443,6 +443,7 @@ function LiveFleetStatus() {
 type WeeklyRow = {
   canvasserId: string;
   name: string;
+  officeLocation: string | null;
   vanName: string | null;
   vanColor: string | null;
   totalLeads: number;
