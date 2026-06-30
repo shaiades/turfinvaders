@@ -282,14 +282,22 @@ function RawDataTable() {
           .select("id, canvasser_id, team_id, log_date, demos_sits, sales, no_demo, one_legs, future_leads, unmarked, people_talked_to, leads_called_in, confirmed_leads")
           .order("log_date", { ascending: false })
           .limit(500),
-        supabase.from("profiles").select("id, display_name"),
+        supabase.from("profiles").select("id, display_name, office_location"),
       ]);
       if (logsR.error) throw logsR.error;
       if (profilesR.error) throw profilesR.error;
       const nameById = new Map((profilesR.data ?? []).map((p) => [p.id, p.display_name ?? "Unknown"]));
-      return (logsR.data ?? []).map((r) => ({ ...r, name: nameById.get(r.canvasser_id) ?? r.canvasser_id.slice(0,8) }));
+      const locById = new Map((profilesR.data ?? []).map((p) => [p.id, (p as { office_location?: string | null }).office_location ?? null]));
+      return (logsR.data ?? []).map((r) => ({
+        ...r,
+        name: nameById.get(r.canvasser_id) ?? r.canvasser_id.slice(0,8),
+        office_location: locById.get(r.canvasser_id) ?? null,
+      }));
     },
   });
+
+  const { matches } = useOfficeFilter();
+  const visible = (q.data ?? []).filter((r) => matches(r.office_location));
 
   return (
     <ArcadePanel
