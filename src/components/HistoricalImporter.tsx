@@ -225,6 +225,29 @@ export function HistoricalImporter({
   const importMut = useMutation({
     mutationFn: async (rows: ParsedRow[]) => {
       const batches = chunkRows(rows, IMPORT_BATCH_SIZE);
+
+      // Compute the min/max log date across the ENTIRE upload so the server
+      // can nuclear-wipe every row in that window before batch 1 begins.
+      const isoDates = rows
+        .map((r) => {
+          const s = (r.date ?? "").trim();
+          if (!s) return null;
+          const d = new Date(s);
+          if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+          const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+          if (m) {
+            const yr = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
+            const d2 = new Date(yr, Number(m[1]) - 1, Number(m[2]));
+            if (!isNaN(d2.getTime())) return d2.toISOString().slice(0, 10);
+          }
+          return null;
+        })
+        .filter((x): x is string => !!x)
+        .sort();
+      const wipeRange = isoDates.length > 0
+        ? { min: isoDates[0], max: isoDates[isoDates.length - 1] }
+        : null;
+
       let total: ImportResult = {
         ok: true,
         created_profiles: 0,
@@ -247,6 +270,7 @@ export function HistoricalImporter({
                 refresh_rows: i === 0 ? rows : null,
                 final_import: i === batches.length - 1,
                 final_rows: i === batches.length - 1 ? rows : null,
+                nuclear_wipe_range: i === 0 ? wipeRange : null,
               },
             }) as Promise<ImportResult>,
             IMPORT_TIMEOUT_MS,
