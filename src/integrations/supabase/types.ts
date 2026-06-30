@@ -591,7 +591,11 @@ export type Database = {
     }
     Enums: {
       app_role: "owner" | "captain" | "canvasser" | "office_staff"
-      canvasser_status: "active" | "suspended" | "inactive"
+      canvasser_status:
+        | "active"
+        | "suspended"
+        | "inactive"
+        | "suspension_review"
       lead_status: "pending" | "confirmed" | "denied"
       pin_type: "not_home" | "talked_to" | "lead"
     }
@@ -722,7 +726,12 @@ export const Constants = {
   public: {
     Enums: {
       app_role: ["owner", "captain", "canvasser", "office_staff"],
-      canvasser_status: ["active", "suspended", "inactive"],
+      canvasser_status: [
+        "active",
+        "suspended",
+        "inactive",
+        "suspension_review",
+      ],
       lead_status: ["pending", "confirmed", "denied"],
       pin_type: ["not_home", "talked_to", "lead"],
     },
