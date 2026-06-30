@@ -522,7 +522,10 @@ function WeeklyResults() {
     staleTime: 0,
   });
 
-  const grand = (q.data ?? []).reduce(
+  const { matches, office } = useOfficeFilter();
+  const rows = (q.data ?? []).filter((r) => matches(r.officeLocation));
+
+  const grand = rows.reduce(
     (acc, r) => ({
       leads: acc.leads + r.totalLeads,
       sits: acc.sits + r.totalSits,
