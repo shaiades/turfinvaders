@@ -268,7 +268,7 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
     // overwrites profiles.team_id so the Payroll Ledger shows the Van label
     // even when later CSVs leave the Van column blank.
     for (const r of rowsForRefresh) {
-      const name = r.agent.trim();
+      const name = titleCaseName(r.agent);
       const vanRaw = (r.van ?? "").trim();
       if (name && vanRaw) vanByAgent.set(name.toLowerCase(), vanRaw);
     }
