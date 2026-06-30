@@ -151,6 +151,11 @@ export function PayrollLedger() {
       aggByCanv.set(l.canvasser_id, a);
     }
 
+    const hoursByCanv = new Map<string, number>();
+    for (const t of data.timeEntries) {
+      hoursByCanv.set(t.user_id, (hoursByCanv.get(t.user_id) ?? 0) + Number(t.billable_hours ?? 0));
+    }
+
     return Array.from(aggByCanv.entries())
       .map(([cid, a]) => {
         a.total = a.bo + a.ol + a.rs + a.pm + a.sales;
@@ -162,7 +167,10 @@ export function PayrollLedger() {
         const rate = isDiamondLock ? 35 : payRate(a.points);
         const commRate = isDiamondLock ? 0.02 : commissionRate(a.points);
         const sitBonusPer = isSrGoldPlus ? 75 : 50;
-        const base = ASSUMED_HOURS * rate;
+        const clocked = hoursByCanv.get(cid) ?? 0;
+        const hours = clocked > 0 ? clocked : ASSUMED_HOURS;
+        const hoursSource: "clocked" | "estimated" = clocked > 0 ? "clocked" : "estimated";
+        const base = hours * rate;
         const commission = a.sale_amount * commRate;
         const sitBonus = Math.max(0, a.sits - 3) * sitBonusPer;
         const monster = a.points >= 10 ? 500 : 0;
@@ -174,6 +182,8 @@ export function PayrollLedger() {
           team,
           rank,
           ...a,
+          hours,
+          hoursSource,
           rate,
           commRate,
           base,
@@ -185,7 +195,7 @@ export function PayrollLedger() {
           totalPay: total,
         };
       })
-      .filter((r) => r.total > 0 || r.sale_amount > 0)
+      .filter((r) => r.total > 0 || r.sale_amount > 0 || r.hours > 0)
       .sort((a, b) => b.totalPay - a.totalPay);
   }, [data]);
 
