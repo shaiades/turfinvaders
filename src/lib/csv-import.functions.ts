@@ -18,6 +18,7 @@ type CsvImportRow = {
   date: string;
   sale_price: string | number | null;
   lead_name: string | null;
+  van: string | null;
 };
 
 type CsvImportInput = {
@@ -43,6 +44,7 @@ function coerceCsvImportInput(data: unknown): CsvImportInput {
         date: toStringValue(row.date),
         sale_price: row.sale_price === null || row.sale_price === undefined ? null : toStringValue(row.sale_price),
         lead_name: toStringValue(row.lead_name) || null,
+        van: toStringValue(row.van) || null,
       };
     }),
     team_id: typeof input.team_id === "string" && uuidLike.test(input.team_id) ? input.team_id : null,
