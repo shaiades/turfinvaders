@@ -90,7 +90,7 @@ export function PayrollLedger() {
   const { data, isLoading } = useQuery({
     queryKey: ["payroll-ledger", startStr, endStr],
     queryFn: async () => {
-      const [logsRes, leadsRes, profilesRes, teamsRes] = await Promise.all([
+      const [logsRes, leadsRes, profilesRes, teamsRes, timeRes] = await Promise.all([
         supabase
           .from("daily_logs")
           .select("canvasser_id, team_id, no_demo, one_legs, future_leads, demos_sits, sales, log_date")
@@ -104,16 +104,24 @@ export function PayrollLedger() {
           .lte("created_at", `${endStr}T23:59:59Z`),
         supabase.from("profiles").select("id, display_name, team_id, current_rank"),
         supabase.from("teams").select("id, name, color"),
+        supabase
+          .from("time_entries")
+          .select("user_id, billable_hours, log_date, clock_out")
+          .gte("log_date", startStr)
+          .lte("log_date", endStr)
+          .not("clock_out", "is", null),
       ]);
       if (logsRes.error) throw logsRes.error;
       if (leadsRes.error) throw leadsRes.error;
       if (profilesRes.error) throw profilesRes.error;
       if (teamsRes.error) throw teamsRes.error;
+      if (timeRes.error) throw timeRes.error;
       return {
         logs: (logsRes.data ?? []) as LogRow[],
         leads: (leadsRes.data ?? []) as LeadRow[],
         profiles: profilesRes.data ?? [],
         teams: teamsRes.data ?? [],
+        timeEntries: (timeRes.data ?? []) as { user_id: string; billable_hours: number }[],
       };
     },
   });
@@ -143,6 +151,11 @@ export function PayrollLedger() {
       aggByCanv.set(l.canvasser_id, a);
     }
 
+    const hoursByCanv = new Map<string, number>();
+    for (const t of data.timeEntries) {
+      hoursByCanv.set(t.user_id, (hoursByCanv.get(t.user_id) ?? 0) + Number(t.billable_hours ?? 0));
+    }
+
     return Array.from(aggByCanv.entries())
       .map(([cid, a]) => {
         a.total = a.bo + a.ol + a.rs + a.pm + a.sales;
@@ -154,7 +167,10 @@ export function PayrollLedger() {
         const rate = isDiamondLock ? 35 : payRate(a.points);
         const commRate = isDiamondLock ? 0.02 : commissionRate(a.points);
         const sitBonusPer = isSrGoldPlus ? 75 : 50;
-        const base = ASSUMED_HOURS * rate;
+        const clocked = hoursByCanv.get(cid) ?? 0;
+        const hours = clocked > 0 ? clocked : ASSUMED_HOURS;
+        const hoursSource: "clocked" | "estimated" = clocked > 0 ? "clocked" : "estimated";
+        const base = hours * rate;
         const commission = a.sale_amount * commRate;
         const sitBonus = Math.max(0, a.sits - 3) * sitBonusPer;
         const monster = a.points >= 10 ? 500 : 0;
@@ -166,6 +182,8 @@ export function PayrollLedger() {
           team,
           rank,
           ...a,
+          hours,
+          hoursSource,
           rate,
           commRate,
           base,
@@ -177,7 +195,7 @@ export function PayrollLedger() {
           totalPay: total,
         };
       })
-      .filter((r) => r.total > 0 || r.sale_amount > 0)
+      .filter((r) => r.total > 0 || r.sale_amount > 0 || r.hours > 0)
       .sort((a, b) => b.totalPay - a.totalPay);
   }, [data]);
 
@@ -199,7 +217,8 @@ export function PayrollLedger() {
       "Total Sits",
       "Total Points",
       "Hourly Rate",
-      "Assumed Hours",
+      "Total Hours",
+      "Hours Source",
       "Base Pay",
       "Total Sales Volume ($)",
       "Commission Rate",
@@ -222,7 +241,8 @@ export function PayrollLedger() {
         r.sits,
         r.points,
         `$${r.rate}/hr`,
-        ASSUMED_HOURS,
+        r.hours.toFixed(2),
+        r.hoursSource,
         r.base.toFixed(2),
         r.sale_amount.toFixed(2),
         `${(r.commRate * 100).toFixed(0)}%`,
@@ -324,6 +344,7 @@ export function PayrollLedger() {
                   <th className="text-right py-2 pr-3">Sits</th>
                   <th className="text-right py-2 pr-3">Pts</th>
                   <th className="text-right py-2 pr-3">Rate</th>
+                  <th className="text-right py-2 pr-3">Total Hours</th>
                   <th className="text-right py-2 pr-3">Total Sales Volume ($)</th>
                   <th className="text-right py-2 pr-3">Commission Earned ($)</th>
                   <th className="text-right py-2 pr-3">Bonuses</th>
@@ -348,6 +369,12 @@ export function PayrollLedger() {
                       <span className={r.rate === 35 ? "text-victory" : r.rate === 30 ? "text-neon" : "text-muted-foreground"}>
                         ${r.rate}
                       </span>
+                    </td>
+                    <td className="py-2.5 pr-3 text-right">
+                      <div className="font-display text-neon">{r.hours.toFixed(2)}h</div>
+                      <div className="text-[9px] text-muted-foreground">
+                        {r.hoursSource === "clocked" ? "clocked" : "est. from logs"}
+                      </div>
                     </td>
                     <td className="py-2.5 pr-3 text-right font-display text-victory">
                       ${r.sale_amount.toFixed(2)}
@@ -374,7 +401,7 @@ export function PayrollLedger() {
               </tbody>
               <tfoot>
                 <tr className="border-t border-neon/40">
-                  <td colSpan={11} className="py-3 text-right text-[10px] font-display uppercase tracking-widest text-muted-foreground">Grand Total · Estimated Pay</td>
+                  <td colSpan={12} className="py-3 text-right text-[10px] font-display uppercase tracking-widest text-muted-foreground">Grand Total · Estimated Pay</td>
                   <td className="py-3 pr-1 text-right font-display text-victory text-base">${grandTotal.toFixed(2)}</td>
                 </tr>
               </tfoot>

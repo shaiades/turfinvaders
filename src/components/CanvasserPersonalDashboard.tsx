@@ -5,6 +5,7 @@ import { ArcadePanel } from "@/components/arcade";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { LiveLeadCounter } from "@/components/LiveLeadCounter";
 import { WeeklyPlaybook } from "@/components/WeeklyPlaybook";
+import { TimeClock } from "@/components/TimeClock";
 import { RankPill, RANK_PERKS } from "@/components/RankPill";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -360,6 +361,7 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
 
   return (
     <div className="space-y-6">
+      <TimeClock userId={userId} />
       <TakeHomeWidget userId={userId} weeklyPay={weeklyPay} hourlyRate={hourlyRate} weekPoints={weekPoints} />
       <SCCERankBanner userId={userId} />
       <WeeklyPlaybook userId={userId} />

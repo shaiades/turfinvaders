@@ -514,6 +514,39 @@ export type Database = {
           },
         ]
       }
+      time_entries: {
+        Row: {
+          billable_hours: number
+          clock_in: string
+          clock_out: string | null
+          created_at: string
+          id: string
+          log_date: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          billable_hours?: number
+          clock_in?: string
+          clock_out?: string | null
+          created_at?: string
+          id?: string
+          log_date?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          billable_hours?: number
+          clock_in?: string
+          clock_out?: string | null
+          created_at?: string
+          id?: string
+          log_date?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           id: string
