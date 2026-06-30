@@ -26,6 +26,8 @@ type CsvImportInput = {
   team_id: string | null;
   refresh_existing: boolean;
   refresh_rows: CsvImportRow[] | null;
+  final_import: boolean;
+  final_rows: CsvImportRow[] | null;
 };
 
 function toStringValue(v: unknown): string {
@@ -55,6 +57,8 @@ function coerceCsvImportInput(data: unknown): CsvImportInput {
     team_id: typeof input.team_id === "string" && uuidLike.test(input.team_id) ? input.team_id : null,
     refresh_existing: input.refresh_existing !== false,
     refresh_rows: Array.isArray(input.refresh_rows) ? coerceRows(input.refresh_rows) : null,
+    final_import: input.final_import === true,
+    final_rows: Array.isArray(input.final_rows) ? coerceRows(input.final_rows) : null,
   };
 }
 
@@ -92,6 +96,14 @@ function parseDate(raw: string | null | undefined): string | null {
     if (!isNaN(d2.getTime())) return d2.toISOString().slice(0, 10);
   }
   return null;
+}
+
+function weekStartMonday(dateIso: string): string {
+  const d = new Date(`${dateIso}T00:00:00Z`);
+  const day = d.getUTCDay();
+  const diff = (day + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - diff);
+  return d.toISOString().slice(0, 10);
 }
 
 function slugify(name: string): string {
@@ -136,6 +148,7 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
     const vanByAgent = new Map<string, string>();
 
     const rowsForRefresh = data.refresh_rows ?? data.rows;
+    const rowsForFinalCalculations = data.final_rows ?? data.rows;
 
     for (let i = 0; i < data.rows.length; i++) {
       const r = data.rows[i];
@@ -289,46 +302,45 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
     }
 
 
+    type DailyLogUpsert = {
+      canvasser_id: string;
+      team_id: string | null;
+      log_date: string;
+      no_demo: number;
+      one_legs: number;
+      future_leads: number;
+      demos_sits: number;
+      sales: number;
+    };
+    const dailyLogRows: DailyLogUpsert[] = [];
+    const saleLeadRows: {
+      canvasser_id: string;
+      team_id: string | null;
+      status: "confirmed";
+      customer_name: string | null;
+      sale_amount: number | null;
+      is_sale: true;
+      reviewed_at: string;
+    }[] = [];
+
     for (const b of buckets.values()) {
       const profile = await resolveProfile(b.profileKey);
       if (!profile) continue;
 
-      // Upsert row — return existing values so we can accumulate.
-      const { error: insErr } = await supabaseAdmin
-        .from("daily_logs")
-        .upsert(
-          { canvasser_id: profile.id, team_id: profile.team_id, log_date: b.log_date },
-          { onConflict: "canvasser_id,log_date", ignoreDuplicates: true },
-        );
-      if (insErr) {
-        throw new Error(`daily_logs upsert failed for ${b.profileKey} on ${b.log_date}: ${insErr.message} (code=${insErr.code ?? "?"}, details=${insErr.details ?? ""}, hint=${insErr.hint ?? ""})`);
-      }
-
-      const { data: row, error: selErr } = await supabaseAdmin
-        .from("daily_logs")
-        .select("id, no_demo, one_legs, future_leads, demos_sits, sales")
-        .eq("canvasser_id", profile.id)
-        .eq("log_date", b.log_date)
-        .maybeSingle();
-      if (selErr) throw new Error(`daily_logs select failed for ${b.profileKey}: ${selErr.message}`);
-      if (!row) throw new Error(`daily_logs row missing after upsert for ${b.profileKey} on ${b.log_date}`);
-
-      const update = {
-        no_demo: (row.no_demo ?? 0) + b.no_demo,
-        one_legs: (row.one_legs ?? 0) + b.one_legs,
-        future_leads: (row.future_leads ?? 0) + b.future_leads,
-        demos_sits: (row.demos_sits ?? 0) + b.demos_sits,
-        sales: (row.sales ?? 0) + b.sales,
-      };
-      const { error: updErr } = await supabaseAdmin.from("daily_logs").update(update).eq("id", row.id);
-      if (updErr) {
-        throw new Error(`daily_logs update failed for ${b.profileKey} on ${b.log_date}: ${updErr.message} (code=${updErr.code ?? "?"}, details=${updErr.details ?? ""}, hint=${updErr.hint ?? ""})`);
-      }
-      updated_logs += 1;
+      dailyLogRows.push({
+        canvasser_id: profile.id,
+        team_id: profile.team_id,
+        log_date: b.log_date,
+        no_demo: b.no_demo,
+        one_legs: b.one_legs,
+        future_leads: b.future_leads,
+        demos_sits: b.demos_sits,
+        sales: b.sales,
+      });
 
       // Insert confirmed leads for each SALE → feeds Paycheck Engine commission.
       for (const sale of b.sale_rows) {
-        const { error: lErr } = await supabaseAdmin.from("leads").insert({
+        saleLeadRows.push({
           canvasser_id: profile.id,
           team_id: profile.team_id,
           status: "confirmed",
@@ -337,16 +349,74 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
           is_sale: true,
           reviewed_at: new Date(`${b.log_date}T12:00:00Z`).toISOString(),
         });
-        if (lErr) {
-          errors.push({ row: 0, reason: `Lead insert failed for ${b.profileKey}: ${lErr.message} (code=${lErr.code ?? "?"}, hint=${lErr.hint ?? ""})` });
-        } else {
-          inserted_sales += 1;
-        }
+      }
+    }
+
+    if (dailyLogRows.length > 0) {
+      const { error: upsertErr } = await supabaseAdmin
+        .from("daily_logs")
+        .upsert(dailyLogRows, { onConflict: "canvasser_id,log_date" });
+      if (upsertErr) {
+        throw new Error(`daily_logs batch upsert failed: ${upsertErr.message} (code=${upsertErr.code ?? "?"}, details=${upsertErr.details ?? ""}, hint=${upsertErr.hint ?? ""})`);
+      }
+      updated_logs = dailyLogRows.length;
+    }
+
+    if (saleLeadRows.length > 0) {
+      const { error: leadErr } = await supabaseAdmin.from("leads").insert(saleLeadRows);
+      if (leadErr) {
+        errors.push({ row: 0, reason: `Lead batch insert failed: ${leadErr.message} (code=${leadErr.code ?? "?"}, hint=${leadErr.hint ?? ""})` });
+      } else {
+        inserted_sales = saleLeadRows.length;
       }
     }
 
     if (buckets.size > 0 && updated_logs === 0) {
       throw new Error(`Parsed ${buckets.size} bucket(s) but wrote 0 daily_logs rows. First error: ${errors[0]?.reason ?? "unknown"}`);
+    }
+
+    if (data.final_import) {
+      const refreshedProfiles = new Set<string>();
+      const paycheckWeeksByProfile = new Map<string, Set<string>>();
+      for (const r of rowsForFinalCalculations) {
+        const name = r.agent.trim();
+        if (!name) continue;
+        const logDate = parseDate(r.date);
+        const profile = await resolveProfile(name);
+        if (!profile) continue;
+        if (!refreshedProfiles.has(profile.id)) {
+          const { error: rankErr } = await supabaseAdmin.rpc("refresh_canvasser_rank", {
+            _canvasser_id: profile.id,
+          });
+          if (rankErr) {
+            errors.push({
+              row: 0,
+              reason: `Final rank refresh failed for ${name}: ${rankErr.message}`,
+            });
+          }
+          refreshedProfiles.add(profile.id);
+        }
+        if (logDate) {
+          const weeks = paycheckWeeksByProfile.get(profile.id) ?? new Set<string>();
+          weeks.add(weekStartMonday(logDate));
+          paycheckWeeksByProfile.set(profile.id, weeks);
+        }
+      }
+
+      for (const [profileId, weeks] of paycheckWeeksByProfile.entries()) {
+        for (const weekStart of weeks) {
+          const { error: payErr } = await supabaseAdmin.rpc("calc_weekly_paycheck", {
+            _canvasser_id: profileId,
+            _week_start: weekStart,
+          });
+          if (payErr) {
+            errors.push({
+              row: 0,
+              reason: `Final paycheck calculation failed for week ${weekStart}: ${payErr.message}`,
+            });
+          }
+        }
+      }
     }
 
     return {
