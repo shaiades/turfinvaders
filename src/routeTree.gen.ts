@@ -22,6 +22,7 @@ import { Route as AuthenticatedDashboardRouteImport } from './routes/_authentica
 import { Route as AuthenticatedConfirmationDeskRouteImport } from './routes/_authenticated/confirmation-desk'
 import { Route as AuthenticatedTeamsIndexRouteImport } from './routes/_authenticated/teams.index'
 import { Route as ApiPublicMondayWebhookRouteImport } from './routes/api/public/monday-webhook'
+import { Route as ApiPublicMondayLiveDispatchRouteImport } from './routes/api/public/monday-live-dispatch'
 import { Route as AuthenticatedTeamsTeamIdRouteImport } from './routes/_authenticated/teams.$teamId'
 import { Route as AuthenticatedCanvassersCanvasserIdRouteImport } from './routes/_authenticated/canvassers.$canvasserId'
 import { Route as AuthenticatedCanvassersCanvasserIdFieldRouteImport } from './routes/_authenticated/canvassers.$canvasserId.field'
@@ -94,6 +95,12 @@ const ApiPublicMondayWebhookRoute = ApiPublicMondayWebhookRouteImport.update({
   path: '/api/public/monday-webhook',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicMondayLiveDispatchRoute =
+  ApiPublicMondayLiveDispatchRouteImport.update({
+    id: '/api/public/monday-live-dispatch',
+    path: '/api/public/monday-live-dispatch',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AuthenticatedTeamsTeamIdRoute =
   AuthenticatedTeamsTeamIdRouteImport.update({
     id: '/teams/$teamId',
@@ -126,6 +133,7 @@ export interface FileRoutesByFullPath {
   '/users': typeof AuthenticatedUsersRoute
   '/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRouteWithChildren
   '/teams/$teamId': typeof AuthenticatedTeamsTeamIdRoute
+  '/api/public/monday-live-dispatch': typeof ApiPublicMondayLiveDispatchRoute
   '/api/public/monday-webhook': typeof ApiPublicMondayWebhookRoute
   '/teams/': typeof AuthenticatedTeamsIndexRoute
   '/canvassers/$canvasserId/field': typeof AuthenticatedCanvassersCanvasserIdFieldRoute
@@ -143,6 +151,7 @@ export interface FileRoutesByTo {
   '/users': typeof AuthenticatedUsersRoute
   '/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRouteWithChildren
   '/teams/$teamId': typeof AuthenticatedTeamsTeamIdRoute
+  '/api/public/monday-live-dispatch': typeof ApiPublicMondayLiveDispatchRoute
   '/api/public/monday-webhook': typeof ApiPublicMondayWebhookRoute
   '/teams': typeof AuthenticatedTeamsIndexRoute
   '/canvassers/$canvasserId/field': typeof AuthenticatedCanvassersCanvasserIdFieldRoute
@@ -162,6 +171,7 @@ export interface FileRoutesById {
   '/_authenticated/users': typeof AuthenticatedUsersRoute
   '/_authenticated/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRouteWithChildren
   '/_authenticated/teams/$teamId': typeof AuthenticatedTeamsTeamIdRoute
+  '/api/public/monday-live-dispatch': typeof ApiPublicMondayLiveDispatchRoute
   '/api/public/monday-webhook': typeof ApiPublicMondayWebhookRoute
   '/_authenticated/teams/': typeof AuthenticatedTeamsIndexRoute
   '/_authenticated/canvassers/$canvasserId/field': typeof AuthenticatedCanvassersCanvasserIdFieldRoute
@@ -181,6 +191,7 @@ export interface FileRouteTypes {
     | '/users'
     | '/canvassers/$canvasserId'
     | '/teams/$teamId'
+    | '/api/public/monday-live-dispatch'
     | '/api/public/monday-webhook'
     | '/teams/'
     | '/canvassers/$canvasserId/field'
@@ -198,6 +209,7 @@ export interface FileRouteTypes {
     | '/users'
     | '/canvassers/$canvasserId'
     | '/teams/$teamId'
+    | '/api/public/monday-live-dispatch'
     | '/api/public/monday-webhook'
     | '/teams'
     | '/canvassers/$canvasserId/field'
@@ -216,6 +228,7 @@ export interface FileRouteTypes {
     | '/_authenticated/users'
     | '/_authenticated/canvassers/$canvasserId'
     | '/_authenticated/teams/$teamId'
+    | '/api/public/monday-live-dispatch'
     | '/api/public/monday-webhook'
     | '/_authenticated/teams/'
     | '/_authenticated/canvassers/$canvasserId/field'
@@ -225,6 +238,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  ApiPublicMondayLiveDispatchRoute: typeof ApiPublicMondayLiveDispatchRoute
   ApiPublicMondayWebhookRoute: typeof ApiPublicMondayWebhookRoute
 }
 
@@ -321,6 +335,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicMondayWebhookRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/monday-live-dispatch': {
+      id: '/api/public/monday-live-dispatch'
+      path: '/api/public/monday-live-dispatch'
+      fullPath: '/api/public/monday-live-dispatch'
+      preLoaderRoute: typeof ApiPublicMondayLiveDispatchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_authenticated/teams/$teamId': {
       id: '/_authenticated/teams/$teamId'
       path: '/teams/$teamId'
@@ -396,6 +417,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  ApiPublicMondayLiveDispatchRoute: ApiPublicMondayLiveDispatchRoute,
   ApiPublicMondayWebhookRoute: ApiPublicMondayWebhookRoute,
 }
 export const routeTree = rootRouteImport

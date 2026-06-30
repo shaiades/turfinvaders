@@ -155,6 +155,7 @@ export type Database = {
           id: string
           leads_called_in: number
           leads_confirmed: number
+          leads_submitted: number
           metric_date: string
           office_location: string
           sits_ran_today: number
@@ -166,6 +167,7 @@ export type Database = {
           id?: string
           leads_called_in?: number
           leads_confirmed?: number
+          leads_submitted?: number
           metric_date?: string
           office_location?: string
           sits_ran_today?: number
@@ -177,6 +179,7 @@ export type Database = {
           id?: string
           leads_called_in?: number
           leads_confirmed?: number
+          leads_submitted?: number
           metric_date?: string
           office_location?: string
           sits_ran_today?: number
