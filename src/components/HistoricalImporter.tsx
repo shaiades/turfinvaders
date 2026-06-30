@@ -54,28 +54,25 @@ function isMarked(v: unknown): boolean {
   return true;
 }
 
-// The five canonical outcome columns from Monday.com.
-// Maps the column header → backend outcome enum the importer understands.
+// Canonical outcome columns from Monday.com → backend outcome enum.
 // POINT VALUES (locked by spec):
-//   BO    = Blowout       → 0 pts (no_demo bucket)
-//   OL    = One Leg       → 0 pts (one_legs bucket — does NOT count as sit)
-//   CTC   = Call to Cancel→ 0 pts (no_demo bucket)
-//   Reset = Reset         → 0 pts (future_leads bucket — RS)
-//   Sale  = Sale          → 2 pts (demos_sits +1, sales +1, capture Sale Price)
-//   (PM "Pitch Miss / True Sit" = 1 pt comes from the live webhook, not this CSV.)
-// Priority on resolution: Sale > OL > CTC > Reset > BO.
+//   Sale = 2 pts   PM = 1 pt   BO/CTC/RS/OL = 0 pts
+// PRIORITY when multiple columns are marked on the same row:
+//   Sale > PM > RS > BO > CTC > OL
 const OUTCOME_TOKENS: { token: string; outcome: string }[] = [
   { token: "sale",  outcome: "SALE" },
-  { token: "ol",    outcome: "OL"   },
-  { token: "ctc",   outcome: "BO"   },
+  { token: "pm",    outcome: "PM"   },
   { token: "reset", outcome: "RS"   },
   { token: "bo",    outcome: "BO"   },
+  { token: "ctc",   outcome: "BO"   }, // CTC routes into the BO (no-demo) bucket, still 0 pts
+  { token: "ol",    outcome: "OL"   },
 ];
 
 
 const SALE_PRICE_HEADERS = ["Sale Price", "Sale Amount", "Amount"];
 const AGENT_HEADERS = ["Agent", "Canvasser", "Rep", "Salesperson"];
 const LEAD_HEADERS = ["Lead", "Customer", "Lead Name", "Customer Name"];
+const VAN_HEADERS = ["Van", "Team", "Crew", "Faction"];
 
 // Resolve which raw CSV header maps to each of the 5 outcome buckets.
 // Strategy: prefer exact normalized equality; fall back to substring match,
