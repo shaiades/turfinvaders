@@ -231,7 +231,7 @@ export function PayrollLedger() {
     ];
     const lines = [headers.join(",")];
     for (const r of rows) {
-      const breakdown = `${r.bo} BO, ${r.ol} OL, ${r.rs} RS, ${r.pm} PM, ${r.sales} Sale`;
+      const breakdown = `${r.bo} BO, ${r.ol} OL, ${r.rs} RS, ${r.pm} Sit, ${r.sales} Sale`;
       const cells = [
         r.name,
         r.rank,
