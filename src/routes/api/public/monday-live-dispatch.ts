@@ -69,7 +69,9 @@ function mapStatus(raw: string): Bucket {
 export const Route = createFileRoute("/api/public/monday-live-dispatch")({
   server: {
     handlers: {
-      OPTIONS: async () => new Response(null, { status: 204, headers: CORS }),
+      OPTIONS: async () => new Response(null, { status: 200, headers: CORS }),
+      GET: async () =>
+        json({ ok: true, endpoint: "monday-live-dispatch", method: "GET" }),
       POST: async ({ request }) => {
         const secret = process.env.MONDAY_WEBHOOK_SECRET;
         const url = new URL(request.url);
@@ -84,9 +86,30 @@ export const Route = createFileRoute("/api/public/monday-live-dispatch")({
           return json({ error: "Invalid JSON" }, 400);
         }
 
-        // Monday handshake — must echo challenge BEFORE anything else.
-        if (parsed && typeof parsed === "object" && "challenge" in (parsed as Record<string, unknown>)) {
-          return json({ challenge: (parsed as Record<string, unknown>).challenge });
+        // Monday handshake — MUST echo challenge IMMEDIATELY, before any
+        // logging, auth, or DB work. Any error here breaks webhook setup.
+        if (
+          parsed &&
+          typeof parsed === "object" &&
+          "challenge" in (parsed as Record<string, unknown>)
+        ) {
+          const challenge = (parsed as Record<string, unknown>).challenge;
+          // Fire-and-forget log of the knock — never block the handshake.
+          try {
+            const { supabaseAdmin } = await import(
+              "@/integrations/supabase/client.server"
+            );
+            void supabaseAdmin
+              .from("webhook_logs")
+              .insert({
+                source: "monday-live-dispatch:challenge",
+                raw_payload: parsed as never,
+              })
+              .then(() => {});
+          } catch {
+            // swallow — handshake must succeed
+          }
+          return json({ challenge });
         }
 
         // X-RAY: log every incoming payload (after handshake, before auth/match)
