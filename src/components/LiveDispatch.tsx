@@ -254,6 +254,108 @@ function WebhookUrlBanner() {
   );
 }
 
+function MondayTokenCard() {
+  const qc = useQueryClient();
+  const [value, setValue] = useState("");
+  const [reveal, setReveal] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["system-settings"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("system_settings")
+        .select("monday_api_token, updated_at")
+        .eq("id", true)
+        .maybeSingle();
+      if (error) throw error;
+      return data as { monday_api_token: string | null; updated_at: string } | null;
+    },
+  });
+
+  const hasToken = !!data?.monday_api_token;
+
+  const save = async () => {
+    setSaving(true);
+    setError(null);
+    const { error } = await supabase
+      .from("system_settings")
+      .upsert({ id: true, monday_api_token: value.trim() || null }, { onConflict: "id" });
+    setSaving(false);
+    if (error) {
+      setError(error.message);
+      return;
+    }
+    setValue("");
+    setSavedAt(Date.now());
+    qc.invalidateQueries({ queryKey: ["system-settings"] });
+  };
+
+  return (
+    <div className="arcade-card p-4 border-warning/40">
+      <div className="flex items-center gap-2 mb-2">
+        <KeyRound className="w-4 h-4 text-warning" />
+        <div className="text-[10px] font-display uppercase tracking-widest text-warning">
+          Monday.com API Token
+        </div>
+        {hasToken && (
+          <span className="ml-auto text-[10px] font-display uppercase tracking-widest text-victory">
+            ✓ Configured
+          </span>
+        )}
+      </div>
+      <div className="text-xs text-muted-foreground mb-3">
+        Required for the webhook to look up the canvasser name from Monday when
+        only <code className="text-foreground">pulseId</code> is sent. Stored
+        securely (owners only).
+      </div>
+      <div className="flex flex-col sm:flex-row gap-2 items-stretch">
+        <div className="relative flex-1">
+          <input
+            type={reveal ? "text" : "password"}
+            placeholder={
+              isLoading
+                ? "Loading…"
+                : hasToken
+                  ? "Enter new token to replace existing"
+                  : "Paste Monday API token"
+            }
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            className="w-full bg-surface border border-border rounded px-3 py-2 pr-10 text-xs font-mono text-neon"
+          />
+          <button
+            type="button"
+            onClick={() => setReveal((r) => !r)}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            aria-label={reveal ? "Hide token" : "Show token"}
+          >
+            {reveal ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+          </button>
+        </div>
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving || !value.trim()}
+          className="arcade-card px-3 py-2 text-[10px] font-display uppercase tracking-widest text-warning hover:bg-surface-elevated disabled:opacity-50"
+        >
+          {saving ? "Saving…" : "Save Token"}
+        </button>
+      </div>
+      {error && (
+        <div className="mt-2 text-[11px] text-destructive font-mono">{error}</div>
+      )}
+      {savedAt && !error && (
+        <div className="mt-2 text-[11px] text-victory font-display uppercase tracking-widest">
+          Saved
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TotalTile({
   label,
   value,
