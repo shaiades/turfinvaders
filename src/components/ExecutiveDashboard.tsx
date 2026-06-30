@@ -36,16 +36,28 @@ function leadsSum(r: { demos_sits?: number | null; sales?: number | null; no_dem
 
 export function ExecutiveDashboard() {
   return (
-    <div className="space-y-6">
-      <ManualEntryBar />
-      <HistoricalImporter />
-      <WeeklyResults />
-      <PayrollLedger />
-      <LiveDailyAction />
-      <DatabaseCleanup />
-      <RawDataTable />
-      <LiveFleetStatus />
-    </div>
+    <OfficeFilterProvider>
+      <div className="space-y-6">
+        <div className="arcade-card p-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <Building2 className="w-4 h-4 text-neon shrink-0" />
+            <div>
+              <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">View</div>
+              <div className="text-sm font-medium">Office Location Filter</div>
+            </div>
+          </div>
+          <OfficeFilterToggle />
+        </div>
+        <ManualEntryBar />
+        <HistoricalImporter />
+        <WeeklyResults />
+        <PayrollLedger />
+        <LiveDailyAction />
+        <DatabaseCleanup />
+        <RawDataTable />
+        <LiveFleetStatus />
+      </div>
+    </OfficeFilterProvider>
   );
 }
 
