@@ -292,7 +292,7 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
     if (data.refresh_existing) {
       const datesByProfile = new Map<string, Set<string>>();
       for (const r of rowsForRefresh) {
-        const name = r.agent.trim();
+        const name = titleCaseName(r.agent);
         if (!name) continue;
         const logDate = parseDate(r.date);
         if (!logDate) continue;
