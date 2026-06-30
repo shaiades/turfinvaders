@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { OfficeFilterToggle, useOfficeFilter } from "@/components/OfficeFilterContext";
-import { Radio, Users, FileSearch, X } from "lucide-react";
+import { Radio, Users, FileSearch, X, Link2, Copy, Check } from "lucide-react";
 
 
 type Profile = {
