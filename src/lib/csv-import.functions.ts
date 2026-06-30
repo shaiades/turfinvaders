@@ -399,7 +399,7 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
       const refreshedProfiles = new Set<string>();
       const paycheckWeeksByProfile = new Map<string, Set<string>>();
       for (const r of rowsForFinalCalculations) {
-        const name = r.agent.trim();
+        const name = titleCaseName(r.agent);
         if (!name) continue;
         const logDate = parseDate(r.date);
         const profile = await resolveProfile(name);
