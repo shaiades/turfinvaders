@@ -84,14 +84,23 @@ export const Route = createFileRoute("/api/public/monday-live-dispatch")({
           return json({ error: "Invalid JSON" }, 400);
         }
 
-        // Monday handshake
+        // Monday handshake — must echo challenge BEFORE anything else.
         if (parsed && typeof parsed === "object" && "challenge" in (parsed as Record<string, unknown>)) {
           return json({ challenge: (parsed as Record<string, unknown>).challenge });
         }
 
+        // X-RAY: log every incoming payload (after handshake, before auth/match)
+        // so we can see exactly what Monday is sending.
+        const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+        await supabaseAdmin.from("webhook_logs").insert({
+          source: "monday-live-dispatch",
+          raw_payload: parsed as never,
+        });
+
         if (secret && headerSecret !== secret && querySecret !== secret) {
           return json({ error: "Unauthorized" }, 401);
         }
+
 
         const result = BodySchema.safeParse(parsed);
         if (!result.success) {
