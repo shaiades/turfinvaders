@@ -1,1 +1,4 @@
 project_id = "uugdbtsxpkztxajssjph"
+
+[functions.monday-live-dispatch]
+verify_jwt = false
