@@ -225,3 +225,97 @@ function TotalTile({
     </div>
   );
 }
+
+type WebhookLog = {
+  id: string;
+  created_at: string;
+  source: string | null;
+  raw_payload: unknown;
+};
+
+function WebhookLogsButton() {
+  const [open, setOpen] = useState(false);
+  const { data: logs = [], refetch, isFetching } = useQuery({
+    queryKey: ["webhook-logs"],
+    enabled: open,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("webhook_logs")
+        .select("id, created_at, source, raw_payload")
+        .order("created_at", { ascending: false })
+        .limit(25);
+      return (data ?? []) as WebhookLog[];
+    },
+  });
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="arcade-card px-3 py-2 text-[10px] font-display uppercase tracking-widest text-accent hover:bg-surface-elevated flex items-center gap-2"
+      >
+        <FileSearch className="w-3.5 h-3.5" />
+        Webhook Logs
+      </button>
+      {open && (
+        <div
+          className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setOpen(false)}
+        >
+          <div
+            className="arcade-card w-full max-w-3xl max-h-[85vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b border-border">
+              <div>
+                <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                  X-Ray · Raw Incoming Payloads
+                </div>
+                <div className="font-display text-sm text-neon mt-0.5">
+                  WEBHOOK LOGS (LAST 25)
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => refetch()}
+                  className="text-[10px] font-display uppercase tracking-widest text-accent px-2 py-1 hover:bg-surface-elevated rounded"
+                >
+                  {isFetching ? "…" : "Refresh"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <div className="overflow-y-auto p-4 space-y-3">
+              {logs.length === 0 ? (
+                <div className="text-sm text-muted-foreground text-center py-8">
+                  No webhook payloads received yet.
+                </div>
+              ) : (
+                logs.map((l) => (
+                  <div key={l.id} className="border border-border rounded p-3 bg-surface">
+                    <div className="flex justify-between text-[10px] font-display uppercase tracking-widest text-muted-foreground mb-2">
+                      <span>{l.source ?? "unknown"}</span>
+                      <span>{new Date(l.created_at).toLocaleString()}</span>
+                    </div>
+                    <pre className="text-[11px] font-mono text-foreground whitespace-pre-wrap break-all max-h-64 overflow-auto">
+                      {JSON.stringify(l.raw_payload, null, 2)}
+                    </pre>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
