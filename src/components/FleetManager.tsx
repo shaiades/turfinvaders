@@ -22,6 +22,11 @@ export function FleetManager() {
   const [dragOverVan, setDragOverVan] = useState<string | null>(null);
   const [dragOverUnassigned, setDragOverUnassigned] = useState(false);
   const deleteProfileFn = useServerFn(deleteProfile);
+  const deleteVanFn = useServerFn(deleteVan);
+  const [editingVanId, setEditingVanId] = useState<string | null>(null);
+  const [editVanName, setEditVanName] = useState("");
+  const [editVanColor, setEditVanColor] = useState(VAN_COLORS[0]);
+  const [editVanOffice, setEditVanOffice] = useState<string | null>(null);
 
   const fleet = useQuery({
     queryKey: ["fleet_manager"],
