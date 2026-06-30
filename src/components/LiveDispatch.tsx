@@ -132,7 +132,10 @@ export function LiveDispatch() {
       </div>
 
 
+      <WebhookUrlBanner />
+
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+
         <TotalTile label="Submitted" value={totals.sub} accent="neon" />
         <TotalTile label="Pending" value={totals.pen} accent="warning" />
         <TotalTile label="N/A" value={totals.na} accent="muted" />
