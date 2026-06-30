@@ -529,9 +529,9 @@ export function HistoricalImporter({
           </div>
 
           <div className="mt-4 flex items-center justify-between gap-3 flex-wrap">
-            <div className="text-[11px] text-muted-foreground flex items-center gap-2">
-              <AlertTriangle className="w-3.5 h-3.5 text-warning" />
-              Unknown agents will be auto-created as Canvassers. Existing weekly buckets will be refreshed.
+            <div className="text-[11px] text-warning flex items-center gap-2">
+              <AlertTriangle className="w-3.5 h-3.5" />
+              Diagnostic mode · Import is disabled. Inspect the "Raw PM Cell" column to see exactly what Monday.com puts in blank cells.
             </div>
             <div className="flex gap-2">
               <Button variant="outline" size="sm" onClick={() => { setPreview(null); setFilename(null); setMissingColumns([]); if (inputRef.current) inputRef.current.value = ""; }}>
@@ -539,13 +539,11 @@ export function HistoricalImporter({
               </Button>
               <Button
                 size="sm"
-                disabled={isSubmitting}
-                onClick={() => importMut.mutate(preview)}
-                className="bg-victory text-background hover:bg-victory/90"
+                disabled
+                title="Import disabled while diagnosing PM column contents"
+                className="bg-victory/40 text-background cursor-not-allowed"
               >
-                {isSubmitting ? (importProgress ?? "Importing CSV…") : (
-                  <span className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4" /> Confirm & Import</span>
-                )}
+                <span className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4" /> Import Disabled (Diagnostic)</span>
               </Button>
             </div>
           </div>
