@@ -360,6 +360,7 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
 
   return (
     <div className="space-y-6">
+      <TimeClock userId={userId} />
       <TakeHomeWidget userId={userId} weeklyPay={weeklyPay} hourlyRate={hourlyRate} weekPoints={weekPoints} />
       <SCCERankBanner userId={userId} />
       <WeeklyPlaybook userId={userId} />
