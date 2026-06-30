@@ -124,13 +124,13 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, message: string):
 //   Sale = 2 pts   PM = 1 pt   BO/CTC/RS/OL = 0 pts
 // PRIORITY when multiple columns are marked on the same row:
 //   Sale > PM > RS > BO > CTC > OL
-const OUTCOME_TOKENS: { token: string; outcome: string }[] = [
-  { token: "sale",  outcome: "SALE" },
-  { token: "pm",    outcome: "PM"   },
-  { token: "reset", outcome: "RS"   },
-  { token: "bo",    outcome: "BO"   },
-  { token: "ctc",   outcome: "BO"   }, // CTC routes into the BO (no-demo) bucket, still 0 pts
-  { token: "ol",    outcome: "OL"   },
+const OUTCOME_TOKENS: { key: string; label: string; aliases: string[]; outcome: string }[] = [
+  { key: "sale", label: "SALE", aliases: ["sale", "sold"], outcome: "SALE" },
+  { key: "pm", label: "PM", aliases: ["pm", "pitchmiss", "demo", "sit"], outcome: "PM" },
+  { key: "rs", label: "RS", aliases: ["rs", "reset"], outcome: "RS" },
+  { key: "bo", label: "BO", aliases: ["bo", "blowout", "nodemo"], outcome: "BO" },
+  { key: "ctc", label: "CTC", aliases: ["ctc", "calltocancel", "cancel"], outcome: "BO" },
+  { key: "ol", label: "OL", aliases: ["ol", "oneleg", "1leg"], outcome: "OL" },
 ];
 
 
@@ -148,22 +148,22 @@ function resolveOutcomeHeaders(
 ): Record<string, string | null> {
   const out: Record<string, string | null> = {};
   const used = new Set<string>();
-  for (const { token, outcome } of OUTCOME_TOKENS) {
-    if (out[outcome]) continue;
+  for (const { key, aliases } of OUTCOME_TOKENS) {
+    if (out[key]) continue;
     const hit = headers.find(
-      (h) => !claimed.has(h) && !used.has(h) && norm(h) === token,
+      (h) => !claimed.has(h) && !used.has(h) && aliases.some((a) => norm(h) === a),
     );
-    if (hit) { out[outcome] = hit; used.add(hit); }
+    if (hit) { out[key] = hit; used.add(hit); }
   }
-  for (const { token, outcome } of OUTCOME_TOKENS) {
-    if (out[outcome]) continue;
+  for (const { key, aliases } of OUTCOME_TOKENS) {
+    if (out[key]) continue;
     const hit = headers.find(
-      (h) => !claimed.has(h) && !used.has(h) && norm(h).includes(token),
+      (h) => !claimed.has(h) && !used.has(h) && aliases.some((a) => norm(h).includes(a)),
     );
-    if (hit) { out[outcome] = hit; used.add(hit); }
+    if (hit) { out[key] = hit; used.add(hit); }
   }
-  for (const { outcome } of OUTCOME_TOKENS) {
-    if (!(outcome in out)) out[outcome] = null;
+  for (const { key } of OUTCOME_TOKENS) {
+    if (!(key in out)) out[key] = null;
   }
   return out;
 }
@@ -308,8 +308,9 @@ export function HistoricalImporter({
       const scanRows = (scan.data ?? []) as string[][];
       let headerIdx = -1;
       for (let i = 0; i < scanRows.length; i++) {
-        const cells = (scanRows[i] ?? []).map((c) => String(c ?? "").toLowerCase().trim());
-        if (cells.some((c) => c === "agent" || c === "sale price" || c.includes("agent") || c.includes("sale price"))) {
+        const cells = (scanRows[i] ?? []).map((c) => String(c ?? "").trim());
+        const normalized = cells.map(norm);
+        if (normalized.some((c) => c === "agent" || c === "agentname" || c === "saleprice")) {
           headerIdx = i;
           break;
         }
@@ -345,8 +346,8 @@ export function HistoricalImporter({
           );
           const outcomeMap = resolveOutcomeHeaders(headers, claimed);
           const missing = OUTCOME_TOKENS
-            .filter(({ outcome }) => !outcomeMap[outcome])
-            .map(({ token }) => token.toUpperCase());
+            .filter(({ key }) => !outcomeMap[key])
+            .map(({ label }) => label);
           setMissingColumns(missing);
 
           const rows: ParsedRow[] = res.data
@@ -359,8 +360,8 @@ export function HistoricalImporter({
               const van = vanHeader ? String(raw[vanHeader] ?? "").trim() : "";
               // Walk OUTCOME_TOKENS in priority order; first marked column wins.
               let outcome = "";
-              for (const { outcome: o } of OUTCOME_TOKENS) {
-                const h = outcomeMap[o];
+              for (const { key, outcome: o } of OUTCOME_TOKENS) {
+                const h = outcomeMap[key];
                 if (h && isMarked(raw[h])) { outcome = o; break; }
               }
               return { agent, outcome, date, sale_price: sale_price || null, lead_name: lead_name || null, van: van || null };
