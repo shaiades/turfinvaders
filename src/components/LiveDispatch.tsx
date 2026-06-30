@@ -125,8 +125,12 @@ export function LiveDispatch() {
             </div>
           </div>
         </div>
-        <OfficeFilterToggle />
+        <div className="flex items-center gap-2">
+          <WebhookLogsButton />
+          <OfficeFilterToggle />
+        </div>
       </div>
+
 
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
         <TotalTile label="Submitted" value={totals.sub} accent="neon" />
