@@ -231,7 +231,7 @@ export function PayrollLedger() {
     ];
     const lines = [headers.join(",")];
     for (const r of rows) {
-      const breakdown = `${r.bo} BO, ${r.ol} OL, ${r.rs} RS, ${r.pm} PM, ${r.sales} Sale`;
+      const breakdown = `${r.bo} BO, ${r.ol} OL, ${r.rs} RS, ${r.pm} Sit, ${r.sales} Sale`;
       const cells = [
         r.name,
         r.rank,
@@ -361,7 +361,7 @@ export function PayrollLedger() {
                     </td>
                     <td className="py-2.5 pr-3 text-right text-victory">{r.total}</td>
                     <td className="py-2.5 pr-3 text-xs text-muted-foreground whitespace-nowrap">
-                      {r.bo} BO, {r.ol} OL, {r.rs} RS, <span className="text-neon">{r.pm} PM</span>, <span className="text-victory">{r.sales} Sale</span>
+                      {r.bo} BO, {r.ol} OL, {r.rs} RS, <span className="text-neon">{r.pm} Sit</span>, <span className="text-victory">{r.sales} Sale</span>
                     </td>
                     <td className="py-2.5 pr-3 text-right">{r.sits}</td>
                     <td className="py-2.5 pr-3 text-right font-display text-neon">{r.points}</td>

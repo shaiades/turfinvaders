@@ -14,6 +14,7 @@ type ParsedRow = {
   date: string;
   sale_price?: string | null;
   lead_name?: string | null;
+  van?: string | null;
 };
 
 function norm(s: string): string {
@@ -53,28 +54,25 @@ function isMarked(v: unknown): boolean {
   return true;
 }
 
-// The five canonical outcome columns from Monday.com.
-// Maps the column header → backend outcome enum the importer understands.
+// Canonical outcome columns from Monday.com → backend outcome enum.
 // POINT VALUES (locked by spec):
-//   BO    = Blowout       → 0 pts (no_demo bucket)
-//   OL    = One Leg       → 0 pts (one_legs bucket — does NOT count as sit)
-//   CTC   = Call to Cancel→ 0 pts (no_demo bucket)
-//   Reset = Reset         → 0 pts (future_leads bucket — RS)
-//   Sale  = Sale          → 2 pts (demos_sits +1, sales +1, capture Sale Price)
-//   (PM "Pitch Miss / True Sit" = 1 pt comes from the live webhook, not this CSV.)
-// Priority on resolution: Sale > OL > CTC > Reset > BO.
+//   Sale = 2 pts   PM = 1 pt   BO/CTC/RS/OL = 0 pts
+// PRIORITY when multiple columns are marked on the same row:
+//   Sale > PM > RS > BO > CTC > OL
 const OUTCOME_TOKENS: { token: string; outcome: string }[] = [
   { token: "sale",  outcome: "SALE" },
-  { token: "ol",    outcome: "OL"   },
-  { token: "ctc",   outcome: "BO"   },
+  { token: "pm",    outcome: "PM"   },
   { token: "reset", outcome: "RS"   },
   { token: "bo",    outcome: "BO"   },
+  { token: "ctc",   outcome: "BO"   }, // CTC routes into the BO (no-demo) bucket, still 0 pts
+  { token: "ol",    outcome: "OL"   },
 ];
 
 
 const SALE_PRICE_HEADERS = ["Sale Price", "Sale Amount", "Amount"];
 const AGENT_HEADERS = ["Agent", "Canvasser", "Rep", "Salesperson"];
 const LEAD_HEADERS = ["Lead", "Customer", "Lead Name", "Customer Name"];
+const VAN_HEADERS = ["Van", "Team", "Crew", "Faction"];
 
 // Resolve which raw CSV header maps to each of the 5 outcome buckets.
 // Strategy: prefer exact normalized equality; fall back to substring match,
@@ -247,9 +245,10 @@ export function HistoricalImporter({
           const dateHeader = pickDateHeader(headers);
           const salePriceHeader = pickHeader(headers, ...SALE_PRICE_HEADERS);
           const leadHeader = pickHeader(headers, ...LEAD_HEADERS);
+          const vanHeader = pickHeader(headers, ...VAN_HEADERS);
 
           const claimed = new Set<string>(
-            [agentHeader, dateHeader, salePriceHeader, leadHeader].filter(
+            [agentHeader, dateHeader, salePriceHeader, leadHeader, vanHeader].filter(
               (x): x is string => !!x,
             ),
           );
@@ -266,12 +265,14 @@ export function HistoricalImporter({
               const date = dateHeader ? String(raw[dateHeader] ?? "").trim() : "";
               const sale_price = salePriceHeader ? String(raw[salePriceHeader] ?? "").trim() : "";
               const lead_name = leadHeader ? String(raw[leadHeader] ?? "").trim() : "";
+              const van = vanHeader ? String(raw[vanHeader] ?? "").trim() : "";
+              // Walk OUTCOME_TOKENS in priority order; first marked column wins.
               let outcome = "";
               for (const { outcome: o } of OUTCOME_TOKENS) {
                 const h = outcomeMap[o];
                 if (h && isMarked(raw[h])) { outcome = o; break; }
               }
-              return { agent, outcome, date, sale_price: sale_price || null, lead_name: lead_name || null };
+              return { agent, outcome, date, sale_price: sale_price || null, lead_name: lead_name || null, van: van || null };
             })
             .filter((r) => r.agent && r.outcome);
 
@@ -331,9 +332,9 @@ export function HistoricalImporter({
         <Upload className="w-8 h-8 mx-auto text-neon mb-3" />
         <div className="font-display text-sm text-neon">DROP MONDAY.COM CSV HERE</div>
         <div className="text-xs text-muted-foreground mt-2">
-          Reads <span className="text-foreground">Agent</span>, <span className="text-foreground">Sale Price</span>,
-          and the 5 outcome columns:{" "}
-          <span className="text-foreground">BO · OL · Sale · CTC · Reset</span>.
+          Reads <span className="text-foreground">Agent</span>, <span className="text-foreground">Van</span>,{" "}
+          <span className="text-foreground">Sale Price</span>, and the outcome columns:{" "}
+          <span className="text-foreground">Sale · PM · Reset · BO · CTC · OL</span>.
         </div>
         <div className="text-[10px] text-muted-foreground mt-1">or click to browse</div>
       </div>
@@ -361,9 +362,10 @@ export function HistoricalImporter({
           <div className="mt-4 flex flex-wrap gap-2 text-[11px]">
             {[
               { k: "SALE", label: "Sale (2pt)" },
-              { k: "OL",   label: "OL · One Leg (0pt)" },
-              { k: "BO",   label: "BO + CTC (0pt)" },
+              { k: "PM",   label: "Sit · PM (1pt)" },
               { k: "RS",   label: "Reset (0pt)" },
+              { k: "BO",   label: "BO + CTC (0pt)" },
+              { k: "OL",   label: "OL · One Leg (0pt)" },
             ].map(({ k, label }) => (
 
               <span key={k} className="rounded border border-border bg-surface px-2 py-1 font-display tracking-wider text-muted-foreground">

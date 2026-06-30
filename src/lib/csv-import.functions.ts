@@ -18,6 +18,7 @@ type CsvImportRow = {
   date: string;
   sale_price: string | number | null;
   lead_name: string | null;
+  van: string | null;
 };
 
 type CsvImportInput = {
@@ -43,6 +44,7 @@ function coerceCsvImportInput(data: unknown): CsvImportInput {
         date: toStringValue(row.date),
         sale_price: row.sale_price === null || row.sale_price === undefined ? null : toStringValue(row.sale_price),
         lead_name: toStringValue(row.lead_name) || null,
+        van: toStringValue(row.van) || null,
       };
     }),
     team_id: typeof input.team_id === "string" && uuidLike.test(input.team_id) ? input.team_id : null,
@@ -122,11 +124,17 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
     };
     const buckets = new Map<string, Bucket>();
 
+    // Capture the most recent non-empty Van label per agent so we can
+    // permanently assign them to that team in profiles.team_id.
+    const vanByAgent = new Map<string, string>();
+
     for (let i = 0; i < data.rows.length; i++) {
       const r = data.rows[i];
       const name = r.agent.trim();
       // Silently skip blank-agent rows (Monday exports often have spacer rows).
       if (!name) continue;
+      const vanRaw = (r.van ?? "").trim();
+      if (vanRaw) vanByAgent.set(name.toLowerCase(), vanRaw);
       const outcome = normalizeOutcome(r.outcome);
       // Silently skip rows with no recognizable outcome — do not surface as error.
       if (!outcome) continue;
@@ -196,6 +204,40 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
       profileCache.set(k, v);
       return v;
     }
+
+    // Resolve / create a Van (team) by name, case-insensitive.
+    const teamCache = new Map<string, string>();
+    async function resolveTeamId(vanName: string): Promise<string | null> {
+      const key = vanName.toLowerCase();
+      const hit = teamCache.get(key);
+      if (hit) return hit;
+      const { data: existing } = await supabaseAdmin
+        .from("teams").select("id, name").ilike("name", vanName).maybeSingle();
+      if (existing) { teamCache.set(key, existing.id); return existing.id; }
+      const { data: created, error: cErr } = await supabaseAdmin
+        .from("teams").insert({ name: vanName, color: "#10b981" }).select("id").single();
+      if (cErr || !created) {
+        errors.push({ row: 0, reason: `Could not create Van "${vanName}": ${cErr?.message ?? "unknown"}` });
+        return null;
+      }
+      teamCache.set(key, created.id);
+      return created.id;
+    }
+
+    // Apply Van assignments captured during row scan → permanently
+    // overwrites profiles.team_id so the Payroll Ledger shows the Van label
+    // even when later CSVs leave the Van column blank.
+    for (const [agentKey, vanName] of vanByAgent.entries()) {
+      const profile = await resolveProfile(agentKey);
+      if (!profile) continue;
+      const teamId = await resolveTeamId(vanName);
+      if (!teamId) continue;
+      if (profile.team_id !== teamId) {
+        await supabaseAdmin.from("profiles").update({ team_id: teamId }).eq("id", profile.id);
+        profileCache.set(agentKey, { id: profile.id, team_id: teamId });
+      }
+    }
+
 
     // === REFRESH MODE ===
     // Wipe existing daily_logs + confirmed sale leads for each affected
