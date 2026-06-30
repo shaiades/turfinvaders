@@ -362,9 +362,10 @@ export function HistoricalImporter({
           <div className="mt-4 flex flex-wrap gap-2 text-[11px]">
             {[
               { k: "SALE", label: "Sale (2pt)" },
-              { k: "OL",   label: "OL · One Leg (0pt)" },
-              { k: "BO",   label: "BO + CTC (0pt)" },
+              { k: "PM",   label: "Sit · PM (1pt)" },
               { k: "RS",   label: "Reset (0pt)" },
+              { k: "BO",   label: "BO + CTC (0pt)" },
+              { k: "OL",   label: "OL · One Leg (0pt)" },
             ].map(({ k, label }) => (
 
               <span key={k} className="rounded border border-border bg-surface px-2 py-1 font-display tracking-wider text-muted-foreground">
