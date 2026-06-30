@@ -37,6 +37,7 @@ type CsvImportInput = {
   refresh_rows: CsvImportRow[] | null;
   final_import: boolean;
   final_rows: CsvImportRow[] | null;
+  nuclear_wipe_range: { min: string; max: string } | null;
 };
 
 function toStringValue(v: unknown): string {
@@ -61,6 +62,12 @@ function coerceCsvImportInput(data: unknown): CsvImportInput {
     });
   };
   const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const isoDate = /^\d{4}-\d{2}-\d{2}$/;
+  const wipeRaw = input.nuclear_wipe_range && typeof input.nuclear_wipe_range === "object"
+    ? input.nuclear_wipe_range as Record<string, unknown>
+    : null;
+  const wipeMin = wipeRaw && typeof wipeRaw.min === "string" && isoDate.test(wipeRaw.min) ? wipeRaw.min : null;
+  const wipeMax = wipeRaw && typeof wipeRaw.max === "string" && isoDate.test(wipeRaw.max) ? wipeRaw.max : null;
   return {
     rows: coerceRows(input.rows),
     team_id: typeof input.team_id === "string" && uuidLike.test(input.team_id) ? input.team_id : null,
@@ -68,8 +75,10 @@ function coerceCsvImportInput(data: unknown): CsvImportInput {
     refresh_rows: Array.isArray(input.refresh_rows) ? coerceRows(input.refresh_rows) : null,
     final_import: input.final_import === true,
     final_rows: Array.isArray(input.final_rows) ? coerceRows(input.final_rows) : null,
+    nuclear_wipe_range: wipeMin && wipeMax ? { min: wipeMin, max: wipeMax } : null,
   };
 }
+
 
 function normalizeOutcome(raw: string | null | undefined): Outcome | null {
   if (!raw) return null;
@@ -142,6 +151,34 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
     let created_profiles = 0;
     let updated_logs = 0;
     let inserted_sales = 0;
+
+    // NUCLEAR WIPE — before any inserts, scrub every daily_logs and confirmed
+    // sale-leads row whose date falls inside the uploaded CSV's [min, max]
+    // window. Guarantees a 100% clean slate for the week so re-uploads cannot
+    // duplicate. Only runs on the first batch (when the importer sends the
+    // range), so subsequent batches don't erase rows the prior batch wrote.
+    if (data.nuclear_wipe_range) {
+      const { min, max } = data.nuclear_wipe_range;
+      const { error: wipeLogsErr } = await supabaseAdmin
+        .from("daily_logs")
+        .delete()
+        .gte("log_date", min)
+        .lte("log_date", max);
+      if (wipeLogsErr) {
+        throw new Error(`Nuclear wipe (daily_logs ${min}..${max}) failed: ${wipeLogsErr.message}`);
+      }
+      const { error: wipeLeadsErr } = await supabaseAdmin
+        .from("leads")
+        .delete()
+        .eq("status", "confirmed")
+        .eq("is_sale", true)
+        .gte("reviewed_at", `${min}T00:00:00Z`)
+        .lte("reviewed_at", `${max}T23:59:59Z`);
+      if (wipeLeadsErr) {
+        errors.push({ row: 0, reason: `Nuclear wipe (sale leads ${min}..${max}) failed: ${wipeLeadsErr.message}` });
+      }
+    }
+
 
     // Aggregate per (canvasser, date) to minimize round-trips.
     type Bucket = {

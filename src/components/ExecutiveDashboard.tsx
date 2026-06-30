@@ -434,6 +434,7 @@ type WeeklyRow = {
   vanColor: string | null;
   totalLeads: number;
   totalSits: number;
+  totalResets: number;
   totalSales: number;
   totalPoints: number;
   totalPay: number;
@@ -459,13 +460,15 @@ function WeeklyResults() {
       if (logsR.error) throw logsR.error;
 
       const vanById = new Map((vansR.data ?? []).map((v) => [v.id, v]));
-      const agg = new Map<string, { leads: number; sits: number; sales: number }>();
+      const agg = new Map<string, { leads: number; sits: number; resets: number; sales: number }>();
       for (const l of logsR.data ?? []) {
-        const cur = agg.get(l.canvasser_id) ?? { leads: 0, sits: 0, sales: 0 };
+        const cur = agg.get(l.canvasser_id) ?? { leads: 0, sits: 0, resets: 0, sales: 0 };
         cur.leads += leadsSum(l);
         // demos_sits in DB includes sale rows. Sits (PM only) = demos_sits - sales.
         const pmOnly = Math.max(0, (l.demos_sits ?? 0) - (l.sales ?? 0));
         cur.sits += pmOnly;
+        // RS outcomes are persisted in future_leads (see csv-import.functions.ts).
+        cur.resets += l.future_leads ?? 0;
         cur.sales += l.sales ?? 0;
         agg.set(l.canvasser_id, cur);
       }
@@ -491,6 +494,7 @@ function WeeklyResults() {
           vanColor: v?.color ?? null,
           totalLeads: a.leads,
           totalSits: a.sits,
+          totalResets: a.resets,
           totalSales: a.sales,
           totalPoints,
           totalPay: payById.get(id) ?? 0,
@@ -499,17 +503,20 @@ function WeeklyResults() {
       rows.sort((a, b) => b.totalPay - a.totalPay);
       return rows;
     },
+    refetchOnWindowFocus: true,
+    staleTime: 0,
   });
 
   const grand = (q.data ?? []).reduce(
     (acc, r) => ({
       leads: acc.leads + r.totalLeads,
       sits: acc.sits + r.totalSits,
+      resets: acc.resets + r.totalResets,
       sales: acc.sales + r.totalSales,
       points: acc.points + r.totalPoints,
       pay: acc.pay + r.totalPay,
     }),
-    { leads: 0, sits: 0, sales: 0, points: 0, pay: 0 }
+    { leads: 0, sits: 0, resets: 0, sales: 0, points: 0, pay: 0 }
   );
 
   return (
@@ -534,6 +541,7 @@ function WeeklyResults() {
                 <th className="px-4 py-2">Van</th>
                 <th className="px-4 py-2 text-right">Total Leads</th>
                 <th className="px-4 py-2 text-right">Total Sits</th>
+                <th className="px-4 py-2 text-right">Total Resets</th>
                 <th className="px-4 py-2 text-right">Total Sales</th>
                 <th className="px-4 py-2 text-right">Total Points</th>
                 <th className="px-4 py-2 text-right">Total Pay</th>
@@ -548,6 +556,7 @@ function WeeklyResults() {
                   </td>
                   <td className="px-4 py-2.5 text-right font-display">{r.totalLeads}</td>
                   <td className="px-4 py-2.5 text-right font-display">{r.totalSits}</td>
+                  <td className="px-4 py-2.5 text-right font-display text-[var(--accent)]">{r.totalResets}</td>
                   <td className="px-4 py-2.5 text-right font-display text-victory">{r.totalSales}</td>
                   <td className="px-4 py-2.5 text-right font-display text-neon">{r.totalPoints}</td>
                   <td className="px-4 py-2.5 text-right font-display text-victory">${r.totalPay.toFixed(2)}</td>
@@ -557,6 +566,7 @@ function WeeklyResults() {
                 <td className="px-4 py-2.5 font-display text-xs uppercase tracking-widest text-neon" colSpan={2}>Grand Total</td>
                 <td className="px-4 py-2.5 text-right font-display">{grand.leads}</td>
                 <td className="px-4 py-2.5 text-right font-display">{grand.sits}</td>
+                <td className="px-4 py-2.5 text-right font-display text-[var(--accent)]">{grand.resets}</td>
                 <td className="px-4 py-2.5 text-right font-display text-victory">{grand.sales}</td>
                 <td className="px-4 py-2.5 text-right font-display text-neon">{grand.points}</td>
                 <td className="px-4 py-2.5 text-right font-display text-victory">${grand.pay.toFixed(2)}</td>
