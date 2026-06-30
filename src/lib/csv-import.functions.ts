@@ -329,6 +329,7 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
       future_leads: number;
       demos_sits: number;
       sales: number;
+      unmarked: number;
     };
     const dailyLogRows: DailyLogUpsert[] = [];
     const saleLeadRows: {
@@ -354,6 +355,7 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
         future_leads: b.future_leads,
         demos_sits: b.demos_sits,
         sales: b.sales,
+        unmarked: b.unmarked,
       });
 
       // Insert confirmed leads for each SALE → feeds Paycheck Engine commission.
