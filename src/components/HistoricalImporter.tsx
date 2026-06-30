@@ -482,9 +482,6 @@ export function HistoricalImporter({
             ))}
           </div>
 
-          <div className="mt-2 text-[10px] font-display uppercase tracking-widest text-warning">
-            Diagnostic mode · PM header detected: <span className="text-foreground">{preview[0]?.pm_header ?? "NONE"}</span>
-          </div>
 
           <div className="mt-4 max-h-72 overflow-auto rounded border border-border">
             <table className="w-full text-xs">
@@ -493,32 +490,20 @@ export function HistoricalImporter({
                   <th className="px-2 py-1.5">Agent</th>
                   <th className="px-2 py-1.5">Date</th>
                   <th className="px-2 py-1.5">Outcome</th>
-                  <th className="px-2 py-1.5 bg-warning/10 text-warning">Raw PM Cell</th>
                   <th className="px-2 py-1.5 text-right">Sale $</th>
                 </tr>
               </thead>
               <tbody>
-                {preview.slice(0, 100).map((r, i) => {
-                  const rawPm = r.raw_pm ?? "UNDEFINED";
-                  const len = rawPm === "UNDEFINED" ? 0 : rawPm.length;
-                  const codes = rawPm === "UNDEFINED"
-                    ? ""
-                    : Array.from(rawPm).slice(0, 12).map((c) => c.charCodeAt(0)).join(",");
-                  return (
-                    <tr key={i} className="border-t border-border/50">
-                      <td className="px-2 py-1">{r.agent}</td>
-                      <td className="px-2 py-1 text-muted-foreground">{r.date || "—"}</td>
-                      <td className="px-2 py-1 uppercase text-neon">{r.outcome || "—"}</td>
-                      <td className="px-2 py-1 bg-warning/5 font-mono text-[10px] text-warning">
-                        <span className="text-foreground">"{rawPm}"</span>
-                        <span className="text-muted-foreground"> · len={len} · codes=[{codes}]</span>
-                      </td>
-                      <td className="px-2 py-1 text-right text-victory">
-                        {r.sale_price ? `$${Number(String(r.sale_price).replace(/[^0-9.]/g, "")).toLocaleString()}` : "—"}
-                      </td>
-                    </tr>
-                  );
-                })}
+                {preview.slice(0, 100).map((r, i) => (
+                  <tr key={i} className="border-t border-border/50">
+                    <td className="px-2 py-1">{r.agent}</td>
+                    <td className="px-2 py-1 text-muted-foreground">{r.date || "—"}</td>
+                    <td className="px-2 py-1 uppercase text-neon">{r.outcome || "—"}</td>
+                    <td className="px-2 py-1 text-right text-victory">
+                      {r.sale_price ? `$${Number(String(r.sale_price).replace(/[^0-9.]/g, "")).toLocaleString()}` : "—"}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
             {preview.length > 100 && (
@@ -529,9 +514,8 @@ export function HistoricalImporter({
           </div>
 
           <div className="mt-4 flex items-center justify-between gap-3 flex-wrap">
-            <div className="text-[11px] text-warning flex items-center gap-2">
-              <AlertTriangle className="w-3.5 h-3.5" />
-              Diagnostic mode · Import is disabled. Inspect the "Raw PM Cell" column to see exactly what Monday.com puts in blank cells.
+            <div className="text-[11px] text-muted-foreground">
+              {importMut.isPending ? importProgress : `Ready to import ${preview.length} rows in batches of ${IMPORT_BATCH_SIZE}`}
             </div>
             <div className="flex gap-2">
               <Button variant="outline" size="sm" onClick={() => { setPreview(null); setFilename(null); setMissingColumns([]); if (inputRef.current) inputRef.current.value = ""; }}>
@@ -539,11 +523,18 @@ export function HistoricalImporter({
               </Button>
               <Button
                 size="sm"
-                disabled
-                title="Import disabled while diagnosing PM column contents"
-                className="bg-victory/40 text-background cursor-not-allowed"
+                disabled={importMut.isPending || isSubmitting}
+                onClick={() => importMut.mutate(preview)}
+                className="bg-victory text-background hover:bg-victory/80"
               >
-                <span className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4" /> Import Disabled (Diagnostic)</span>
+                <span className="flex items-center gap-2">
+                  {importMut.isPending || isSubmitting ? (
+                    <span className="inline-block w-4 h-4 border-2 border-background/30 border-t-background rounded-full animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="w-4 h-4" />
+                  )}
+                  {importMut.isPending || isSubmitting ? "Importing…" : "Confirm & Import"}
+                </span>
               </Button>
             </div>
           </div>
