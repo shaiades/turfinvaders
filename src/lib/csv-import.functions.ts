@@ -124,6 +124,10 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
     };
     const buckets = new Map<string, Bucket>();
 
+    // Capture the most recent non-empty Van label per agent so we can
+    // permanently assign them to that team in profiles.team_id.
+    const vanByAgent = new Map<string, string>();
+
     for (let i = 0; i < data.rows.length; i++) {
       const r = data.rows[i];
       const name = r.agent.trim();
