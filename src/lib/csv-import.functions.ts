@@ -81,6 +81,7 @@ function normalizeOutcome(raw: string | null | undefined): Outcome | null {
   if (k === "rs" || k.includes("reset")) return "RS";
   if (k === "pm" || k.includes("pitchmiss") || k.includes("demo") || k.includes("sit")) return "PM";
   if (k.includes("sale") || k.includes("sold") || k.includes("close") || k === "win") return "SALE";
+  if (k === "unmarked" || k === "none" || k === "blank") return "UNMARKED";
   return null;
 }
 
