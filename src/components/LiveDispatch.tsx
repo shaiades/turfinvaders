@@ -206,8 +206,10 @@ function WebhookUrlBanner() {
   // Monday.com receives a naked JSON challenge response, not HTML.
   const supabaseUrl =
     (import.meta.env.VITE_SUPABASE_URL as string | undefined) ?? "";
+  const anonKey =
+    (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined) ?? "";
   const url = supabaseUrl
-    ? `${supabaseUrl.replace(/\/$/, "")}/functions/v1/monday-live-dispatch`
+    ? `${supabaseUrl.replace(/\/$/, "")}/functions/v1/monday-live-dispatch${anonKey ? `?apikey=${encodeURIComponent(anonKey)}` : ""}`
     : "";
 
   const copy = async () => {
