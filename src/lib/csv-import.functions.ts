@@ -37,6 +37,7 @@ type CsvImportInput = {
   refresh_rows: CsvImportRow[] | null;
   final_import: boolean;
   final_rows: CsvImportRow[] | null;
+  nuclear_wipe_range: { min: string; max: string } | null;
 };
 
 function toStringValue(v: unknown): string {
@@ -61,6 +62,12 @@ function coerceCsvImportInput(data: unknown): CsvImportInput {
     });
   };
   const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const isoDate = /^\d{4}-\d{2}-\d{2}$/;
+  const wipeRaw = input.nuclear_wipe_range && typeof input.nuclear_wipe_range === "object"
+    ? input.nuclear_wipe_range as Record<string, unknown>
+    : null;
+  const wipeMin = wipeRaw && typeof wipeRaw.min === "string" && isoDate.test(wipeRaw.min) ? wipeRaw.min : null;
+  const wipeMax = wipeRaw && typeof wipeRaw.max === "string" && isoDate.test(wipeRaw.max) ? wipeRaw.max : null;
   return {
     rows: coerceRows(input.rows),
     team_id: typeof input.team_id === "string" && uuidLike.test(input.team_id) ? input.team_id : null,
@@ -68,8 +75,10 @@ function coerceCsvImportInput(data: unknown): CsvImportInput {
     refresh_rows: Array.isArray(input.refresh_rows) ? coerceRows(input.refresh_rows) : null,
     final_import: input.final_import === true,
     final_rows: Array.isArray(input.final_rows) ? coerceRows(input.final_rows) : null,
+    nuclear_wipe_range: wipeMin && wipeMax ? { min: wipeMin, max: wipeMax } : null,
   };
 }
+
 
 function normalizeOutcome(raw: string | null | undefined): Outcome | null {
   if (!raw) return null;
