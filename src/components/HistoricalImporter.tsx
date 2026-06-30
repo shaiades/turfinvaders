@@ -55,16 +55,15 @@ function hasAnyValue(row: Record<string, unknown>): boolean {
   return Object.values(row).some((v) => v != null && String(v).trim() !== "");
 }
 
-// Strict CSV marker rule: Monday.com often exports filler placeholders in
-// visually-empty cells. A cell is marked only when it has meaningful text,
-// not dashes/symbols or values like 0, false, n/a, null.
+// Permissive CSV marker rule: a cell is marked if it has ANY content other
+// than known "empty" placeholders. Previously a strict regex was eating
+// valid PM marks like "v", single characters, or unicode glyphs.
+const EMPTY_TOKENS = new Set(["-", "—", "–", "0", "false", "n/a", "null"]);
 function isMarked(v: unknown): boolean {
-  const val = v ? v.toString().trim() : "";
-  if (val === "" || val === "-") return false;
-  const compact = val.toLowerCase().replace(/\s+/g, "");
-  if (["0", "false", "n/a", "na", "null", "none"].includes(compact)) return false;
-  if (/^[\u002d\u2010-\u2015\u2212]+$/.test(val)) return false;
-  return /[a-zA-Z0-9]/.test(val);
+  const val = v ? v.toString().trim().toLowerCase() : "";
+  if (val.length === 0) return false;
+  if (EMPTY_TOKENS.has(val)) return false;
+  return true;
 }
 
 function chunkRows(rows: ParsedRow[], size = IMPORT_BATCH_SIZE): ParsedRow[][] {
