@@ -98,6 +98,14 @@ function parseDate(raw: string | null | undefined): string | null {
   return null;
 }
 
+function weekStartMonday(dateIso: string): string {
+  const d = new Date(`${dateIso}T00:00:00Z`);
+  const day = d.getUTCDay();
+  const diff = (day + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - diff);
+  return d.toISOString().slice(0, 10);
+}
+
 function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 40) || "agent";
 }
@@ -369,9 +377,11 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
 
     if (data.final_import) {
       const refreshedProfiles = new Set<string>();
+      const paycheckWeeksByProfile = new Map<string, Set<string>>();
       for (const r of rowsForFinalCalculations) {
         const name = r.agent.trim();
         if (!name) continue;
+        const logDate = parseDate(r.date);
         const profile = await resolveProfile(name);
         if (!profile || refreshedProfiles.has(profile.id)) continue;
         const { error: rankErr } = await supabaseAdmin.rpc("refresh_canvasser_rank", {
@@ -384,6 +394,26 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
           });
         }
         refreshedProfiles.add(profile.id);
+        if (logDate) {
+          const weeks = paycheckWeeksByProfile.get(profile.id) ?? new Set<string>();
+          weeks.add(weekStartMonday(logDate));
+          paycheckWeeksByProfile.set(profile.id, weeks);
+        }
+      }
+
+      for (const [profileId, weeks] of paycheckWeeksByProfile.entries()) {
+        for (const weekStart of weeks) {
+          const { error: payErr } = await supabaseAdmin.rpc("calc_weekly_paycheck", {
+            _canvasser_id: profileId,
+            _week_start: weekStart,
+          });
+          if (payErr) {
+            errors.push({
+              row: 0,
+              reason: `Final paycheck calculation failed for week ${weekStart}: ${payErr.message}`,
+            });
+          }
+        }
       }
     }
 
