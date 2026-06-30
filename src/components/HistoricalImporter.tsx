@@ -59,13 +59,12 @@ function hasAnyValue(row: Record<string, unknown>): boolean {
 // visually-empty cells. A cell is marked only when it has meaningful text,
 // not dashes/symbols or values like 0, false, n/a, null.
 function isMarked(v: unknown): boolean {
-  const s = String(v ?? "").trim();
-  const compact = s.toLowerCase().replace(/\s+/g, "");
-  if (!s) return false;
-  if (["0", "false", "n/a", "na", "null"].includes(compact)) return false;
-  if (/^[\u002d\u2010-\u2015\u2212]+$/.test(s)) return false;
-  if (s.length <= 1) return false;
-  return /[a-zA-Z0-9]/.test(s);
+  const val = v ? v.toString().trim() : "";
+  if (val === "" || val === "-") return false;
+  const compact = val.toLowerCase().replace(/\s+/g, "");
+  if (["0", "false", "n/a", "na", "null", "none"].includes(compact)) return false;
+  if (/^[\u002d\u2010-\u2015\u2212]+$/.test(val)) return false;
+  return /[a-zA-Z0-9]/.test(val);
 }
 
 function chunkRows(rows: ParsedRow[], size = IMPORT_BATCH_SIZE): ParsedRow[][] {
@@ -129,7 +128,7 @@ const OUTCOME_TOKENS: { key: string; label: string; aliases: string[]; outcome: 
 ];
 
 
-const SALE_PRICE_HEADERS = ["Sale Price", "Sale Amount", "Amount"];
+const SALE_PRICE_HEADERS = ["Sale Price", "Sales Volume", "Sale Amount", "Sold Amount", "Contract Amount", "Amount", "Volume"];
 const AGENT_HEADERS = ["Agent", "Canvasser", "Rep", "Salesperson"];
 const LEAD_HEADERS = ["Lead", "Customer", "Lead Name", "Customer Name"];
 const VAN_HEADERS = ["Van", "Team", "Crew", "Faction"];
@@ -264,6 +263,7 @@ export function HistoricalImporter({
         setPreview(null);
         setFilename(null);
         setMissingColumns([]);
+        if (inputRef.current) inputRef.current.value = "";
         onImported?.();
       }
       if (res.errors?.length) {
@@ -427,7 +427,11 @@ export function HistoricalImporter({
           type="file"
           accept=".csv,text/csv"
           className="hidden"
-          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) handleFile(f);
+            e.currentTarget.value = "";
+          }}
         />
         <Upload className="w-8 h-8 mx-auto text-neon mb-3" />
         <div className="font-display text-sm text-neon">DROP MONDAY.COM CSV HERE</div>
@@ -510,7 +514,7 @@ export function HistoricalImporter({
               Unknown agents will be auto-created as Canvassers. Existing weekly buckets will be refreshed.
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => { setPreview(null); setFilename(null); setMissingColumns([]); }}>
+              <Button variant="outline" size="sm" onClick={() => { setPreview(null); setFilename(null); setMissingColumns([]); if (inputRef.current) inputRef.current.value = ""; }}>
                 Cancel
               </Button>
               <Button

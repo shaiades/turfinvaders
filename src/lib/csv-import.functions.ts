@@ -77,9 +77,12 @@ function normalizeOutcome(raw: string | null | undefined): Outcome | null {
 
 
 function parseMoney(v: unknown): number | null {
-  if (v === null || v === undefined || v === "") return null;
-  const n = typeof v === "number" ? v : Number(String(v).replace(/[^0-9.\-]/g, ""));
-  return Number.isFinite(n) ? n : null;
+  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+  const val = v ? v.toString().trim() : "";
+  if (!val) return 0;
+  const cleaned = val.replace(/[^0-9.-]+/g, "");
+  const parsed = parseFloat(cleaned);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function parseDate(raw: string | null | undefined): string | null {
