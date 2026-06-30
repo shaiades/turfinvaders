@@ -356,6 +356,7 @@ type Range = "today" | "week" | "month";
 
 function LiveFleetStatus() {
   const [range, setRange] = useState<Range>("today");
+  const { matches } = useOfficeFilter();
 
   const since = useMemo(() => {
     const today = new Date(); today.setHours(0,0,0,0);
