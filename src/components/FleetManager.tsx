@@ -118,6 +118,41 @@ export function FleetManager() {
     onError: (e: Error) => toast.error(e.message ?? "Failed to delete"),
   });
 
+  const updateVan = useMutation({
+    mutationFn: async ({ id, name, color, office_id }: { id: string; name: string; color: string; office_id: string | null }) => {
+      if (!name.trim()) throw new Error("Van name required");
+      const { error } = await supabase.from("teams")
+        .update({ name: name.trim(), color, office_id })
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Van updated");
+      setEditingVanId(null);
+      qc.invalidateQueries({ queryKey: ["fleet_manager"] });
+      qc.invalidateQueries({ queryKey: ["offices"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const removeVan = useMutation({
+    mutationFn: async (id: string) => { await deleteVanFn({ data: { id } }); },
+    onSuccess: () => {
+      toast.success("Van deleted — members moved to Unassigned");
+      qc.invalidateQueries({ queryKey: ["fleet_manager"] });
+      qc.invalidateQueries({ queryKey: ["offices"] });
+      qc.invalidateQueries({ queryKey: ["performance-matrix"] });
+    },
+    onError: (e: Error) => toast.error(e.message ?? "Failed to delete van"),
+  });
+
+  function startEditVan(v: { id: string; name: string; color: string; office_id: string | null }) {
+    setEditingVanId(v.id);
+    setEditVanName(v.name);
+    setEditVanColor(v.color);
+    setEditVanOffice(v.office_id);
+  }
+
   if (fleet.isLoading || !fleet.data) {
     return <div className="text-sm text-muted-foreground">Loading fleet…</div>;
   }
