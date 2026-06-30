@@ -4,9 +4,18 @@ import { z } from "zod";
 /**
  * Monday.com → Live Dispatch intraday webhook.
  *
- * Accepts: { canvasser_name: string, status: "Submitted" | "Confirmed" }
- * Action:  matches canvasser_name → profile.id, then upserts today's row in
- *          public.daily_metrics, incrementing leads_submitted or leads_confirmed.
+ * Accepts: { canvasser_name: string, status: <Monday label> }
+ *
+ * Status mapping (case-insensitive):
+ *   "Confirmed" | "Future Reconf"                  → leads_confirmed++
+ *   "N/A" | "N/A x2" | "N/A x3" | "N/A x4"          → no_answers++
+ *   "Blowout" | "Disconnected"                      → killed++
+ *   "Unconfirmed" | "Future" | "Room Lead"          → pending++
+ *   "Submitted"                                     → (only) leads_submitted++
+ *
+ * Every webhook also increments leads_submitted by 1 (net-new lead),
+ * UNLESS the status itself is the legacy "Submitted" trigger (which is
+ * already a net-new lead and would otherwise double-count).
  *
  * Security: caller must send `x-monday-secret: <MONDAY_WEBHOOK_SECRET>` OR
  *           pass `?secret=<MONDAY_WEBHOOK_SECRET>`. Also handles Monday's
@@ -28,10 +37,7 @@ const json = (body: unknown, status = 200) =>
 
 const BodySchema = z.object({
   canvasser_name: z.string().min(1),
-  status: z
-    .string()
-    .min(1)
-    .transform((s) => s.trim().toLowerCase()),
+  status: z.string().min(1),
 });
 
 function normalizeName(s: string): string {
@@ -46,6 +52,18 @@ function todayLA(): string {
     day: "2-digit",
   });
   return fmt.format(new Date());
+}
+
+type Bucket = "leads_confirmed" | "no_answers" | "killed" | "pending" | null;
+
+function mapStatus(raw: string): Bucket {
+  const s = raw.trim().toLowerCase().replace(/\s+/g, " ");
+  if (s === "confirmed" || s === "future reconf") return "leads_confirmed";
+  if (s === "n/a" || s === "n/a x2" || s === "n/a x3" || s === "n/a x4") return "no_answers";
+  if (s === "blowout" || s === "disconnected") return "killed";
+  if (s === "unconfirmed" || s === "future" || s === "room lead") return "pending";
+  if (s === "submitted") return null; // submitted-only trigger
+  return "pending"; // unknown labels → safest bucket so nothing is dropped
 }
 
 export const Route = createFileRoute("/api/public/monday-live-dispatch")({
@@ -81,15 +99,12 @@ export const Route = createFileRoute("/api/public/monday-live-dispatch")({
         }
 
         const { canvasser_name, status } = result.data;
-        let field: "leads_submitted" | "leads_confirmed";
-        if (status === "submitted") field = "leads_submitted";
-        else if (status === "confirmed") field = "leads_confirmed";
-        else return json({ error: `Unknown status: ${status}` }, 400);
+        const bucket = mapStatus(status);
+        const isSubmittedOnly = status.trim().toLowerCase() === "submitted";
 
         const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-        // Match canvasser_name → profile id (case-insensitive exact match first,
-        // then loose contains match as fallback).
+        // Match canvasser_name → profile id
         const wanted = normalizeName(canvasser_name);
         const { data: profiles, error: profErr } = await supabaseAdmin
           .from("profiles")
@@ -112,20 +127,23 @@ export const Route = createFileRoute("/api/public/monday-live-dispatch")({
         const metric_date = todayLA();
         const office_location = match.office_location ?? "San Diego";
 
-        // Read existing row to increment atomically (PostgREST has no
-        // increment expression on upsert). Use RPC-free 2-step path with
-        // unique constraint as the safety net.
         const { data: existing } = await supabaseAdmin
           .from("daily_metrics")
-          .select("id, leads_submitted, leads_confirmed")
+          .select("id, leads_submitted, leads_confirmed, no_answers, killed, pending")
           .eq("canvasser_id", match.id)
           .eq("metric_date", metric_date)
           .maybeSingle();
 
-        const nextSubmitted =
-          (existing?.leads_submitted ?? 0) + (field === "leads_submitted" ? 1 : 0);
+        // Every incoming webhook represents one net-new lead, so submitted
+        // increments by 1 (the legacy "Submitted" trigger is also +1, never +2).
+        const nextSubmitted = (existing?.leads_submitted ?? 0) + 1;
         const nextConfirmed =
-          (existing?.leads_confirmed ?? 0) + (field === "leads_confirmed" ? 1 : 0);
+          (existing?.leads_confirmed ?? 0) + (bucket === "leads_confirmed" ? 1 : 0);
+        const nextNoAnswers =
+          (existing?.no_answers ?? 0) + (bucket === "no_answers" ? 1 : 0);
+        const nextKilled = (existing?.killed ?? 0) + (bucket === "killed" ? 1 : 0);
+        const nextPending =
+          (existing?.pending ?? 0) + (bucket === "pending" && !isSubmittedOnly ? 1 : 0);
 
         const { error: upErr } = await supabaseAdmin
           .from("daily_metrics")
@@ -136,6 +154,9 @@ export const Route = createFileRoute("/api/public/monday-live-dispatch")({
               office_location,
               leads_submitted: nextSubmitted,
               leads_confirmed: nextConfirmed,
+              no_answers: nextNoAnswers,
+              killed: nextKilled,
+              pending: nextPending,
             },
             { onConflict: "canvasser_id,metric_date" },
           );
@@ -146,8 +167,13 @@ export const Route = createFileRoute("/api/public/monday-live-dispatch")({
           canvasser_id: match.id,
           canvasser_name: match.display_name,
           metric_date,
+          status_received: status,
+          bucket: bucket ?? "submitted_only",
           leads_submitted: nextSubmitted,
           leads_confirmed: nextConfirmed,
+          no_answers: nextNoAnswers,
+          killed: nextKilled,
+          pending: nextPending,
         });
       },
     },

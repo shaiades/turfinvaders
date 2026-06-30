@@ -1,0 +1,4 @@
+ALTER TABLE public.daily_metrics
+  ADD COLUMN IF NOT EXISTS no_answers integer NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS killed integer NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS pending integer NOT NULL DEFAULT 0;

@@ -17,10 +17,11 @@ type Metric = {
   metric_date: string;
   leads_submitted: number;
   leads_confirmed: number;
+  no_answers: number;
+  killed: number;
+  pending: number;
   office_location: string;
 };
-
-type Team = { id: string; name: string; color: string | null };
 
 function todayLA(): string {
   const fmt = new Intl.DateTimeFormat("en-CA", {
@@ -56,20 +57,14 @@ export function LiveDispatch() {
     },
   });
 
-  const { data: teams = [] } = useQuery({
-    queryKey: ["dispatch-teams"],
-    queryFn: async () => {
-      const { data } = await supabase.from("teams").select("id, name, color");
-      return (data ?? []) as Team[];
-    },
-  });
-
   const { data: metrics = [] } = useQuery({
     queryKey: ["daily-metrics", today],
     queryFn: async () => {
       const { data } = await supabase
         .from("daily_metrics")
-        .select("id, canvasser_id, metric_date, leads_submitted, leads_confirmed, office_location")
+        .select(
+          "id, canvasser_id, metric_date, leads_submitted, leads_confirmed, no_answers, killed, pending, office_location",
+        )
         .eq("metric_date", today);
       return (data ?? []) as Metric[];
     },
@@ -90,7 +85,6 @@ export function LiveDispatch() {
     };
   }, [qc, today]);
 
-  const teamMap = useMemo(() => Object.fromEntries(teams.map((t) => [t.id, t])), [teams]);
   const metricMap = useMemo(
     () => Object.fromEntries(metrics.map((m) => [m.canvasser_id, m])),
     [metrics],
@@ -102,16 +96,18 @@ export function LiveDispatch() {
   );
 
   const totals = useMemo(() => {
-    let sub = 0,
-      conf = 0;
+    let sub = 0, conf = 0, na = 0, kil = 0, pen = 0;
     visible.forEach((c) => {
       const m = metricMap[c.id];
       if (!m) return;
       sub += m.leads_submitted ?? 0;
       conf += m.leads_confirmed ?? 0;
+      na += m.no_answers ?? 0;
+      kil += m.killed ?? 0;
+      pen += m.pending ?? 0;
     });
     const conv = sub > 0 ? Math.round((conf / sub) * 100) : 0;
-    return { sub, conf, conv };
+    return { sub, conf, na, kil, pen, conv };
   }, [visible, metricMap]);
 
   return (
@@ -131,9 +127,12 @@ export function LiveDispatch() {
         <OfficeFilterToggle />
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
         <TotalTile label="Submitted" value={totals.sub} accent="neon" />
+        <TotalTile label="Pending" value={totals.pen} accent="warning" />
+        <TotalTile label="N/A" value={totals.na} accent="muted" />
         <TotalTile label="Confirmed" value={totals.conf} accent="victory" />
+        <TotalTile label="Killed" value={totals.kil} accent="danger" />
         <TotalTile label="Conversion" value={`${totals.conv}%`} accent="accent" />
       </div>
 
@@ -149,9 +148,12 @@ export function LiveDispatch() {
               <thead>
                 <tr className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border bg-surface">
                   <th className="text-left py-2.5 px-3">Canvasser</th>
-                  <th className="text-left py-2.5 px-3 hidden md:table-cell">Van</th>
+                  <th className="text-left py-2.5 px-3">Office</th>
                   <th className="text-right py-2.5 px-3">Submitted</th>
+                  <th className="text-right py-2.5 px-3">Pending</th>
+                  <th className="text-right py-2.5 px-3">N/A</th>
                   <th className="text-right py-2.5 px-3">Confirmed</th>
+                  <th className="text-right py-2.5 px-3">Killed</th>
                   <th className="text-right py-2.5 px-3">Conversion %</th>
                 </tr>
               </thead>
@@ -160,29 +162,21 @@ export function LiveDispatch() {
                   const m = metricMap[c.id];
                   const sub = m?.leads_submitted ?? 0;
                   const conf = m?.leads_confirmed ?? 0;
+                  const na = m?.no_answers ?? 0;
+                  const kil = m?.killed ?? 0;
+                  const pen = m?.pending ?? 0;
                   const conv = sub > 0 ? Math.round((conf / sub) * 100) : 0;
-                  const team = c.team_id ? teamMap[c.team_id] : undefined;
                   return (
                     <tr key={c.id} className="border-b border-border/40 hover:bg-surface-elevated">
                       <td className="py-2.5 px-3 font-medium">{c.display_name ?? "—"}</td>
-                      <td className="py-2.5 px-3 hidden md:table-cell">
-                        {team ? (
-                          <span
-                            className="inline-flex items-center gap-1.5 text-xs"
-                            style={{ color: team.color ?? undefined }}
-                          >
-                            <span
-                              className="w-2 h-2 rounded-full"
-                              style={{ background: team.color ?? "#10b981" }}
-                            />
-                            {team.name}
-                          </span>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">—</span>
-                        )}
+                      <td className="py-2.5 px-3 text-xs text-muted-foreground">
+                        {c.office_location ?? "—"}
                       </td>
                       <td className="py-2.5 px-3 text-right font-display text-neon">{sub}</td>
+                      <td className="py-2.5 px-3 text-right font-display text-warning">{pen}</td>
+                      <td className="py-2.5 px-3 text-right font-display text-muted-foreground">{na}</td>
                       <td className="py-2.5 px-3 text-right font-display text-victory">{conf}</td>
+                      <td className="py-2.5 px-3 text-right font-display text-destructive">{kil}</td>
                       <td className="py-2.5 px-3 text-right font-display text-accent">{conv}%</td>
                     </tr>
                   );
@@ -203,10 +197,20 @@ function TotalTile({
 }: {
   label: string;
   value: number | string;
-  accent: "neon" | "victory" | "accent";
+  accent: "neon" | "victory" | "accent" | "warning" | "danger" | "muted";
 }) {
   const color =
-    accent === "victory" ? "text-victory" : accent === "accent" ? "text-accent" : "text-neon";
+    accent === "victory"
+      ? "text-victory"
+      : accent === "accent"
+        ? "text-accent"
+        : accent === "warning"
+          ? "text-warning"
+          : accent === "danger"
+            ? "text-destructive"
+            : accent === "muted"
+              ? "text-muted-foreground"
+              : "text-neon";
   return (
     <div className="arcade-card p-4">
       <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
