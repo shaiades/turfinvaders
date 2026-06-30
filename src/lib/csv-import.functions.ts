@@ -294,46 +294,45 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
     }
 
 
+    type DailyLogUpsert = {
+      canvasser_id: string;
+      team_id: string | null;
+      log_date: string;
+      no_demo: number;
+      one_legs: number;
+      future_leads: number;
+      demos_sits: number;
+      sales: number;
+    };
+    const dailyLogRows: DailyLogUpsert[] = [];
+    const saleLeadRows: {
+      canvasser_id: string;
+      team_id: string | null;
+      status: "confirmed";
+      customer_name: string | null;
+      sale_amount: number | null;
+      is_sale: true;
+      reviewed_at: string;
+    }[] = [];
+
     for (const b of buckets.values()) {
       const profile = await resolveProfile(b.profileKey);
       if (!profile) continue;
 
-      // Upsert row — return existing values so we can accumulate.
-      const { error: insErr } = await supabaseAdmin
-        .from("daily_logs")
-        .upsert(
-          { canvasser_id: profile.id, team_id: profile.team_id, log_date: b.log_date },
-          { onConflict: "canvasser_id,log_date", ignoreDuplicates: true },
-        );
-      if (insErr) {
-        throw new Error(`daily_logs upsert failed for ${b.profileKey} on ${b.log_date}: ${insErr.message} (code=${insErr.code ?? "?"}, details=${insErr.details ?? ""}, hint=${insErr.hint ?? ""})`);
-      }
-
-      const { data: row, error: selErr } = await supabaseAdmin
-        .from("daily_logs")
-        .select("id, no_demo, one_legs, future_leads, demos_sits, sales")
-        .eq("canvasser_id", profile.id)
-        .eq("log_date", b.log_date)
-        .maybeSingle();
-      if (selErr) throw new Error(`daily_logs select failed for ${b.profileKey}: ${selErr.message}`);
-      if (!row) throw new Error(`daily_logs row missing after upsert for ${b.profileKey} on ${b.log_date}`);
-
-      const update = {
-        no_demo: (row.no_demo ?? 0) + b.no_demo,
-        one_legs: (row.one_legs ?? 0) + b.one_legs,
-        future_leads: (row.future_leads ?? 0) + b.future_leads,
-        demos_sits: (row.demos_sits ?? 0) + b.demos_sits,
-        sales: (row.sales ?? 0) + b.sales,
-      };
-      const { error: updErr } = await supabaseAdmin.from("daily_logs").update(update).eq("id", row.id);
-      if (updErr) {
-        throw new Error(`daily_logs update failed for ${b.profileKey} on ${b.log_date}: ${updErr.message} (code=${updErr.code ?? "?"}, details=${updErr.details ?? ""}, hint=${updErr.hint ?? ""})`);
-      }
-      updated_logs += 1;
+      dailyLogRows.push({
+        canvasser_id: profile.id,
+        team_id: profile.team_id,
+        log_date: b.log_date,
+        no_demo: b.no_demo,
+        one_legs: b.one_legs,
+        future_leads: b.future_leads,
+        demos_sits: b.demos_sits,
+        sales: b.sales,
+      });
 
       // Insert confirmed leads for each SALE → feeds Paycheck Engine commission.
       for (const sale of b.sale_rows) {
-        const { error: lErr } = await supabaseAdmin.from("leads").insert({
+        saleLeadRows.push({
           canvasser_id: profile.id,
           team_id: profile.team_id,
           status: "confirmed",
@@ -342,11 +341,25 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
           is_sale: true,
           reviewed_at: new Date(`${b.log_date}T12:00:00Z`).toISOString(),
         });
-        if (lErr) {
-          errors.push({ row: 0, reason: `Lead insert failed for ${b.profileKey}: ${lErr.message} (code=${lErr.code ?? "?"}, hint=${lErr.hint ?? ""})` });
-        } else {
-          inserted_sales += 1;
-        }
+      }
+    }
+
+    if (dailyLogRows.length > 0) {
+      const { error: upsertErr } = await supabaseAdmin
+        .from("daily_logs")
+        .upsert(dailyLogRows, { onConflict: "canvasser_id,log_date" });
+      if (upsertErr) {
+        throw new Error(`daily_logs batch upsert failed: ${upsertErr.message} (code=${upsertErr.code ?? "?"}, details=${upsertErr.details ?? ""}, hint=${upsertErr.hint ?? ""})`);
+      }
+      updated_logs = dailyLogRows.length;
+    }
+
+    if (saleLeadRows.length > 0) {
+      const { error: leadErr } = await supabaseAdmin.from("leads").insert(saleLeadRows);
+      if (leadErr) {
+        errors.push({ row: 0, reason: `Lead batch insert failed: ${leadErr.message} (code=${leadErr.code ?? "?"}, hint=${leadErr.hint ?? ""})` });
+      } else {
+        inserted_sales = saleLeadRows.length;
       }
     }
 
