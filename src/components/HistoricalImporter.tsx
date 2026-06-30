@@ -14,6 +14,7 @@ type ParsedRow = {
   date: string;
   sale_price?: string | null;
   lead_name?: string | null;
+  van?: string | null;
 };
 
 function norm(s: string): string {
