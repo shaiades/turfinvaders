@@ -502,6 +502,7 @@ export function HistoricalImporter({
               { k: "RS",   label: "Reset (0pt)" },
               { k: "BO",   label: "BO + CTC (0pt)" },
               { k: "OL",   label: "OL · One Leg (0pt)" },
+              { k: "UNMARKED", label: "Unmarked (0pt)" },
             ].map(({ k, label }) => (
 
               <span key={k} className="rounded border border-border bg-surface px-2 py-1 font-display tracking-wider text-muted-foreground">
