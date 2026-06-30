@@ -504,6 +504,7 @@ function WeeklyResults() {
         rows.push({
           canvasserId: id,
           name: p?.display_name ?? "Unknown",
+          officeLocation: (p as { office_location?: string | null } | undefined)?.office_location ?? null,
           vanName: v?.name ?? null,
           vanColor: v?.color ?? null,
           totalLeads: a.leads,
