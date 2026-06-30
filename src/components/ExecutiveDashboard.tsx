@@ -37,14 +37,17 @@ export function ExecutiveDashboard() {
   return (
     <div className="space-y-6">
       <ManualEntryBar />
+      <HistoricalImporter />
+      <WeeklyResults />
+      <PayrollLedger />
       <LiveDailyAction />
       <DatabaseCleanup />
       <RawDataTable />
       <LiveFleetStatus />
-      <WeeklyResults />
     </div>
   );
 }
+
 
 /* ============ Live Daily Action (Today) ============ */
 
