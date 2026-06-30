@@ -1,10 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { OfficeFilterToggle, useOfficeFilter } from "@/components/OfficeFilterContext";
-import { Minus, Plus, Radio, Users } from "lucide-react";
+import { Radio, Users } from "lucide-react";
 
 type Profile = {
   id: string;
@@ -17,9 +15,8 @@ type Metric = {
   id: string;
   canvasser_id: string;
   metric_date: string;
-  leads_called_in: number;
+  leads_submitted: number;
   leads_confirmed: number;
-  sits_ran_today: number;
   office_location: string;
 };
 
@@ -72,28 +69,13 @@ export function LiveDispatch() {
     queryFn: async () => {
       const { data } = await supabase
         .from("daily_metrics")
-        .select("*")
+        .select("id, canvasser_id, metric_date, leads_submitted, leads_confirmed, office_location")
         .eq("metric_date", today);
       return (data ?? []) as Metric[];
     },
   });
 
-  const { data: clockedIds = new Set<string>() } = useQuery({
-    queryKey: ["dispatch-clocked-in", today],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("time_entries")
-        .select("user_id, clock_out")
-        .eq("log_date", today);
-      const set = new Set<string>();
-      (data ?? []).forEach((r: { user_id: string; clock_out: string | null }) => {
-        if (!r.clock_out) set.add(r.user_id);
-      });
-      return set;
-    },
-  });
-
-  // Realtime subscription
+  // Realtime subscription — instant updates when Monday webhook upserts.
   useEffect(() => {
     const channel = supabase
       .channel("dispatch-daily-metrics")
@@ -101,11 +83,6 @@ export function LiveDispatch() {
         "postgres_changes",
         { event: "*", schema: "public", table: "daily_metrics" },
         () => qc.invalidateQueries({ queryKey: ["daily-metrics", today] }),
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "time_entries" },
-        () => qc.invalidateQueries({ queryKey: ["dispatch-clocked-in", today] }),
       )
       .subscribe();
     return () => {
@@ -124,19 +101,17 @@ export function LiveDispatch() {
     [canvassers, matches],
   );
 
-  // Totals
   const totals = useMemo(() => {
-    let called = 0,
-      conf = 0,
-      sits = 0;
+    let sub = 0,
+      conf = 0;
     visible.forEach((c) => {
       const m = metricMap[c.id];
       if (!m) return;
-      called += m.leads_called_in;
-      conf += m.leads_confirmed;
-      sits += m.sits_ran_today;
+      sub += m.leads_submitted ?? 0;
+      conf += m.leads_confirmed ?? 0;
     });
-    return { called, conf, sits };
+    const conv = sub > 0 ? Math.round((conf / sub) * 100) : 0;
+    return { sub, conf, conv };
   }, [visible, metricMap]);
 
   return (
@@ -149,18 +124,17 @@ export function LiveDispatch() {
               Live Dispatch · {today}
             </div>
             <div className="font-display text-sm text-neon mt-0.5">
-              REAL-TIME LEADERBOARD
+              READ-ONLY · MONDAY.COM FEED
             </div>
           </div>
         </div>
         <OfficeFilterToggle />
       </div>
 
-      {/* Totals strip */}
       <div className="grid grid-cols-3 gap-3">
-        <TotalTile label="Called In" value={totals.called} accent="neon" />
+        <TotalTile label="Submitted" value={totals.sub} accent="neon" />
         <TotalTile label="Confirmed" value={totals.conf} accent="victory" />
-        <TotalTile label="Sits Today" value={totals.sits} accent="accent" />
+        <TotalTile label="Conversion" value={`${totals.conv}%`} accent="accent" />
       </div>
 
       <div className="arcade-card overflow-hidden">
@@ -176,23 +150,43 @@ export function LiveDispatch() {
                 <tr className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border bg-surface">
                   <th className="text-left py-2.5 px-3">Canvasser</th>
                   <th className="text-left py-2.5 px-3 hidden md:table-cell">Van</th>
-                  <th className="text-center py-2.5 px-3">Status</th>
-                  <th className="text-center py-2.5 px-3">Called In</th>
-                  <th className="text-center py-2.5 px-3">Confirmed</th>
-                  <th className="text-center py-2.5 px-3">Sits</th>
+                  <th className="text-right py-2.5 px-3">Submitted</th>
+                  <th className="text-right py-2.5 px-3">Confirmed</th>
+                  <th className="text-right py-2.5 px-3">Conversion %</th>
                 </tr>
               </thead>
               <tbody>
-                {visible.map((c) => (
-                  <DispatchRow
-                    key={c.id}
-                    canvasser={c}
-                    metric={metricMap[c.id]}
-                    team={c.team_id ? teamMap[c.team_id] : undefined}
-                    clockedIn={clockedIds.has(c.id)}
-                    today={today}
-                  />
-                ))}
+                {visible.map((c) => {
+                  const m = metricMap[c.id];
+                  const sub = m?.leads_submitted ?? 0;
+                  const conf = m?.leads_confirmed ?? 0;
+                  const conv = sub > 0 ? Math.round((conf / sub) * 100) : 0;
+                  const team = c.team_id ? teamMap[c.team_id] : undefined;
+                  return (
+                    <tr key={c.id} className="border-b border-border/40 hover:bg-surface-elevated">
+                      <td className="py-2.5 px-3 font-medium">{c.display_name ?? "—"}</td>
+                      <td className="py-2.5 px-3 hidden md:table-cell">
+                        {team ? (
+                          <span
+                            className="inline-flex items-center gap-1.5 text-xs"
+                            style={{ color: team.color ?? undefined }}
+                          >
+                            <span
+                              className="w-2 h-2 rounded-full"
+                              style={{ background: team.color ?? "#10b981" }}
+                            />
+                            {team.name}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-display text-neon">{sub}</td>
+                      <td className="py-2.5 px-3 text-right font-display text-victory">{conf}</td>
+                      <td className="py-2.5 px-3 text-right font-display text-accent">{conv}%</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -208,7 +202,7 @@ function TotalTile({
   accent,
 }: {
   label: string;
-  value: number;
+  value: number | string;
   accent: "neon" | "victory" | "accent";
 }) {
   const color =
@@ -220,168 +214,5 @@ function TotalTile({
       </div>
       <div className={`font-display text-2xl mt-1 ${color}`}>{value}</div>
     </div>
-  );
-}
-
-type Field = "leads_called_in" | "leads_confirmed" | "sits_ran_today";
-
-function DispatchRow({
-  canvasser,
-  metric,
-  team,
-  clockedIn,
-  today,
-}: {
-  canvasser: Profile;
-  metric: Metric | undefined;
-  team: Team | undefined;
-  clockedIn: boolean;
-  today: string;
-}) {
-  const qc = useQueryClient();
-  const [pending, setPending] = useState<Field | null>(null);
-
-  const setValue = async (field: Field, value: number) => {
-    const safe = Math.max(0, Math.floor(value));
-    setPending(field);
-    // Optimistic
-    qc.setQueryData<Metric[]>(["daily-metrics", today], (prev) => {
-      const list = prev ? [...prev] : [];
-      const idx = list.findIndex((m) => m.canvasser_id === canvasser.id);
-      if (idx >= 0) {
-        list[idx] = { ...list[idx], [field]: safe };
-      } else {
-        list.push({
-          id: `tmp-${canvasser.id}`,
-          canvasser_id: canvasser.id,
-          metric_date: today,
-          leads_called_in: field === "leads_called_in" ? safe : 0,
-          leads_confirmed: field === "leads_confirmed" ? safe : 0,
-          sits_ran_today: field === "sits_ran_today" ? safe : 0,
-          office_location: canvasser.office_location ?? "San Diego",
-        });
-      }
-      return list;
-    });
-
-    const payload = {
-      canvasser_id: canvasser.id,
-      metric_date: today,
-      office_location: canvasser.office_location ?? "San Diego",
-      leads_called_in: field === "leads_called_in" ? safe : metric?.leads_called_in ?? 0,
-      leads_confirmed: field === "leads_confirmed" ? safe : metric?.leads_confirmed ?? 0,
-      sits_ran_today: field === "sits_ran_today" ? safe : metric?.sits_ran_today ?? 0,
-    };
-
-    const { error } = await supabase
-      .from("daily_metrics")
-      .upsert(payload, { onConflict: "canvasser_id,metric_date" });
-    setPending(null);
-    if (error) {
-      qc.invalidateQueries({ queryKey: ["daily-metrics", today] });
-      console.error("dispatch upsert failed", error);
-    }
-  };
-
-  const called = metric?.leads_called_in ?? 0;
-  const confirmed = metric?.leads_confirmed ?? 0;
-  const sits = metric?.sits_ran_today ?? 0;
-
-  return (
-    <tr className="border-b border-border/40 hover:bg-surface-elevated">
-      <td className="py-2.5 px-3 font-medium">{canvasser.display_name ?? "—"}</td>
-      <td className="py-2.5 px-3 hidden md:table-cell">
-        {team ? (
-          <span
-            className="inline-flex items-center gap-1.5 text-xs"
-            style={{ color: team.color ?? undefined }}
-          >
-            <span
-              className="w-2 h-2 rounded-full"
-              style={{ background: team.color ?? "#10b981" }}
-            />
-            {team.name}
-          </span>
-        ) : (
-          <span className="text-xs text-muted-foreground">—</span>
-        )}
-      </td>
-      <td className="py-2.5 px-3 text-center">
-        <span
-          className={`text-[9px] font-display uppercase tracking-widest px-2 py-0.5 rounded border ${
-            clockedIn
-              ? "border-victory text-victory"
-              : "border-border text-muted-foreground"
-          }`}
-        >
-          {clockedIn ? "ON CLOCK" : "OFF"}
-        </span>
-      </td>
-      <Stepper
-        value={called}
-        onChange={(v) => setValue("leads_called_in", v)}
-        loading={pending === "leads_called_in"}
-      />
-      <Stepper
-        value={confirmed}
-        onChange={(v) => setValue("leads_confirmed", v)}
-        loading={pending === "leads_confirmed"}
-        accent="victory"
-      />
-      <Stepper
-        value={sits}
-        onChange={(v) => setValue("sits_ran_today", v)}
-        loading={pending === "sits_ran_today"}
-        accent="accent"
-      />
-    </tr>
-  );
-}
-
-function Stepper({
-  value,
-  onChange,
-  loading,
-  accent = "neon",
-}: {
-  value: number;
-  onChange: (v: number) => void;
-  loading?: boolean;
-  accent?: "neon" | "victory" | "accent";
-}) {
-  const color =
-    accent === "victory" ? "text-victory" : accent === "accent" ? "text-accent" : "text-neon";
-  return (
-    <td className="py-2 px-2">
-      <div className="flex items-center justify-center gap-1">
-        <Button
-          size="icon"
-          variant="outline"
-          className="h-7 w-7"
-          onClick={() => onChange(Math.max(0, value - 1))}
-          disabled={loading || value <= 0}
-          aria-label="decrement"
-        >
-          <Minus className="w-3 h-3" />
-        </Button>
-        <Input
-          type="number"
-          min={0}
-          value={value}
-          onChange={(e) => onChange(Number(e.target.value) || 0)}
-          className={`h-7 w-14 text-center font-display ${color}`}
-        />
-        <Button
-          size="icon"
-          variant="outline"
-          className="h-7 w-7"
-          onClick={() => onChange(value + 1)}
-          disabled={loading}
-          aria-label="increment"
-        >
-          <Plus className="w-3 h-3" />
-        </Button>
-      </div>
-    </td>
   );
 }
