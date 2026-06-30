@@ -181,12 +181,22 @@ Deno.serve(async (req) => {
       : evStatus ?? "";
 
   if (!canvasser_name && pulseId) {
-    // Fetch token from system_settings, then call Monday GraphQL.
-    const { data: settings } = await admin
+    // Service-role client (admin) bypasses RLS; system_settings is a single
+    // row keyed by id=TRUE (boolean singleton).
+    const { data: settings, error: settingsErr } = await admin
       .from("system_settings")
       .select("monday_api_token")
-      .eq("id", true)
+      .limit(1)
       .maybeSingle();
+
+    if (settingsErr) {
+      await admin.from("webhook_logs").insert({
+        source: "monday-live-dispatch:settings_error",
+        raw_payload: { pulseId, error: settingsErr.message } as never,
+      });
+      return json({ error: "Failed to read system_settings", details: settingsErr.message }, 500);
+    }
+
     const token = settings?.monday_api_token as string | undefined;
 
     if (!token) {
@@ -205,12 +215,22 @@ Deno.serve(async (req) => {
     }
 
     try {
-      const { name, raw } = await fetchCanvasserNameFromMonday(pulseId, token);
+      const { name, ok, status: httpStatus, raw } = await fetchCanvasserNameFromMonday(
+        pulseId,
+        token,
+        admin,
+      );
       canvasser_name = name;
-      await admin.from("webhook_logs").insert({
-        source: "monday-live-dispatch:graphql",
-        raw_payload: { pulseId, resolved_name: name, monday_response: raw } as never,
-      });
+      if (!ok) {
+        return json(
+          {
+            error: "Monday GraphQL returned an error",
+            http_status: httpStatus,
+            monday_response: raw,
+          },
+          502,
+        );
+      }
     } catch (err) {
       await admin.from("webhook_logs").insert({
         source: "monday-live-dispatch:graphql_error",
