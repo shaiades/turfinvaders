@@ -90,7 +90,7 @@ export function PayrollLedger() {
   const { data, isLoading } = useQuery({
     queryKey: ["payroll-ledger", startStr, endStr],
     queryFn: async () => {
-      const [logsRes, leadsRes, profilesRes, teamsRes] = await Promise.all([
+      const [logsRes, leadsRes, profilesRes, teamsRes, timeRes] = await Promise.all([
         supabase
           .from("daily_logs")
           .select("canvasser_id, team_id, no_demo, one_legs, future_leads, demos_sits, sales, log_date")
@@ -104,16 +104,24 @@ export function PayrollLedger() {
           .lte("created_at", `${endStr}T23:59:59Z`),
         supabase.from("profiles").select("id, display_name, team_id, current_rank"),
         supabase.from("teams").select("id, name, color"),
+        supabase
+          .from("time_entries")
+          .select("user_id, billable_hours, log_date, clock_out")
+          .gte("log_date", startStr)
+          .lte("log_date", endStr)
+          .not("clock_out", "is", null),
       ]);
       if (logsRes.error) throw logsRes.error;
       if (leadsRes.error) throw leadsRes.error;
       if (profilesRes.error) throw profilesRes.error;
       if (teamsRes.error) throw teamsRes.error;
+      if (timeRes.error) throw timeRes.error;
       return {
         logs: (logsRes.data ?? []) as LogRow[],
         leads: (leadsRes.data ?? []) as LeadRow[],
         profiles: profilesRes.data ?? [],
         teams: teamsRes.data ?? [],
+        timeEntries: (timeRes.data ?? []) as { user_id: string; billable_hours: number }[],
       };
     },
   });
