@@ -263,6 +263,7 @@ export function HistoricalImporter({
         setPreview(null);
         setFilename(null);
         setMissingColumns([]);
+        if (inputRef.current) inputRef.current.value = "";
         onImported?.();
       }
       if (res.errors?.length) {
@@ -426,7 +427,11 @@ export function HistoricalImporter({
           type="file"
           accept=".csv,text/csv"
           className="hidden"
-          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) handleFile(f);
+            e.currentTarget.value = "";
+          }}
         />
         <Upload className="w-8 h-8 mx-auto text-neon mb-3" />
         <div className="font-display text-sm text-neon">DROP MONDAY.COM CSV HERE</div>
@@ -509,7 +514,7 @@ export function HistoricalImporter({
               Unknown agents will be auto-created as Canvassers. Existing weekly buckets will be refreshed.
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => { setPreview(null); setFilename(null); setMissingColumns([]); }}>
+              <Button variant="outline" size="sm" onClick={() => { setPreview(null); setFilename(null); setMissingColumns([]); if (inputRef.current) inputRef.current.value = ""; }}>
                 Cancel
               </Button>
               <Button
