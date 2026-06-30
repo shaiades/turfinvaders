@@ -434,6 +434,7 @@ type WeeklyRow = {
   vanColor: string | null;
   totalLeads: number;
   totalSits: number;
+  totalSales: number;
   totalPoints: number;
   totalPay: number;
 };
@@ -458,14 +459,14 @@ function WeeklyResults() {
       if (logsR.error) throw logsR.error;
 
       const vanById = new Map((vansR.data ?? []).map((v) => [v.id, v]));
-      const agg = new Map<string, { leads: number; sits: number; points: number }>();
+      const agg = new Map<string, { leads: number; sits: number; sales: number }>();
       for (const l of logsR.data ?? []) {
-        const cur = agg.get(l.canvasser_id) ?? { leads: 0, sits: 0, points: 0 };
+        const cur = agg.get(l.canvasser_id) ?? { leads: 0, sits: 0, sales: 0 };
         cur.leads += leadsSum(l);
-        cur.sits += (l.demos_sits ?? 0) + (l.sales ?? 0);
-        // Points = Sit*1 + Sale*2. demos_sits already includes sale rows (each sale is also a sit),
-        // so total points = (demos_sits) + (sales) = PM*1 + SALE*(1+1) = SIT*1 + SALE*2.
-        cur.points += (l.demos_sits ?? 0) + (l.sales ?? 0);
+        // demos_sits in DB includes sale rows. Sits (PM only) = demos_sits - sales.
+        const pmOnly = Math.max(0, (l.demos_sits ?? 0) - (l.sales ?? 0));
+        cur.sits += pmOnly;
+        cur.sales += l.sales ?? 0;
         agg.set(l.canvasser_id, cur);
       }
 
@@ -481,6 +482,8 @@ function WeeklyResults() {
         const p = profilesR.data?.find((x) => x.id === id);
         const v = p?.team_id ? vanById.get(p.team_id) : null;
         const a = agg.get(id)!;
+        // Strict formula: Points = (Sits * 1) + (Sales * 2)
+        const totalPoints = a.sits * 1 + a.sales * 2;
         rows.push({
           canvasserId: id,
           name: p?.display_name ?? "Unknown",
@@ -488,7 +491,8 @@ function WeeklyResults() {
           vanColor: v?.color ?? null,
           totalLeads: a.leads,
           totalSits: a.sits,
-          totalPoints: a.points,
+          totalSales: a.sales,
+          totalPoints,
           totalPay: payById.get(id) ?? 0,
         });
       }
@@ -501,10 +505,11 @@ function WeeklyResults() {
     (acc, r) => ({
       leads: acc.leads + r.totalLeads,
       sits: acc.sits + r.totalSits,
+      sales: acc.sales + r.totalSales,
       points: acc.points + r.totalPoints,
       pay: acc.pay + r.totalPay,
     }),
-    { leads: 0, sits: 0, points: 0, pay: 0 }
+    { leads: 0, sits: 0, sales: 0, points: 0, pay: 0 }
   );
 
   return (
@@ -529,6 +534,7 @@ function WeeklyResults() {
                 <th className="px-4 py-2">Van</th>
                 <th className="px-4 py-2 text-right">Total Leads</th>
                 <th className="px-4 py-2 text-right">Total Sits</th>
+                <th className="px-4 py-2 text-right">Total Sales</th>
                 <th className="px-4 py-2 text-right">Total Points</th>
                 <th className="px-4 py-2 text-right">Total Pay</th>
               </tr>
@@ -542,7 +548,8 @@ function WeeklyResults() {
                   </td>
                   <td className="px-4 py-2.5 text-right font-display">{r.totalLeads}</td>
                   <td className="px-4 py-2.5 text-right font-display">{r.totalSits}</td>
-                  <td className="px-4 py-2.5 text-right font-display">{r.totalPoints}</td>
+                  <td className="px-4 py-2.5 text-right font-display text-victory">{r.totalSales}</td>
+                  <td className="px-4 py-2.5 text-right font-display text-neon">{r.totalPoints}</td>
                   <td className="px-4 py-2.5 text-right font-display text-victory">${r.totalPay.toFixed(2)}</td>
                 </tr>
               ))}
@@ -550,7 +557,8 @@ function WeeklyResults() {
                 <td className="px-4 py-2.5 font-display text-xs uppercase tracking-widest text-neon" colSpan={2}>Grand Total</td>
                 <td className="px-4 py-2.5 text-right font-display">{grand.leads}</td>
                 <td className="px-4 py-2.5 text-right font-display">{grand.sits}</td>
-                <td className="px-4 py-2.5 text-right font-display">{grand.points}</td>
+                <td className="px-4 py-2.5 text-right font-display text-victory">{grand.sales}</td>
+                <td className="px-4 py-2.5 text-right font-display text-neon">{grand.points}</td>
                 <td className="px-4 py-2.5 text-right font-display text-victory">${grand.pay.toFixed(2)}</td>
               </tr>
             </tbody>
@@ -560,6 +568,7 @@ function WeeklyResults() {
     </ArcadePanel>
   );
 }
+
 
 /* ============ 3. Database Cleanup ============ */
 
