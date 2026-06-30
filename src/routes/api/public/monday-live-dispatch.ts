@@ -73,44 +73,31 @@ export const Route = createFileRoute("/api/public/monday-live-dispatch")({
       GET: async () =>
         json({ ok: true, endpoint: "monday-live-dispatch", method: "GET" }),
       POST: async ({ request }) => {
-        const secret = process.env.MONDAY_WEBHOOK_SECRET;
-        const url = new URL(request.url);
-        const headerSecret = request.headers.get("x-monday-secret");
-        const querySecret = url.searchParams.get("secret");
-
-        const raw = await request.text();
         let parsed: unknown;
         try {
-          parsed = raw ? JSON.parse(raw) : {};
+          parsed = await request.json();
         } catch {
           return json({ error: "Invalid JSON" }, 400);
         }
 
-        // Monday handshake — MUST echo challenge IMMEDIATELY, before any
-        // logging, auth, or DB work. Any error here breaks webhook setup.
+        // Monday handshake — return a naked JSON Response immediately.
+        // No helpers, auth, logging, imports, or DB/RLS work may run first.
         if (
           parsed &&
           typeof parsed === "object" &&
           "challenge" in (parsed as Record<string, unknown>)
         ) {
           const challenge = (parsed as Record<string, unknown>).challenge;
-          // Fire-and-forget log of the knock — never block the handshake.
-          try {
-            const { supabaseAdmin } = await import(
-              "@/integrations/supabase/client.server"
-            );
-            void supabaseAdmin
-              .from("webhook_logs")
-              .insert({
-                source: "monday-live-dispatch:challenge",
-                raw_payload: parsed as never,
-              })
-              .then(() => {});
-          } catch {
-            // swallow — handshake must succeed
-          }
-          return json({ challenge });
+          return new Response(JSON.stringify({ challenge }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
         }
+
+        const secret = process.env.MONDAY_WEBHOOK_SECRET;
+        const url = new URL(request.url);
+        const headerSecret = request.headers.get("x-monday-secret");
+        const querySecret = url.searchParams.get("secret");
 
         // X-RAY: log every incoming payload (after handshake, before auth/match)
         // so we can see exactly what Monday is sending.
