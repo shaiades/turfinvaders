@@ -10,7 +10,16 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
  * `calc_monthly_paycheck` functions (Prompt 15) compute pay from these rows.
  */
 
-type Outcome = "BO" | "OL" | "RS" | "PM" | "SALE";
+type Outcome = "BO" | "OL" | "RS" | "PM" | "SALE" | "UNMARKED";
+
+function titleCaseName(raw: string): string {
+  return raw
+    .trim()
+    .replace(/\s+/g, " ")
+    .split(" ")
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w))
+    .join(" ");
+}
 
 type CsvImportRow = {
   agent: string;
