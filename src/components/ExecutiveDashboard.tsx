@@ -434,6 +434,7 @@ type WeeklyRow = {
   vanColor: string | null;
   totalLeads: number;
   totalSits: number;
+  totalResets: number;
   totalSales: number;
   totalPoints: number;
   totalPay: number;
@@ -459,13 +460,15 @@ function WeeklyResults() {
       if (logsR.error) throw logsR.error;
 
       const vanById = new Map((vansR.data ?? []).map((v) => [v.id, v]));
-      const agg = new Map<string, { leads: number; sits: number; sales: number }>();
+      const agg = new Map<string, { leads: number; sits: number; resets: number; sales: number }>();
       for (const l of logsR.data ?? []) {
-        const cur = agg.get(l.canvasser_id) ?? { leads: 0, sits: 0, sales: 0 };
+        const cur = agg.get(l.canvasser_id) ?? { leads: 0, sits: 0, resets: 0, sales: 0 };
         cur.leads += leadsSum(l);
         // demos_sits in DB includes sale rows. Sits (PM only) = demos_sits - sales.
         const pmOnly = Math.max(0, (l.demos_sits ?? 0) - (l.sales ?? 0));
         cur.sits += pmOnly;
+        // RS outcomes are persisted in future_leads (see csv-import.functions.ts).
+        cur.resets += l.future_leads ?? 0;
         cur.sales += l.sales ?? 0;
         agg.set(l.canvasser_id, cur);
       }
@@ -491,6 +494,7 @@ function WeeklyResults() {
           vanColor: v?.color ?? null,
           totalLeads: a.leads,
           totalSits: a.sits,
+          totalResets: a.resets,
           totalSales: a.sales,
           totalPoints,
           totalPay: payById.get(id) ?? 0,
@@ -499,6 +503,8 @@ function WeeklyResults() {
       rows.sort((a, b) => b.totalPay - a.totalPay);
       return rows;
     },
+    refetchOnWindowFocus: true,
+    staleTime: 0,
   });
 
   const grand = (q.data ?? []).reduce(
