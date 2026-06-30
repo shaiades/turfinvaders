@@ -71,6 +71,7 @@ function emptyAgg(): Agg {
 }
 
 export function PayrollLedger() {
+  const { matches, office } = useOfficeFilter();
   const [weekStart, setWeekStart] = useState<Date>(() => {
     // Default to last week
     const lastWk = new Date();
