@@ -61,12 +61,32 @@ function hasAnyValue(row: Record<string, unknown>): boolean {
 // alphabetical letter AND is not one of Monday.com's system filler words.
 // Monday fills "empty" cells with non-breaking spaces, dashes, or zeros —
 // all of those must safely evaluate to false.
-const FILLER_TOKENS = new Set(["false", "null", "n/a", "undefined", "none"]);
+const FILLER_TOKENS = new Set(["", "false", "null", "n/a", "undefined", "none"]);
 function isMarked(v: unknown): boolean {
   const val = v == null ? "" : v.toString().trim().toLowerCase();
   const hasLetter = /[a-z]/i.test(val);
   const notFiller = !FILLER_TOKENS.has(val);
   return hasLetter && notFiller;
+}
+
+// Relaxed check for the PM column only — catches edge-case typos.
+// Any non-blacklisted text (even without alphabetical letters) is treated
+// as a mark. Empty / dash / number-zero cells still safely fail.
+const PM_DEAD_TOKENS = new Set(["", "-", "—", "–", "0", "false", "null", "n/a", "undefined", "none"]);
+function isMarkedPM(v: unknown): boolean {
+  const val = v == null ? "" : v.toString().trim().toLowerCase();
+  if (PM_DEAD_TOKENS.has(val)) return false;
+  // Reject pure whitespace / non-printable junk.
+  return /\S/.test(val);
+}
+
+function titleCaseName(raw: string): string {
+  return raw
+    .trim()
+    .replace(/\s+/g, " ")
+    .split(" ")
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w))
+    .join(" ");
 }
 
 function chunkRows(rows: ParsedRow[], size = IMPORT_BATCH_SIZE): ParsedRow[][] {
