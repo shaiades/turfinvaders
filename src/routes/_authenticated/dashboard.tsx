@@ -108,7 +108,7 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
                   Auto-detects BO/OL/RS/PM/Sale outcomes and pipes totals into the Paycheck Engine.
                 </DialogDescription>
               </DialogHeader>
-              <HistoricalImporter />
+              <HistoricalImporter onImported={() => setImportOpen(false)} />
             </DialogContent>
           </Dialog>
         </div>
