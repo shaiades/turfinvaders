@@ -57,28 +57,76 @@ function isMarked(v: unknown): boolean {
 // Maps the column header → backend outcome enum the importer understands.
 // Per spec: BO=Blowout(0pt) · OL=Sit/PitchMiss(1pt) · Sale=2pt · CTC=Cancel(0pt) · Reset(0pt)
 // OL is intentionally mapped to "PM" so the Paycheck Engine credits it as a 1pt sit.
-const OUTCOME_COLUMNS: { header: string; outcome: string }[] = [
-  { header: "Sale",  outcome: "SALE" },
-  { header: "OL",    outcome: "PM"   },
-  { header: "CTC",   outcome: "BO"   },
-  { header: "Reset", outcome: "RS"   },
-  { header: "BO",    outcome: "BO"   },
+// Priority on resolution: Sale > OL > CTC > Reset > BO.
+const OUTCOME_TOKENS: { token: string; outcome: string }[] = [
+  { token: "sale",  outcome: "SALE" },
+  { token: "ol",    outcome: "PM"   },
+  { token: "ctc",   outcome: "BO"   },
+  { token: "reset", outcome: "RS"   },
+  { token: "bo",    outcome: "BO"   },
 ];
 
-// Returns the canonical outcome based on which of the 5 columns has a mark.
-// Priority: Sale > OL > CTC > Reset > BO.
-function detectOutcomeFromColumns(row: Record<string, unknown>): string {
-  const keys = Object.keys(row);
-  for (const { header, outcome } of OUTCOME_COLUMNS) {
-    const k = keys.find((kk) => norm(kk) === norm(header));
-    if (k && isMarked(row[k])) return outcome;
+const SALE_PRICE_HEADERS = ["Sale Price", "Sale Amount", "Amount"];
+const AGENT_HEADERS = ["Agent", "Canvasser", "Rep", "Salesperson"];
+const LEAD_HEADERS = ["Lead", "Customer", "Lead Name", "Customer Name"];
+
+// Resolve which raw CSV header maps to each of the 5 outcome buckets.
+// Strategy: prefer exact normalized equality; fall back to substring match,
+// skipping headers already claimed by Agent / Date / Sale Price / Lead Name.
+function resolveOutcomeHeaders(
+  headers: string[],
+  claimed: Set<string>,
+): Record<string, string | null> {
+  const out: Record<string, string | null> = {};
+  const used = new Set<string>();
+  for (const { token, outcome } of OUTCOME_TOKENS) {
+    if (out[outcome]) continue;
+    const hit = headers.find(
+      (h) => !claimed.has(h) && !used.has(h) && norm(h) === token,
+    );
+    if (hit) { out[outcome] = hit; used.add(hit); }
   }
-  return "";
+  for (const { token, outcome } of OUTCOME_TOKENS) {
+    if (out[outcome]) continue;
+    const hit = headers.find(
+      (h) => !claimed.has(h) && !used.has(h) && norm(h).includes(token),
+    );
+    if (hit) { out[outcome] = hit; used.add(hit); }
+  }
+  for (const { outcome } of OUTCOME_TOKENS) {
+    if (!(outcome in out)) out[outcome] = null;
+  }
+  return out;
 }
 
-const SALE_PRICE_HEADERS = ["Sale Price", "Sale Amount", "Amount"];
+function pickHeader(headers: string[], ...names: string[]): string | null {
+  for (const n of names) {
+    const exact = headers.find((h) => norm(h) === norm(n));
+    if (exact) return exact;
+  }
+  for (const n of names) {
+    const contains = headers.find((h) => norm(h).includes(norm(n)));
+    if (contains) return contains;
+  }
+  return null;
+}
 
-export function HistoricalImporter({ defaultTeamId }: { defaultTeamId?: string | null }) {
+function pickDateHeader(headers: string[]): string | null {
+  return (
+    headers.find((h) => norm(h) === "datetime") ??
+    headers.find((h) => norm(h) === "date") ??
+    headers.find((h) => norm(h).includes("date")) ??
+    null
+  );
+}
+
+export function HistoricalImporter({
+  defaultTeamId,
+  onImported,
+}: {
+  defaultTeamId?: string | null;
+  onImported?: () => void;
+}) {
   const qc = useQueryClient();
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -110,6 +158,7 @@ export function HistoricalImporter({ defaultTeamId }: { defaultTeamId?: string |
       setFilename(null);
       setMissingColumns([]);
       qc.invalidateQueries();
+      if (res.updated_logs > 0) onImported?.();
     },
     onError: (e: Error) => {
       toast.error("Database INSERT failed", { description: e.message, duration: 20000 });
@@ -123,22 +172,38 @@ export function HistoricalImporter({ defaultTeamId }: { defaultTeamId?: string |
     Papa.parse<Record<string, unknown>>(file, {
       header: true,
       skipEmptyLines: true,
+      transformHeader: (h) => (h ?? "").toString().trim(),
       complete: (res) => {
-        const headers = (res.meta.fields ?? []).map((h) => h ?? "");
-        const headerNorm = headers.map(norm);
-        const missing = OUTCOME_COLUMNS
-          .map((c) => c.header)
-          .filter((h) => !headerNorm.includes(norm(h)));
+        const headers = (res.meta.fields ?? []).map((h) => (h ?? "").toString());
+
+        const agentHeader = pickHeader(headers, ...AGENT_HEADERS);
+        const dateHeader = pickDateHeader(headers);
+        const salePriceHeader = pickHeader(headers, ...SALE_PRICE_HEADERS);
+        const leadHeader = pickHeader(headers, ...LEAD_HEADERS);
+
+        const claimed = new Set<string>(
+          [agentHeader, dateHeader, salePriceHeader, leadHeader].filter(
+            (x): x is string => !!x,
+          ),
+        );
+        const outcomeMap = resolveOutcomeHeaders(headers, claimed);
+        const missing = OUTCOME_TOKENS
+          .filter(({ outcome }) => !outcomeMap[outcome])
+          .map(({ token }) => token.toUpperCase());
         setMissingColumns(missing);
 
         const rows: ParsedRow[] = res.data
           .filter(hasAnyValue)
           .map((raw) => {
-            const agent = pick(raw, "Agent", "Canvasser", "Rep", "Salesperson");
-            const date = pick(raw, "Date/Time") || pickContains(raw, "date");
-            const sale_price = pick(raw, ...SALE_PRICE_HEADERS);
-            const lead_name = pick(raw, "Lead", "Customer", "Lead Name", "Customer Name");
-            const outcome = detectOutcomeFromColumns(raw);
+            const agent = agentHeader ? String(raw[agentHeader] ?? "").trim() : "";
+            const date = dateHeader ? String(raw[dateHeader] ?? "").trim() : "";
+            const sale_price = salePriceHeader ? String(raw[salePriceHeader] ?? "").trim() : "";
+            const lead_name = leadHeader ? String(raw[leadHeader] ?? "").trim() : "";
+            let outcome = "";
+            for (const { outcome: o } of OUTCOME_TOKENS) {
+              const h = outcomeMap[o];
+              if (h && isMarked(raw[h])) { outcome = o; break; }
+            }
             return { agent, outcome, date, sale_price: sale_price || null, lead_name: lead_name || null };
           })
           .filter((r) => r.agent && r.outcome);
@@ -147,8 +212,8 @@ export function HistoricalImporter({ defaultTeamId }: { defaultTeamId?: string |
         if (rows.length === 0) {
           toast.error("Parsed 0 rows", {
             description: missing.length
-              ? `Missing outcome columns: ${missing.join(", ")}. Expected headers: BO, OL, Sale, CTC, Reset.`
-              : "No rows had a mark in BO / OL / Sale / CTC / Reset.",
+              ? `Could not detect outcome columns: ${missing.join(", ")}. Headers seen: ${headers.join(", ") || "none"}.`
+              : "Detected outcome columns but no row had a mark in any of them.",
             duration: 15000,
           });
         }
@@ -156,6 +221,7 @@ export function HistoricalImporter({ defaultTeamId }: { defaultTeamId?: string |
       error: (err) => toast.error(`CSV parse failed: ${err.message}`),
     });
   }, []);
+
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
