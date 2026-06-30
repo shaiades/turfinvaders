@@ -89,7 +89,7 @@ Deno.serve(async (req) => {
     const challenge = (parsed as Record<string, unknown>).challenge;
     return new Response(JSON.stringify({ challenge }), {
       status: 200,
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...CORS },
     });
   }
 
