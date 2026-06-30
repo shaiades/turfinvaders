@@ -380,22 +380,30 @@ export function HistoricalImporter({
           const rows: ParsedRow[] = res.data
             .filter(hasAnyValue)
             .map((raw) => {
-              const agent = agentHeader ? String(raw[agentHeader] ?? "").trim() : "";
+              const agentRaw = agentHeader ? String(raw[agentHeader] ?? "").trim() : "";
+              // Title-case + collapse whitespace so "Ethan Munoz " and
+              // "ethan munoz" merge into one canvasser profile.
+              const agent = titleCaseName(agentRaw);
               const date = dateHeader ? String(raw[dateHeader] ?? "").trim() : "";
               const sale_price = salePriceHeader ? String(raw[salePriceHeader] ?? "").trim() : "";
               const lead_name = leadHeader ? String(raw[leadHeader] ?? "").trim() : "";
               const van = vanHeader ? String(raw[vanHeader] ?? "").trim() : "";
-              // Raw PM cell — exact literal string as the CSV parser delivered it.
               const rawPmVal = pmHeader ? raw[pmHeader] : undefined;
               const raw_pm = rawPmVal === undefined || rawPmVal === null
                 ? "UNDEFINED"
                 : String(rawPmVal);
               // Walk OUTCOME_TOKENS in priority order; first marked column wins.
+              // PM uses a relaxed check to catch typo edge cases.
               let outcome = "";
               for (const { key, outcome: o } of OUTCOME_TOKENS) {
                 const h = outcomeMap[key];
-                if (h && isMarked(raw[h])) { outcome = o; break; }
+                if (!h) continue;
+                const marked = key === "pm" ? isMarkedPM(raw[h]) : isMarked(raw[h]);
+                if (marked) { outcome = o; break; }
               }
+              // NEVER drop a row. If no outcome column is marked, save as UNMARKED
+              // so Total Leads on the dashboard matches raw CSV row count.
+              if (!outcome) outcome = "UNMARKED";
               return { agent, outcome, date, sale_price: sale_price || null, lead_name: lead_name || null, van: van || null, raw_pm, pm_header: pmHeader ?? undefined };
             })
             .filter((r) => r.agent && norm(r.agent) !== "agent");
