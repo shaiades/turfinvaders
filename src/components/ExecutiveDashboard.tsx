@@ -266,7 +266,7 @@ function RawDataTable() {
     queryFn: async () => {
       const [logsR, profilesR] = await Promise.all([
         supabase.from("daily_logs")
-          .select("id, canvasser_id, team_id, log_date, demos_sits, sales, no_demo, one_legs, future_leads, people_talked_to, leads_called_in, confirmed_leads")
+          .select("id, canvasser_id, team_id, log_date, demos_sits, sales, no_demo, one_legs, future_leads, unmarked, people_talked_to, leads_called_in, confirmed_leads")
           .order("log_date", { ascending: false })
           .limit(500),
         supabase.from("profiles").select("id, display_name"),
@@ -349,7 +349,7 @@ function LiveFleetStatus() {
       const [vansR, logsR] = await Promise.all([
         supabase.from("teams").select("id, name, color").order("name"),
         supabase.from("daily_logs")
-          .select("team_id, demos_sits, sales, no_demo, one_legs, future_leads, log_date")
+          .select("team_id, demos_sits, sales, no_demo, one_legs, future_leads, unmarked, log_date")
           .gte("log_date", toISODate(since)),
       ]);
       if (vansR.error) throw vansR.error;
@@ -450,7 +450,7 @@ function WeeklyResults() {
         supabase.from("profiles").select("id, display_name, team_id"),
         supabase.from("teams").select("id, name, color"),
         supabase.from("daily_logs")
-          .select("canvasser_id, demos_sits, sales, no_demo, one_legs, future_leads")
+          .select("canvasser_id, demos_sits, sales, no_demo, one_legs, future_leads, unmarked")
           .gte("log_date", toISODate(lastWeekStart))
           .lte("log_date", toISODate(lastWeekEnd)),
       ]);
