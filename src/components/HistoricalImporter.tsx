@@ -482,32 +482,48 @@ export function HistoricalImporter({
             ))}
           </div>
 
-          <div className="mt-4 max-h-56 overflow-auto rounded border border-border">
+          <div className="mt-2 text-[10px] font-display uppercase tracking-widest text-warning">
+            Diagnostic mode · PM header detected: <span className="text-foreground">{preview[0]?.pm_header ?? "NONE"}</span>
+          </div>
+
+          <div className="mt-4 max-h-72 overflow-auto rounded border border-border">
             <table className="w-full text-xs">
               <thead className="bg-surface sticky top-0">
                 <tr className="text-left text-[10px] font-display uppercase tracking-widest text-muted-foreground">
                   <th className="px-2 py-1.5">Agent</th>
                   <th className="px-2 py-1.5">Date</th>
                   <th className="px-2 py-1.5">Outcome</th>
+                  <th className="px-2 py-1.5 bg-warning/10 text-warning">Raw PM Cell</th>
                   <th className="px-2 py-1.5 text-right">Sale $</th>
                 </tr>
               </thead>
               <tbody>
-                {preview.slice(0, 25).map((r, i) => (
-                  <tr key={i} className="border-t border-border/50">
-                    <td className="px-2 py-1">{r.agent}</td>
-                    <td className="px-2 py-1 text-muted-foreground">{r.date || "—"}</td>
-                    <td className="px-2 py-1 uppercase text-neon">{r.outcome}</td>
-                    <td className="px-2 py-1 text-right text-victory">
-                      {r.sale_price ? `$${Number(String(r.sale_price).replace(/[^0-9.]/g, "")).toLocaleString()}` : "—"}
-                    </td>
-                  </tr>
-                ))}
+                {preview.slice(0, 100).map((r, i) => {
+                  const rawPm = r.raw_pm ?? "UNDEFINED";
+                  const len = rawPm === "UNDEFINED" ? 0 : rawPm.length;
+                  const codes = rawPm === "UNDEFINED"
+                    ? ""
+                    : Array.from(rawPm).slice(0, 12).map((c) => c.charCodeAt(0)).join(",");
+                  return (
+                    <tr key={i} className="border-t border-border/50">
+                      <td className="px-2 py-1">{r.agent}</td>
+                      <td className="px-2 py-1 text-muted-foreground">{r.date || "—"}</td>
+                      <td className="px-2 py-1 uppercase text-neon">{r.outcome || "—"}</td>
+                      <td className="px-2 py-1 bg-warning/5 font-mono text-[10px] text-warning">
+                        <span className="text-foreground">"{rawPm}"</span>
+                        <span className="text-muted-foreground"> · len={len} · codes=[{codes}]</span>
+                      </td>
+                      <td className="px-2 py-1 text-right text-victory">
+                        {r.sale_price ? `$${Number(String(r.sale_price).replace(/[^0-9.]/g, "")).toLocaleString()}` : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
-            {preview.length > 25 && (
+            {preview.length > 100 && (
               <div className="text-[10px] text-muted-foreground p-2 border-t border-border">
-                + {preview.length - 25} more rows…
+                + {preview.length - 100} more rows…
               </div>
             )}
           </div>
