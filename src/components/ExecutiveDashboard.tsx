@@ -368,7 +368,7 @@ function LiveFleetStatus() {
     queryKey: ["fleet_status", range],
     queryFn: async () => {
       const [vansR, logsR] = await Promise.all([
-        supabase.from("teams").select("id, name, color").order("name"),
+        supabase.from("teams").select("id, name, color, office_location").order("name"),
         supabase.from("daily_logs")
           .select("team_id, demos_sits, sales, no_demo, one_legs, future_leads, unmarked, log_date")
           .gte("log_date", toISODate(since)),
