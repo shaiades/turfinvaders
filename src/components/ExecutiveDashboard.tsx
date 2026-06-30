@@ -542,14 +542,16 @@ function WeeklyResults() {
       title="Last Week's Results"
       action={
         <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-          {toISODate(lastWeekStart)} → {toISODate(lastWeekEnd)}
+          {office === "All" ? "" : `${office} · `}{toISODate(lastWeekStart)} → {toISODate(lastWeekEnd)}
         </span>
       }
     >
       {q.isLoading ? (
         <div className="text-sm text-muted-foreground">Loading…</div>
-      ) : (q.data?.length ?? 0) === 0 ? (
-        <div className="text-sm text-muted-foreground">No activity recorded last week.</div>
+      ) : rows.length === 0 ? (
+        <div className="text-sm text-muted-foreground">
+          {office === "All" ? "No activity recorded last week." : `No ${office} activity recorded last week.`}
+        </div>
       ) : (
         <div className="overflow-x-auto -mx-4 sm:mx-0">
           <table className="w-full text-sm">
@@ -566,7 +568,7 @@ function WeeklyResults() {
               </tr>
             </thead>
             <tbody>
-              {q.data!.map((r) => (
+              {rows.map((r) => (
                 <tr key={r.canvasserId} className="border-t border-border">
                   <td className="px-4 py-2.5 font-medium">{r.name}</td>
                   <td className="px-4 py-2.5">
