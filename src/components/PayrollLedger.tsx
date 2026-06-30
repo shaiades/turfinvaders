@@ -103,7 +103,7 @@ export function PayrollLedger() {
           .eq("status", "confirmed")
           .gte("created_at", `${startStr}T00:00:00Z`)
           .lte("created_at", `${endStr}T23:59:59Z`),
-        supabase.from("profiles").select("id, display_name, team_id, current_rank"),
+        supabase.from("profiles").select("id, display_name, team_id, current_rank, office_location"),
         supabase.from("teams").select("id, name, color"),
         supabase
           .from("time_entries")
