@@ -61,7 +61,7 @@ function hasAnyValue(row: Record<string, unknown>): boolean {
 // alphabetical letter AND is not one of Monday.com's system filler words.
 // Monday fills "empty" cells with non-breaking spaces, dashes, or zeros —
 // all of those must safely evaluate to false.
-const FILLER_TOKENS = new Set(["false", "null", "n/a", "undefined"]);
+const FILLER_TOKENS = new Set(["false", "null", "n/a", "undefined", "none"]);
 function isMarked(v: unknown): boolean {
   const val = v == null ? "" : v.toString().trim().toLowerCase();
   const hasLetter = /[a-z]/i.test(val);
