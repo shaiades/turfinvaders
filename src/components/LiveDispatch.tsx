@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { OfficeFilterToggle, useOfficeFilter } from "@/components/OfficeFilterContext";
-import { Radio, Users, FileSearch, X } from "lucide-react";
+import { Radio, Users, FileSearch, X, Link2, Copy, Check } from "lucide-react";
 
 
 type Profile = {
@@ -132,7 +132,10 @@ export function LiveDispatch() {
       </div>
 
 
+      <WebhookUrlBanner />
+
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+
         <TotalTile label="Submitted" value={totals.sub} accent="neon" />
         <TotalTile label="Pending" value={totals.pen} accent="warning" />
         <TotalTile label="N/A" value={totals.na} accent="muted" />
@@ -190,6 +193,57 @@ export function LiveDispatch() {
             </table>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+
+function WebhookUrlBanner() {
+  const [copied, setCopied] = useState(false);
+  const url =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/api/public/monday-live-dispatch`
+      : "/api/public/monday-live-dispatch";
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // ignore
+    }
+  };
+
+  return (
+    <div className="arcade-card p-4 border-accent/40">
+      <div className="flex items-center gap-2 mb-2">
+        <Link2 className="w-4 h-4 text-accent" />
+        <div className="text-[10px] font-display uppercase tracking-widest text-accent">
+          Webhook Integration URL
+        </div>
+      </div>
+      <div className="text-xs text-muted-foreground mb-3">
+        Paste this into Monday.com's webhook integration. Send POST with{" "}
+        <code className="text-foreground">{`{ canvasser_name, status }`}</code> and the
+        header <code className="text-foreground">x-monday-secret</code>.
+      </div>
+      <div className="flex flex-col sm:flex-row gap-2 items-stretch">
+        <input
+          readOnly
+          value={url}
+          onFocus={(e) => e.currentTarget.select()}
+          className="flex-1 bg-surface border border-border rounded px-3 py-2 text-xs font-mono text-neon overflow-x-auto"
+        />
+        <button
+          type="button"
+          onClick={copy}
+          className="arcade-card px-3 py-2 text-[10px] font-display uppercase tracking-widest text-accent hover:bg-surface-elevated flex items-center justify-center gap-2"
+        >
+          {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+          {copied ? "Copied" : "Copy"}
+        </button>
       </div>
     </div>
   );
