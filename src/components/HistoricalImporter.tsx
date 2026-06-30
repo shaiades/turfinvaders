@@ -175,57 +175,95 @@ export function HistoricalImporter({
     setFilename(file.name);
     setPreview(null);
     setMissingColumns([]);
-    Papa.parse<Record<string, unknown>>(file, {
-      header: true,
-      skipEmptyLines: true,
-      transformHeader: (h) => (h ?? "").toString().trim(),
-      complete: (res) => {
-        const headers = (res.meta.fields ?? []).map((h) => (h ?? "").toString());
 
-        const agentHeader = pickHeader(headers, ...AGENT_HEADERS);
-        const dateHeader = pickDateHeader(headers);
-        const salePriceHeader = pickHeader(headers, ...SALE_PRICE_HEADERS);
-        const leadHeader = pickHeader(headers, ...LEAD_HEADERS);
-
-        const claimed = new Set<string>(
-          [agentHeader, dateHeader, salePriceHeader, leadHeader].filter(
-            (x): x is string => !!x,
-          ),
-        );
-        const outcomeMap = resolveOutcomeHeaders(headers, claimed);
-        const missing = OUTCOME_TOKENS
-          .filter(({ outcome }) => !outcomeMap[outcome])
-          .map(({ token }) => token.toUpperCase());
-        setMissingColumns(missing);
-
-        const rows: ParsedRow[] = res.data
-          .filter(hasAnyValue)
-          .map((raw) => {
-            const agent = agentHeader ? String(raw[agentHeader] ?? "").trim() : "";
-            const date = dateHeader ? String(raw[dateHeader] ?? "").trim() : "";
-            const sale_price = salePriceHeader ? String(raw[salePriceHeader] ?? "").trim() : "";
-            const lead_name = leadHeader ? String(raw[leadHeader] ?? "").trim() : "";
-            let outcome = "";
-            for (const { outcome: o } of OUTCOME_TOKENS) {
-              const h = outcomeMap[o];
-              if (h && isMarked(raw[h])) { outcome = o; break; }
-            }
-            return { agent, outcome, date, sale_price: sale_price || null, lead_name: lead_name || null };
-          })
-          .filter((r) => r.agent && r.outcome);
-
-        setPreview(rows);
-        if (rows.length === 0) {
-          toast.error("Parsed 0 rows", {
-            description: missing.length
-              ? `Could not detect outcome columns: ${missing.join(", ")}. Headers seen: ${headers.join(", ") || "none"}.`
-              : "Detected outcome columns but no row had a mark in any of them.",
-            duration: 15000,
-          });
+    // Monday.com exports prepend title/metadata rows ("This spreadsheet was
+    // created using monday.com", blank rows, etc.) before the real header.
+    // Read raw text, scan the first 10 rows for one that contains "Agent"
+    // or "Sale Price" (case-insensitive, trimmed), then slice from there.
+    const reader = new FileReader();
+    reader.onerror = () => toast.error("Could not read file");
+    reader.onload = () => {
+      const text = String(reader.result ?? "");
+      const scan = Papa.parse<string[]>(text, {
+        header: false,
+        skipEmptyLines: false,
+        preview: 10,
+      });
+      const scanRows = (scan.data ?? []) as string[][];
+      let headerIdx = -1;
+      for (let i = 0; i < scanRows.length; i++) {
+        const cells = (scanRows[i] ?? []).map((c) => String(c ?? "").toLowerCase().trim());
+        if (cells.some((c) => c === "agent" || c === "sale price" || c.includes("agent") || c.includes("sale price"))) {
+          headerIdx = i;
+          break;
         }
-      },
-      error: (err) => toast.error(`CSV parse failed: ${err.message}`),
-    });
+      }
+      if (headerIdx === -1) {
+        toast.error("Could not locate header row", {
+          description: "Scanned the first 10 rows for 'Agent' or 'Sale Price' and found neither.",
+          duration: 15000,
+        });
+        return;
+      }
+
+      const lines = text.split(/\r?\n/);
+      const sliced = lines.slice(headerIdx).join("\n");
+
+      Papa.parse<Record<string, unknown>>(sliced, {
+        header: true,
+        skipEmptyLines: true,
+        transformHeader: (h) => (h ?? "").toString().trim(),
+        complete: (res) => {
+          const headers = (res.meta.fields ?? []).map((h) => (h ?? "").toString());
+
+          const agentHeader = pickHeader(headers, ...AGENT_HEADERS);
+          const dateHeader = pickDateHeader(headers);
+          const salePriceHeader = pickHeader(headers, ...SALE_PRICE_HEADERS);
+          const leadHeader = pickHeader(headers, ...LEAD_HEADERS);
+
+          const claimed = new Set<string>(
+            [agentHeader, dateHeader, salePriceHeader, leadHeader].filter(
+              (x): x is string => !!x,
+            ),
+          );
+          const outcomeMap = resolveOutcomeHeaders(headers, claimed);
+          const missing = OUTCOME_TOKENS
+            .filter(({ outcome }) => !outcomeMap[outcome])
+            .map(({ token }) => token.toUpperCase());
+          setMissingColumns(missing);
+
+          const rows: ParsedRow[] = res.data
+            .filter(hasAnyValue)
+            .map((raw) => {
+              const agent = agentHeader ? String(raw[agentHeader] ?? "").trim() : "";
+              const date = dateHeader ? String(raw[dateHeader] ?? "").trim() : "";
+              const sale_price = salePriceHeader ? String(raw[salePriceHeader] ?? "").trim() : "";
+              const lead_name = leadHeader ? String(raw[leadHeader] ?? "").trim() : "";
+              let outcome = "";
+              for (const { outcome: o } of OUTCOME_TOKENS) {
+                const h = outcomeMap[o];
+                if (h && isMarked(raw[h])) { outcome = o; break; }
+              }
+              return { agent, outcome, date, sale_price: sale_price || null, lead_name: lead_name || null };
+            })
+            .filter((r) => r.agent && r.outcome);
+
+          setPreview(rows);
+          if (rows.length === 0) {
+            toast.error("Parsed 0 rows", {
+              description: missing.length
+                ? `Could not detect outcome columns: ${missing.join(", ")}. Headers seen (row ${headerIdx + 1}): ${headers.join(", ") || "none"}.`
+                : `Detected outcome columns but no row had a mark. Header row: ${headerIdx + 1}.`,
+              duration: 15000,
+            });
+          } else if (headerIdx > 0) {
+            toast.success(`Skipped ${headerIdx} metadata row(s) — header on row ${headerIdx + 1}`);
+          }
+        },
+        error: (err: { message: string }) => toast.error(`CSV parse failed: ${err.message}`),
+      });
+    };
+    reader.readAsText(file);
   }, []);
 
 
