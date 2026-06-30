@@ -133,6 +133,8 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
       const name = r.agent.trim();
       // Silently skip blank-agent rows (Monday exports often have spacer rows).
       if (!name) continue;
+      const vanRaw = (r.van ?? "").trim();
+      if (vanRaw) vanByAgent.set(name.toLowerCase(), vanRaw);
       const outcome = normalizeOutcome(r.outcome);
       // Silently skip rows with no recognizable outcome — do not surface as error.
       if (!outcome) continue;
