@@ -383,17 +383,19 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
         if (!name) continue;
         const logDate = parseDate(r.date);
         const profile = await resolveProfile(name);
-        if (!profile || refreshedProfiles.has(profile.id)) continue;
-        const { error: rankErr } = await supabaseAdmin.rpc("refresh_canvasser_rank", {
-          _canvasser_id: profile.id,
-        });
-        if (rankErr) {
-          errors.push({
-            row: 0,
-            reason: `Final rank refresh failed for ${name}: ${rankErr.message}`,
+        if (!profile) continue;
+        if (!refreshedProfiles.has(profile.id)) {
+          const { error: rankErr } = await supabaseAdmin.rpc("refresh_canvasser_rank", {
+            _canvasser_id: profile.id,
           });
+          if (rankErr) {
+            errors.push({
+              row: 0,
+              reason: `Final rank refresh failed for ${name}: ${rankErr.message}`,
+            });
+          }
+          refreshedProfiles.add(profile.id);
         }
-        refreshedProfiles.add(profile.id);
         if (logDate) {
           const weeks = paycheckWeeksByProfile.get(profile.id) ?? new Set<string>();
           weeks.add(weekStartMonday(logDate));
