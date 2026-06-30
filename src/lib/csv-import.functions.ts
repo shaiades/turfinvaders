@@ -152,6 +152,34 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
     let updated_logs = 0;
     let inserted_sales = 0;
 
+    // NUCLEAR WIPE — before any inserts, scrub every daily_logs and confirmed
+    // sale-leads row whose date falls inside the uploaded CSV's [min, max]
+    // window. Guarantees a 100% clean slate for the week so re-uploads cannot
+    // duplicate. Only runs on the first batch (when the importer sends the
+    // range), so subsequent batches don't erase rows the prior batch wrote.
+    if (data.nuclear_wipe_range) {
+      const { min, max } = data.nuclear_wipe_range;
+      const { error: wipeLogsErr } = await supabaseAdmin
+        .from("daily_logs")
+        .delete()
+        .gte("log_date", min)
+        .lte("log_date", max);
+      if (wipeLogsErr) {
+        throw new Error(`Nuclear wipe (daily_logs ${min}..${max}) failed: ${wipeLogsErr.message}`);
+      }
+      const { error: wipeLeadsErr } = await supabaseAdmin
+        .from("leads")
+        .delete()
+        .eq("status", "confirmed")
+        .eq("is_sale", true)
+        .gte("reviewed_at", `${min}T00:00:00Z`)
+        .lte("reviewed_at", `${max}T23:59:59Z`);
+      if (wipeLeadsErr) {
+        errors.push({ row: 0, reason: `Nuclear wipe (sale leads ${min}..${max}) failed: ${wipeLeadsErr.message}` });
+      }
+    }
+
+
     // Aggregate per (canvasser, date) to minimize round-trips.
     type Bucket = {
       profileKey: string;
