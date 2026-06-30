@@ -12,7 +12,8 @@ import { deleteProfile, deleteVan, upsertManualWeekly } from "@/lib/fleet.functi
 import { HistoricalImporter } from "@/components/HistoricalImporter";
 import { PayrollLedger } from "@/components/PayrollLedger";
 import { toast } from "sonner";
-import { Plus, Trash2, Truck, User } from "lucide-react";
+import { Plus, Trash2, Truck, User, Building2 } from "lucide-react";
+import { OfficeFilterProvider, OfficeFilterToggle, useOfficeFilter } from "@/components/OfficeFilterContext";
 
 
 /* ============ Helpers ============ */
@@ -35,16 +36,28 @@ function leadsSum(r: { demos_sits?: number | null; sales?: number | null; no_dem
 
 export function ExecutiveDashboard() {
   return (
-    <div className="space-y-6">
-      <ManualEntryBar />
-      <HistoricalImporter />
-      <WeeklyResults />
-      <PayrollLedger />
-      <LiveDailyAction />
-      <DatabaseCleanup />
-      <RawDataTable />
-      <LiveFleetStatus />
-    </div>
+    <OfficeFilterProvider>
+      <div className="space-y-6">
+        <div className="arcade-card p-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <Building2 className="w-4 h-4 text-neon shrink-0" />
+            <div>
+              <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">View</div>
+              <div className="text-sm font-medium">Office Location Filter</div>
+            </div>
+          </div>
+          <OfficeFilterToggle />
+        </div>
+        <ManualEntryBar />
+        <HistoricalImporter />
+        <WeeklyResults />
+        <PayrollLedger />
+        <LiveDailyAction />
+        <DatabaseCleanup />
+        <RawDataTable />
+        <LiveFleetStatus />
+      </div>
+    </OfficeFilterProvider>
   );
 }
 
@@ -269,25 +282,33 @@ function RawDataTable() {
           .select("id, canvasser_id, team_id, log_date, demos_sits, sales, no_demo, one_legs, future_leads, unmarked, people_talked_to, leads_called_in, confirmed_leads")
           .order("log_date", { ascending: false })
           .limit(500),
-        supabase.from("profiles").select("id, display_name"),
+        supabase.from("profiles").select("id, display_name, office_location"),
       ]);
       if (logsR.error) throw logsR.error;
       if (profilesR.error) throw profilesR.error;
       const nameById = new Map((profilesR.data ?? []).map((p) => [p.id, p.display_name ?? "Unknown"]));
-      return (logsR.data ?? []).map((r) => ({ ...r, name: nameById.get(r.canvasser_id) ?? r.canvasser_id.slice(0,8) }));
+      const locById = new Map((profilesR.data ?? []).map((p) => [p.id, (p as { office_location?: string | null }).office_location ?? null]));
+      return (logsR.data ?? []).map((r) => ({
+        ...r,
+        name: nameById.get(r.canvasser_id) ?? r.canvasser_id.slice(0,8),
+        office_location: locById.get(r.canvasser_id) ?? null,
+      }));
     },
   });
 
+  const { matches } = useOfficeFilter();
+  const visible = (q.data ?? []).filter((r) => matches(r.office_location));
+
   return (
     <ArcadePanel
-      title={`All Database Records · daily_logs (${q.data?.length ?? 0})`}
+      title={`All Database Records · daily_logs (${visible.length}${visible.length !== (q.data?.length ?? 0) ? ` of ${q.data?.length ?? 0}` : ""})`}
       action={<span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Raw · Newest First</span>}
     >
       {q.isLoading ? (
         <div className="text-sm text-muted-foreground">Loading…</div>
-      ) : (q.data?.length ?? 0) === 0 ? (
+      ) : visible.length === 0 ? (
         <div className="text-sm text-destructive font-medium">
-          ⚠ The database table is EMPTY. No CSV rows saved. Use Manual Data Entry above to add records.
+          ⚠ No rows match the current Office filter.
         </div>
       ) : (
         <div className="overflow-x-auto -mx-4 sm:mx-0">
@@ -307,7 +328,7 @@ function RawDataTable() {
               </tr>
             </thead>
             <tbody>
-              {q.data!.map((r) => (
+              {visible.map((r) => (
                 <tr key={r.id} className="border-t border-border">
                   <td className="px-3 py-1.5 font-mono">{r.log_date}</td>
                   <td className="px-3 py-1.5">{r.name}</td>
@@ -335,6 +356,7 @@ type Range = "today" | "week" | "month";
 
 function LiveFleetStatus() {
   const [range, setRange] = useState<Range>("today");
+  const { matches } = useOfficeFilter();
 
   const since = useMemo(() => {
     const today = new Date(); today.setHours(0,0,0,0);
@@ -347,7 +369,7 @@ function LiveFleetStatus() {
     queryKey: ["fleet_status", range],
     queryFn: async () => {
       const [vansR, logsR] = await Promise.all([
-        supabase.from("teams").select("id, name, color").order("name"),
+        supabase.from("teams").select("id, name, color, office_location").order("name"),
         supabase.from("daily_logs")
           .select("team_id, demos_sits, sales, no_demo, one_legs, future_leads, unmarked, log_date")
           .gte("log_date", toISODate(since)),
@@ -398,7 +420,7 @@ function LiveFleetStatus() {
         <div className="text-sm text-muted-foreground">No vans yet.</div>
       ) : (
         <div className="space-y-2">
-          {q.data!.vans.map((v) => {
+          {q.data!.vans.filter((v) => matches((v as { office_location?: string | null }).office_location)).map((v) => {
             const totals = q.data!.byVan.get(v.id) ?? { leads: 0, sits: 0 };
             return (
               <div key={v.id} className="flex items-center justify-between gap-4 px-4 py-3 rounded-lg border border-border bg-surface">
@@ -430,6 +452,7 @@ function LiveFleetStatus() {
 type WeeklyRow = {
   canvasserId: string;
   name: string;
+  officeLocation: string | null;
   vanName: string | null;
   vanColor: string | null;
   totalLeads: number;
@@ -448,7 +471,7 @@ function WeeklyResults() {
     queryKey: ["weekly_results", toISODate(lastWeekStart)],
     queryFn: async (): Promise<WeeklyRow[]> => {
       const [profilesR, vansR, logsR] = await Promise.all([
-        supabase.from("profiles").select("id, display_name, team_id"),
+        supabase.from("profiles").select("id, display_name, team_id, office_location"),
         supabase.from("teams").select("id, name, color"),
         supabase.from("daily_logs")
           .select("canvasser_id, demos_sits, sales, no_demo, one_legs, future_leads, unmarked")
@@ -490,6 +513,7 @@ function WeeklyResults() {
         rows.push({
           canvasserId: id,
           name: p?.display_name ?? "Unknown",
+          officeLocation: (p as { office_location?: string | null } | undefined)?.office_location ?? null,
           vanName: v?.name ?? null,
           vanColor: v?.color ?? null,
           totalLeads: a.leads,
@@ -507,7 +531,10 @@ function WeeklyResults() {
     staleTime: 0,
   });
 
-  const grand = (q.data ?? []).reduce(
+  const { matches, office } = useOfficeFilter();
+  const rows = (q.data ?? []).filter((r) => matches(r.officeLocation));
+
+  const grand = rows.reduce(
     (acc, r) => ({
       leads: acc.leads + r.totalLeads,
       sits: acc.sits + r.totalSits,
@@ -524,14 +551,16 @@ function WeeklyResults() {
       title="Last Week's Results"
       action={
         <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-          {toISODate(lastWeekStart)} → {toISODate(lastWeekEnd)}
+          {office === "All" ? "" : `${office} · `}{toISODate(lastWeekStart)} → {toISODate(lastWeekEnd)}
         </span>
       }
     >
       {q.isLoading ? (
         <div className="text-sm text-muted-foreground">Loading…</div>
-      ) : (q.data?.length ?? 0) === 0 ? (
-        <div className="text-sm text-muted-foreground">No activity recorded last week.</div>
+      ) : rows.length === 0 ? (
+        <div className="text-sm text-muted-foreground">
+          {office === "All" ? "No activity recorded last week." : `No ${office} activity recorded last week.`}
+        </div>
       ) : (
         <div className="overflow-x-auto -mx-4 sm:mx-0">
           <table className="w-full text-sm">
@@ -548,7 +577,7 @@ function WeeklyResults() {
               </tr>
             </thead>
             <tbody>
-              {q.data!.map((r) => (
+              {rows.map((r) => (
                 <tr key={r.canvasserId} className="border-t border-border">
                   <td className="px-4 py-2.5 font-medium">{r.name}</td>
                   <td className="px-4 py-2.5">

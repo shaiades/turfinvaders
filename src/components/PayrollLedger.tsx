@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { RankPill } from "@/components/RankPill";
+import { useOfficeFilter, OfficeFilterToggle } from "@/components/OfficeFilterContext";
 import { cn } from "@/lib/utils";
 
 type LogRow = {
@@ -70,6 +71,7 @@ function emptyAgg(): Agg {
 }
 
 export function PayrollLedger() {
+  const { matches, office } = useOfficeFilter();
   const [weekStart, setWeekStart] = useState<Date>(() => {
     // Default to last week
     const lastWk = new Date();
@@ -102,7 +104,7 @@ export function PayrollLedger() {
           .eq("status", "confirmed")
           .gte("created_at", `${startStr}T00:00:00Z`)
           .lte("created_at", `${endStr}T23:59:59Z`),
-        supabase.from("profiles").select("id, display_name, team_id, current_rank"),
+        supabase.from("profiles").select("id, display_name, team_id, current_rank, office_location"),
         supabase.from("teams").select("id, name, color"),
         supabase
           .from("time_entries")
@@ -196,8 +198,12 @@ export function PayrollLedger() {
         };
       })
       .filter((r) => r.total > 0 || r.sale_amount > 0 || r.hours > 0)
+      .filter((r) => {
+        const p = data.profiles.find((x) => x.id === r.id) as { office_location?: string | null } | undefined;
+        return matches(p?.office_location ?? null);
+      })
       .sort((a, b) => b.totalPay - a.totalPay);
-  }, [data]);
+  }, [data, matches]);
 
   const grandTotal = rows.reduce((s, r) => s + r.totalPay, 0);
 
@@ -277,6 +283,14 @@ export function PayrollLedger() {
           </h2>
           <div className="text-xs text-muted-foreground mt-1">
             Assumed hours: {ASSUMED_HOURS}/wk · Hourly tier by points · Commission by Sale Price · Sit & Monster bonuses included
+          </div>
+          <div className="mt-3">
+            <OfficeFilterToggle />
+            {office !== "All" && (
+              <span className="ml-3 text-[10px] font-display uppercase tracking-widest text-neon">
+                Filtered · {office}
+              </span>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">

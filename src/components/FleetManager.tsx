@@ -11,13 +11,15 @@ import { Truck, Plus, Building2, Trash2, UserMinus, GripVertical, Pencil, Check,
 import { deleteProfile, deleteVan } from "@/lib/fleet.functions";
 
 const VAN_COLORS = ["#ff007a", "#00f0ff", "#a855f7", "#f59e0b", "#22c55e", "#ef4444", "#3b82f6", "#eab308"];
+export const OFFICE_LOCATIONS = ["San Diego", "Orange County"] as const;
+export type OfficeLocation = (typeof OFFICE_LOCATIONS)[number];
 
 type DragPayload = { id: string; name: string };
 
 export function FleetManager() {
   const qc = useQueryClient();
   const [newVanName, setNewVanName] = useState("");
-  const [newVanOffice, setNewVanOffice] = useState<string | null>(null);
+  const [newVanLoc, setNewVanLoc] = useState<OfficeLocation>("San Diego");
   const [newVanColor, setNewVanColor] = useState(VAN_COLORS[0]);
   const [dragOverVan, setDragOverVan] = useState<string | null>(null);
   const [dragOverUnassigned, setDragOverUnassigned] = useState(false);
@@ -26,22 +28,20 @@ export function FleetManager() {
   const [editingVanId, setEditingVanId] = useState<string | null>(null);
   const [editVanName, setEditVanName] = useState("");
   const [editVanColor, setEditVanColor] = useState(VAN_COLORS[0]);
-  const [editVanOffice, setEditVanOffice] = useState<string | null>(null);
+  const [editVanLoc, setEditVanLoc] = useState<OfficeLocation>("San Diego");
 
   const fleet = useQuery({
     queryKey: ["fleet_manager"],
     queryFn: async () => {
-      const [vansR, profilesR, rolesR, officesR, logsR] = await Promise.all([
-        supabase.from("teams").select("id, name, color, captain_id, office_id").order("name"),
-        supabase.from("profiles").select("id, display_name, team_id").order("display_name"),
+      const [vansR, profilesR, rolesR, logsR] = await Promise.all([
+        supabase.from("teams").select("id, name, color, captain_id, office_location").order("name"),
+        supabase.from("profiles").select("id, display_name, team_id, office_location").order("display_name"),
         supabase.from("user_roles").select("user_id, role"),
-        supabase.from("offices").select("id, name, color").order("name"),
         supabase.from("daily_logs").select("canvasser_id, demos_sits, sales"),
       ]);
       if (vansR.error) throw vansR.error;
       if (profilesR.error) throw profilesR.error;
       if (rolesR.error) throw rolesR.error;
-      if (officesR.error) throw officesR.error;
       if (logsR.error) throw logsR.error;
       const rolesByUser = new Map<string, string[]>();
       for (const r of rolesR.data ?? []) {
@@ -59,7 +59,6 @@ export function FleetManager() {
       return {
         vans: vansR.data ?? [],
         profiles: profilesR.data ?? [],
-        offices: officesR.data ?? [],
         rolesByUser,
         pointsByUser,
       };
@@ -70,7 +69,7 @@ export function FleetManager() {
     mutationFn: async () => {
       if (!newVanName.trim()) throw new Error("Van name required");
       const { error } = await supabase.from("teams").insert({
-        name: newVanName.trim(), color: newVanColor, office_id: newVanOffice,
+        name: newVanName.trim(), color: newVanColor, office_location: newVanLoc,
       });
       if (error) throw error;
     },
@@ -78,7 +77,6 @@ export function FleetManager() {
       toast.success("Van created");
       setNewVanName("");
       qc.invalidateQueries({ queryKey: ["fleet_manager"] });
-      qc.invalidateQueries({ queryKey: ["offices"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -87,7 +85,13 @@ export function FleetManager() {
     mutationFn: async ({ vanId, captainId }: { vanId: string; captainId: string | null }) => {
       const { error } = await supabase.from("teams").update({ captain_id: captainId }).eq("id", vanId);
       if (error) throw error;
-      if (captainId) await supabase.from("profiles").update({ team_id: vanId }).eq("id", captainId);
+      if (captainId) {
+        // Captain inherits van's office.
+        const van = fleet.data?.vans.find((v) => v.id === vanId);
+        const patch: { team_id: string; office_location?: string } = { team_id: vanId };
+        if (van?.office_location) patch.office_location = van.office_location;
+        await supabase.from("profiles").update(patch).eq("id", captainId);
+      }
     },
     onSuccess: () => { toast.success("Captain assigned"); qc.invalidateQueries({ queryKey: ["fleet_manager"] }); },
     onError: (e: Error) => toast.error(e.message),
@@ -95,21 +99,26 @@ export function FleetManager() {
 
   const assignCanvasser = useMutation({
     mutationFn: async ({ canvasserId, vanId }: { canvasserId: string; vanId: string | null }) => {
-      const { error } = await supabase.from("profiles").update({ team_id: vanId }).eq("id", canvasserId);
+      const patch: { team_id: string | null; office_location?: string } = { team_id: vanId };
+      if (vanId) {
+        const van = fleet.data?.vans.find((v) => v.id === vanId);
+        if (van?.office_location) patch.office_location = van.office_location;
+      }
+      const { error } = await supabase.from("profiles").update(patch).eq("id", canvasserId);
       if (error) throw error;
     },
     onSuccess: (_d, vars) => {
       toast.success(vars.vanId ? "Assigned to van" : "Moved to Unassigned");
       qc.invalidateQueries({ queryKey: ["fleet_manager"] });
       qc.invalidateQueries({ queryKey: ["performance-matrix"] });
+      qc.invalidateQueries({ queryKey: ["weekly_results"] });
+      qc.invalidateQueries({ queryKey: ["payroll-ledger"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const removeProfile = useMutation({
-    mutationFn: async (id: string) => {
-      await deleteProfileFn({ data: { id } });
-    },
+    mutationFn: async (id: string) => { await deleteProfileFn({ data: { id } }); },
     onSuccess: () => {
       toast.success("Ghost profile deleted");
       qc.invalidateQueries({ queryKey: ["fleet_manager"] });
@@ -119,18 +128,21 @@ export function FleetManager() {
   });
 
   const updateVan = useMutation({
-    mutationFn: async ({ id, name, color, office_id }: { id: string; name: string; color: string; office_id: string | null }) => {
+    mutationFn: async ({ id, name, color, office_location }: { id: string; name: string; color: string; office_location: OfficeLocation }) => {
       if (!name.trim()) throw new Error("Van name required");
       const { error } = await supabase.from("teams")
-        .update({ name: name.trim(), color, office_id })
+        .update({ name: name.trim(), color, office_location })
         .eq("id", id);
       if (error) throw error;
+      // Cascade office to roster.
+      await supabase.from("profiles").update({ office_location }).eq("team_id", id);
     },
     onSuccess: () => {
       toast.success("Van updated");
       setEditingVanId(null);
       qc.invalidateQueries({ queryKey: ["fleet_manager"] });
-      qc.invalidateQueries({ queryKey: ["offices"] });
+      qc.invalidateQueries({ queryKey: ["weekly_results"] });
+      qc.invalidateQueries({ queryKey: ["payroll-ledger"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -140,26 +152,34 @@ export function FleetManager() {
     onSuccess: () => {
       toast.success("Van deleted — members moved to Unassigned");
       qc.invalidateQueries({ queryKey: ["fleet_manager"] });
-      qc.invalidateQueries({ queryKey: ["offices"] });
       qc.invalidateQueries({ queryKey: ["performance-matrix"] });
     },
     onError: (e: Error) => toast.error(e.message ?? "Failed to delete van"),
   });
 
-  function startEditVan(v: { id: string; name: string; color: string; office_id: string | null }) {
+  function startEditVan(v: { id: string; name: string; color: string; office_location: string | null }) {
     setEditingVanId(v.id);
     setEditVanName(v.name);
     setEditVanColor(v.color);
-    setEditVanOffice(v.office_id);
+    setEditVanLoc((v.office_location as OfficeLocation) ?? "San Diego");
   }
 
   if (fleet.isLoading || !fleet.data) {
     return <div className="text-sm text-muted-foreground">Loading fleet…</div>;
   }
 
-  const { vans, profiles, offices, rolesByUser, pointsByUser } = fleet.data;
+  const { vans, profiles, rolesByUser, pointsByUser } = fleet.data;
   const captains = profiles.filter((p) => (rolesByUser.get(p.id) ?? []).includes("captain"));
   const unassigned = profiles.filter((p) => !p.team_id && !(rolesByUser.get(p.id) ?? []).includes("owner"));
+
+  // Group vans by office location.
+  const vansByOffice = new Map<string, typeof vans>();
+  for (const loc of OFFICE_LOCATIONS) vansByOffice.set(loc, []);
+  for (const v of vans) {
+    const loc = (v.office_location as string) || "San Diego";
+    if (!vansByOffice.has(loc)) vansByOffice.set(loc, []);
+    vansByOffice.get(loc)!.push(v);
+  }
 
   function onDragStart(e: React.DragEvent, payload: DragPayload) {
     e.dataTransfer.setData("application/json", JSON.stringify(payload));
@@ -197,12 +217,11 @@ export function FleetManager() {
             <Input value={newVanName} onChange={(e) => setNewVanName(e.target.value)} placeholder="e.g. Phoenix Strike" />
           </div>
           <div>
-            <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Office</label>
-            <Select value={newVanOffice ?? "none"} onValueChange={(v) => setNewVanOffice(v === "none" ? null : v)}>
-              <SelectTrigger><SelectValue placeholder="Unassigned" /></SelectTrigger>
+            <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Office Location</label>
+            <Select value={newVanLoc} onValueChange={(v) => setNewVanLoc(v as OfficeLocation)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">Unassigned</SelectItem>
-                {offices.map((o) => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}
+                {OFFICE_LOCATIONS.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -227,156 +246,159 @@ export function FleetManager() {
       </ArcadePanel>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
-        {/* Vans */}
-        <ArcadePanel title={`Fleet (${vans.length} Vans)`}>
-          {vans.length === 0 ? (
-            <div className="text-sm text-muted-foreground">No vans yet. Create your first one above.</div>
-          ) : (
-            <div className="grid gap-4 md:grid-cols-2">
-              {vans.map((v) => {
-                const office = offices.find((o) => o.id === v.office_id);
-                const roster = profiles.filter((p) => p.team_id === v.id);
-                const isOver = dragOverVan === v.id;
-                return (
-                  <div
-                    key={v.id}
-                    onDragOver={(e) => onVanDragOver(e, v.id)}
-                    onDragLeave={() => setDragOverVan((cur) => (cur === v.id ? null : cur))}
-                    onDrop={(e) => onVanDrop(e, v.id)}
-                    className={`arcade-card p-4 space-y-3 transition-all ${
-                      isOver ? "ring-2 ring-neon shadow-[0_0_24px_color-mix(in_oklab,var(--neon)_50%,transparent)]" : ""
-                    }`}
-                    style={isOver ? { borderColor: v.color } : undefined}
-                  >
-                    {editingVanId === v.id ? (
-                      <div className="space-y-2 p-2 rounded border border-neon/40 bg-neon/5">
-                        <div className="grid gap-2 md:grid-cols-[1fr_160px]">
-                          <div>
-                            <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Van Name</label>
-                            <Input value={editVanName} onChange={(e) => setEditVanName(e.target.value)} />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Office</label>
-                            <Select value={editVanOffice ?? "none"} onValueChange={(val) => setEditVanOffice(val === "none" ? null : val)}>
-                              <SelectTrigger><SelectValue /></SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="none">Unassigned</SelectItem>
-                                {offices.map((o) => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </div>
-                        <div>
-                          <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Color</label>
-                          <div className="flex gap-1 mt-1">
-                            {VAN_COLORS.map((c) => (
-                              <button
-                                key={c}
-                                onClick={() => setEditVanColor(c)}
-                                className={`w-6 h-6 rounded ${editVanColor === c ? "ring-2 ring-offset-1 ring-offset-background ring-foreground" : ""}`}
-                                style={{ background: c }}
-                                aria-label={`color ${c}`}
-                              />
-                            ))}
-                          </div>
-                        </div>
-                        <div className="flex gap-2 justify-end">
-                          <Button size="sm" variant="ghost" onClick={() => setEditingVanId(null)}>
-                            <X className="w-3.5 h-3.5 mr-1" /> Cancel
-                          </Button>
-                          <Button
-                            size="sm"
-                            disabled={updateVan.isPending}
-                            onClick={() => updateVan.mutate({ id: v.id, name: editVanName, color: editVanColor, office_id: editVanOffice })}
-                            className="bg-neon text-background hover:bg-neon/90"
-                          >
-                            <Check className="w-3.5 h-3.5 mr-1" /> Save
-                          </Button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <Truck className="w-4 h-4 shrink-0" style={{ color: v.color }} />
-                          <TeamBadge name={v.name} color={v.color} />
-                        </div>
-                        <div className="flex items-center gap-1">
-                          {office && (
-                            <span className="text-[10px] font-display uppercase tracking-widest flex items-center gap-1 mr-1" style={{ color: office.color }}>
-                              <Building2 className="w-3 h-3" /> {office.name}
-                            </span>
-                          )}
-                          <button
-                            onClick={() => startEditVan(v)}
-                            className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-                            title="Edit van"
-                          >
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => {
-                              if (confirm(`Delete van "${v.name}"? Members will be moved to Unassigned. This cannot be undone.`)) {
-                                removeVan.mutate(v.id);
-                              }
-                            }}
-                            className="p-1 rounded hover:bg-destructive/20 text-destructive"
-                            title="Delete van"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    <div>
-                      <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Captain</label>
-                      <Select
-                        value={v.captain_id ?? "none"}
-                        onValueChange={(val) => setCaptain.mutate({ vanId: v.id, captainId: val === "none" ? null : val })}
+        {/* Vans grouped by office */}
+        <div className="space-y-4">
+          {Array.from(vansByOffice.entries()).map(([office, list]) => (
+            <ArcadePanel
+              key={office}
+              title={`${office} · ${list.length} ${list.length === 1 ? "Van" : "Vans"}`}
+            >
+              {list.length === 0 ? (
+                <div className="text-sm text-muted-foreground italic">No vans in {office} yet.</div>
+              ) : (
+                <div className="grid gap-4 md:grid-cols-2">
+                  {list.map((v) => {
+                    const roster = profiles.filter((p) => p.team_id === v.id);
+                    const isOver = dragOverVan === v.id;
+                    return (
+                      <div
+                        key={v.id}
+                        onDragOver={(e) => onVanDragOver(e, v.id)}
+                        onDragLeave={() => setDragOverVan((cur) => (cur === v.id ? null : cur))}
+                        onDrop={(e) => onVanDrop(e, v.id)}
+                        className={`arcade-card p-4 space-y-3 transition-all ${
+                          isOver ? "ring-2 ring-neon shadow-[0_0_24px_color-mix(in_oklab,var(--neon)_50%,transparent)]" : ""
+                        }`}
+                        style={isOver ? { borderColor: v.color } : undefined}
                       >
-                        <SelectTrigger><SelectValue placeholder="No captain" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">— No captain —</SelectItem>
-                          {captains.map((c) => (
-                            <SelectItem key={c.id} value={c.id}>{c.display_name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div>
-                      <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground mb-1">
-                        Roster ({roster.length}) <span className="opacity-60">· drop agents here</span>
-                      </div>
-                      <div className="space-y-1.5 min-h-[40px]">
-                        {roster.map((r) => (
-                          <RosterRow
-                            key={r.id}
-                            id={r.id}
-                            name={r.display_name ?? "Unknown"}
-                            points={pointsByUser.get(r.id) ?? 0}
-                            onDragStart={(e) => onDragStart(e, { id: r.id, name: r.display_name ?? "" })}
-                            onUnassign={() => assignCanvasser.mutate({ canvasserId: r.id, vanId: null })}
-                            onDelete={() => {
-                              if (confirm(`Delete profile "${r.display_name}"? This removes the user permanently.`)) {
-                                removeProfile.mutate(r.id);
-                              }
-                            }}
-                          />
-                        ))}
-                        {roster.length === 0 && (
-                          <div className="text-xs text-muted-foreground italic px-2 py-3 border border-dashed border-border rounded">
-                            Drop agents here
+                        {editingVanId === v.id ? (
+                          <div className="space-y-2 p-2 rounded border border-neon/40 bg-neon/5">
+                            <div className="grid gap-2 md:grid-cols-[1fr_160px]">
+                              <div>
+                                <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Van Name</label>
+                                <Input value={editVanName} onChange={(e) => setEditVanName(e.target.value)} />
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Office Location</label>
+                                <Select value={editVanLoc} onValueChange={(val) => setEditVanLoc(val as OfficeLocation)}>
+                                  <SelectTrigger><SelectValue /></SelectTrigger>
+                                  <SelectContent>
+                                    {OFFICE_LOCATIONS.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Color</label>
+                              <div className="flex gap-1 mt-1">
+                                {VAN_COLORS.map((c) => (
+                                  <button
+                                    key={c}
+                                    onClick={() => setEditVanColor(c)}
+                                    className={`w-6 h-6 rounded ${editVanColor === c ? "ring-2 ring-offset-1 ring-offset-background ring-foreground" : ""}`}
+                                    style={{ background: c }}
+                                    aria-label={`color ${c}`}
+                                  />
+                                ))}
+                              </div>
+                            </div>
+                            <div className="flex gap-2 justify-end">
+                              <Button size="sm" variant="ghost" onClick={() => setEditingVanId(null)}>
+                                <X className="w-3.5 h-3.5 mr-1" /> Cancel
+                              </Button>
+                              <Button
+                                size="sm"
+                                disabled={updateVan.isPending}
+                                onClick={() => updateVan.mutate({ id: v.id, name: editVanName, color: editVanColor, office_location: editVanLoc })}
+                                className="bg-neon text-background hover:bg-neon/90"
+                              >
+                                <Check className="w-3.5 h-3.5 mr-1" /> Save
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <Truck className="w-4 h-4 shrink-0" style={{ color: v.color }} />
+                              <TeamBadge name={v.name} color={v.color} />
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <span className="text-[10px] font-display uppercase tracking-widest flex items-center gap-1 mr-1 text-muted-foreground">
+                                <Building2 className="w-3 h-3" /> {v.office_location ?? "San Diego"}
+                              </span>
+                              <button
+                                onClick={() => startEditVan(v)}
+                                className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                                title="Edit van"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  if (confirm(`Delete van "${v.name}"? Members will be moved to Unassigned. This cannot be undone.`)) {
+                                    removeVan.mutate(v.id);
+                                  }
+                                }}
+                                className="p-1 rounded hover:bg-destructive/20 text-destructive"
+                                title="Delete van"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </div>
                         )}
+
+                        <div>
+                          <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Captain</label>
+                          <Select
+                            value={v.captain_id ?? "none"}
+                            onValueChange={(val) => setCaptain.mutate({ vanId: v.id, captainId: val === "none" ? null : val })}
+                          >
+                            <SelectTrigger><SelectValue placeholder="No captain" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">— No captain —</SelectItem>
+                              {captains.map((c) => (
+                                <SelectItem key={c.id} value={c.id}>{c.display_name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div>
+                          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground mb-1">
+                            Roster ({roster.length}) <span className="opacity-60">· drop agents here</span>
+                          </div>
+                          <div className="space-y-1.5 min-h-[40px]">
+                            {roster.map((r) => (
+                              <RosterRow
+                                key={r.id}
+                                id={r.id}
+                                name={r.display_name ?? "Unknown"}
+                                points={pointsByUser.get(r.id) ?? 0}
+                                onDragStart={(e) => onDragStart(e, { id: r.id, name: r.display_name ?? "" })}
+                                onUnassign={() => assignCanvasser.mutate({ canvasserId: r.id, vanId: null })}
+                                onDelete={() => {
+                                  if (confirm(`Delete profile "${r.display_name}"? This removes the user permanently.`)) {
+                                    removeProfile.mutate(r.id);
+                                  }
+                                }}
+                              />
+                            ))}
+                            {roster.length === 0 && (
+                              <div className="text-xs text-muted-foreground italic px-2 py-3 border border-dashed border-border rounded">
+                                Drop agents here
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </ArcadePanel>
+                    );
+                  })}
+                </div>
+              )}
+            </ArcadePanel>
+          ))}
+        </div>
 
         {/* Unassigned holding pen */}
         <ArcadePanel title={`Unassigned Agents (${unassigned.length})`}>
@@ -410,7 +432,7 @@ export function FleetManager() {
             )}
           </div>
           <p className="mt-3 text-[10px] text-muted-foreground">
-            Drag a name onto a Van to assign. Use the trash icon to delete ghost profiles (0 points = safe to remove).
+            Drag a name onto a Van to assign. New CSV agents default to San Diego.
           </p>
         </ArcadePanel>
       </div>

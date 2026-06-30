@@ -368,6 +368,7 @@ export type Database = {
           id: string
           level: number
           monthly_goal: number
+          office_location: string
           recruits_count: number
           rolling_4_week_sit_avg: number
           status: Database["public"]["Enums"]["canvasser_status"]
@@ -387,6 +388,7 @@ export type Database = {
           id: string
           level?: number
           monthly_goal?: number
+          office_location?: string
           recruits_count?: number
           rolling_4_week_sit_avg?: number
           status?: Database["public"]["Enums"]["canvasser_status"]
@@ -406,6 +408,7 @@ export type Database = {
           id?: string
           level?: number
           monthly_goal?: number
+          office_location?: string
           recruits_count?: number
           rolling_4_week_sit_avg?: number
           status?: Database["public"]["Enums"]["canvasser_status"]
@@ -432,6 +435,7 @@ export type Database = {
           id: string
           name: string
           office_id: string | null
+          office_location: string
         }
         Insert: {
           captain_id?: string | null
@@ -440,6 +444,7 @@ export type Database = {
           id?: string
           name: string
           office_id?: string | null
+          office_location?: string
         }
         Update: {
           captain_id?: string | null
@@ -448,6 +453,7 @@ export type Database = {
           id?: string
           name?: string
           office_id?: string | null
+          office_location?: string
         }
         Relationships: [
           {
