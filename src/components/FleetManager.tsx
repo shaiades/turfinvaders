@@ -7,8 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Truck, Plus, Building2, Trash2, UserMinus, GripVertical } from "lucide-react";
-import { deleteProfile } from "@/lib/fleet.functions";
+import { Truck, Plus, Building2, Trash2, UserMinus, GripVertical, Pencil, Check, X } from "lucide-react";
+import { deleteProfile, deleteVan } from "@/lib/fleet.functions";
 
 const VAN_COLORS = ["#ff007a", "#00f0ff", "#a855f7", "#f59e0b", "#22c55e", "#ef4444", "#3b82f6", "#eab308"];
 
@@ -22,6 +22,11 @@ export function FleetManager() {
   const [dragOverVan, setDragOverVan] = useState<string | null>(null);
   const [dragOverUnassigned, setDragOverUnassigned] = useState(false);
   const deleteProfileFn = useServerFn(deleteProfile);
+  const deleteVanFn = useServerFn(deleteVan);
+  const [editingVanId, setEditingVanId] = useState<string | null>(null);
+  const [editVanName, setEditVanName] = useState("");
+  const [editVanColor, setEditVanColor] = useState(VAN_COLORS[0]);
+  const [editVanOffice, setEditVanOffice] = useState<string | null>(null);
 
   const fleet = useQuery({
     queryKey: ["fleet_manager"],
@@ -112,6 +117,41 @@ export function FleetManager() {
     },
     onError: (e: Error) => toast.error(e.message ?? "Failed to delete"),
   });
+
+  const updateVan = useMutation({
+    mutationFn: async ({ id, name, color, office_id }: { id: string; name: string; color: string; office_id: string | null }) => {
+      if (!name.trim()) throw new Error("Van name required");
+      const { error } = await supabase.from("teams")
+        .update({ name: name.trim(), color, office_id })
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Van updated");
+      setEditingVanId(null);
+      qc.invalidateQueries({ queryKey: ["fleet_manager"] });
+      qc.invalidateQueries({ queryKey: ["offices"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const removeVan = useMutation({
+    mutationFn: async (id: string) => { await deleteVanFn({ data: { id } }); },
+    onSuccess: () => {
+      toast.success("Van deleted — members moved to Unassigned");
+      qc.invalidateQueries({ queryKey: ["fleet_manager"] });
+      qc.invalidateQueries({ queryKey: ["offices"] });
+      qc.invalidateQueries({ queryKey: ["performance-matrix"] });
+    },
+    onError: (e: Error) => toast.error(e.message ?? "Failed to delete van"),
+  });
+
+  function startEditVan(v: { id: string; name: string; color: string; office_id: string | null }) {
+    setEditingVanId(v.id);
+    setEditVanName(v.name);
+    setEditVanColor(v.color);
+    setEditVanOffice(v.office_id);
+  }
 
   if (fleet.isLoading || !fleet.data) {
     return <div className="text-sm text-muted-foreground">Loading fleet…</div>;
@@ -208,17 +248,85 @@ export function FleetManager() {
                     }`}
                     style={isOver ? { borderColor: v.color } : undefined}
                   >
-                    <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <Truck className="w-4 h-4 shrink-0" style={{ color: v.color }} />
-                        <TeamBadge name={v.name} color={v.color} />
+                    {editingVanId === v.id ? (
+                      <div className="space-y-2 p-2 rounded border border-neon/40 bg-neon/5">
+                        <div className="grid gap-2 md:grid-cols-[1fr_160px]">
+                          <div>
+                            <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Van Name</label>
+                            <Input value={editVanName} onChange={(e) => setEditVanName(e.target.value)} />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Office</label>
+                            <Select value={editVanOffice ?? "none"} onValueChange={(val) => setEditVanOffice(val === "none" ? null : val)}>
+                              <SelectTrigger><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">Unassigned</SelectItem>
+                                {offices.map((o) => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Color</label>
+                          <div className="flex gap-1 mt-1">
+                            {VAN_COLORS.map((c) => (
+                              <button
+                                key={c}
+                                onClick={() => setEditVanColor(c)}
+                                className={`w-6 h-6 rounded ${editVanColor === c ? "ring-2 ring-offset-1 ring-offset-background ring-foreground" : ""}`}
+                                style={{ background: c }}
+                                aria-label={`color ${c}`}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                        <div className="flex gap-2 justify-end">
+                          <Button size="sm" variant="ghost" onClick={() => setEditingVanId(null)}>
+                            <X className="w-3.5 h-3.5 mr-1" /> Cancel
+                          </Button>
+                          <Button
+                            size="sm"
+                            disabled={updateVan.isPending}
+                            onClick={() => updateVan.mutate({ id: v.id, name: editVanName, color: editVanColor, office_id: editVanOffice })}
+                            className="bg-neon text-background hover:bg-neon/90"
+                          >
+                            <Check className="w-3.5 h-3.5 mr-1" /> Save
+                          </Button>
+                        </div>
                       </div>
-                      {office && (
-                        <span className="text-[10px] font-display uppercase tracking-widest flex items-center gap-1" style={{ color: office.color }}>
-                          <Building2 className="w-3 h-3" /> {office.name}
-                        </span>
-                      )}
-                    </div>
+                    ) : (
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Truck className="w-4 h-4 shrink-0" style={{ color: v.color }} />
+                          <TeamBadge name={v.name} color={v.color} />
+                        </div>
+                        <div className="flex items-center gap-1">
+                          {office && (
+                            <span className="text-[10px] font-display uppercase tracking-widest flex items-center gap-1 mr-1" style={{ color: office.color }}>
+                              <Building2 className="w-3 h-3" /> {office.name}
+                            </span>
+                          )}
+                          <button
+                            onClick={() => startEditVan(v)}
+                            className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                            title="Edit van"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (confirm(`Delete van "${v.name}"? Members will be moved to Unassigned. This cannot be undone.`)) {
+                                removeVan.mutate(v.id);
+                              }
+                            }}
+                            className="p-1 rounded hover:bg-destructive/20 text-destructive"
+                            title="Delete van"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    )}
 
                     <div>
                       <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Captain</label>
