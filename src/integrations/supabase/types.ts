@@ -148,6 +148,50 @@ export type Database = {
           },
         ]
       }
+      daily_metrics: {
+        Row: {
+          canvasser_id: string
+          created_at: string
+          id: string
+          leads_called_in: number
+          leads_confirmed: number
+          metric_date: string
+          office_location: string
+          sits_ran_today: number
+          updated_at: string
+        }
+        Insert: {
+          canvasser_id: string
+          created_at?: string
+          id?: string
+          leads_called_in?: number
+          leads_confirmed?: number
+          metric_date?: string
+          office_location?: string
+          sits_ran_today?: number
+          updated_at?: string
+        }
+        Update: {
+          canvasser_id?: string
+          created_at?: string
+          id?: string
+          leads_called_in?: number
+          leads_confirmed?: number
+          metric_date?: string
+          office_location?: string
+          sits_ran_today?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "daily_metrics_canvasser_id_fkey"
+            columns: ["canvasser_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       field_pins: {
         Row: {
           canvasser_id: string
