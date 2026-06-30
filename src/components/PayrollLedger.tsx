@@ -198,8 +198,9 @@ export function PayrollLedger() {
         };
       })
       .filter((r) => r.total > 0 || r.sale_amount > 0 || r.hours > 0)
+      .filter((r) => matches((r as unknown as { team?: { office_location?: string | null } | null }).team?.office_location ?? (data.profiles.find((p) => p.id === r.id) as { office_location?: string | null } | undefined)?.office_location ?? null))
       .sort((a, b) => b.totalPay - a.totalPay);
-  }, [data]);
+  }, [data, matches]);
 
   const grandTotal = rows.reduce((s, r) => s + r.totalPay, 0);
 
