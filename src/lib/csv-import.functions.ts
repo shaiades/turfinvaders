@@ -10,7 +10,16 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
  * `calc_monthly_paycheck` functions (Prompt 15) compute pay from these rows.
  */
 
-type Outcome = "BO" | "OL" | "RS" | "PM" | "SALE";
+type Outcome = "BO" | "OL" | "RS" | "PM" | "SALE" | "UNMARKED";
+
+function titleCaseName(raw: string): string {
+  return raw
+    .trim()
+    .replace(/\s+/g, " ")
+    .split(" ")
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w))
+    .join(" ");
+}
 
 type CsvImportRow = {
   agent: string;
@@ -72,6 +81,7 @@ function normalizeOutcome(raw: string | null | undefined): Outcome | null {
   if (k === "rs" || k.includes("reset")) return "RS";
   if (k === "pm" || k.includes("pitchmiss") || k.includes("demo") || k.includes("sit")) return "PM";
   if (k.includes("sale") || k.includes("sold") || k.includes("close") || k === "win") return "SALE";
+  if (k === "unmarked" || k === "none" || k === "blank") return "UNMARKED";
   return null;
 }
 
@@ -142,6 +152,7 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
       future_leads: number;
       demos_sits: number;
       sales: number;
+      unmarked: number;
       sale_rows: { amount: number | null; lead_name: string | null }[];
     };
     const buckets = new Map<string, Bucket>();
@@ -155,14 +166,16 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
 
     for (let i = 0; i < data.rows.length; i++) {
       const r = data.rows[i];
-      const name = r.agent.trim();
+      // Normalize agent name: trim, collapse whitespace, title-case so
+      // "ethan munoz " and "Ethan Munoz" merge into the same profile.
+      const name = titleCaseName(r.agent);
       // Silently skip blank-agent rows (Monday exports often have spacer rows).
       if (!name) continue;
       const vanRaw = (r.van ?? "").trim();
       if (vanRaw) vanByAgent.set(name.toLowerCase(), vanRaw);
-      const outcome = normalizeOutcome(r.outcome);
-      // Silently skip rows with no recognizable outcome — do not surface as error.
-      if (!outcome) continue;
+      // Never drop a row: rows with no recognized outcome become UNMARKED (0 pts)
+      // so Total Leads on the dashboard matches the raw CSV row count.
+      const outcome: Outcome = normalizeOutcome(r.outcome) ?? "UNMARKED";
       const logDate = parseDate(r.date);
       if (!logDate) { errors.push({ row: i + 1, reason: `Unparseable date for ${name}: ${r.date}` }); continue; }
 
@@ -173,7 +186,7 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
         b = {
           profileKey: name,
           log_date: logDate,
-          no_demo: 0, one_legs: 0, future_leads: 0, demos_sits: 0, sales: 0, sale_rows: [],
+          no_demo: 0, one_legs: 0, future_leads: 0, demos_sits: 0, sales: 0, unmarked: 0, sale_rows: [],
         };
         buckets.set(key, b);
       }
@@ -190,8 +203,10 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
             lead_name: r.lead_name ?? null,
           });
           break;
+        case "UNMARKED": b.unmarked += 1; break;
       }
     }
+
 
     // Resolve / create profiles.
     async function resolveProfile(name: string): Promise<{ id: string; team_id: string | null } | null> {
@@ -253,7 +268,7 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
     // overwrites profiles.team_id so the Payroll Ledger shows the Van label
     // even when later CSVs leave the Van column blank.
     for (const r of rowsForRefresh) {
-      const name = r.agent.trim();
+      const name = titleCaseName(r.agent);
       const vanRaw = (r.van ?? "").trim();
       if (name && vanRaw) vanByAgent.set(name.toLowerCase(), vanRaw);
     }
@@ -277,7 +292,7 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
     if (data.refresh_existing) {
       const datesByProfile = new Map<string, Set<string>>();
       for (const r of rowsForRefresh) {
-        const name = r.agent.trim();
+        const name = titleCaseName(r.agent);
         if (!name) continue;
         const logDate = parseDate(r.date);
         if (!logDate) continue;
@@ -314,6 +329,7 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
       future_leads: number;
       demos_sits: number;
       sales: number;
+      unmarked: number;
     };
     const dailyLogRows: DailyLogUpsert[] = [];
     const saleLeadRows: {
@@ -339,6 +355,7 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
         future_leads: b.future_leads,
         demos_sits: b.demos_sits,
         sales: b.sales,
+        unmarked: b.unmarked,
       });
 
       // Insert confirmed leads for each SALE → feeds Paycheck Engine commission.
@@ -382,7 +399,7 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
       const refreshedProfiles = new Set<string>();
       const paycheckWeeksByProfile = new Map<string, Set<string>>();
       for (const r of rowsForFinalCalculations) {
-        const name = r.agent.trim();
+        const name = titleCaseName(r.agent);
         if (!name) continue;
         const logDate = parseDate(r.date);
         const profile = await resolveProfile(name);

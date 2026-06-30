@@ -91,6 +91,7 @@ export type Database = {
           renters: number
           sales: number
           team_id: string | null
+          unmarked: number
           updated_at: string
         }
         Insert: {
@@ -112,6 +113,7 @@ export type Database = {
           renters?: number
           sales?: number
           team_id?: string | null
+          unmarked?: number
           updated_at?: string
         }
         Update: {
@@ -133,6 +135,7 @@ export type Database = {
           renters?: number
           sales?: number
           team_id?: string | null
+          unmarked?: number
           updated_at?: string
         }
         Relationships: [

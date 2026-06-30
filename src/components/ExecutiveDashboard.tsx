@@ -27,8 +27,8 @@ function startOfWeekMon(ref = new Date()) {
 function addDays(d: Date, n: number) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
 function startOfMonth(ref = new Date()) { const d = new Date(ref); d.setHours(0,0,0,0); d.setDate(1); return d; }
 
-function leadsSum(r: { demos_sits?: number | null; sales?: number | null; no_demo?: number | null; one_legs?: number | null; future_leads?: number | null }) {
-  return (r.demos_sits ?? 0) + (r.sales ?? 0) + (r.no_demo ?? 0) + (r.one_legs ?? 0) + (r.future_leads ?? 0);
+function leadsSum(r: { demos_sits?: number | null; sales?: number | null; no_demo?: number | null; one_legs?: number | null; future_leads?: number | null; unmarked?: number | null }) {
+  return (r.demos_sits ?? 0) + (r.sales ?? 0) + (r.no_demo ?? 0) + (r.one_legs ?? 0) + (r.future_leads ?? 0) + (r.unmarked ?? 0);
 }
 
 /* ============ Main ============ */
@@ -266,7 +266,7 @@ function RawDataTable() {
     queryFn: async () => {
       const [logsR, profilesR] = await Promise.all([
         supabase.from("daily_logs")
-          .select("id, canvasser_id, team_id, log_date, demos_sits, sales, no_demo, one_legs, future_leads, people_talked_to, leads_called_in, confirmed_leads")
+          .select("id, canvasser_id, team_id, log_date, demos_sits, sales, no_demo, one_legs, future_leads, unmarked, people_talked_to, leads_called_in, confirmed_leads")
           .order("log_date", { ascending: false })
           .limit(500),
         supabase.from("profiles").select("id, display_name"),
@@ -349,7 +349,7 @@ function LiveFleetStatus() {
       const [vansR, logsR] = await Promise.all([
         supabase.from("teams").select("id, name, color").order("name"),
         supabase.from("daily_logs")
-          .select("team_id, demos_sits, sales, no_demo, one_legs, future_leads, log_date")
+          .select("team_id, demos_sits, sales, no_demo, one_legs, future_leads, unmarked, log_date")
           .gte("log_date", toISODate(since)),
       ]);
       if (vansR.error) throw vansR.error;
@@ -450,7 +450,7 @@ function WeeklyResults() {
         supabase.from("profiles").select("id, display_name, team_id"),
         supabase.from("teams").select("id, name, color"),
         supabase.from("daily_logs")
-          .select("canvasser_id, demos_sits, sales, no_demo, one_legs, future_leads")
+          .select("canvasser_id, demos_sits, sales, no_demo, one_legs, future_leads, unmarked")
           .gte("log_date", toISODate(lastWeekStart))
           .lte("log_date", toISODate(lastWeekEnd)),
       ]);

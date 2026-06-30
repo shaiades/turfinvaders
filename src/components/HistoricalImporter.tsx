@@ -61,12 +61,32 @@ function hasAnyValue(row: Record<string, unknown>): boolean {
 // alphabetical letter AND is not one of Monday.com's system filler words.
 // Monday fills "empty" cells with non-breaking spaces, dashes, or zeros —
 // all of those must safely evaluate to false.
-const FILLER_TOKENS = new Set(["false", "null", "n/a", "undefined", "none"]);
+const FILLER_TOKENS = new Set(["", "false", "null", "n/a", "undefined", "none"]);
 function isMarked(v: unknown): boolean {
   const val = v == null ? "" : v.toString().trim().toLowerCase();
   const hasLetter = /[a-z]/i.test(val);
   const notFiller = !FILLER_TOKENS.has(val);
   return hasLetter && notFiller;
+}
+
+// Relaxed check for the PM column only — catches edge-case typos.
+// Any non-blacklisted text (even without alphabetical letters) is treated
+// as a mark. Empty / dash / number-zero cells still safely fail.
+const PM_DEAD_TOKENS = new Set(["", "-", "—", "–", "0", "false", "null", "n/a", "undefined", "none"]);
+function isMarkedPM(v: unknown): boolean {
+  const val = v == null ? "" : v.toString().trim().toLowerCase();
+  if (PM_DEAD_TOKENS.has(val)) return false;
+  // Reject pure whitespace / non-printable junk.
+  return /\S/.test(val);
+}
+
+function titleCaseName(raw: string): string {
+  return raw
+    .trim()
+    .replace(/\s+/g, " ")
+    .split(" ")
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w))
+    .join(" ");
 }
 
 function chunkRows(rows: ParsedRow[], size = IMPORT_BATCH_SIZE): ParsedRow[][] {
@@ -360,22 +380,30 @@ export function HistoricalImporter({
           const rows: ParsedRow[] = res.data
             .filter(hasAnyValue)
             .map((raw) => {
-              const agent = agentHeader ? String(raw[agentHeader] ?? "").trim() : "";
+              const agentRaw = agentHeader ? String(raw[agentHeader] ?? "").trim() : "";
+              // Title-case + collapse whitespace so "Ethan Munoz " and
+              // "ethan munoz" merge into one canvasser profile.
+              const agent = titleCaseName(agentRaw);
               const date = dateHeader ? String(raw[dateHeader] ?? "").trim() : "";
               const sale_price = salePriceHeader ? String(raw[salePriceHeader] ?? "").trim() : "";
               const lead_name = leadHeader ? String(raw[leadHeader] ?? "").trim() : "";
               const van = vanHeader ? String(raw[vanHeader] ?? "").trim() : "";
-              // Raw PM cell — exact literal string as the CSV parser delivered it.
               const rawPmVal = pmHeader ? raw[pmHeader] : undefined;
               const raw_pm = rawPmVal === undefined || rawPmVal === null
                 ? "UNDEFINED"
                 : String(rawPmVal);
               // Walk OUTCOME_TOKENS in priority order; first marked column wins.
+              // PM uses a relaxed check to catch typo edge cases.
               let outcome = "";
               for (const { key, outcome: o } of OUTCOME_TOKENS) {
                 const h = outcomeMap[key];
-                if (h && isMarked(raw[h])) { outcome = o; break; }
+                if (!h) continue;
+                const marked = key === "pm" ? isMarkedPM(raw[h]) : isMarked(raw[h]);
+                if (marked) { outcome = o; break; }
               }
+              // NEVER drop a row. If no outcome column is marked, save as UNMARKED
+              // so Total Leads on the dashboard matches raw CSV row count.
+              if (!outcome) outcome = "UNMARKED";
               return { agent, outcome, date, sale_price: sale_price || null, lead_name: lead_name || null, van: van || null, raw_pm, pm_header: pmHeader ?? undefined };
             })
             .filter((r) => r.agent && norm(r.agent) !== "agent");
@@ -474,6 +502,7 @@ export function HistoricalImporter({
               { k: "RS",   label: "Reset (0pt)" },
               { k: "BO",   label: "BO + CTC (0pt)" },
               { k: "OL",   label: "OL · One Leg (0pt)" },
+              { k: "UNMARKED", label: "Unmarked (0pt)" },
             ].map(({ k, label }) => (
 
               <span key={k} className="rounded border border-border bg-surface px-2 py-1 font-display tracking-wider text-muted-foreground">
