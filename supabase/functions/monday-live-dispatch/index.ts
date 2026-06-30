@@ -1,8 +1,5 @@
 // Supabase Edge Function: monday-live-dispatch
-// Monday.com webhook receiver. Handles challenge handshake, then resolves
-// the canvasser name via a GraphQL callback (Monday payloads only contain
-// pulseId + status, not the agent name) and upserts daily_metrics.
-//
+// Monday.com webhook receiver with extreme step-by-step debug logging.
 // Endpoint: https://<project-ref>.supabase.co/functions/v1/monday-live-dispatch
 // Auth: verify_jwt = false (see supabase/config.toml)
 
@@ -65,56 +62,6 @@ function extractEvent(parsed: any): { pulseId?: number; status?: string } {
   return { pulseId, status };
 }
 
-async function fetchCanvasserNameFromMonday(
-  pulseId: number,
-  token: string,
-  admin: any,
-): Promise<{ name: string | null; raw: unknown; ok: boolean; status: number }> {
-  const query = `query { items (ids: [${pulseId}]) { column_values { column { title } text } } }`;
-  let res: Response;
-  let raw: any = {};
-  try {
-    res = await fetch("https://api.monday.com/v2", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: token,
-        "API-Version": "2024-01",
-      },
-      body: JSON.stringify({ query }),
-    });
-    raw = await res.json().catch(() => ({}));
-  } catch (err) {
-    await admin.from("webhook_logs").insert({
-      source: "monday-live-dispatch:monday_fetch_exception",
-      raw_payload: { pulseId, error: String(err) } as never,
-    });
-    throw err;
-  }
-
-  // Verbose log of every Monday API response (success or failure).
-  await admin.from("webhook_logs").insert({
-    source: res.ok && !raw?.errors
-      ? "monday-live-dispatch:monday_response"
-      : "monday-live-dispatch:monday_error",
-    raw_payload: {
-      pulseId,
-      http_status: res.status,
-      ok: res.ok,
-      response: raw,
-    } as never,
-  });
-
-  const cols = raw?.data?.items?.[0]?.column_values ?? [];
-  // Strict: column title must contain 'agent' (case-insensitive).
-  const hit = cols.find((c: any) => {
-    const t = (c?.column?.title ?? "").toLowerCase();
-    return t.includes("agent");
-  });
-  const name = typeof hit?.text === "string" && hit.text.trim() ? hit.text.trim() : null;
-  return { name, raw, ok: res.ok && !raw?.errors, status: res.status };
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: CORS });
@@ -146,18 +93,22 @@ Deno.serve(async (req) => {
     });
   }
 
+  // Service-role admin client — used for EVERY insert so RLS cannot block logs.
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
   const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const admin = createClient(SUPABASE_URL, SERVICE_KEY, {
+  const supabaseAdmin = createClient(SUPABASE_URL, SERVICE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-  // X-RAY log
-  await admin.from("webhook_logs").insert({
+  // ───────────────────────────────────────────────────────────────
+  // STEP 1 — Webhook Received
+  // ───────────────────────────────────────────────────────────────
+  await supabaseAdmin.from("webhook_logs").insert({
     source: "monday-live-dispatch",
-    raw_payload: parsed as never,
+    raw_payload: { step: "1_Received", data: parsed } as never,
   });
 
+  // Optional shared-secret gate (no logging of the secret itself).
   const secret = Deno.env.get("MONDAY_WEBHOOK_SECRET");
   const url = new URL(req.url);
   const headerSecret = req.headers.get("x-monday-secret");
@@ -166,9 +117,7 @@ Deno.serve(async (req) => {
     return json({ error: "Unauthorized" }, 401);
   }
 
-  // ---- Resolve canvasser_name + status ----
-  // Support: (1) legacy body { canvasser_name, status } and
-  // (2) Monday event body { event: { pulseId, value: { label: { text } } } }
+  // Resolve canvasser_name + status from either legacy body or Monday event.
   const obj = parsed as Record<string, any>;
   let canvasser_name: string | null =
     typeof obj.canvasser_name === "string" && obj.canvasser_name.trim()
@@ -181,66 +130,115 @@ Deno.serve(async (req) => {
       : evStatus ?? "";
 
   if (!canvasser_name && pulseId) {
-    // Service-role client (admin) bypasses RLS; system_settings is a single
-    // row keyed by id=TRUE (boolean singleton).
-    const { data: settings, error: settingsErr } = await admin
+    // ─────────────────────────────────────────────────────────────
+    // STEP 2 — Token Check
+    // ─────────────────────────────────────────────────────────────
+    const { data: settings, error: settingsErr } = await supabaseAdmin
       .from("system_settings")
       .select("monday_api_token")
       .limit(1)
       .maybeSingle();
 
-    if (settingsErr) {
-      await admin.from("webhook_logs").insert({
-        source: "monday-live-dispatch:settings_error",
-        raw_payload: { pulseId, error: settingsErr.message } as never,
-      });
-      return json({ error: "Failed to read system_settings", details: settingsErr.message }, 500);
-    }
-
-    const token = settings?.monday_api_token as string | undefined;
-
-    if (!token) {
-      await admin.from("webhook_logs").insert({
-        source: "monday-live-dispatch:no_token",
+    if (settingsErr || !settings?.monday_api_token) {
+      await supabaseAdmin.from("webhook_logs").insert({
+        source: "monday-live-dispatch",
         raw_payload: {
-          error: "missing_monday_api_token",
+          step: "2_Error",
+          message: "Token not found in DB",
+          db_error: settingsErr?.message ?? null,
           pulseId,
-          status,
         } as never,
       });
       return json(
-        { error: "Monday API token not configured in system_settings" },
+        { error: "Monday API token not found", details: settingsErr?.message ?? null },
         500,
       );
     }
 
+    const mondayApiToken = settings.monday_api_token as string;
+
+    // ─────────────────────────────────────────────────────────────
+    // STEP 3 — Monday API Call
+    // ─────────────────────────────────────────────────────────────
+    const query = `query { items (ids: [${pulseId}]) { column_values { column { title } text } } }`;
+    let responseJson: any = {};
+    let mondayResponse: Response | null = null;
     try {
-      const { name, ok, status: httpStatus, raw } = await fetchCanvasserNameFromMonday(
-        pulseId,
-        token,
-        admin,
-      );
-      canvasser_name = name;
-      if (!ok) {
-        return json(
-          {
-            error: "Monday GraphQL returned an error",
-            http_status: httpStatus,
-            monday_response: raw,
-          },
-          502,
-        );
-      }
+      mondayResponse = await fetch("https://api.monday.com/v2", {
+        method: "POST",
+        headers: {
+          Authorization: mondayApiToken,
+          "Content-Type": "application/json",
+          "API-Version": "2024-01",
+        },
+        body: JSON.stringify({ query }),
+      });
+      responseJson = await mondayResponse.json().catch(() => ({}));
     } catch (err) {
-      await admin.from("webhook_logs").insert({
-        source: "monday-live-dispatch:graphql_error",
-        raw_payload: { pulseId, error: String(err) } as never,
+      await supabaseAdmin.from("webhook_logs").insert({
+        source: "monday-live-dispatch",
+        raw_payload: {
+          step: "3_Error",
+          message: "Monday API fetch threw",
+          error: String(err),
+          pulseId,
+        } as never,
       });
       return json({ error: "Monday GraphQL fetch failed", details: String(err) }, 502);
     }
+
+    await supabaseAdmin.from("webhook_logs").insert({
+      source: "monday-live-dispatch",
+      raw_payload: {
+        step: "3_MondayResponse",
+        http_status: mondayResponse.status,
+        ok: mondayResponse.ok,
+        data: responseJson,
+        pulseId,
+      } as never,
+    });
+
+    if (!mondayResponse.ok || responseJson?.errors) {
+      await supabaseAdmin.from("webhook_logs").insert({
+        source: "monday-live-dispatch",
+        raw_payload: {
+          step: "3_Error",
+          message: "Monday API call failed",
+          http_status: mondayResponse.status,
+          monday_response: responseJson,
+          pulseId,
+        } as never,
+      });
+      return json(
+        {
+          error: "Failed to fetch data from Monday.com",
+          http_status: mondayResponse.status,
+          monday_response: responseJson,
+        },
+        502,
+      );
+    }
+
+    const cols = responseJson?.data?.items?.[0]?.column_values ?? [];
+    const hit = cols.find((c: any) => {
+      const t = (c?.column?.title ?? "").toLowerCase();
+      return t.includes("agent");
+    });
+    canvasser_name =
+      typeof hit?.text === "string" && hit.text.trim() ? hit.text.trim() : null;
   }
 
   if (!canvasser_name || !status) {
+    await supabaseAdmin.from("webhook_logs").insert({
+      source: "monday-live-dispatch",
+      raw_payload: {
+        step: "4_Error",
+        message: "Could not resolve canvasser_name or status",
+        canvasser_name,
+        status,
+        pulseId,
+      } as never,
+    });
     return json(
       {
         error: "Could not resolve canvasser_name or status",
@@ -257,7 +255,7 @@ Deno.serve(async (req) => {
 
   // Smart fuzzy lookup
   const wanted = normalizeName(canvasser_name);
-  const { data: profiles, error: profErr } = await admin
+  const { data: profiles, error: profErr } = await supabaseAdmin
     .from("profiles")
     .select("id, display_name, office_location");
   if (profErr) return json({ error: profErr.message }, 500);
@@ -276,18 +274,24 @@ Deno.serve(async (req) => {
     }
   }
 
+  // ───────────────────────────────────────────────────────────────
+  // STEP 4 — Match Check
+  // ───────────────────────────────────────────────────────────────
+  await supabaseAdmin.from("webhook_logs").insert({
+    source: "monday-live-dispatch",
+    raw_payload: {
+      step: "4_MatchAttempt",
+      agent_found_in_monday: canvasser_name,
+      normalized: wanted,
+      db_match_successful: !!match,
+      matched_profile_id: match?.id ?? null,
+      matched_display_name: match?.display_name ?? null,
+      pulseId,
+      status,
+    } as never,
+  });
+
   if (!match) {
-    await admin.from("webhook_logs").insert({
-      source: "monday-live-dispatch:unmatched",
-      raw_payload: {
-        error: "no_canvasser_match",
-        canvasser_name,
-        normalized: wanted,
-        status,
-        pulseId,
-        original_payload: parsed,
-      } as never,
-    });
     return json(
       { error: `No canvasser matched: ${canvasser_name}`, normalized: wanted },
       404,
@@ -297,7 +301,7 @@ Deno.serve(async (req) => {
   const metric_date = todayLA();
   const office_location = match.office_location ?? "San Diego";
 
-  const { data: existing } = await admin
+  const { data: existing } = await supabaseAdmin
     .from("daily_metrics")
     .select("id, leads_submitted, leads_confirmed, no_answers, killed, pending")
     .eq("canvasser_id", match.id)
@@ -313,7 +317,7 @@ Deno.serve(async (req) => {
   const nextPending =
     (existing?.pending ?? 0) + (bucket === "pending" && !isSubmittedOnly ? 1 : 0);
 
-  const { error: upErr } = await admin.from("daily_metrics").upsert(
+  const { error: upErr } = await supabaseAdmin.from("daily_metrics").upsert(
     {
       canvasser_id: match.id,
       metric_date,
@@ -326,7 +330,18 @@ Deno.serve(async (req) => {
     },
     { onConflict: "canvasser_id,metric_date" },
   );
-  if (upErr) return json({ error: upErr.message }, 500);
+  if (upErr) {
+    await supabaseAdmin.from("webhook_logs").insert({
+      source: "monday-live-dispatch",
+      raw_payload: {
+        step: "5_UpsertError",
+        message: upErr.message,
+        canvasser_id: match.id,
+        metric_date,
+      } as never,
+    });
+    return json({ error: upErr.message }, 500);
+  }
 
   return json({
     ok: true,
