@@ -26,6 +26,8 @@ type CsvImportInput = {
   team_id: string | null;
   refresh_existing: boolean;
   refresh_rows: CsvImportRow[] | null;
+  final_import: boolean;
+  final_rows: CsvImportRow[] | null;
 };
 
 function toStringValue(v: unknown): string {
@@ -55,6 +57,8 @@ function coerceCsvImportInput(data: unknown): CsvImportInput {
     team_id: typeof input.team_id === "string" && uuidLike.test(input.team_id) ? input.team_id : null,
     refresh_existing: input.refresh_existing !== false,
     refresh_rows: Array.isArray(input.refresh_rows) ? coerceRows(input.refresh_rows) : null,
+    final_import: input.final_import === true,
+    final_rows: Array.isArray(input.final_rows) ? coerceRows(input.final_rows) : null,
   };
 }
 
@@ -136,6 +140,7 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
     const vanByAgent = new Map<string, string>();
 
     const rowsForRefresh = data.refresh_rows ?? data.rows;
+    const rowsForFinalCalculations = data.final_rows ?? data.rows;
 
     for (let i = 0; i < data.rows.length; i++) {
       const r = data.rows[i];
@@ -347,6 +352,26 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
 
     if (buckets.size > 0 && updated_logs === 0) {
       throw new Error(`Parsed ${buckets.size} bucket(s) but wrote 0 daily_logs rows. First error: ${errors[0]?.reason ?? "unknown"}`);
+    }
+
+    if (data.final_import) {
+      const refreshedProfiles = new Set<string>();
+      for (const r of rowsForFinalCalculations) {
+        const name = r.agent.trim();
+        if (!name) continue;
+        const profile = await resolveProfile(name);
+        if (!profile || refreshedProfiles.has(profile.id)) continue;
+        const { error: rankErr } = await supabaseAdmin.rpc("refresh_canvasser_rank", {
+          _canvasser_id: profile.id,
+        });
+        if (rankErr) {
+          errors.push({
+            row: 0,
+            reason: `Final rank refresh failed for ${name}: ${rankErr.message}`,
+          });
+        }
+        refreshedProfiles.add(profile.id);
+      }
     }
 
     return {
