@@ -55,16 +55,22 @@ function isMarked(v: unknown): boolean {
 
 // The five canonical outcome columns from Monday.com.
 // Maps the column header → backend outcome enum the importer understands.
-// Per spec: BO=Blowout(0pt) · OL=Sit/PitchMiss(1pt) · Sale=2pt · CTC=Cancel(0pt) · Reset(0pt)
-// OL is intentionally mapped to "PM" so the Paycheck Engine credits it as a 1pt sit.
+// POINT VALUES (locked by spec):
+//   BO    = Blowout       → 0 pts (no_demo bucket)
+//   OL    = One Leg       → 0 pts (one_legs bucket — does NOT count as sit)
+//   CTC   = Call to Cancel→ 0 pts (no_demo bucket)
+//   Reset = Reset         → 0 pts (future_leads bucket — RS)
+//   Sale  = Sale          → 2 pts (demos_sits +1, sales +1, capture Sale Price)
+//   (PM "Pitch Miss / True Sit" = 1 pt comes from the live webhook, not this CSV.)
 // Priority on resolution: Sale > OL > CTC > Reset > BO.
 const OUTCOME_TOKENS: { token: string; outcome: string }[] = [
   { token: "sale",  outcome: "SALE" },
-  { token: "ol",    outcome: "PM"   },
+  { token: "ol",    outcome: "OL"   },
   { token: "ctc",   outcome: "BO"   },
   { token: "reset", outcome: "RS"   },
   { token: "bo",    outcome: "BO"   },
 ];
+
 
 const SALE_PRICE_HEADERS = ["Sale Price", "Sale Amount", "Amount"];
 const AGENT_HEADERS = ["Agent", "Canvasser", "Rep", "Salesperson"];
@@ -289,11 +295,12 @@ export function HistoricalImporter({
         <>
           <div className="mt-4 flex flex-wrap gap-2 text-[11px]">
             {[
-              { k: "SALE", label: "Sale" },
-              { k: "PM",   label: "OL / Sit" },
-              { k: "BO",   label: "BO + CTC" },
-              { k: "RS",   label: "Reset" },
+              { k: "SALE", label: "Sale (2pt)" },
+              { k: "OL",   label: "OL · One Leg (0pt)" },
+              { k: "BO",   label: "BO + CTC (0pt)" },
+              { k: "RS",   label: "Reset (0pt)" },
             ].map(({ k, label }) => (
+
               <span key={k} className="rounded border border-border bg-surface px-2 py-1 font-display tracking-wider text-muted-foreground">
                 {label}: <span className="text-foreground">{counts[k] ?? 0}</span>
               </span>
