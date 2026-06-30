@@ -21,13 +21,18 @@ import { useTodayLeads } from "@/hooks/useTodayLeads";
 import { DEMO_TEAMS, demoCanvassers, teamTotals, formatCurrency } from "@/lib/demo-data";
 import { Zap, DoorOpen, Truck, FileSpreadsheet } from "lucide-react";
 
-type OwnerTab = "executive" | "fleet" | "timesheets" | "payroll";
+type OwnerTab = "dispatch" | "executive" | "fleet" | "timesheets" | "payroll";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — Knockout" }] }),
   validateSearch: (s: Record<string, unknown>): { tab: OwnerTab } => {
     const t = s.tab;
-    return { tab: t === "fleet" || t === "payroll" || t === "timesheets" ? t : "executive" };
+    return {
+      tab:
+        t === "fleet" || t === "payroll" || t === "timesheets" || t === "executive"
+          ? t
+          : "dispatch",
+    };
   },
   component: Dashboard,
 });
