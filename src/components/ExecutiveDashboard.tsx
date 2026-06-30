@@ -419,7 +419,7 @@ function LiveFleetStatus() {
         <div className="text-sm text-muted-foreground">No vans yet.</div>
       ) : (
         <div className="space-y-2">
-          {q.data!.vans.map((v) => {
+          {q.data!.vans.filter((v) => matches((v as { office_location?: string | null }).office_location)).map((v) => {
             const totals = q.data!.byVan.get(v.id) ?? { leads: 0, sits: 0 };
             return (
               <div key={v.id} className="flex items-center justify-between gap-4 px-4 py-3 rounded-lg border border-border bg-surface">
