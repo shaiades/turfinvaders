@@ -11,6 +11,7 @@ import { HistoricalImporter } from "@/components/HistoricalImporter";
 import { PayrollLedger } from "@/components/PayrollLedger";
 import { ExecutiveDashboard } from "@/components/ExecutiveDashboard";
 import { TimesheetEditor } from "@/components/TimesheetEditor";
+import { LiveDispatch } from "@/components/LiveDispatch";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
