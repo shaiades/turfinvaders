@@ -356,6 +356,7 @@ export function HistoricalImporter({
             .map(({ label }) => label);
           setMissingColumns(missing);
 
+          const pmHeader = outcomeMap.pm;
           const rows: ParsedRow[] = res.data
             .filter(hasAnyValue)
             .map((raw) => {
@@ -364,19 +365,20 @@ export function HistoricalImporter({
               const sale_price = salePriceHeader ? String(raw[salePriceHeader] ?? "").trim() : "";
               const lead_name = leadHeader ? String(raw[leadHeader] ?? "").trim() : "";
               const van = vanHeader ? String(raw[vanHeader] ?? "").trim() : "";
-              const pmHeader = outcomeMap.pm;
-              if (pmHeader) {
-                console.log("[HistoricalImporter] raw PM cell value", String(raw[pmHeader] ?? ""));
-              }
+              // Raw PM cell — exact literal string as the CSV parser delivered it.
+              const rawPmVal = pmHeader ? raw[pmHeader] : undefined;
+              const raw_pm = rawPmVal === undefined || rawPmVal === null
+                ? "UNDEFINED"
+                : String(rawPmVal);
               // Walk OUTCOME_TOKENS in priority order; first marked column wins.
               let outcome = "";
               for (const { key, outcome: o } of OUTCOME_TOKENS) {
                 const h = outcomeMap[key];
                 if (h && isMarked(raw[h])) { outcome = o; break; }
               }
-              return { agent, outcome, date, sale_price: sale_price || null, lead_name: lead_name || null, van: van || null };
+              return { agent, outcome, date, sale_price: sale_price || null, lead_name: lead_name || null, van: van || null, raw_pm, pm_header: pmHeader ?? undefined };
             })
-            .filter((r) => r.agent && norm(r.agent) !== "agent" && r.outcome);
+            .filter((r) => r.agent && norm(r.agent) !== "agent");
 
           setPreview(rows);
           if (rows.length === 0) {
