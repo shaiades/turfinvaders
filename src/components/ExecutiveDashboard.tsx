@@ -462,7 +462,7 @@ function WeeklyResults() {
     queryKey: ["weekly_results", toISODate(lastWeekStart)],
     queryFn: async (): Promise<WeeklyRow[]> => {
       const [profilesR, vansR, logsR] = await Promise.all([
-        supabase.from("profiles").select("id, display_name, team_id"),
+        supabase.from("profiles").select("id, display_name, team_id, office_location"),
         supabase.from("teams").select("id, name, color"),
         supabase.from("daily_logs")
           .select("canvasser_id, demos_sits, sales, no_demo, one_legs, future_leads, unmarked")
