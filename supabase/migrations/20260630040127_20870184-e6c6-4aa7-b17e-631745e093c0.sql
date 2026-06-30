@@ -1,0 +1,1 @@
+ALTER TABLE public.daily_logs ADD COLUMN IF NOT EXISTS unmarked integer NOT NULL DEFAULT 0;
