@@ -15,6 +15,8 @@ type ParsedRow = {
   sale_price?: string | null;
   lead_name?: string | null;
   van?: string | null;
+  raw_pm?: string;
+  pm_header?: string;
 };
 
 type ImportResult = {
