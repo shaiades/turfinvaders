@@ -153,11 +153,14 @@ export type Database = {
           canvasser_id: string
           created_at: string
           id: string
+          killed: number
           leads_called_in: number
           leads_confirmed: number
           leads_submitted: number
           metric_date: string
+          no_answers: number
           office_location: string
+          pending: number
           sits_ran_today: number
           updated_at: string
         }
@@ -165,11 +168,14 @@ export type Database = {
           canvasser_id: string
           created_at?: string
           id?: string
+          killed?: number
           leads_called_in?: number
           leads_confirmed?: number
           leads_submitted?: number
           metric_date?: string
+          no_answers?: number
           office_location?: string
+          pending?: number
           sits_ran_today?: number
           updated_at?: string
         }
@@ -177,11 +183,14 @@ export type Database = {
           canvasser_id?: string
           created_at?: string
           id?: string
+          killed?: number
           leads_called_in?: number
           leads_confirmed?: number
           leads_submitted?: number
           metric_date?: string
+          no_answers?: number
           office_location?: string
+          pending?: number
           sits_ran_today?: number
           updated_at?: string
         }
