@@ -301,14 +301,14 @@ function RawDataTable() {
 
   return (
     <ArcadePanel
-      title={`All Database Records · daily_logs (${q.data?.length ?? 0})`}
+      title={`All Database Records · daily_logs (${visible.length}${visible.length !== (q.data?.length ?? 0) ? ` of ${q.data?.length ?? 0}` : ""})`}
       action={<span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Raw · Newest First</span>}
     >
       {q.isLoading ? (
         <div className="text-sm text-muted-foreground">Loading…</div>
-      ) : (q.data?.length ?? 0) === 0 ? (
+      ) : visible.length === 0 ? (
         <div className="text-sm text-destructive font-medium">
-          ⚠ The database table is EMPTY. No CSV rows saved. Use Manual Data Entry above to add records.
+          ⚠ No rows match the current Office filter.
         </div>
       ) : (
         <div className="overflow-x-auto -mx-4 sm:mx-0">
@@ -328,7 +328,7 @@ function RawDataTable() {
               </tr>
             </thead>
             <tbody>
-              {q.data!.map((r) => (
+              {visible.map((r) => (
                 <tr key={r.id} className="border-t border-border">
                   <td className="px-3 py-1.5 font-mono">{r.log_date}</td>
                   <td className="px-3 py-1.5">{r.name}</td>
