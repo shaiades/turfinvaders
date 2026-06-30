@@ -201,10 +201,13 @@ export function LiveDispatch() {
 
 function WebhookUrlBanner() {
   const [copied, setCopied] = useState(false);
-  const url =
-    typeof window !== "undefined"
-      ? `${window.location.origin}/api/public/monday-live-dispatch`
-      : "/api/public/monday-live-dispatch";
+  // Direct backend Edge Function URL — bypasses the frontend entirely so
+  // Monday.com receives a naked JSON challenge response, not HTML.
+  const supabaseUrl =
+    (import.meta.env.VITE_SUPABASE_URL as string | undefined) ?? "";
+  const url = supabaseUrl
+    ? `${supabaseUrl.replace(/\/$/, "")}/functions/v1/monday-live-dispatch`
+    : "";
 
   const copy = async () => {
     try {
@@ -221,11 +224,12 @@ function WebhookUrlBanner() {
       <div className="flex items-center gap-2 mb-2">
         <Link2 className="w-4 h-4 text-accent" />
         <div className="text-[10px] font-display uppercase tracking-widest text-accent">
-          Webhook Integration URL
+          Webhook Integration URL · Direct Backend
         </div>
       </div>
       <div className="text-xs text-muted-foreground mb-3">
-        Paste this into Monday.com's webhook integration. Send POST with{" "}
+        Paste this raw backend URL into Monday.com. It returns naked JSON for the
+        challenge handshake. Send POST with{" "}
         <code className="text-foreground">{`{ canvasser_name, status }`}</code> and the
         header <code className="text-foreground">x-monday-secret</code>.
       </div>

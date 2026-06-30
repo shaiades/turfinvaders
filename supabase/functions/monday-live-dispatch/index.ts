@@ -1,0 +1,200 @@
+// Supabase Edge Function: monday-live-dispatch
+// Raw Monday.com webhook receiver. Returns naked JSON for challenge handshake.
+//
+// Endpoint: https://<project-ref>.supabase.co/functions/v1/monday-live-dispatch
+// Auth: verify_jwt = false (see supabase/config.toml)
+//
+// POST body: { canvasser_name: string, status: string }
+// Optional security header: x-monday-secret: <MONDAY_WEBHOOK_SECRET>
+
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-nocheck
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS, GET",
+  "Access-Control-Allow-Headers": "Content-Type, x-monday-secret, Authorization, apikey",
+  "Access-Control-Max-Age": "86400",
+};
+
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json", ...CORS },
+  });
+
+function normalizeName(s: string): string {
+  return s.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function todayLA(): string {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Los_Angeles",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  return fmt.format(new Date());
+}
+
+type Bucket = "leads_confirmed" | "no_answers" | "killed" | "pending" | null;
+
+function mapStatus(raw: string): Bucket {
+  const s = raw.trim().toLowerCase().replace(/\s+/g, " ");
+  if (s === "confirmed" || s === "future reconf") return "leads_confirmed";
+  if (s === "n/a" || s === "n/a x2" || s === "n/a x3" || s === "n/a x4") return "no_answers";
+  if (s === "blowout" || s === "disconnected") return "killed";
+  if (s === "unconfirmed" || s === "future" || s === "room lead") return "pending";
+  if (s === "submitted") return null;
+  return "pending";
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 200, headers: CORS });
+  }
+
+  if (req.method === "GET") {
+    return json({ ok: true, endpoint: "monday-live-dispatch", method: "GET" });
+  }
+
+  if (req.method !== "POST") {
+    return json({ error: "Method not allowed" }, 405);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = await req.json();
+  } catch {
+    return json({ error: "Invalid JSON" }, 400);
+  }
+
+  // Monday handshake — naked JSON response, no auth, no DB, nothing.
+  if (
+    parsed &&
+    typeof parsed === "object" &&
+    "challenge" in (parsed as Record<string, unknown>)
+  ) {
+    const challenge = (parsed as Record<string, unknown>).challenge;
+    return new Response(JSON.stringify({ challenge }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+  const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const admin = createClient(SUPABASE_URL, SERVICE_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
+  // X-RAY log every incoming payload.
+  await admin.from("webhook_logs").insert({
+    source: "monday-live-dispatch",
+    raw_payload: parsed as never,
+  });
+
+  const secret = Deno.env.get("MONDAY_WEBHOOK_SECRET");
+  const url = new URL(req.url);
+  const headerSecret = req.headers.get("x-monday-secret");
+  const querySecret = url.searchParams.get("secret");
+  if (secret && headerSecret !== secret && querySecret !== secret) {
+    return json({ error: "Unauthorized" }, 401);
+  }
+
+  const obj = parsed as Record<string, unknown>;
+  const canvasser_name = typeof obj.canvasser_name === "string" ? obj.canvasser_name : "";
+  const status = typeof obj.status === "string" ? obj.status : "";
+  if (!canvasser_name || !status) {
+    return json({ error: "Invalid payload: canvasser_name & status required" }, 400);
+  }
+
+  const bucket = mapStatus(status);
+  const isSubmittedOnly = status.trim().toLowerCase() === "submitted";
+
+  const wanted = normalizeName(canvasser_name);
+  const { data: profiles, error: profErr } = await admin
+    .from("profiles")
+    .select("id, display_name, office_location");
+  if (profErr) return json({ error: profErr.message }, 500);
+
+  const candidates = (profiles ?? [])
+    .filter((p: any) => p.display_name)
+    .map((p: any) => ({ ...p, _norm: normalizeName(p.display_name) }));
+
+  let match = candidates.find((p: any) => p._norm === wanted);
+  if (!match) match = candidates.find((p: any) => p._norm.includes(wanted));
+  if (!match) match = candidates.find((p: any) => wanted.includes(p._norm));
+  if (!match) {
+    const firstToken = wanted.split(" ")[0];
+    if (firstToken) {
+      match = candidates.find((p: any) => p._norm.split(" ")[0] === firstToken);
+    }
+  }
+
+  if (!match) {
+    await admin.from("webhook_logs").insert({
+      source: "monday-live-dispatch:unmatched",
+      raw_payload: {
+        error: "no_canvasser_match",
+        canvasser_name,
+        normalized: wanted,
+        status,
+        original_payload: parsed,
+      } as never,
+    });
+    return json(
+      { error: `No canvasser matched: ${canvasser_name}`, normalized: wanted },
+      404,
+    );
+  }
+
+  const metric_date = todayLA();
+  const office_location = match.office_location ?? "San Diego";
+
+  const { data: existing } = await admin
+    .from("daily_metrics")
+    .select("id, leads_submitted, leads_confirmed, no_answers, killed, pending")
+    .eq("canvasser_id", match.id)
+    .eq("metric_date", metric_date)
+    .maybeSingle();
+
+  const nextSubmitted = (existing?.leads_submitted ?? 0) + 1;
+  const nextConfirmed =
+    (existing?.leads_confirmed ?? 0) + (bucket === "leads_confirmed" ? 1 : 0);
+  const nextNoAnswers =
+    (existing?.no_answers ?? 0) + (bucket === "no_answers" ? 1 : 0);
+  const nextKilled = (existing?.killed ?? 0) + (bucket === "killed" ? 1 : 0);
+  const nextPending =
+    (existing?.pending ?? 0) + (bucket === "pending" && !isSubmittedOnly ? 1 : 0);
+
+  const { error: upErr } = await admin.from("daily_metrics").upsert(
+    {
+      canvasser_id: match.id,
+      metric_date,
+      office_location,
+      leads_submitted: nextSubmitted,
+      leads_confirmed: nextConfirmed,
+      no_answers: nextNoAnswers,
+      killed: nextKilled,
+      pending: nextPending,
+    },
+    { onConflict: "canvasser_id,metric_date" },
+  );
+  if (upErr) return json({ error: upErr.message }, 500);
+
+  return json({
+    ok: true,
+    canvasser_id: match.id,
+    canvasser_name: match.display_name,
+    metric_date,
+    status_received: status,
+    bucket: bucket ?? "submitted_only",
+    leads_submitted: nextSubmitted,
+    leads_confirmed: nextConfirmed,
+    no_answers: nextNoAnswers,
+    killed: nextKilled,
+    pending: nextPending,
+  });
+});
