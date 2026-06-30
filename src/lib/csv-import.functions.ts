@@ -152,6 +152,7 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
       future_leads: number;
       demos_sits: number;
       sales: number;
+      unmarked: number;
       sale_rows: { amount: number | null; lead_name: string | null }[];
     };
     const buckets = new Map<string, Bucket>();
@@ -165,14 +166,16 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
 
     for (let i = 0; i < data.rows.length; i++) {
       const r = data.rows[i];
-      const name = r.agent.trim();
+      // Normalize agent name: trim, collapse whitespace, title-case so
+      // "ethan munoz " and "Ethan Munoz" merge into the same profile.
+      const name = titleCaseName(r.agent);
       // Silently skip blank-agent rows (Monday exports often have spacer rows).
       if (!name) continue;
       const vanRaw = (r.van ?? "").trim();
       if (vanRaw) vanByAgent.set(name.toLowerCase(), vanRaw);
-      const outcome = normalizeOutcome(r.outcome);
-      // Silently skip rows with no recognizable outcome — do not surface as error.
-      if (!outcome) continue;
+      // Never drop a row: rows with no recognized outcome become UNMARKED (0 pts)
+      // so Total Leads on the dashboard matches the raw CSV row count.
+      const outcome: Outcome = normalizeOutcome(r.outcome) ?? "UNMARKED";
       const logDate = parseDate(r.date);
       if (!logDate) { errors.push({ row: i + 1, reason: `Unparseable date for ${name}: ${r.date}` }); continue; }
 
@@ -183,7 +186,7 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
         b = {
           profileKey: name,
           log_date: logDate,
-          no_demo: 0, one_legs: 0, future_leads: 0, demos_sits: 0, sales: 0, sale_rows: [],
+          no_demo: 0, one_legs: 0, future_leads: 0, demos_sits: 0, sales: 0, unmarked: 0, sale_rows: [],
         };
         buckets.set(key, b);
       }
@@ -200,8 +203,10 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
             lead_name: r.lead_name ?? null,
           });
           break;
+        case "UNMARKED": b.unmarked += 1; break;
       }
     }
+
 
     // Resolve / create profiles.
     async function resolveProfile(name: string): Promise<{ id: string; team_id: string | null } | null> {
