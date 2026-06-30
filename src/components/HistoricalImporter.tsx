@@ -58,12 +58,16 @@ function hasAnyValue(row: Record<string, unknown>): boolean {
 // Permissive CSV marker rule: a cell is marked if it has ANY content other
 // than known "empty" placeholders. Previously a strict regex was eating
 // valid PM marks like "v", single characters, or unicode glyphs.
-const EMPTY_TOKENS = new Set(["-", "—", "–", "0", "false", "n/a", "null"]);
+// Strict whitelist: a cell is ONLY marked if it contains at least one
+// alphabetical letter AND is not one of Monday.com's system filler words.
+// Monday fills "empty" cells with non-breaking spaces, dashes, or zeros —
+// all of those must safely evaluate to false.
+const FILLER_TOKENS = new Set(["false", "null", "n/a", "undefined"]);
 function isMarked(v: unknown): boolean {
-  const val = v ? v.toString().trim().toLowerCase() : "";
-  if (val.length === 0) return false;
-  if (EMPTY_TOKENS.has(val)) return false;
-  return true;
+  const val = v == null ? "" : v.toString().trim().toLowerCase();
+  const hasLetter = /[a-z]/i.test(val);
+  const notFiller = !FILLER_TOKENS.has(val);
+  return hasLetter && notFiller;
 }
 
 function chunkRows(rows: ParsedRow[], size = IMPORT_BATCH_SIZE): ParsedRow[][] {
