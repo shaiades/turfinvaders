@@ -17,6 +17,19 @@ type ParsedRow = {
   van?: string | null;
 };
 
+type ImportResult = {
+  ok: boolean;
+  created_profiles: number;
+  updated_logs: number;
+  inserted_sales: number;
+  bucket_count: number;
+  parsed_rows: number;
+  errors?: { row: number; reason: string }[];
+};
+
+const IMPORT_BATCH_SIZE = 25;
+const IMPORT_TIMEOUT_MS = 30_000;
+
 function norm(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
@@ -42,15 +55,43 @@ function hasAnyValue(row: Record<string, unknown>): boolean {
   return Object.values(row).some((v) => v != null && String(v).trim() !== "");
 }
 
-// Strict CSV marker rule: Monday.com sometimes exports hidden spaces or "-"
-// placeholders in empty cells. A cell is marked only when its trimmed value
-// contains at least one alphanumeric character (v, x, 1, yes, etc.).
+// Strict CSV marker rule: Monday.com sometimes exports hidden spaces, hyphens,
+// en-dashes, em-dashes, or symbol placeholders in empty cells. A cell is marked
+// only when it contains at least one ASCII alphanumeric character.
 function isMarked(v: unknown): boolean {
-  if (v === null || v === undefined) return false;
-  const s = String(v).trim();
-  if (!s) return false;
-  if (s === "-") return false;
-  return /[a-z0-9]/i.test(s);
+  return /[a-zA-Z0-9]/.test(String(v ?? ""));
+}
+
+function chunkRows(rows: ParsedRow[], size = IMPORT_BATCH_SIZE): ParsedRow[][] {
+  const batches: ParsedRow[][] = [];
+  for (let i = 0; i < rows.length; i += size) {
+    batches.push(rows.slice(i, i + size));
+  }
+  return batches;
+}
+
+function mergeImportResult(total: ImportResult, next: ImportResult): ImportResult {
+  return {
+    ok: total.ok && next.ok,
+    created_profiles: total.created_profiles + (next.created_profiles ?? 0),
+    updated_logs: total.updated_logs + (next.updated_logs ?? 0),
+    inserted_sales: total.inserted_sales + (next.inserted_sales ?? 0),
+    bucket_count: total.bucket_count + (next.bucket_count ?? 0),
+    parsed_rows: total.parsed_rows + (next.parsed_rows ?? 0),
+    errors: [...(total.errors ?? []), ...(next.errors ?? [])].slice(0, 50),
+  };
+}
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error(message)), ms);
+    });
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
 }
 
 // Canonical outcome columns from Monday.com → backend outcome enum.
@@ -58,13 +99,13 @@ function isMarked(v: unknown): boolean {
 //   Sale = 2 pts   PM = 1 pt   BO/CTC/RS/OL = 0 pts
 // PRIORITY when multiple columns are marked on the same row:
 //   Sale > PM > RS > BO > CTC > OL
-const OUTCOME_TOKENS: { token: string; outcome: string }[] = [
-  { token: "sale",  outcome: "SALE" },
-  { token: "pm",    outcome: "PM"   },
-  { token: "reset", outcome: "RS"   },
-  { token: "bo",    outcome: "BO"   },
-  { token: "ctc",   outcome: "BO"   }, // CTC routes into the BO (no-demo) bucket, still 0 pts
-  { token: "ol",    outcome: "OL"   },
+const OUTCOME_TOKENS: { key: string; label: string; aliases: string[]; outcome: string }[] = [
+  { key: "sale", label: "SALE", aliases: ["sale", "sold"], outcome: "SALE" },
+  { key: "pm", label: "PM", aliases: ["pm", "pitchmiss", "demo", "sit"], outcome: "PM" },
+  { key: "rs", label: "RS", aliases: ["rs", "reset"], outcome: "RS" },
+  { key: "bo", label: "BO", aliases: ["bo", "blowout", "nodemo"], outcome: "BO" },
+  { key: "ctc", label: "CTC", aliases: ["ctc", "calltocancel", "cancel"], outcome: "BO" },
+  { key: "ol", label: "OL", aliases: ["ol", "oneleg", "1leg"], outcome: "OL" },
 ];
 
 
@@ -82,22 +123,22 @@ function resolveOutcomeHeaders(
 ): Record<string, string | null> {
   const out: Record<string, string | null> = {};
   const used = new Set<string>();
-  for (const { token, outcome } of OUTCOME_TOKENS) {
-    if (out[outcome]) continue;
+  for (const { key, aliases } of OUTCOME_TOKENS) {
+    if (out[key]) continue;
     const hit = headers.find(
-      (h) => !claimed.has(h) && !used.has(h) && norm(h) === token,
+      (h) => !claimed.has(h) && !used.has(h) && aliases.some((a) => norm(h) === a),
     );
-    if (hit) { out[outcome] = hit; used.add(hit); }
+    if (hit) { out[key] = hit; used.add(hit); }
   }
-  for (const { token, outcome } of OUTCOME_TOKENS) {
-    if (out[outcome]) continue;
+  for (const { key, aliases } of OUTCOME_TOKENS) {
+    if (out[key]) continue;
     const hit = headers.find(
-      (h) => !claimed.has(h) && !used.has(h) && norm(h).includes(token),
+      (h) => !claimed.has(h) && !used.has(h) && aliases.some((a) => norm(h).includes(a)),
     );
-    if (hit) { out[outcome] = hit; used.add(hit); }
+    if (hit) { out[key] = hit; used.add(hit); }
   }
-  for (const { outcome } of OUTCOME_TOKENS) {
-    if (!(outcome in out)) out[outcome] = null;
+  for (const { key } of OUTCOME_TOKENS) {
+    if (!(key in out)) out[key] = null;
   }
   return out;
 }
@@ -137,21 +178,40 @@ export function HistoricalImporter({
   const [filename, setFilename] = useState<string | null>(null);
   const [missingColumns, setMissingColumns] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [importProgress, setImportProgress] = useState<string | null>(null);
   const importFn = useServerFn(importHistoricalCsv);
 
   const importMut = useMutation({
     mutationFn: async (rows: ParsedRow[]) => {
-      const timeoutMs = 5000;
-      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      const batches = chunkRows(rows, IMPORT_BATCH_SIZE);
+      let total: ImportResult = {
+        ok: true,
+        created_profiles: 0,
+        updated_logs: 0,
+        inserted_sales: 0,
+        bucket_count: 0,
+        parsed_rows: 0,
+        errors: [],
+      };
       try {
-        const request = importFn({ data: { rows, team_id: defaultTeamId ?? null } });
-        const timeout = new Promise<never>((_, reject) => {
-          timeoutId = setTimeout(() => {
-            reject(new Error("Request timed out after 5 seconds while Running Paycheck Engine."));
-          }, timeoutMs);
-        });
-        const res = await Promise.race([request, timeout]);
-        return res;
+        for (let i = 0; i < batches.length; i++) {
+          const batch = batches[i];
+          setImportProgress(`Batch ${i + 1}/${batches.length} · ${batch.length} rows`);
+          const res = await withTimeout(
+            importFn({
+              data: {
+                rows: batch,
+                team_id: defaultTeamId ?? null,
+                refresh_existing: i === 0,
+                refresh_rows: i === 0 ? rows : null,
+              },
+            }) as Promise<ImportResult>,
+            IMPORT_TIMEOUT_MS,
+            `Batch ${i + 1}/${batches.length} timed out after 30 seconds while Running Paycheck Engine.`,
+          );
+          total = mergeImportResult(total, res);
+        }
+        return total;
       } catch (err: unknown) {
         // Normalize server errors so onError always sees an Error w/ message.
         const msg =
@@ -163,8 +223,6 @@ export function HistoricalImporter({
                   try { return JSON.stringify(err); } catch { return "Unknown server error"; }
                 })();
         throw new Error(msg);
-      } finally {
-        if (timeoutId) clearTimeout(timeoutId);
       }
     },
     onMutate: () => {
@@ -204,6 +262,7 @@ export function HistoricalImporter({
     // but onSettled guarantees the button text resets even if a handler throws.
     onSettled: () => {
       setIsSubmitting(false);
+      setImportProgress(null);
       // No-op state writes here force a re-render so `importMut.isPending`
       // is read fresh by the button. Keeps the UI from appearing stuck.
       setDragOver((d) => d);
@@ -231,8 +290,9 @@ export function HistoricalImporter({
       const scanRows = (scan.data ?? []) as string[][];
       let headerIdx = -1;
       for (let i = 0; i < scanRows.length; i++) {
-        const cells = (scanRows[i] ?? []).map((c) => String(c ?? "").toLowerCase().trim());
-        if (cells.some((c) => c === "agent" || c === "sale price" || c.includes("agent") || c.includes("sale price"))) {
+        const cells = (scanRows[i] ?? []).map((c) => String(c ?? "").trim());
+        const normalized = cells.map(norm);
+        if (normalized.some((c) => c === "agent" || c === "agentname" || c === "saleprice")) {
           headerIdx = i;
           break;
         }
@@ -268,8 +328,8 @@ export function HistoricalImporter({
           );
           const outcomeMap = resolveOutcomeHeaders(headers, claimed);
           const missing = OUTCOME_TOKENS
-            .filter(({ outcome }) => !outcomeMap[outcome])
-            .map(({ token }) => token.toUpperCase());
+            .filter(({ key }) => !outcomeMap[key])
+            .map(({ label }) => label);
           setMissingColumns(missing);
 
           const rows: ParsedRow[] = res.data
@@ -282,13 +342,13 @@ export function HistoricalImporter({
               const van = vanHeader ? String(raw[vanHeader] ?? "").trim() : "";
               // Walk OUTCOME_TOKENS in priority order; first marked column wins.
               let outcome = "";
-              for (const { outcome: o } of OUTCOME_TOKENS) {
-                const h = outcomeMap[o];
+              for (const { key, outcome: o } of OUTCOME_TOKENS) {
+                const h = outcomeMap[key];
                 if (h && isMarked(raw[h])) { outcome = o; break; }
               }
               return { agent, outcome, date, sale_price: sale_price || null, lead_name: lead_name || null, van: van || null };
             })
-            .filter((r) => r.agent && r.outcome);
+            .filter((r) => r.agent && norm(r.agent) !== "agent" && r.outcome);
 
           setPreview(rows);
           if (rows.length === 0) {
@@ -433,7 +493,7 @@ export function HistoricalImporter({
                 onClick={() => importMut.mutate(preview)}
                 className="bg-victory text-background hover:bg-victory/90"
               >
-                {isSubmitting ? "Running Paycheck Engine…" : (
+                {isSubmitting ? (importProgress ?? "Running Paycheck Engine…") : (
                   <span className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4" /> Confirm & Import</span>
                 )}
               </Button>
