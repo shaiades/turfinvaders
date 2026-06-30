@@ -114,24 +114,48 @@ export const Route = createFileRoute("/api/public/monday-live-dispatch")({
         // supabaseAdmin already imported above for X-Ray logging.
 
 
-        // Match canvasser_name → profile id
+        // Smart Canvasser Lookup — normalize + fuzzy partial matching.
         const wanted = normalizeName(canvasser_name);
         const { data: profiles, error: profErr } = await supabaseAdmin
           .from("profiles")
           .select("id, display_name, office_location");
         if (profErr) return json({ error: profErr.message }, 500);
 
-        const candidates = (profiles ?? []).filter((p) => p.display_name);
-        let match = candidates.find(
-          (p) => normalizeName(p.display_name as string) === wanted,
-        );
+        const candidates = (profiles ?? [])
+          .filter((p) => p.display_name)
+          .map((p) => ({ ...p, _norm: normalizeName(p.display_name as string) }));
+
+        // 1) exact normalized match
+        let match = candidates.find((p) => p._norm === wanted);
+        // 2) db name includes webhook name (e.g. "ernie ruiz".includes("ernie"))
+        if (!match) match = candidates.find((p) => p._norm.includes(wanted));
+        // 3) webhook name includes db name (e.g. "ernie r" includes "ernie")
+        if (!match) match = candidates.find((p) => wanted.includes(p._norm));
+        // 4) first-token match as a last resort ("ernie" ↔ "ernie ruiz")
         if (!match) {
-          match = candidates.find((p) =>
-            normalizeName(p.display_name as string).includes(wanted),
-          );
+          const firstToken = wanted.split(" ")[0];
+          if (firstToken) {
+            match = candidates.find((p) => p._norm.split(" ")[0] === firstToken);
+          }
         }
+
         if (!match) {
-          return json({ error: `No canvasser matched: ${canvasser_name}` }, 404);
+          // Log a distinct unmatched entry so admins can see who got missed.
+          // Base X-Ray log already fired above; this is the error annotation.
+          await supabaseAdmin.from("webhook_logs").insert({
+            source: "monday-live-dispatch:unmatched",
+            raw_payload: {
+              error: "no_canvasser_match",
+              canvasser_name,
+              normalized: wanted,
+              status,
+              original_payload: parsed,
+            } as never,
+          });
+          return json(
+            { error: `No canvasser matched: ${canvasser_name}`, normalized: wanted },
+            404,
+          );
         }
 
         const metric_date = todayLA();
