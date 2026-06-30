@@ -245,9 +245,10 @@ export function HistoricalImporter({
           const dateHeader = pickDateHeader(headers);
           const salePriceHeader = pickHeader(headers, ...SALE_PRICE_HEADERS);
           const leadHeader = pickHeader(headers, ...LEAD_HEADERS);
+          const vanHeader = pickHeader(headers, ...VAN_HEADERS);
 
           const claimed = new Set<string>(
-            [agentHeader, dateHeader, salePriceHeader, leadHeader].filter(
+            [agentHeader, dateHeader, salePriceHeader, leadHeader, vanHeader].filter(
               (x): x is string => !!x,
             ),
           );
@@ -264,12 +265,14 @@ export function HistoricalImporter({
               const date = dateHeader ? String(raw[dateHeader] ?? "").trim() : "";
               const sale_price = salePriceHeader ? String(raw[salePriceHeader] ?? "").trim() : "";
               const lead_name = leadHeader ? String(raw[leadHeader] ?? "").trim() : "";
+              const van = vanHeader ? String(raw[vanHeader] ?? "").trim() : "";
+              // Walk OUTCOME_TOKENS in priority order; first marked column wins.
               let outcome = "";
               for (const { outcome: o } of OUTCOME_TOKENS) {
                 const h = outcomeMap[o];
                 if (h && isMarked(raw[h])) { outcome = o; break; }
               }
-              return { agent, outcome, date, sale_price: sale_price || null, lead_name: lead_name || null };
+              return { agent, outcome, date, sale_price: sale_price || null, lead_name: lead_name || null, van: van || null };
             })
             .filter((r) => r.agent && r.outcome);
 
