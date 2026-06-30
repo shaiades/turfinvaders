@@ -55,18 +55,38 @@ function hasAnyValue(row: Record<string, unknown>): boolean {
   return Object.values(row).some((v) => v != null && String(v).trim() !== "");
 }
 
-// Strict CSV marker rule: Monday.com sometimes exports hidden spaces, hyphens,
-// en-dashes, em-dashes, or symbol placeholders in empty cells. A cell is marked
-// only when it contains at least one ASCII alphanumeric character.
+// Strict CSV marker rule: Monday.com often exports filler placeholders in
+// visually-empty cells. A cell is marked only when it has meaningful text,
+// not dashes/symbols or values like 0, false, n/a, null.
 function isMarked(v: unknown): boolean {
-  return /[a-zA-Z0-9]/.test(String(v ?? ""));
+  const s = String(v ?? "").trim();
+  const compact = s.toLowerCase().replace(/\s+/g, "");
+  if (!s) return false;
+  if (["0", "false", "n/a", "na", "null"].includes(compact)) return false;
+  if (/^[\u002d\u2010-\u2015\u2212]+$/.test(s)) return false;
+  if (s.length <= 1) return false;
+  return /[a-zA-Z0-9]/.test(s);
 }
 
 function chunkRows(rows: ParsedRow[], size = IMPORT_BATCH_SIZE): ParsedRow[][] {
-  const batches: ParsedRow[][] = [];
-  for (let i = 0; i < rows.length; i += size) {
-    batches.push(rows.slice(i, i + size));
+  const groups = new Map<string, ParsedRow[]>();
+  for (const row of rows) {
+    const key = `${norm(row.agent)}|${row.date}`;
+    const group = groups.get(key) ?? [];
+    group.push(row);
+    groups.set(key, group);
   }
+
+  const batches: ParsedRow[][] = [];
+  let current: ParsedRow[] = [];
+  for (const group of groups.values()) {
+    if (current.length > 0 && current.length + group.length > size) {
+      batches.push(current);
+      current = [];
+    }
+    current.push(...group);
+  }
+  if (current.length > 0) batches.push(current);
   return batches;
 }
 
@@ -204,10 +224,12 @@ export function HistoricalImporter({
                 team_id: defaultTeamId ?? null,
                 refresh_existing: i === 0,
                 refresh_rows: i === 0 ? rows : null,
+                final_import: i === batches.length - 1,
+                final_rows: i === batches.length - 1 ? rows : null,
               },
             }) as Promise<ImportResult>,
             IMPORT_TIMEOUT_MS,
-            `Batch ${i + 1}/${batches.length} timed out after 30 seconds while Running Paycheck Engine.`,
+            `Batch ${i + 1}/${batches.length} timed out after 30 seconds during database import.`,
           );
           total = mergeImportResult(total, res);
         }
@@ -340,6 +362,10 @@ export function HistoricalImporter({
               const sale_price = salePriceHeader ? String(raw[salePriceHeader] ?? "").trim() : "";
               const lead_name = leadHeader ? String(raw[leadHeader] ?? "").trim() : "";
               const van = vanHeader ? String(raw[vanHeader] ?? "").trim() : "";
+              const pmHeader = outcomeMap.pm;
+              if (pmHeader) {
+                console.log("[HistoricalImporter] raw PM cell value", String(raw[pmHeader] ?? ""));
+              }
               // Walk OUTCOME_TOKENS in priority order; first marked column wins.
               let outcome = "";
               for (const { key, outcome: o } of OUTCOME_TOKENS) {
@@ -493,7 +519,7 @@ export function HistoricalImporter({
                 onClick={() => importMut.mutate(preview)}
                 className="bg-victory text-background hover:bg-victory/90"
               >
-                {isSubmitting ? (importProgress ?? "Running Paycheck Engine…") : (
+                {isSubmitting ? (importProgress ?? "Importing CSV…") : (
                   <span className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4" /> Confirm & Import</span>
                 )}
               </Button>
