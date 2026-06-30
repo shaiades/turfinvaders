@@ -344,6 +344,7 @@ export function PayrollLedger() {
                   <th className="text-right py-2 pr-3">Sits</th>
                   <th className="text-right py-2 pr-3">Pts</th>
                   <th className="text-right py-2 pr-3">Rate</th>
+                  <th className="text-right py-2 pr-3">Total Hours</th>
                   <th className="text-right py-2 pr-3">Total Sales Volume ($)</th>
                   <th className="text-right py-2 pr-3">Commission Earned ($)</th>
                   <th className="text-right py-2 pr-3">Bonuses</th>
@@ -368,6 +369,12 @@ export function PayrollLedger() {
                       <span className={r.rate === 35 ? "text-victory" : r.rate === 30 ? "text-neon" : "text-muted-foreground"}>
                         ${r.rate}
                       </span>
+                    </td>
+                    <td className="py-2.5 pr-3 text-right">
+                      <div className="font-display text-neon">{r.hours.toFixed(2)}h</div>
+                      <div className="text-[9px] text-muted-foreground">
+                        {r.hoursSource === "clocked" ? "clocked" : "est. from logs"}
+                      </div>
                     </td>
                     <td className="py-2.5 pr-3 text-right font-display text-victory">
                       ${r.sale_amount.toFixed(2)}
@@ -394,7 +401,7 @@ export function PayrollLedger() {
               </tbody>
               <tfoot>
                 <tr className="border-t border-neon/40">
-                  <td colSpan={11} className="py-3 text-right text-[10px] font-display uppercase tracking-widest text-muted-foreground">Grand Total · Estimated Pay</td>
+                  <td colSpan={12} className="py-3 text-right text-[10px] font-display uppercase tracking-widest text-muted-foreground">Grand Total · Estimated Pay</td>
                   <td className="py-3 pr-1 text-right font-display text-victory text-base">${grandTotal.toFixed(2)}</td>
                 </tr>
               </tfoot>
