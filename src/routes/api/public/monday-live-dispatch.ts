@@ -111,7 +111,8 @@ export const Route = createFileRoute("/api/public/monday-live-dispatch")({
         const bucket = mapStatus(status);
         const isSubmittedOnly = status.trim().toLowerCase() === "submitted";
 
-        const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+        // supabaseAdmin already imported above for X-Ray logging.
+
 
         // Match canvasser_name → profile id
         const wanted = normalizeName(canvasser_name);
