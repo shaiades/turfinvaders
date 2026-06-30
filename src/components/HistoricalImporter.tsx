@@ -55,9 +55,6 @@ function hasAnyValue(row: Record<string, unknown>): boolean {
   return Object.values(row).some((v) => v != null && String(v).trim() !== "");
 }
 
-// Permissive CSV marker rule: a cell is marked if it has ANY content other
-// than known "empty" placeholders. Previously a strict regex was eating
-// valid PM marks like "v", single characters, or unicode glyphs.
 // Strict whitelist: a cell is ONLY marked if it contains at least one
 // alphabetical letter AND is not one of Monday.com's system filler words.
 // Monday fills "empty" cells with non-breaking spaces, dashes, or zeros —
