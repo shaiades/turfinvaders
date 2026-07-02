@@ -154,6 +154,7 @@ export function NeonMap({
   center,
   height = 480,
   follow = false,
+  onTerritoryClick,
 }: {
   territories: Territory[];
   pins?: FieldPin[];
@@ -163,6 +164,7 @@ export function NeonMap({
   center?: LatLng;
   height?: number;
   follow?: boolean;
+  onTerritoryClick?: (id: string) => void;
 }) {
   const [draft, setDraft] = useState<LatLng[]>([]);
   const mapRef = useRef<L.Map | null>(null);
