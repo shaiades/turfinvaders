@@ -55,19 +55,41 @@ function LiveDispatchInner() {
     queryFn: async () => {
       const { data: roles } = await supabase
         .from("user_roles")
-        .select("user_id")
-        .eq("role", "canvasser");
-      const ids = (roles ?? []).map((r) => r.user_id);
+        .select("user_id, role")
+        .in("role", ["canvasser", "captain"]);
+      const roleMap = new Map<string, "canvasser" | "captain">();
+      (roles ?? []).forEach((r) => {
+        // Captain wins if a user somehow has both (canvasser is default).
+        const prev = roleMap.get(r.user_id);
+        if (prev === "captain") return;
+        roleMap.set(r.user_id, r.role as "canvasser" | "captain");
+      });
+      const ids = Array.from(roleMap.keys());
       if (ids.length === 0) return [] as Profile[];
       const { data: profs } = await supabase
         .from("profiles")
-        .select("id, display_name, office_location, team_id")
+        .select("id, display_name, office_location, team_id, teams:team_id(office_location)")
         .in("id", ids);
-      return ((profs ?? []) as Profile[]).sort((a, b) =>
+      const rows: Profile[] = ((profs ?? []) as Array<{
+        id: string;
+        display_name: string | null;
+        office_location: string | null;
+        team_id: string | null;
+        teams: { office_location: string | null } | null;
+      }>).map((p) => ({
+        id: p.id,
+        display_name: p.display_name,
+        office_location: p.office_location,
+        team_id: p.team_id,
+        team_office: p.teams?.office_location ?? null,
+        role: roleMap.get(p.id) ?? "canvasser",
+      }));
+      return rows.sort((a, b) =>
         (a.display_name ?? "").localeCompare(b.display_name ?? ""),
       );
     },
   });
+
 
   const { data: metrics = [] } = useQuery({
     queryKey: ["daily-metrics", today],
