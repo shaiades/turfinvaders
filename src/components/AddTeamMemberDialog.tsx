@@ -125,6 +125,7 @@ export function AddTeamMemberDialog({ variant = "default" }: { variant?: "defaul
             >
               <option value="canvasser">Canvasser</option>
               <option value="captain">Captain</option>
+              <option value="office_staff">Admin</option>
               <option value="owner">Owner</option>
             </select>
           </div>
