@@ -30,10 +30,11 @@ function Leaderboard() {
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ["leaderboard_real"],
     queryFn: async () => {
-      const [teamsR, profilesR, logsR] = await Promise.all([
+      const [teamsR, profilesR, logsR, metricsR] = await Promise.all([
         supabase.from("teams").select("id, name, color"),
         supabase.from("profiles").select("id, display_name, team_id"),
         supabase.from("daily_logs").select("canvasser_id, demos_sits, sales, no_demo, one_legs, future_leads"),
+        supabase.from("daily_metrics").select("canvasser_id, pitch_missed, sales"),
       ]);
       const teamById = new Map((teamsR.data ?? []).map((t) => [t.id, t]));
       const agg = new Map<string, { doors: number; sales: number; sits: number }>();
@@ -44,6 +45,12 @@ function Leaderboard() {
         a.sales += l.sales ?? 0;
         a.sits += l.demos_sits ?? 0;
         agg.set(l.canvasser_id, a);
+      }
+      // Points: PM * 1 + Sale * 2 from daily_metrics (BO/RS/basic leads = 0 pts).
+      const pointsByUser = new Map<string, number>();
+      for (const m of metricsR.data ?? []) {
+        const pts = (m.pitch_missed ?? 0) * 1 + (m.sales ?? 0) * 2;
+        pointsByUser.set(m.canvasser_id, (pointsByUser.get(m.canvasser_id) ?? 0) + pts);
       }
       return (profilesR.data ?? [])
         .filter((p) => p.team_id && teamById.has(p.team_id))
@@ -58,7 +65,7 @@ function Leaderboard() {
             teamColor: team.color ?? "#00f0ff",
             doors: a.doors,
             sales: a.sales,
-            points: a.sits + a.sales * 2,
+            points: pointsByUser.get(p.id) ?? 0,
           };
         })
         .sort((a, b) => b.points - a.points);

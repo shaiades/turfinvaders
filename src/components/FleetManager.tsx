@@ -83,7 +83,7 @@ export function FleetManager() {
         supabase.from("user_roles").select("user_id, role"),
         supabase
           .from("daily_metrics")
-          .select("canvasser_id, leads_confirmed, sales, metric_date")
+          .select("canvasser_id, pitch_missed, sales, metric_date")
           .gte("metric_date", weekStartISO)
           .lte("metric_date", weekEndISO),
       ]);
@@ -97,10 +97,10 @@ export function FleetManager() {
         arr.push(r.role);
         rolesByUser.set(r.user_id, arr);
       }
-      // Weekly points: sit (leads_confirmed) = 1 pt, sale = 2 pts.
+      // Weekly points: PM = 1 pt, Sale = 2 pts. BO/RS/basic leads = 0.
       const pointsByUser = new Map<string, number>();
       for (const m of metricsR.data ?? []) {
-        const pts = (m.leads_confirmed ?? 0) * 1 + (m.sales ?? 0) * 2;
+        const pts = (m.pitch_missed ?? 0) * 1 + (m.sales ?? 0) * 2;
         pointsByUser.set(m.canvasser_id, (pointsByUser.get(m.canvasser_id) ?? 0) + pts);
       }
       return {
@@ -297,7 +297,7 @@ export function FleetManager() {
           )}
         </div>
         <p className="mt-2 text-[10px] text-muted-foreground">
-          Points below reflect Mon–Sun of the selected week (Sit = 1 pt, Sale = 2 pts).
+          Points below reflect Mon–Sun of the selected week (PM = 1 pt, Sale = 2 pts; BO/RS = 0).
         </p>
       </ArcadePanel>
 
