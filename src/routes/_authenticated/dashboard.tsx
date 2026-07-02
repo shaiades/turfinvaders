@@ -14,6 +14,7 @@ import { TimesheetEditor } from "@/components/TimesheetEditor";
 import { LiveDispatch } from "@/components/LiveDispatch";
 import { WeeklyScheduleSettings } from "@/components/WeeklyScheduleSettings";
 import { AddTeamMemberDialog } from "@/components/AddTeamMemberDialog";
+import { RosterPanel } from "@/components/RosterPanel";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -143,10 +144,8 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
         <TabsContent value="timesheets" className="mt-0"><TimesheetEditor /></TabsContent>
         <TabsContent value="payroll" className="mt-0"><PayrollLedger /></TabsContent>
         <TabsContent value="settings" className="mt-0 space-y-6">
-          <div className="flex justify-end">
-            <AddTeamMemberDialog />
-          </div>
           <WeeklyScheduleSettings />
+          <RosterPanel />
         </TabsContent>
       </Tabs>
     </div>

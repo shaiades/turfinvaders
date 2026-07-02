@@ -18,9 +18,11 @@ import { toast } from "sonner";
 import { UserPlus } from "lucide-react";
 
 type Office = "San Diego" | "Orange County";
-type Role = "owner" | "captain" | "canvasser";
 
-export function AddTeamMemberDialog() {
+
+type Role = "owner" | "office_staff" | "captain" | "canvasser";
+
+export function AddTeamMemberDialog({ variant = "default" }: { variant?: "default" | "neon" } = {}) {
   const qc = useQueryClient();
   const addFn = useServerFn(addTeamMember);
   const [open, setOpen] = useState(false);
@@ -56,9 +58,17 @@ export function AddTeamMemberDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" className="gap-2">
-          <UserPlus className="h-4 w-4" />+ Add Team Member
-        </Button>
+        {variant === "neon" ? (
+          <Button
+            className="gap-2 font-display uppercase tracking-widest text-xs bg-neon text-background hover:bg-neon/90 shadow-[0_0_24px_-4px_color-mix(in_oklab,var(--neon)_70%,transparent)]"
+          >
+            <UserPlus className="h-4 w-4" />+ Add New Team Member / Captain
+          </Button>
+        ) : (
+          <Button variant="outline" className="gap-2">
+            <UserPlus className="h-4 w-4" />+ Add Team Member
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
@@ -115,6 +125,7 @@ export function AddTeamMemberDialog() {
             >
               <option value="canvasser">Canvasser</option>
               <option value="captain">Captain</option>
+              <option value="office_staff">Admin</option>
               <option value="owner">Owner</option>
             </select>
           </div>
