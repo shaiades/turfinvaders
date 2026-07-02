@@ -135,6 +135,37 @@ type Mode =
 
 export type HouseMarker = { id: string; lat: number; lng: number; name: string };
 
+export type LeadStatus = "pending" | "confirmed" | "na" | "killed";
+export type LeadPin = { id: string; lat: number; lng: number; status: LeadStatus; label?: string };
+
+export const LEAD_STATUS_COLORS: Record<LeadStatus, string> = {
+  pending: "#8a8f99",
+  confirmed: "#39ff14",
+  na: "#ffd60a",
+  killed: "#ff2d55",
+};
+
+function leadPinIcon(color: string, solid: boolean, size = 20) {
+  const html = solid
+    ? `<div style="width:${size}px;height:${size}px;border-radius:9999px;background:${color};border:2px solid #fff;box-shadow:0 0 14px ${color},0 0 22px ${color}88;"></div>`
+    : `<div style="width:${size}px;height:${size}px;border-radius:9999px;background:transparent;border:3px solid ${color};box-shadow:0 0 10px ${color}aa, inset 0 0 6px ${color}55;"></div>`;
+  return L.divIcon({
+    html, className: "neon-lead-pin",
+    iconSize: [size, size], iconAnchor: [size / 2, size / 2],
+  });
+}
+
+function haversineM(a: LatLng, b: LatLng) {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const s1 = Math.sin(dLat / 2);
+  const s2 = Math.sin(dLng / 2);
+  const h = s1 * s1 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * s2 * s2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
 function houseIcon(name: string) {
   const safe = name.replace(/[<>&"']/g, "");
   const html = `
@@ -149,6 +180,8 @@ export function NeonMap({
   territories,
   pins = [],
   houses = [],
+  leads = [],
+  proximityMeters = 30,
   me,
   mode = { kind: "view" },
   center,
@@ -159,6 +192,8 @@ export function NeonMap({
   territories: Territory[];
   pins?: FieldPin[];
   houses?: HouseMarker[];
+  leads?: LeadPin[];
+  proximityMeters?: number;
   me?: LatLng | null;
   mode?: Mode;
   center?: LatLng;
@@ -264,6 +299,19 @@ export function NeonMap({
         {pins.map((p) => (
           <Marker key={p.id} position={[p.lat, p.lng]} icon={p.is_remote_drop ? flaggedPinIcon() : glowingDotIcon(PIN_COLORS[p.pin_type])} />
         ))}
+
+        {leads.map((l) => {
+          const color = LEAD_STATUS_COLORS[l.status];
+          const dist = me ? haversineM(me, { lat: l.lat, lng: l.lng }) : Infinity;
+          const solid = dist <= proximityMeters;
+          return (
+            <Marker
+              key={`${l.id}:${solid ? "s" : "h"}:${l.status}`}
+              position={[l.lat, l.lng]}
+              icon={leadPinIcon(color, solid)}
+            />
+          );
+        })}
 
         {me && <Marker position={[me.lat, me.lng]} icon={pulseDotIcon("#00e5ff")} />}
       </MapContainer>
