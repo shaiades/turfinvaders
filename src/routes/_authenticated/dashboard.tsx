@@ -170,8 +170,12 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
             <TeamBadge name={myTeam.name} color={myTeam.color} />
           </h1>
         </div>
-        <VisibilityChip on={visibility} />
+        <div className="flex items-center gap-3">
+          <VisibilityChip on={visibility} />
+          <AddTeamMemberDialog />
+        </div>
       </div>
+
 
       {/* Van-level Live Lead Counter */}
       <div className="arcade-card p-5 flex items-center justify-between gap-4 flex-wrap">
