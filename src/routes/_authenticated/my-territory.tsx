@@ -528,7 +528,7 @@ function AssignTurfDialog({
               onClick={() => onSave(name.trim(), assigneeId, color)}
               disabled={saving || !name.trim() || !assigneeId || polygon.length < 3}
             >
-              {saving ? "Saving…" : "Save & Assign"}
+              {saving ? "Saving…" : isEdit ? "Save Changes" : "Save & Assign"}
             </Button>
           </DialogFooter>
         </DialogContent>
