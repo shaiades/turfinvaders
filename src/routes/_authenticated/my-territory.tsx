@@ -61,6 +61,7 @@ function MyTerritoryPage() {
   const [drawing, setDrawing] = useState(false);
   const [pendingPolygon, setPendingPolygon] = useState<LatLng[] | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingTurfId, setEditingTurfId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!navigator.geolocation) return;
@@ -172,6 +173,27 @@ function MyTerritoryPage() {
     onError: (e: Error) => {
       toast.error(`Failed to assign turf: ${e.message}`, { duration: 8000 });
     },
+  });
+
+  const updateTurf = useMutation({
+    mutationFn: async (payload: { id: string; name: string; assigned_user_id: string; color: string }) => {
+      const { error } = await supabase
+        .from("turfs")
+        .update({
+          name: payload.name,
+          assigned_user_id: payload.assigned_user_id,
+          color: payload.color,
+        })
+        .eq("id", payload.id);
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: () => {
+      toast.success("✅ Turf Reassigned!");
+      setEditingTurfId(null);
+      setIsModalOpen(false);
+      qc.invalidateQueries({ queryKey: ["turfs"] });
+    },
+    onError: (e: Error) => toast.error(`Failed to reassign: ${e.message}`, { duration: 8000 }),
   });
 
 
@@ -299,6 +321,7 @@ function MyTerritoryPage() {
             height={560}
             follow
             mode={mapMode}
+            onTerritoryClick={isManager && !drawing ? (id) => { setEditingTurfId(id); setIsModalOpen(true); } : undefined}
           />
           {/* Floating fallback: always visible when a polygon is pending */}
           {isManager && pendingPolygon && pendingPolygon.length >= 3 && (
@@ -372,21 +395,39 @@ function MyTerritoryPage() {
         )}
       </div>
 
-      {/* Assign modal (manager-only) */}
-      <AssignTurfDialog
-        open={isModalOpen && isManager}
-        onOpenChange={(v) => {
-          setIsModalOpen(v);
-          if (!v) setPendingPolygon(null); // clicking cancel/away discards the drawn shape
-        }}
-        polygon={pendingPolygon ?? []}
-        canvassers={canvassersQuery.data ?? []}
-        saving={saveTurf.isPending}
-        onSave={(name, assigneeId, color) => {
-          if (!pendingPolygon) return;
-          saveTurf.mutate({ name, assigned_user_id: assigneeId, polygon: pendingPolygon, color });
-        }}
-      />
+      {/* Assign / Edit modal (manager-only) */}
+      {(() => {
+        const editing = editingTurfId
+          ? (turfsQuery.data ?? []).find((t) => t.id === editingTurfId) ?? null
+          : null;
+        return (
+          <AssignTurfDialog
+            open={isModalOpen && isManager}
+            mode={editing ? "edit" : "create"}
+            initialName={editing?.name ?? ""}
+            initialAssigneeId={editing?.assigned_user_id ?? ""}
+            initialColor={editing?.color ?? TURF_COLORS[0]}
+            onOpenChange={(v) => {
+              setIsModalOpen(v);
+              if (!v) {
+                setPendingPolygon(null);
+                setEditingTurfId(null);
+              }
+            }}
+            polygon={editing ? (editing.polygon_coordinates ?? []) : (pendingPolygon ?? [])}
+            canvassers={canvassersQuery.data ?? []}
+            saving={saveTurf.isPending || updateTurf.isPending}
+            onSave={(name, assigneeId, color) => {
+              if (editing) {
+                updateTurf.mutate({ id: editing.id, name, assigned_user_id: assigneeId, color });
+              } else {
+                if (!pendingPolygon) return;
+                saveTurf.mutate({ name, assigned_user_id: assigneeId, polygon: pendingPolygon, color });
+              }
+            }}
+          />
+        );
+      })()}
     </GratitudeGate>
   );
 }
@@ -398,6 +439,7 @@ function formatAssignable(c: { display_name: string; role: string }) {
 
 function AssignTurfDialog({
   open, onOpenChange, polygon, canvassers, onSave, saving,
+  mode = "create", initialName = "", initialAssigneeId = "", initialColor = TURF_COLORS[0],
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -405,14 +447,24 @@ function AssignTurfDialog({
   canvassers: Array<{ id: string; display_name: string; role: string }>;
   onSave: (name: string, assigneeId: string, color: string) => void;
   saving: boolean;
+  mode?: "create" | "edit";
+  initialName?: string;
+  initialAssigneeId?: string;
+  initialColor?: string;
 }) {
-  const [name, setName] = useState("");
-  const [assigneeId, setAssigneeId] = useState<string>("");
-  const [color, setColor] = useState<string>(TURF_COLORS[0]);
+  const [name, setName] = useState(initialName);
+  const [assigneeId, setAssigneeId] = useState<string>(initialAssigneeId);
+  const [color, setColor] = useState<string>(initialColor);
 
   useEffect(() => {
-    if (open) { setName(""); setAssigneeId(""); setColor(TURF_COLORS[0]); }
-  }, [open]);
+    if (open) {
+      setName(initialName);
+      setAssigneeId(initialAssigneeId);
+      setColor(initialColor || TURF_COLORS[0]);
+    }
+  }, [open, initialName, initialAssigneeId, initialColor]);
+
+  const isEdit = mode === "edit";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -420,9 +472,13 @@ function AssignTurfDialog({
         <DialogOverlay className="fixed inset-0 z-[9999] bg-black/50" />
         <DialogContent className="z-[9999] max-w-md overflow-visible">
           <DialogHeader>
-            <DialogTitle className="font-display text-neon">ASSIGN TURF</DialogTitle>
+            <DialogTitle className="font-display text-neon">
+              {isEdit ? "REASSIGN TURF" : "ASSIGN TURF"}
+            </DialogTitle>
             <DialogDescription>
-              {polygon.length} vertices drawn. Name the turf and assign a canvasser.
+              {isEdit
+                ? `Update the name, assignee, or color for this turf (${polygon.length} vertices).`
+                : `${polygon.length} vertices drawn. Name the turf and assign a canvasser.`}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -472,7 +528,7 @@ function AssignTurfDialog({
               onClick={() => onSave(name.trim(), assigneeId, color)}
               disabled={saving || !name.trim() || !assigneeId || polygon.length < 3}
             >
-              {saving ? "Saving…" : "Save & Assign"}
+              {saving ? "Saving…" : isEdit ? "Save Changes" : "Save & Assign"}
             </Button>
           </DialogFooter>
         </DialogContent>
