@@ -300,6 +300,19 @@ export function NeonMap({
           <Marker key={p.id} position={[p.lat, p.lng]} icon={p.is_remote_drop ? flaggedPinIcon() : glowingDotIcon(PIN_COLORS[p.pin_type])} />
         ))}
 
+        {leads.map((l) => {
+          const color = LEAD_STATUS_COLORS[l.status];
+          const dist = me ? haversineM(me, { lat: l.lat, lng: l.lng }) : Infinity;
+          const solid = dist <= proximityMeters;
+          return (
+            <Marker
+              key={`${l.id}:${solid ? "s" : "h"}:${l.status}`}
+              position={[l.lat, l.lng]}
+              icon={leadPinIcon(color, solid)}
+            />
+          );
+        })}
+
         {me && <Marker position={[me.lat, me.lng]} icon={pulseDotIcon("#00e5ff")} />}
       </MapContainer>
 
