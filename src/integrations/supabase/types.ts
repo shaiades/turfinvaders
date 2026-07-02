@@ -633,6 +633,57 @@ export type Database = {
         }
         Relationships: []
       }
+      turfs: {
+        Row: {
+          assigned_user_id: string | null
+          color: string
+          created_at: string
+          created_by: string | null
+          id: string
+          name: string
+          notes: string | null
+          polygon_coordinates: Json
+          updated_at: string
+        }
+        Insert: {
+          assigned_user_id?: string | null
+          color?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name: string
+          notes?: string | null
+          polygon_coordinates: Json
+          updated_at?: string
+        }
+        Update: {
+          assigned_user_id?: string | null
+          color?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name?: string
+          notes?: string | null
+          polygon_coordinates?: Json
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "turfs_assigned_user_id_fkey"
+            columns: ["assigned_user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "turfs_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_roles: {
         Row: {
           id: string
