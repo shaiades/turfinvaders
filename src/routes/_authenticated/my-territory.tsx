@@ -202,6 +202,37 @@ function MyTerritoryPage() {
     [turfsQuery.data],
   );
 
+  const effectiveMe: LatLng | null = useMemo(() => {
+    if (!me) return null;
+    if (simOffset.lat === 0 && simOffset.lng === 0) return me;
+    return { lat: me.lat + simOffset.lat, lng: me.lng + simOffset.lng };
+  }, [me, simOffset]);
+
+  // Mock lead pins inside the canvasser's assigned turf (fog-of-war preview)
+  const mockLeads: LeadPin[] = useMemo(() => {
+    if (isManager) return [];
+    const first = (turfsQuery.data ?? [])[0];
+    if (!first) return [];
+    return generateMockLeads(first.id, (first.polygon_coordinates ?? []) as LatLng[], 18);
+  }, [isManager, turfsQuery.data]);
+
+  // Simulate Walk: nudge the sim offset toward the nearest unvisited lead
+  function simulateWalk() {
+    if (!me || mockLeads.length === 0) return;
+    const from = effectiveMe ?? me;
+    let nearest = mockLeads[0];
+    let best = haversineMeters(from, { lat: nearest.lat, lng: nearest.lng });
+    for (const l of mockLeads) {
+      const d = haversineMeters(from, { lat: l.lat, lng: l.lng });
+      if (d < best) { best = d; nearest = l; }
+    }
+    // step ~40% of the way to the nearest lead
+    const stepLat = (nearest.lat - from.lat) * 0.4;
+    const stepLng = (nearest.lng - from.lng) * 0.4;
+    setSimOffset((o) => ({ lat: o.lat + stepLat, lng: o.lng + stepLng }));
+    toast.success(`👟 Stepped ~${Math.round(best * 0.4)}m toward next door`);
+  }
+
   const saveTurf = useMutation({
     mutationFn: async (payload: { name: string; assigned_user_id: string; polygon: LatLng[]; color: string }) => {
       const { data: authData } = await supabase.auth.getUser();
