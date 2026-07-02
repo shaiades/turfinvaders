@@ -61,6 +61,7 @@ function MyTerritoryPage() {
   const [drawing, setDrawing] = useState(false);
   const [pendingPolygon, setPendingPolygon] = useState<LatLng[] | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingTurfId, setEditingTurfId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!navigator.geolocation) return;
