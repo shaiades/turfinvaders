@@ -20,7 +20,9 @@ import { UserPlus } from "lucide-react";
 type Office = "San Diego" | "Orange County";
 type Role = "owner" | "captain" | "canvasser";
 
-export function AddTeamMemberDialog() {
+type Role = "owner" | "office_staff" | "captain" | "canvasser";
+
+export function AddTeamMemberDialog({ variant = "default" }: { variant?: "default" | "neon" } = {}) {
   const qc = useQueryClient();
   const addFn = useServerFn(addTeamMember);
   const [open, setOpen] = useState(false);
