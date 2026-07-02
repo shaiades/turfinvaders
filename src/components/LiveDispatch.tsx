@@ -393,10 +393,13 @@ type WebhookLog = {
   id: string;
   created_at: string;
   source: string | null;
+  step: string | null;
+  data: unknown;
   raw_payload: unknown;
 };
 
 function WebhookLogsButton() {
+  const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const { data: logs = [], refetch, isFetching } = useQuery({
     queryKey: ["webhook-logs"],
@@ -404,12 +407,28 @@ function WebhookLogsButton() {
     queryFn: async () => {
       const { data } = await supabase
         .from("webhook_logs")
-        .select("id, created_at, source, raw_payload")
+        .select("id, created_at, source, step, data, raw_payload")
         .order("created_at", { ascending: false })
-        .limit(25);
+        .limit(50);
       return (data ?? []) as WebhookLog[];
     },
   });
+
+  // Realtime — new webhook_logs rows pop in instantly.
+  useEffect(() => {
+    if (!open) return;
+    const channel = supabase
+      .channel("webhook-logs-live")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "webhook_logs" },
+        () => qc.invalidateQueries({ queryKey: ["webhook-logs"] }),
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [open, qc]);
 
   return (
     <>
@@ -436,7 +455,7 @@ function WebhookLogsButton() {
                   X-Ray · Raw Incoming Payloads
                 </div>
                 <div className="font-display text-sm text-neon mt-0.5">
-                  WEBHOOK LOGS (LAST 25)
+                  WEBHOOK LOGS · LIVE (LAST 50)
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -465,11 +484,11 @@ function WebhookLogsButton() {
                 logs.map((l) => (
                   <div key={l.id} className="border border-border rounded p-3 bg-surface">
                     <div className="flex justify-between text-[10px] font-display uppercase tracking-widest text-muted-foreground mb-2">
-                      <span>{l.source ?? "unknown"}</span>
+                      <span className="text-neon">{l.step ?? l.source ?? "unknown"}</span>
                       <span>{new Date(l.created_at).toLocaleString()}</span>
                     </div>
                     <pre className="text-[11px] font-mono text-foreground whitespace-pre-wrap break-all max-h-64 overflow-auto">
-                      {JSON.stringify(l.raw_payload, null, 2)}
+{JSON.stringify(l.data ?? l.raw_payload ?? {}, null, 2)}
                     </pre>
                   </div>
                 ))

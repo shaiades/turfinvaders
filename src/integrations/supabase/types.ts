@@ -705,21 +705,27 @@ export type Database = {
       webhook_logs: {
         Row: {
           created_at: string
+          data: Json | null
           id: string
           raw_payload: Json | null
           source: string | null
+          step: string | null
         }
         Insert: {
           created_at?: string
+          data?: Json | null
           id?: string
           raw_payload?: Json | null
           source?: string | null
+          step?: string | null
         }
         Update: {
           created_at?: string
+          data?: Json | null
           id?: string
           raw_payload?: Json | null
           source?: string | null
+          step?: string | null
         }
         Relationships: []
       }
