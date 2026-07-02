@@ -22,7 +22,7 @@ import { useTodayLeads } from "@/hooks/useTodayLeads";
 import { DEMO_TEAMS, demoCanvassers, teamTotals, formatCurrency } from "@/lib/demo-data";
 import { Zap, DoorOpen, Truck, FileSpreadsheet } from "lucide-react";
 
-type OwnerTab = "dispatch" | "executive" | "fleet" | "timesheets" | "payroll";
+type OwnerTab = "dispatch" | "executive" | "fleet" | "timesheets" | "payroll" | "settings";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — Knockout" }] }),
