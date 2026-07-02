@@ -14,6 +14,7 @@ import { TimesheetEditor } from "@/components/TimesheetEditor";
 import { LiveDispatch } from "@/components/LiveDispatch";
 import { WeeklyScheduleSettings } from "@/components/WeeklyScheduleSettings";
 import { AddTeamMemberDialog } from "@/components/AddTeamMemberDialog";
+import { RosterPanel } from "@/components/RosterPanel";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
