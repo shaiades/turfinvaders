@@ -112,6 +112,23 @@ export function FleetManager() {
     },
   });
 
+  const createVan = useMutation({
+    mutationFn: async () => {
+      if (!newVanName.trim()) throw new Error("Van name required");
+      const { error } = await supabase.from("teams").insert({
+        name: newVanName.trim(), color: newVanColor, office_location: newVanLoc,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Van created");
+      setNewVanName("");
+      qc.invalidateQueries({ queryKey: ["fleet_manager"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const setCaptain = useMutation({
     mutationFn: async ({ vanId, captainId }: { vanId: string; captainId: string | null }) => {
       const { error } = await supabase.from("teams").update({ captain_id: captainId }).eq("id", vanId);
       if (error) throw error;
