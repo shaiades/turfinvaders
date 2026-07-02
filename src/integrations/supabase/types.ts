@@ -485,18 +485,24 @@ export type Database = {
       }
       system_settings: {
         Row: {
+          active_monday_board_oc: string | null
+          active_monday_board_sd: string | null
           created_at: string
           id: boolean
           monday_api_token: string | null
           updated_at: string
         }
         Insert: {
+          active_monday_board_oc?: string | null
+          active_monday_board_sd?: string | null
           created_at?: string
           id?: boolean
           monday_api_token?: string | null
           updated_at?: string
         }
         Update: {
+          active_monday_board_oc?: string | null
+          active_monday_board_sd?: string | null
           created_at?: string
           id?: boolean
           monday_api_token?: string | null
