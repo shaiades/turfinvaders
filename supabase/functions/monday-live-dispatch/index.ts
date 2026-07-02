@@ -106,6 +106,13 @@ Deno.serve(async (req) => {
   try {
     if (!supabaseAdmin) throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
 
+    // STEP 2: Client Created — proves env vars + client init succeeded
+    const { pulseId: earlyPulseId } = extractEvent(body);
+    await supabaseAdmin.from("webhook_logs").insert({
+      source: "monday-live-dispatch",
+      raw_payload: { step: "2_Client_Created", pulseId: earlyPulseId ?? null } as never,
+    });
+
     // Log raw payload for X-Ray
     await supabaseAdmin.from("webhook_logs").insert({
       source: "monday-live-dispatch",
