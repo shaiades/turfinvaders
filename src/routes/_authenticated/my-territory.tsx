@@ -395,21 +395,39 @@ function MyTerritoryPage() {
         )}
       </div>
 
-      {/* Assign modal (manager-only) */}
-      <AssignTurfDialog
-        open={isModalOpen && isManager}
-        onOpenChange={(v) => {
-          setIsModalOpen(v);
-          if (!v) setPendingPolygon(null); // clicking cancel/away discards the drawn shape
-        }}
-        polygon={pendingPolygon ?? []}
-        canvassers={canvassersQuery.data ?? []}
-        saving={saveTurf.isPending}
-        onSave={(name, assigneeId, color) => {
-          if (!pendingPolygon) return;
-          saveTurf.mutate({ name, assigned_user_id: assigneeId, polygon: pendingPolygon, color });
-        }}
-      />
+      {/* Assign / Edit modal (manager-only) */}
+      {(() => {
+        const editing = editingTurfId
+          ? (turfsQuery.data ?? []).find((t) => t.id === editingTurfId) ?? null
+          : null;
+        return (
+          <AssignTurfDialog
+            open={isModalOpen && isManager}
+            mode={editing ? "edit" : "create"}
+            initialName={editing?.name ?? ""}
+            initialAssigneeId={editing?.assigned_user_id ?? ""}
+            initialColor={editing?.color ?? TURF_COLORS[0]}
+            onOpenChange={(v) => {
+              setIsModalOpen(v);
+              if (!v) {
+                setPendingPolygon(null);
+                setEditingTurfId(null);
+              }
+            }}
+            polygon={editing ? (editing.polygon_coordinates ?? []) : (pendingPolygon ?? [])}
+            canvassers={canvassersQuery.data ?? []}
+            saving={saveTurf.isPending || updateTurf.isPending}
+            onSave={(name, assigneeId, color) => {
+              if (editing) {
+                updateTurf.mutate({ id: editing.id, name, assigned_user_id: assigneeId, color });
+              } else {
+                if (!pendingPolygon) return;
+                saveTurf.mutate({ name, assigned_user_id: assigneeId, polygon: pendingPolygon, color });
+              }
+            }}
+          />
+        );
+      })()}
     </GratitudeGate>
   );
 }
