@@ -70,21 +70,38 @@ serve(async (req) => {
       return new Response('No pulseId', { status: 200, headers: corsHeaders })
     }
 
-    // Step 3: Fetch Monday token
+    // Step 3: Fetch Monday token (system_settings is a singleton row: id=true, monday_api_token text)
     const { data: tokenRow, error: tokenErr } = await supabaseAdmin
       .from('system_settings')
-      .select('value')
-      .eq('key', 'monday_api_token')
+      .select('*')
       .maybeSingle()
 
-    if (tokenErr || !tokenRow?.value) {
+    await supabaseAdmin.from('webhook_logs').insert({
+      step: '2.5_Token_Row_Inspect',
+      data: { error: tokenErr?.message, keys: tokenRow ? Object.keys(tokenRow) : [] },
+    })
+
+    // Prefer known column, fall back to any string-valued column that looks like a token
+    let mondayToken = (tokenRow as any)?.monday_api_token
+      || (tokenRow as any)?.value
+      || (tokenRow as any)?.setting_value
+      || (tokenRow as any)?.config_value
+      || null
+    if (!mondayToken && tokenRow) {
+      for (const [k, v] of Object.entries(tokenRow)) {
+        if (typeof v === 'string' && v.length > 20 && k !== 'id') { mondayToken = v; break }
+      }
+    }
+
+    if (tokenErr || !mondayToken) {
       await supabaseAdmin.from('webhook_logs').insert({
         step: 'Error_No_Token',
-        data: { error: tokenErr?.message, hasRow: !!tokenRow },
+        data: { error: tokenErr?.message, hasRow: !!tokenRow, keys: tokenRow ? Object.keys(tokenRow) : [] },
       })
       return new Response('No token', { status: 200, headers: corsHeaders })
     }
-    const mondayToken = String(tokenRow.value)
+    mondayToken = String(mondayToken)
+
 
     // Step 3b: Query Monday GraphQL
     const query = `query { items(ids: [${pulseId}]) { id name column_values { id text column { title } } } }`
