@@ -175,6 +175,27 @@ function MyTerritoryPage() {
     },
   });
 
+  const updateTurf = useMutation({
+    mutationFn: async (payload: { id: string; name: string; assigned_user_id: string; color: string }) => {
+      const { error } = await supabase
+        .from("turfs")
+        .update({
+          name: payload.name,
+          assigned_user_id: payload.assigned_user_id,
+          color: payload.color,
+        })
+        .eq("id", payload.id);
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: () => {
+      toast.success("✅ Turf Reassigned!");
+      setEditingTurfId(null);
+      setIsModalOpen(false);
+      qc.invalidateQueries({ queryKey: ["turfs"] });
+    },
+    onError: (e: Error) => toast.error(`Failed to reassign: ${e.message}`, { duration: 8000 }),
+  });
+
 
   const deleteTurf = useMutation({
     mutationFn: async (id: string) => {
