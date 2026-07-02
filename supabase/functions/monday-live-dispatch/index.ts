@@ -9,49 +9,44 @@ const corsHeaders = {
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
-  let supabaseAdmin: ReturnType<typeof createClient> | undefined
+  // 1. INITIALIZE CLIENT FIRST
+  const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
+  const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+  const supabaseAdmin = createClient(supabaseUrl, supabaseKey)
 
   try {
-    const body = await req.json()
+    // 2. LOG HEARTBEAT
+    await supabaseAdmin.from('webhook_logs').insert({ step: '0_Endpoint_Hit' })
+
+    // 3. SAFELY PARSE TEXT
+    const text = await req.text()
+    if (!text) {
+      await supabaseAdmin.from('webhook_logs').insert({ step: '1_Error', data: { msg: 'Empty body' } })
+      return new Response('Empty', { status: 200, headers: corsHeaders })
+    }
+
+    const body = JSON.parse(text)
     if (body.challenge) {
       return new Response(JSON.stringify({ challenge: body.challenge }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
 
-    supabaseAdmin = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
-    )
-
     const event = body?.data?.event || body?.event
     const pulseId = event?.pulseId
 
-    await supabaseAdmin.from('webhook_logs').insert({
-      step: '2.5_Reset_Successful',
-      data: { pulseId },
-    })
+    await supabaseAdmin.from('webhook_logs').insert({ step: '2_Payload_Parsed', data: { pulseId } })
 
-    const { data: settings, error: settingsError } = await supabaseAdmin
-      .from('system_settings')
-      .select('value')
-      .eq('key', 'monday_api_token')
-      .maybeSingle()
-
-    if (settingsError || !settings?.value) {
-      await supabaseAdmin.from('webhook_logs').insert({ step: 'Abort_No_Token' })
-      return new Response('No token', { headers: corsHeaders, status: 200 })
-    }
-
-    await supabaseAdmin.from('webhook_logs').insert({ step: '3_Token_Found' })
     return new Response('Success', { headers: corsHeaders, status: 200 })
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    if (supabaseAdmin) {
+    // 4. GUARANTEED FATAL LOG
+    try {
       await supabaseAdmin.from('webhook_logs').insert({
         step: 'Fatal_Crash',
-        data: { error: message },
+        data: { error: err instanceof Error ? err.message : String(err) },
       })
+    } catch (_) {
+      // swallow
     }
     return new Response('Caught error', { headers: corsHeaders, status: 200 })
   }
