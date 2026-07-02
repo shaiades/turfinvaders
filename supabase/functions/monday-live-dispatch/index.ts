@@ -270,6 +270,29 @@ serve(async (req) => {
     }
     const inc = (key: string) => (bucket === key ? 1 : 0)
 
+    // Duplicate-generation guard: if we've already processed this pulseId
+    // (same physical lead/house), do NOT credit leads_submitted again. Still
+    // credit outcome metrics (sales, resets, blowouts, etc.).
+    const { data: priorHits } = await supabaseAdmin
+      .from('webhook_logs')
+      .select('id, data')
+      .eq('step', 'Schedule_Outcome_Processed')
+      .contains('data', { pulseId: String(pulseId) })
+      .limit(1)
+    const isDuplicateLead = (priorHits?.length ?? 0) > 0
+
+    if (isDuplicateLead) {
+      await supabaseAdmin.from('webhook_logs').insert({
+        step: 'Duplicate_Lead_Credit_Blocked',
+        data: {
+          note: `[Lead ${pulseId}] updated outcome to ${bucket ?? changedValue}, blocked duplicate lead generation credit`,
+          pulseId,
+          agentName: match.display_name,
+          newOutcome: bucket ?? changedValue,
+        },
+      })
+    }
+
     const payload = {
       canvasser_id: match.id,
       metric_date,
