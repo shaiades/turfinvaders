@@ -9,7 +9,7 @@ const createCanvasserSchema = z.object({
   password: z.string().min(8).max(72),
   display_name: z.string().trim().min(1).max(100),
   role: z.enum(ROLES).default("canvasser"),
-  office_location: z.enum(["San Diego", "Orange County"]).nullable().optional(),
+  office_location: z.enum(["San Diego", "Orange County"]).optional(),
   team_id: z.string().uuid().nullable().optional(),
 });
 
