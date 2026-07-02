@@ -84,6 +84,37 @@ function UsersPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const createFn = useServerFn(createCanvasser);
+  const [form, setForm] = useState({
+    email: "",
+    password: "",
+    display_name: "",
+    role: "canvasser" as AppRole,
+    office_location: "" as "" | "San Diego" | "Orange County",
+    team_id: "",
+  });
+
+  const createUser = useMutation({
+    mutationFn: async () => {
+      return createFn({
+        data: {
+          email: form.email,
+          password: form.password,
+          display_name: form.display_name,
+          role: form.role,
+          office_location: form.office_location || undefined,
+          team_id: form.team_id || undefined,
+        },
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["manage_users"] });
+      toast.success(`Added ${form.display_name}`);
+      setForm({ email: "", password: "", display_name: "", role: "canvasser", office_location: "", team_id: "" });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   if (isLoading || !data) return <div className="text-sm text-muted-foreground">Loading…</div>;
 
   const ownerCount = Array.from(data.rolesByUser.values()).filter((r) => r.includes("owner")).length;
