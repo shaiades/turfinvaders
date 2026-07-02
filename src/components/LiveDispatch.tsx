@@ -211,10 +211,18 @@ function LiveDispatchInner() {
                   const conv = sub > 0 ? Math.round((conf / sub) * 100) : 0;
                   return (
                     <tr key={c.id} className="border-b border-border/40 hover:bg-surface-elevated">
-                      <td className="py-2.5 px-3 font-medium">{c.display_name ?? "—"}</td>
-                      <td className="py-2.5 px-3 text-xs text-muted-foreground">
-                        {c.office_location ?? "—"}
+                      <td className="py-2.5 px-3 font-medium">
+                        {c.display_name ?? "—"}
+                        {c.role === "captain" && (
+                          <span className="ml-2 text-[9px] font-display uppercase tracking-widest text-accent">
+                            Captain
+                          </span>
+                        )}
                       </td>
+                      <td className="py-2.5 px-3 text-xs text-muted-foreground">
+                        {c.office_location ?? c.team_office ?? "—"}
+                      </td>
+
                       <td className="py-2.5 px-3 text-right font-display text-neon">{sub}</td>
                       <td className="py-2.5 px-3 text-right font-display text-warning">{pen}</td>
                       <td className="py-2.5 px-3 text-right font-display text-muted-foreground">{na}</td>
