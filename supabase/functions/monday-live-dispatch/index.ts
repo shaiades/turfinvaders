@@ -377,6 +377,8 @@ serve(async (req) => {
         canvasser_id: match.id,
         changedColumn: changedTitle,
         changedValue,
+        previousValue: previousStatusFromEvent ?? null,
+        previousBucket: prevBucket ?? null,
         recordedAs: bucket ?? 'unmapped',
         metric_date,
       },
