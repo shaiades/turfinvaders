@@ -437,6 +437,7 @@ export type Database = {
           current_rank: string | null
           display_name: string
           id: string
+          is_placeholder: boolean
           level: number
           monthly_goal: number
           office_location: string
@@ -457,6 +458,7 @@ export type Database = {
           current_rank?: string | null
           display_name: string
           id: string
+          is_placeholder?: boolean
           level?: number
           monthly_goal?: number
           office_location?: string
@@ -477,6 +479,7 @@ export type Database = {
           current_rank?: string | null
           display_name?: string
           id?: string
+          is_placeholder?: boolean
           level?: number
           monthly_goal?: number
           office_location?: string
