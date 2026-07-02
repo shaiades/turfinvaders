@@ -231,7 +231,7 @@ function MyTerritoryPage() {
   }, [pinsQuery.data]);
 
   const mapMode = drawing
-    ? { kind: "draw" as const, onComplete: (poly: LatLng[]) => setPendingPolygon(poly) }
+    ? { kind: "draw" as const, onComplete: (poly: LatLng[]) => { setPendingPolygon(poly); setIsModalOpen(true); } }
     : { kind: "pin" as const, onDrop: (ll: LatLng) => dropPin.mutate(ll) };
 
   return (
