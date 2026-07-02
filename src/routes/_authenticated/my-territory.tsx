@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { isManagerRole } from "@/lib/roles";
 import { ArcadePanel } from "@/components/arcade";
 import { NeonMap, type Territory, type FieldPin, type LatLng, type LeadPin, type LeadStatus, LEAD_STATUS_COLORS } from "@/components/NeonMap";
 import { Button } from "@/components/ui/button";
@@ -115,7 +116,7 @@ type TurfRow = {
 function MyTerritoryPage() {
   const { user, role } = useAuth();
   const qc = useQueryClient();
-  const isManager = role === "owner" || role === "captain";
+  const isManager = isManagerRole(role);
   const [me, setMe] = useState<LatLng | null>(null);
   const [simOffset, setSimOffset] = useState<LatLng>({ lat: 0, lng: 0 });
   const [active, setActive] = useState<ActivePin>("lead");

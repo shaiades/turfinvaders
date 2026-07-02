@@ -17,7 +17,7 @@ export const Route = createFileRoute("/_authenticated/users")({
       .from("user_roles")
       .select("role")
       .eq("user_id", data.user.id)
-      .in("role", ["owner", "captain"]);
+      .in("role", ["owner", "captain", "office_staff"]);
     if (!roles || roles.length === 0) throw redirect({ to: "/dashboard" });
   },
   component: UsersPage,

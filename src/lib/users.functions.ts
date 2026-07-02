@@ -17,7 +17,8 @@ export const createCanvasser = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => createCanvasserSchema.parse(data))
   .handler(async ({ data, context }) => {
-    // Owners or Captains can add new players. Captains can only create canvassers.
+    // Owners, Captains, and Office Staff (Admin) can add new players.
+    // Captains and Office Staff can only create Canvassers or other Captains.
     const { data: roleRows, error: roleErr } = await context.supabase
       .from("user_roles")
       .select("role")
@@ -25,12 +26,12 @@ export const createCanvasser = createServerFn({ method: "POST" })
     if (roleErr) throw new Error(roleErr.message);
     const roles = (roleRows ?? []).map((r) => r.role as string);
     const isOwner = roles.includes("owner");
-    const isCaptain = roles.includes("captain");
-    if (!isOwner && !isCaptain) {
-      throw new Error("Only Owners or Captains can add new users.");
+    const isManager = isOwner || roles.includes("captain") || roles.includes("office_staff");
+    if (!isManager) {
+      throw new Error("Only Owners, Captains, or Admins can add new users.");
     }
-    if (!isOwner && data.role !== "canvasser") {
-      throw new Error("Captains can only create Canvassers.");
+    if (!isOwner && !["canvasser", "captain"].includes(data.role)) {
+      throw new Error("Only Owners can create Owners or Admins.");
     }
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -80,16 +81,23 @@ const addTeamMemberSchema = z.object({
   role: z.enum(["owner", "captain", "canvasser"]),
 });
 
-/** Owner-only: create a placeholder profile (no auth login) with a generated UUID. */
+/** Managers (Owner / Captain / Admin) can add a placeholder profile with a generated UUID. */
 export const addTeamMember = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => addTeamMemberSchema.parse(data))
   .handler(async ({ data, context }) => {
-    const { data: isOwner } = await context.supabase.rpc("has_role", {
-      _user_id: context.userId,
-      _role: "owner",
-    });
-    if (!isOwner) throw new Error("Only Owners can add team members.");
+    const { data: roleRows, error: roleErr } = await context.supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId);
+    if (roleErr) throw new Error(roleErr.message);
+    const roles = (roleRows ?? []).map((r) => r.role as string);
+    const isOwner = roles.includes("owner");
+    const isManager = isOwner || roles.includes("captain") || roles.includes("office_staff");
+    if (!isManager) throw new Error("Only Owners, Captains, or Admins can add team members.");
+    if (!isOwner && !["canvasser", "captain"].includes(data.role)) {
+      throw new Error("Only Owners can add Owners or Admins.");
+    }
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const newId = crypto.randomUUID();
@@ -102,10 +110,10 @@ export const addTeamMember = createServerFn({ method: "POST" })
     });
     if (profErr) throw new Error(profErr.message);
 
-    const { error: roleErr } = await supabaseAdmin
+    const { error: insRoleErr } = await supabaseAdmin
       .from("user_roles")
       .insert({ user_id: newId, role: data.role });
-    if (roleErr) throw new Error(roleErr.message);
+    if (insRoleErr) throw new Error(insRoleErr.message);
 
     return { id: newId };
   });
