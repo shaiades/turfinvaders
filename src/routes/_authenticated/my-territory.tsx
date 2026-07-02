@@ -133,23 +133,37 @@ function MyTerritoryPage() {
 
   const saveTurf = useMutation({
     mutationFn: async (payload: { name: string; assigned_user_id: string; polygon: LatLng[]; color: string }) => {
-      const { error } = await supabase.from("turfs").insert({
+      const { data: authData } = await supabase.auth.getUser();
+      const uid = authData.user?.id;
+      if (!uid) throw new Error("Not signed in — please refresh and sign in again.");
+      const insertRow = {
         name: payload.name,
         color: payload.color,
-        polygon_coordinates: payload.polygon,
+        polygon_coordinates: payload.polygon.map((p) => ({ lat: p.lat, lng: p.lng })),
         assigned_user_id: payload.assigned_user_id,
-        created_by: user!.id,
-      });
-      if (error) throw error;
+        created_by: uid,
+      };
+      const { data, error } = await supabase.from("turfs").insert(insertRow).select().single();
+      if (error) {
+        console.error("[turf insert failed]", error, "row:", insertRow);
+        const parts = [error.message];
+        if (error.code) parts.push(`(code ${error.code})`);
+        if (error.hint) parts.push(`— ${error.hint}`);
+        throw new Error(parts.join(" "));
+      }
+      return data;
     },
     onSuccess: () => {
-      toast.success("🗺 Turf assigned");
+      toast.success("🗺 Turf Assigned!");
       setPendingPolygon(null);
       setDrawing(false);
       qc.invalidateQueries({ queryKey: ["turfs"] });
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => {
+      toast.error(`Failed to assign turf: ${e.message}`, { duration: 8000 });
+    },
   });
+
 
   const deleteTurf = useMutation({
     mutationFn: async (id: string) => {
