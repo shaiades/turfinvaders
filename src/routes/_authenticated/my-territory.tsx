@@ -364,10 +364,13 @@ function MyTerritoryPage() {
         )}
       </div>
 
-      {/* Assign modal (manager-only, opens after polygon completed) */}
+      {/* Assign modal (manager-only) */}
       <AssignTurfDialog
-        open={!!pendingPolygon && isManager}
-        onOpenChange={(v) => { if (!v) setPendingPolygon(null); }}
+        open={isModalOpen && isManager}
+        onOpenChange={(v) => {
+          setIsModalOpen(v);
+          if (!v) setPendingPolygon(null); // clicking cancel/away discards the drawn shape
+        }}
         polygon={pendingPolygon ?? []}
         canvassers={canvassersQuery.data ?? []}
         saving={saveTurf.isPending}
