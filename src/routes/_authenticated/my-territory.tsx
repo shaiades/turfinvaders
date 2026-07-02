@@ -117,6 +117,7 @@ function MyTerritoryPage() {
   const qc = useQueryClient();
   const isManager = role === "owner" || role === "captain";
   const [me, setMe] = useState<LatLng | null>(null);
+  const [simOffset, setSimOffset] = useState<LatLng>({ lat: 0, lng: 0 });
   const [active, setActive] = useState<ActivePin>("lead");
   const [drawing, setDrawing] = useState(false);
   const [pendingPolygon, setPendingPolygon] = useState<LatLng[] | null>(null);
