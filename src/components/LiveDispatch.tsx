@@ -203,11 +203,11 @@ function LiveDispatchInner() {
               <tbody>
                 {visible.map((c) => {
                   const m = metricMap[c.id];
-                  const sub = m?.leads_submitted ?? 0;
                   const conf = m?.leads_confirmed ?? 0;
                   const na = m?.no_answers ?? 0;
                   const kil = m?.killed ?? 0;
                   const pen = m?.pending ?? 0;
+                  const sub = conf + kil + pen + na;
                   const conv = sub > 0 ? Math.round((conf / sub) * 100) : 0;
                   return (
                     <tr key={c.id} className="border-b border-border/40 hover:bg-surface-elevated">
