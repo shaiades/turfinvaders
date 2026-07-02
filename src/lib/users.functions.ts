@@ -73,3 +73,39 @@ export const createCanvasser = createServerFn({ method: "POST" })
 
     return { id: newUserId };
   });
+
+const addTeamMemberSchema = z.object({
+  full_name: z.string().trim().min(1).max(100),
+  office_location: z.enum(["San Diego", "Orange County"]),
+  role: z.enum(["owner", "captain", "canvasser"]),
+});
+
+/** Owner-only: create a placeholder profile (no auth login) with a generated UUID. */
+export const addTeamMember = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => addTeamMemberSchema.parse(data))
+  .handler(async ({ data, context }) => {
+    const { data: isOwner } = await context.supabase.rpc("has_role", {
+      _user_id: context.userId,
+      _role: "owner",
+    });
+    if (!isOwner) throw new Error("Only Owners can add team members.");
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const newId = crypto.randomUUID();
+
+    const { error: profErr } = await supabaseAdmin.from("profiles").insert({
+      id: newId,
+      display_name: data.full_name,
+      office_location: data.office_location,
+      is_placeholder: true,
+    });
+    if (profErr) throw new Error(profErr.message);
+
+    const { error: roleErr } = await supabaseAdmin
+      .from("user_roles")
+      .insert({ user_id: newId, role: data.role });
+    if (roleErr) throw new Error(roleErr.message);
+
+    return { id: newId };
+  });
