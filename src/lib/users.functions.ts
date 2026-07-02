@@ -110,10 +110,10 @@ export const addTeamMember = createServerFn({ method: "POST" })
     });
     if (profErr) throw new Error(profErr.message);
 
-    const { error: roleErr } = await supabaseAdmin
+    const { error: insRoleErr } = await supabaseAdmin
       .from("user_roles")
       .insert({ user_id: newId, role: data.role });
-    if (roleErr) throw new Error(roleErr.message);
+    if (insRoleErr) throw new Error(insRoleErr.message);
 
     return { id: newId };
   });
