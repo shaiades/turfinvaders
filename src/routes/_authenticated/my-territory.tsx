@@ -59,6 +59,7 @@ function MyTerritoryPage() {
   const [active, setActive] = useState<ActivePin>("lead");
   const [drawing, setDrawing] = useState(false);
   const [pendingPolygon, setPendingPolygon] = useState<LatLng[] | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   useEffect(() => {
     if (!navigator.geolocation) return;
