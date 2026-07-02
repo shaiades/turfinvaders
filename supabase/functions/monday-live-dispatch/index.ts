@@ -121,7 +121,7 @@ Deno.serve(async (req) => {
       return ok200("Acknowledged (auth skipped)");
     }
 
-    // 5) Extract pulseId + status safely
+    // STEP 1: Extracting Pulse ID
     let canvasser_name: string | null =
       typeof body?.canvasser_name === "string" && body.canvasser_name.trim()
         ? body.canvasser_name.trim()
@@ -132,20 +132,36 @@ Deno.serve(async (req) => {
         ? body.status.trim()
         : (evStatus ?? "");
 
-    // 6) If no name in payload, call Monday GraphQL for the row
+    await supabaseAdmin.from("webhook_logs").insert({
+      source: "monday-live-dispatch",
+      raw_payload: {
+        step: "1_Extracting Pulse ID",
+        pulseId: pulseId ?? null,
+        status: status ?? null,
+        canvasser_name_in_payload: canvasser_name,
+      } as never,
+    });
+
+    // If no name in payload, call Monday GraphQL for the row
     if (!canvasser_name && pulseId) {
-      const { data: settings } = await supabaseAdmin
+      // STEP 2: Fetching Monday Token
+      const { data: settings, error: settingsErr } = await supabaseAdmin
         .from("system_settings")
         .select("monday_api_token")
         .limit(1)
         .maybeSingle();
 
       const mondayApiToken = settings?.monday_api_token as string | undefined;
+      await supabaseAdmin.from("webhook_logs").insert({
+        source: "monday-live-dispatch",
+        raw_payload: {
+          step: "2_Fetching Monday Token",
+          hasToken: !!mondayApiToken,
+          settings_error: settingsErr?.message ?? null,
+        } as never,
+      });
+
       if (!mondayApiToken) {
-        await supabaseAdmin.from("webhook_logs").insert({
-          source: "monday-live-dispatch",
-          raw_payload: { step: "2_Error", message: "Monday API token missing", pulseId } as never,
-        });
         return ok200("Acknowledged (no token)");
       }
 
@@ -168,8 +184,7 @@ Deno.serve(async (req) => {
         await supabaseAdmin.from("webhook_logs").insert({
           source: "monday-live-dispatch",
           raw_payload: {
-            step: "3_Error",
-            message: "Monday API fetch threw",
+            step: "3_Querying Monday API",
             error: String(err),
             pulseId,
           } as never,
@@ -177,18 +192,18 @@ Deno.serve(async (req) => {
         return ok200("Acknowledged (monday fetch failed)");
       }
 
+      // STEP 3: Querying Monday API
       await supabaseAdmin.from("webhook_logs").insert({
         source: "monday-live-dispatch",
         raw_payload: {
-          step: "3_MondayResponse",
+          step: "3_Querying Monday API",
           http_status: mondayHttp,
-          data: mondayJson,
+          mondayResponse: mondayJson,
           pulseId,
         } as never,
       });
 
       const cols = mondayJson?.data?.items?.[0]?.column_values ?? [];
-      // Case-insensitive title === 'agent' preferred; fallback to includes('agent')
       let hit = cols.find(
         (c: any) => (c?.column?.title ?? "").toString().trim().toLowerCase() === "agent",
       );
@@ -198,7 +213,6 @@ Deno.serve(async (req) => {
         );
       }
       if (hit) {
-        // Prefer .text; if empty, try parsing person-column .value JSON
         if (typeof hit.text === "string" && hit.text.trim()) {
           canvasser_name = hit.text.trim();
         } else if (typeof hit.value === "string" && hit.value.trim()) {
@@ -212,6 +226,17 @@ Deno.serve(async (req) => {
         }
       }
     }
+
+    // STEP 4: Finding Canvasser Name
+    await supabaseAdmin.from("webhook_logs").insert({
+      source: "monday-live-dispatch",
+      raw_payload: {
+        step: "4_Finding Canvasser Name",
+        agentName: canvasser_name,
+        status,
+        pulseId,
+      } as never,
+    });
 
     if (!canvasser_name || !status) {
       await supabaseAdmin.from("webhook_logs").insert({
@@ -295,18 +320,26 @@ Deno.serve(async (req) => {
       },
       { onConflict: "canvasser_id,metric_date" },
     );
-    if (upErr) {
-      await supabaseAdmin.from("webhook_logs").insert({
-        source: "monday-live-dispatch",
-        raw_payload: {
-          step: "5_UpsertError",
-          message: upErr.message,
-          canvasser_id: match.id,
-          metric_date,
-        } as never,
-      });
-      return ok200("Acknowledged (upsert failed)");
-    }
+    // STEP 5: Updating Supabase
+    await supabaseAdmin.from("webhook_logs").insert({
+      source: "monday-live-dispatch",
+      raw_payload: {
+        step: "5_Updating Supabase",
+        upsertResult: upErr ? { error: upErr.message } : "Success",
+        canvasser_id: match.id,
+        metric_date,
+        bucket,
+        status,
+        totals: {
+          leads_submitted: nextSubmitted,
+          leads_confirmed: nextConfirmed,
+          no_answers: nextNoAnswers,
+          killed: nextKilled,
+          pending: nextPending,
+        },
+      } as never,
+    });
+    if (upErr) return ok200("Acknowledged (upsert failed)");
 
     return new Response("Success", {
       status: 200,
