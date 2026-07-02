@@ -16,7 +16,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Home, MessageSquare, Sparkles, Crosshair, Pencil, MapPin, Trash2 } from "lucide-react";
+import { Home, MessageSquare, Sparkles, Crosshair, Pencil, MapPin, Trash2, Footprints } from "lucide-react";
 import { GratitudeGate } from "@/components/GratitudeGate";
 
 export const Route = createFileRoute("/_authenticated/my-territory")({
