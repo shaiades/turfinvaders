@@ -153,25 +153,50 @@ Deno.serve(async (req) => {
 
     // If no name in payload, call Monday GraphQL for the row
     if (!canvasser_name && pulseId) {
-      // STEP 2: Fetching Monday Token
-      const { data: settings, error: settingsErr } = await supabaseAdmin
+      // STEP 2.5: Attempting Token Fetch
+      await supabaseAdmin.from("webhook_logs").insert({
+        source: "monday-live-dispatch",
+        raw_payload: { step: "2.5_Attempting_Token_Fetch", pulseId } as never,
+      });
+
+      const { data: settingsData, error: settingsError } = await supabaseAdmin
         .from("system_settings")
         .select("monday_api_token")
-        .limit(1)
         .maybeSingle();
 
-      const mondayApiToken = settings?.monday_api_token as string | undefined;
+      if (settingsError) {
+        await supabaseAdmin.from("webhook_logs").insert({
+          source: "monday-live-dispatch",
+          raw_payload: {
+            step: "Token_Fetch_DB_Error",
+            pulseId,
+            error: settingsError.message,
+          } as never,
+        });
+        throw new Error("DB Error fetching token: " + settingsError.message);
+      }
+
+      const mondayApiToken = settingsData?.monday_api_token as string | undefined;
+
+      // STEP 3: Token Result
       await supabaseAdmin.from("webhook_logs").insert({
         source: "monday-live-dispatch",
         raw_payload: {
-          step: "2_Fetching Monday Token",
+          step: "3_Token_Result",
+          pulseId,
           hasToken: !!mondayApiToken,
-          settings_error: settingsErr?.message ?? null,
         } as never,
       });
 
       if (!mondayApiToken) {
-        return ok200("Acknowledged (no token)");
+        await supabaseAdmin.from("webhook_logs").insert({
+          source: "monday-live-dispatch",
+          raw_payload: { step: "Abort_No_Token", pulseId } as never,
+        });
+        return new Response(
+          JSON.stringify({ status: "No token, but OK" }),
+          { status: 200, headers: { "Content-Type": "application/json", ...CORS } },
+        );
       }
 
       const query = `query { items (ids: [${pulseId}]) { column_values { column { title } text value } } }`;
