@@ -391,13 +391,18 @@ function MyTerritoryPage() {
   );
 }
 
+function formatAssignable(c: { display_name: string; role: string }) {
+  const title = c.role.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
+  return `${c.display_name} (${title})`;
+}
+
 function AssignTurfDialog({
   open, onOpenChange, polygon, canvassers, onSave, saving,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   polygon: LatLng[];
-  canvassers: Array<{ id: string; display_name: string }>;
+  canvassers: Array<{ id: string; display_name: string; role: string }>;
   onSave: (name: string, assigneeId: string, color: string) => void;
   saving: boolean;
 }) {
