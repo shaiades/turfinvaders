@@ -266,16 +266,41 @@ serve(async (req) => {
 
     const { data: existing } = await supabaseAdmin
       .from('daily_metrics')
+    // Step 5: Map new + previous outcomes
+    const bucket = mapScheduleOutcome(changedTitle, changedValue)
+    const prevBucket = previousStatusFromEvent
+      ? mapScheduleOutcome(changedTitle, previousStatusFromEvent)
+      : null
+    const metric_date = todayLA()
+    const office_location = boardOffice ?? match.office_location ?? 'San Diego'
+
+    // Same-bucket transition (e.g. "N/A" -> "N/A x2"): log + no-op.
+    if (bucket && prevBucket && bucket === prevBucket) {
+      await supabaseAdmin.from('webhook_logs').insert({
+        step: 'Same_Bucket_NoOp',
+        data: {
+          pulseId,
+          agentName: match.display_name,
+          bucket,
+          previousValue: previousStatusFromEvent,
+          newValue: changedValue,
+          note: 'Status changed within the same mapped bucket; no counter mutation.',
+        },
+      })
+      return new Response('No-op (same bucket)', { status: 200, headers: corsHeaders })
+    }
+
+    const { data: existing } = await supabaseAdmin
+      .from('daily_metrics')
       .select('id, leads_submitted, leads_confirmed, no_answers, killed, pending, blowouts, outside_leads, resets, pitch_missed, sales')
       .eq('canvasser_id', match.id)
       .eq('metric_date', metric_date)
       .maybeSingle()
 
-    const cur = existing ?? {
+    const cur: Record<string, number> = existing ?? {
       leads_submitted: 0, leads_confirmed: 0, no_answers: 0, killed: 0, pending: 0,
       blowouts: 0, outside_leads: 0, resets: 0, pitch_missed: 0, sales: 0,
     }
-    const inc = (key: string) => (bucket === key ? 1 : 0)
 
     // Duplicate-generation guard: if we've already processed this pulseId
     // (same physical lead/house), do NOT credit leads_submitted again. Still
@@ -300,20 +325,35 @@ serve(async (req) => {
       })
     }
 
+    const bucketKeys = [
+      'leads_confirmed', 'no_answers', 'killed', 'pending',
+      'blowouts', 'outside_leads', 'resets', 'pitch_missed', 'sales',
+    ] as const
+
+    const next: Record<string, number> = { ...cur }
+    // Decrement previous bucket (floor at 0) when it's a real transition.
+    if (prevBucket && bucketKeys.includes(prevBucket as any)) {
+      next[prevBucket] = Math.max(0, (cur[prevBucket] ?? 0) - 1)
+    }
+    // Increment new bucket.
+    if (bucket && bucketKeys.includes(bucket as any)) {
+      next[bucket] = (next[bucket] ?? 0) + 1
+    }
+
     const payload = {
       canvasser_id: match.id,
       metric_date,
       office_location,
       leads_submitted: cur.leads_submitted ?? 0,
-      leads_confirmed: (cur.leads_confirmed ?? 0) + inc('leads_confirmed'),
-      no_answers: (cur.no_answers ?? 0) + inc('no_answers'),
-      killed: (cur.killed ?? 0) + inc('killed'),
-      pending: (cur.pending ?? 0) + inc('pending'),
-      blowouts: (cur.blowouts ?? 0) + inc('blowouts'),
-      outside_leads: (cur.outside_leads ?? 0) + inc('outside_leads'),
-      resets: (cur.resets ?? 0) + inc('resets'),
-      pitch_missed: (cur.pitch_missed ?? 0) + inc('pitch_missed'),
-      sales: (cur.sales ?? 0) + inc('sales'),
+      leads_confirmed: next.leads_confirmed ?? 0,
+      no_answers: next.no_answers ?? 0,
+      killed: next.killed ?? 0,
+      pending: next.pending ?? 0,
+      blowouts: next.blowouts ?? 0,
+      outside_leads: next.outside_leads ?? 0,
+      resets: next.resets ?? 0,
+      pitch_missed: next.pitch_missed ?? 0,
+      sales: next.sales ?? 0,
     }
 
     const { error: upErr } = await supabaseAdmin
