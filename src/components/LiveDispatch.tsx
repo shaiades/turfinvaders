@@ -35,6 +35,14 @@ function todayLA(): string {
 }
 
 export function LiveDispatch() {
+  return (
+    <OfficeFilterProvider>
+      <LiveDispatchInner />
+    </OfficeFilterProvider>
+  );
+}
+
+function LiveDispatchInner() {
   const qc = useQueryClient();
   const today = todayLA();
   const { matches } = useOfficeFilter();
