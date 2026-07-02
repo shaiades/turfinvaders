@@ -59,6 +59,7 @@ function MyTerritoryPage() {
   const [active, setActive] = useState<ActivePin>("lead");
   const [drawing, setDrawing] = useState(false);
   const [pendingPolygon, setPendingPolygon] = useState<LatLng[] | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   useEffect(() => {
     if (!navigator.geolocation) return;
@@ -156,6 +157,7 @@ function MyTerritoryPage() {
     onSuccess: () => {
       toast.success("🗺 Turf Assigned!");
       setPendingPolygon(null);
+      setIsModalOpen(false);
       setDrawing(false);
       qc.invalidateQueries({ queryKey: ["turfs"] });
     },
@@ -229,7 +231,7 @@ function MyTerritoryPage() {
   }, [pinsQuery.data]);
 
   const mapMode = drawing
-    ? { kind: "draw" as const, onComplete: (poly: LatLng[]) => setPendingPolygon(poly) }
+    ? { kind: "draw" as const, onComplete: (poly: LatLng[]) => { setPendingPolygon(poly); setIsModalOpen(true); } }
     : { kind: "pin" as const, onDrop: (ll: LatLng) => dropPin.mutate(ll) };
 
   return (
@@ -280,15 +282,37 @@ function MyTerritoryPage() {
           </div>
         )}
 
-        <NeonMap
-          territories={territories}
-          pins={isManager ? [] : (pinsQuery.data ?? [])}
-          houses={[]}
-          me={me}
-          height={560}
-          follow
-          mode={mapMode}
-        />
+        <div className="relative">
+          <NeonMap
+            territories={territories}
+            pins={isManager ? [] : (pinsQuery.data ?? [])}
+            houses={[]}
+            me={me}
+            height={560}
+            follow
+            mode={mapMode}
+          />
+          {/* Floating fallback: always visible when a polygon is pending */}
+          {isManager && pendingPolygon && pendingPolygon.length >= 3 && (
+            <div className="absolute left-1/2 -translate-x-1/2 bottom-4 z-[1000] flex gap-2">
+              <Button
+                size="lg"
+                onClick={() => setIsModalOpen(true)}
+                className="font-display uppercase tracking-widest bg-victory text-black hover:bg-victory/90 shadow-[0_0_24px_rgba(57,255,20,0.6)] animate-pulse"
+              >
+                <MapPin className="w-4 h-4 mr-2" />
+                Assign This Territory ({pendingPolygon.length} pts)
+              </Button>
+              <Button
+                size="lg"
+                variant="outline"
+                onClick={() => { setPendingPolygon(null); setIsModalOpen(false); }}
+              >
+                Discard
+              </Button>
+            </div>
+          )}
+        </div>
 
         {/* Manager turf list */}
         {isManager && (
@@ -340,10 +364,13 @@ function MyTerritoryPage() {
         )}
       </div>
 
-      {/* Assign modal (manager-only, opens after polygon completed) */}
+      {/* Assign modal (manager-only) */}
       <AssignTurfDialog
-        open={!!pendingPolygon && isManager}
-        onOpenChange={(v) => { if (!v) setPendingPolygon(null); }}
+        open={isModalOpen && isManager}
+        onOpenChange={(v) => {
+          setIsModalOpen(v);
+          if (!v) setPendingPolygon(null); // clicking cancel/away discards the drawn shape
+        }}
         polygon={pendingPolygon ?? []}
         canvassers={canvassersQuery.data ?? []}
         saving={saveTurf.isPending}
