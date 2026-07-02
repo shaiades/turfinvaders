@@ -363,7 +363,7 @@ function MyTerritoryPage() {
           <h1 className="font-display text-2xl text-neon">MY TERRITORY</h1>
           <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground flex items-center gap-2">
             <Crosshair className="w-3 h-3 text-[#00e5ff]" />
-            {me ? `LIVE · ${me.lat.toFixed(4)}, ${me.lng.toFixed(4)}` : "Acquiring GPS…"}
+            {effectiveMe ? `LIVE · ${effectiveMe.lat.toFixed(4)}, ${effectiveMe.lng.toFixed(4)}${simOffset.lat || simOffset.lng ? " · SIM" : ""}` : "Acquiring GPS…"}
           </div>
         </div>
 
