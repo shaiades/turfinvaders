@@ -76,13 +76,48 @@ function ClickCapture({ onClick }: { onClick: (ll: LatLng) => void }) {
 
 function FitBounds({ points }: { points: LatLng[] }) {
   const map = useMap();
+  const didFit = useRef(false);
   useEffect(() => {
-    if (points.length === 0) return;
+    if (didFit.current || points.length === 0) return;
     const b = L.latLngBounds(points.map((p) => [p.lat, p.lng] as [number, number]));
     map.fitBounds(b, { padding: [40, 40], maxZoom: 16 });
+    didFit.current = true;
   }, [map, points]);
   return null;
 }
+
+function FollowMe({ me, zoom = 17 }: { me: LatLng | null | undefined; zoom?: number }) {
+  const map = useMap();
+  const didInitial = useRef(false);
+  useEffect(() => {
+    if (!me) return;
+    if (!didInitial.current) {
+      map.setView([me.lat, me.lng], zoom, { animate: false });
+      didInitial.current = true;
+    } else {
+      map.panTo([me.lat, me.lng], { animate: true });
+    }
+  }, [map, me?.lat, me?.lng, zoom]);
+  return null;
+}
+
+function InvalidateOnMount() {
+  const map = useMap();
+  useEffect(() => {
+    const run = () => map.invalidateSize();
+    run();
+    const t1 = setTimeout(run, 100);
+    const t2 = setTimeout(run, 400);
+    const t3 = setTimeout(run, 1000);
+    window.addEventListener("resize", run);
+    return () => {
+      clearTimeout(t1); clearTimeout(t2); clearTimeout(t3);
+      window.removeEventListener("resize", run);
+    };
+  }, [map]);
+  return null;
+}
+
 
 type Mode =
   | { kind: "view" }
