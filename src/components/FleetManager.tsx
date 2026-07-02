@@ -90,6 +90,45 @@ export function FleetManager() {
           (pointsByUser.get(l.canvasser_id) ?? 0) + (l.demos_sits ?? 0) + (l.sales ?? 0),
         );
       }
+  // Week selector — default to current Monday-anchored week.
+  const [weekStart, setWeekStart] = useState<Date>(() => startOfWeekMonday(new Date()));
+  const weekEnd = useMemo(() => addDays(weekStart, 6), [weekStart]);
+  const weekStartISO = useMemo(() => toISODate(weekStart), [weekStart]);
+  const weekEndISO = useMemo(() => toISODate(weekEnd), [weekEnd]);
+  const isCurrentWeek = useMemo(
+    () => toISODate(startOfWeekMonday(new Date())) === weekStartISO,
+    [weekStartISO],
+  );
+
+  const fleet = useQuery({
+    queryKey: ["fleet_manager", weekStartISO, weekEndISO],
+    queryFn: async () => {
+      const [vansR, profilesR, rolesR, metricsR] = await Promise.all([
+        supabase.from("teams").select("id, name, color, captain_id, office_location").order("name"),
+        supabase.from("profiles").select("id, display_name, team_id, office_location").order("display_name"),
+        supabase.from("user_roles").select("user_id, role"),
+        supabase
+          .from("daily_metrics")
+          .select("canvasser_id, leads_confirmed, sales, metric_date")
+          .gte("metric_date", weekStartISO)
+          .lte("metric_date", weekEndISO),
+      ]);
+      if (vansR.error) throw vansR.error;
+      if (profilesR.error) throw profilesR.error;
+      if (rolesR.error) throw rolesR.error;
+      if (metricsR.error) throw metricsR.error;
+      const rolesByUser = new Map<string, string[]>();
+      for (const r of rolesR.data ?? []) {
+        const arr = rolesByUser.get(r.user_id) ?? [];
+        arr.push(r.role);
+        rolesByUser.set(r.user_id, arr);
+      }
+      // Weekly points: sit (leads_confirmed) = 1 pt, sale = 2 pts.
+      const pointsByUser = new Map<string, number>();
+      for (const m of metricsR.data ?? []) {
+        const pts = (m.leads_confirmed ?? 0) * 1 + (m.sales ?? 0) * 2;
+        pointsByUser.set(m.canvasser_id, (pointsByUser.get(m.canvasser_id) ?? 0) + pts);
+      }
       return {
         vans: vansR.data ?? [],
         profiles: profilesR.data ?? [],
@@ -99,23 +138,6 @@ export function FleetManager() {
     },
   });
 
-  const createVan = useMutation({
-    mutationFn: async () => {
-      if (!newVanName.trim()) throw new Error("Van name required");
-      const { error } = await supabase.from("teams").insert({
-        name: newVanName.trim(), color: newVanColor, office_location: newVanLoc,
-      });
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      toast.success("Van created");
-      setNewVanName("");
-      qc.invalidateQueries({ queryKey: ["fleet_manager"] });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  const setCaptain = useMutation({
     mutationFn: async ({ vanId, captainId }: { vanId: string; captainId: string | null }) => {
       const { error } = await supabase.from("teams").update({ captain_id: captainId }).eq("id", vanId);
       if (error) throw error;
