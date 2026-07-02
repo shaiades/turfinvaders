@@ -86,18 +86,27 @@ function FitBounds({ points }: { points: LatLng[] }) {
   return null;
 }
 
-function FollowMe({ me, zoom = 17 }: { me: LatLng | null | undefined; zoom?: number }) {
+function FollowMe({ me, zoom = 18, lockRadiusKm = 2 }: { me: LatLng | null | undefined; zoom?: number; lockRadiusKm?: number }) {
   const map = useMap();
   const didInitial = useRef(false);
   useEffect(() => {
     if (!me) return;
     if (!didInitial.current) {
       map.setView([me.lat, me.lng], zoom, { animate: false });
+      // Lock panning to a bounding box around the user (~lockRadiusKm)
+      const dLat = lockRadiusKm / 111;
+      const dLng = lockRadiusKm / (111 * Math.cos((me.lat * Math.PI) / 180));
+      const bounds = L.latLngBounds(
+        [me.lat - dLat, me.lng - dLng],
+        [me.lat + dLat, me.lng + dLng],
+      );
+      map.setMaxBounds(bounds);
+      map.setMinZoom(15);
       didInitial.current = true;
     } else {
       map.panTo([me.lat, me.lng], { animate: true });
     }
-  }, [map, me?.lat, me?.lng, zoom]);
+  }, [map, me?.lat, me?.lng, zoom, lockRadiusKm]);
   return null;
 }
 
@@ -124,9 +133,22 @@ type Mode =
   | { kind: "draw"; onComplete: (polygon: LatLng[]) => void }
   | { kind: "pin"; onDrop: (ll: LatLng) => void };
 
+export type HouseMarker = { id: string; lat: number; lng: number; name: string };
+
+function houseIcon(name: string) {
+  const safe = name.replace(/[<>&"']/g, "");
+  const html = `
+    <div style="display:flex;flex-direction:column;align-items:center;transform:translateY(-8px);">
+      <div style="background:rgba(11,15,26,0.85);border:1px solid #39ff14;color:#39ff14;font:700 10px/1 ui-sans-serif,system-ui;padding:3px 6px;border-radius:4px;white-space:nowrap;text-shadow:0 0 6px #39ff1488;box-shadow:0 0 8px #39ff1466;margin-bottom:2px;">${safe}</div>
+      <div style="width:14px;height:14px;background:#39ff14;border:2px solid #fff;border-radius:2px;box-shadow:0 0 10px #39ff14;transform:rotate(45deg);"></div>
+    </div>`;
+  return L.divIcon({ html, className: "neon-house", iconSize: [80, 34], iconAnchor: [40, 30] });
+}
+
 export function NeonMap({
   territories,
   pins = [],
+  houses = [],
   me,
   mode = { kind: "view" },
   center,
@@ -135,6 +157,7 @@ export function NeonMap({
 }: {
   territories: Territory[];
   pins?: FieldPin[];
+  houses?: HouseMarker[];
   me?: LatLng | null;
   mode?: Mode;
   center?: LatLng;
@@ -187,8 +210,14 @@ export function NeonMap({
         ref={(instance) => { mapRef.current = instance; }}
       >
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+          attribution='Imagery &copy; Esri, Maxar, Earthstar Geographics'
+          url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+          maxZoom={19}
+        />
+        <TileLayer
+          attribution='Labels &copy; Esri'
+          url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
+          maxZoom={19}
         />
         <InvalidateOnMount />
         <ClickCapture onClick={handleClick} />
@@ -224,6 +253,10 @@ export function NeonMap({
             ))}
           </>
         )}
+
+        {houses.map((h) => (
+          <Marker key={h.id} position={[h.lat, h.lng]} icon={houseIcon(h.name)} />
+        ))}
 
         {pins.map((p) => (
           <Marker key={p.id} position={[p.lat, p.lng]} icon={p.is_remote_drop ? flaggedPinIcon() : glowingDotIcon(PIN_COLORS[p.pin_type])} />

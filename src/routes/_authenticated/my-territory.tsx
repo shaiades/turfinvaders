@@ -53,7 +53,10 @@ function MyTerritoryPage() {
     enabled: !!user?.id,
     queryKey: ["my_territories", user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase.from("territories").select("id, name, color, polygon");
+      const { data, error } = await supabase
+        .from("territories")
+        .select("id, name, color, polygon")
+        .eq("canvasser_id", user!.id);
       if (error) throw error;
       return data ?? [];
     },
@@ -73,7 +76,7 @@ function MyTerritoryPage() {
     },
   });
 
-  const territories: Territory[] = useMemo(
+  const realTerritories: Territory[] = useMemo(
     () => (territoriesQuery.data ?? []).map((t) => ({
       id: t.id as string,
       name: t.name as string,
@@ -82,6 +85,39 @@ function MyTerritoryPage() {
     })),
     [territoriesQuery.data],
   );
+
+  // MOCK TURF + HOUSES for testing — only when user has no assigned territory yet.
+  // Generated around the user's live GPS so every canvasser sees their OWN turf.
+  const mock = useMemo(() => {
+    if (!me || realTerritories.length > 0) return { territories: [] as Territory[], houses: [] as Array<{ id: string; lat: number; lng: number; name: string }> };
+    // ~150m box around the user
+    const dLat = 0.00135;
+    const dLng = 0.0018;
+    const poly: LatLng[] = [
+      { lat: me.lat - dLat, lng: me.lng - dLng },
+      { lat: me.lat - dLat, lng: me.lng + dLng },
+      { lat: me.lat + dLat, lng: me.lng + dLng },
+      { lat: me.lat + dLat, lng: me.lng - dLng },
+    ];
+    const names = ["Johnson", "Smith", "Garcia", "Nguyen", "Patel", "O'Brien", "Chen", "Ruiz"];
+    const houses = names.map((n, i) => {
+      const angle = (i / names.length) * Math.PI * 2;
+      const r = 0.0009 + (i % 3) * 0.00025;
+      return {
+        id: `mock-${i}`,
+        name: n,
+        lat: me.lat + Math.sin(angle) * r,
+        lng: me.lng + Math.cos(angle) * r * 1.3,
+      };
+    });
+    return {
+      territories: [{ id: "mock-turf", name: "My Turf (Demo)", color: "#39ff14", polygon: poly }],
+      houses,
+    };
+  }, [me, realTerritories.length]);
+
+  const territories = realTerritories.length > 0 ? realTerritories : mock.territories;
+  const houseMarkers = mock.houses;
 
   const dropPin = useMutation({
     mutationFn: async (ll: LatLng) => {
@@ -165,6 +201,7 @@ function MyTerritoryPage() {
       <NeonMap
         territories={territories}
         pins={pinsQuery.data ?? []}
+        houses={houseMarkers}
         me={me}
         height={560}
         follow
