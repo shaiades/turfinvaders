@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
@@ -7,8 +7,42 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Truck, Plus, Building2, Trash2, UserMinus, GripVertical, Pencil, Check, X } from "lucide-react";
+import { Truck, Plus, Building2, Trash2, UserMinus, GripVertical, Pencil, Check, X, ChevronLeft, ChevronRight, CalendarRange } from "lucide-react";
 import { deleteProfile, deleteVan } from "@/lib/fleet.functions";
+
+// Week helpers — ISO week, Monday..Sunday.
+function startOfWeekMonday(d: Date): Date {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  const day = x.getDay(); // 0=Sun..6=Sat
+  const diff = day === 0 ? -6 : 1 - day; // shift to Monday
+  x.setDate(x.getDate() + diff);
+  return x;
+}
+function addDays(d: Date, n: number): Date {
+  const x = new Date(d);
+  x.setDate(x.getDate() + n);
+  return x;
+}
+function toISODate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+function formatRange(start: Date, end: Date): string {
+  const sameMonth = start.getMonth() === end.getMonth();
+  const sameYear = start.getFullYear() === end.getFullYear();
+  const monthFmt = (d: Date) => d.toLocaleDateString(undefined, { month: "short" });
+  const sM = monthFmt(start);
+  const eM = monthFmt(end);
+  const sD = start.getDate();
+  const eD = end.getDate();
+  if (sameMonth && sameYear) return `${sM} ${sD} – ${eD}, ${end.getFullYear()}`;
+  if (sameYear) return `${sM} ${sD} – ${eM} ${eD}, ${end.getFullYear()}`;
+  return `${sM} ${sD}, ${start.getFullYear()} – ${eM} ${eD}, ${end.getFullYear()}`;
+}
+
 
 const VAN_COLORS = ["#ff007a", "#00f0ff", "#a855f7", "#f59e0b", "#22c55e", "#ef4444", "#3b82f6", "#eab308"];
 export const OFFICE_LOCATIONS = ["San Diego", "Orange County"] as const;
@@ -30,31 +64,44 @@ export function FleetManager() {
   const [editVanColor, setEditVanColor] = useState(VAN_COLORS[0]);
   const [editVanLoc, setEditVanLoc] = useState<OfficeLocation>("San Diego");
 
+  // Week selector — default to current Monday-anchored week.
+  const [weekStart, setWeekStart] = useState<Date>(() => startOfWeekMonday(new Date()));
+  const weekEnd = useMemo(() => addDays(weekStart, 6), [weekStart]);
+  const weekStartISO = useMemo(() => toISODate(weekStart), [weekStart]);
+  const weekEndISO = useMemo(() => toISODate(weekEnd), [weekEnd]);
+  const isCurrentWeek = useMemo(
+    () => toISODate(startOfWeekMonday(new Date())) === weekStartISO,
+    [weekStartISO],
+  );
+
   const fleet = useQuery({
-    queryKey: ["fleet_manager"],
+    queryKey: ["fleet_manager", weekStartISO, weekEndISO],
     queryFn: async () => {
-      const [vansR, profilesR, rolesR, logsR] = await Promise.all([
+      const [vansR, profilesR, rolesR, metricsR] = await Promise.all([
         supabase.from("teams").select("id, name, color, captain_id, office_location").order("name"),
         supabase.from("profiles").select("id, display_name, team_id, office_location").order("display_name"),
         supabase.from("user_roles").select("user_id, role"),
-        supabase.from("daily_logs").select("canvasser_id, demos_sits, sales"),
+        supabase
+          .from("daily_metrics")
+          .select("canvasser_id, leads_confirmed, sales, metric_date")
+          .gte("metric_date", weekStartISO)
+          .lte("metric_date", weekEndISO),
       ]);
       if (vansR.error) throw vansR.error;
       if (profilesR.error) throw profilesR.error;
       if (rolesR.error) throw rolesR.error;
-      if (logsR.error) throw logsR.error;
+      if (metricsR.error) throw metricsR.error;
       const rolesByUser = new Map<string, string[]>();
       for (const r of rolesR.data ?? []) {
         const arr = rolesByUser.get(r.user_id) ?? [];
         arr.push(r.role);
         rolesByUser.set(r.user_id, arr);
       }
+      // Weekly points: sit (leads_confirmed) = 1 pt, sale = 2 pts.
       const pointsByUser = new Map<string, number>();
-      for (const l of logsR.data ?? []) {
-        pointsByUser.set(
-          l.canvasser_id,
-          (pointsByUser.get(l.canvasser_id) ?? 0) + (l.demos_sits ?? 0) + (l.sales ?? 0),
-        );
+      for (const m of metricsR.data ?? []) {
+        const pts = (m.leads_confirmed ?? 0) * 1 + (m.sales ?? 0) * 2;
+        pointsByUser.set(m.canvasser_id, (pointsByUser.get(m.canvasser_id) ?? 0) + pts);
       }
       return {
         vans: vansR.data ?? [],
@@ -209,8 +256,54 @@ export function FleetManager() {
 
   return (
     <div className="space-y-6">
-      {/* Create Van */}
+      {/* Week Selector */}
+      <ArcadePanel title="Leaderboard Week">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setWeekStart((w) => addDays(w, -7))}
+              title="Previous week"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+            <div className="px-3 py-1.5 rounded border border-neon/40 bg-neon/5 flex items-center gap-2 min-w-[240px] justify-center">
+              <CalendarRange className="w-4 h-4 text-neon" />
+              <div className="flex flex-col leading-tight">
+                <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                  {isCurrentWeek ? "Current Week" : "Selected Week"}
+                </span>
+                <span className="text-sm font-display">{formatRange(weekStart, weekEnd)}</span>
+              </div>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setWeekStart((w) => addDays(w, 7))}
+              title="Next week"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+          </div>
+          {!isCurrentWeek && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setWeekStart(startOfWeekMonday(new Date()))}
+            >
+              Jump to current week
+            </Button>
+          )}
+        </div>
+        <p className="mt-2 text-[10px] text-muted-foreground">
+          Points below reflect Mon–Sun of the selected week (Sit = 1 pt, Sale = 2 pts).
+        </p>
+      </ArcadePanel>
+
+      {/* Create New Van */}
       <ArcadePanel title="Create New Van">
+
         <div className="grid gap-3 md:grid-cols-[1fr_180px_140px_auto] items-end">
           <div>
             <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Van Name</label>
