@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
@@ -7,8 +7,42 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Truck, Plus, Building2, Trash2, UserMinus, GripVertical, Pencil, Check, X } from "lucide-react";
+import { Truck, Plus, Building2, Trash2, UserMinus, GripVertical, Pencil, Check, X, ChevronLeft, ChevronRight, CalendarRange } from "lucide-react";
 import { deleteProfile, deleteVan } from "@/lib/fleet.functions";
+
+// Week helpers — ISO week, Monday..Sunday.
+function startOfWeekMonday(d: Date): Date {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  const day = x.getDay(); // 0=Sun..6=Sat
+  const diff = day === 0 ? -6 : 1 - day; // shift to Monday
+  x.setDate(x.getDate() + diff);
+  return x;
+}
+function addDays(d: Date, n: number): Date {
+  const x = new Date(d);
+  x.setDate(x.getDate() + n);
+  return x;
+}
+function toISODate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+function formatRange(start: Date, end: Date): string {
+  const sameMonth = start.getMonth() === end.getMonth();
+  const sameYear = start.getFullYear() === end.getFullYear();
+  const monthFmt = (d: Date) => d.toLocaleDateString(undefined, { month: "short" });
+  const sM = monthFmt(start);
+  const eM = monthFmt(end);
+  const sD = start.getDate();
+  const eD = end.getDate();
+  if (sameMonth && sameYear) return `${sM} ${sD} – ${eD}, ${end.getFullYear()}`;
+  if (sameYear) return `${sM} ${sD} – ${eM} ${eD}, ${end.getFullYear()}`;
+  return `${sM} ${sD}, ${start.getFullYear()} – ${eM} ${eD}, ${end.getFullYear()}`;
+}
+
 
 const VAN_COLORS = ["#ff007a", "#00f0ff", "#a855f7", "#f59e0b", "#22c55e", "#ef4444", "#3b82f6", "#eab308"];
 export const OFFICE_LOCATIONS = ["San Diego", "Orange County"] as const;
