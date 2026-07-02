@@ -150,6 +150,7 @@ export type Database = {
       }
       daily_metrics: {
         Row: {
+          blowouts: number
           canvasser_id: string
           created_at: string
           id: string
@@ -160,11 +161,16 @@ export type Database = {
           metric_date: string
           no_answers: number
           office_location: string
+          outside_leads: number
           pending: number
+          pitch_missed: number
+          resets: number
+          sales: number
           sits_ran_today: number
           updated_at: string
         }
         Insert: {
+          blowouts?: number
           canvasser_id: string
           created_at?: string
           id?: string
@@ -175,11 +181,16 @@ export type Database = {
           metric_date?: string
           no_answers?: number
           office_location?: string
+          outside_leads?: number
           pending?: number
+          pitch_missed?: number
+          resets?: number
+          sales?: number
           sits_ran_today?: number
           updated_at?: string
         }
         Update: {
+          blowouts?: number
           canvasser_id?: string
           created_at?: string
           id?: string
@@ -190,7 +201,11 @@ export type Database = {
           metric_date?: string
           no_answers?: number
           office_location?: string
+          outside_leads?: number
           pending?: number
+          pitch_missed?: number
+          resets?: number
+          sales?: number
           sits_ran_today?: number
           updated_at?: string
         }

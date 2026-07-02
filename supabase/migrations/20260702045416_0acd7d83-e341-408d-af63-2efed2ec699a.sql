@@ -1,0 +1,6 @@
+ALTER TABLE public.daily_metrics
+  ADD COLUMN IF NOT EXISTS blowouts integer NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS outside_leads integer NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS resets integer NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS pitch_missed integer NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS sales integer NOT NULL DEFAULT 0;

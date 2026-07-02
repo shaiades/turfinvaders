@@ -18,15 +18,62 @@ function todayLA(): string {
   return fmt.format(new Date())
 }
 
-type Bucket = 'leads_confirmed' | 'no_answers' | 'killed' | 'pending' | null
-function mapStatus(raw: string): Bucket {
-  const s = raw.trim().toLowerCase().replace(/\s+/g, ' ')
-  if (s === 'confirmed' || s === 'future reconf') return 'leads_confirmed'
-  if (s.startsWith('n/a')) return 'no_answers'
-  if (s === 'blowout' || s === 'disconnected') return 'killed'
-  if (s === 'unconfirmed' || s === 'future' || s === 'room lead') return 'pending'
-  if (s === 'submitted') return null
-  return 'pending'
+/**
+ * Schedule board outcome mapper.
+ * Returns which daily_metrics counter to bump based on the changed column
+ * label and the new cell value. Match is case-insensitive.
+ */
+type ScheduleBucket =
+  | 'blowouts'         // BO
+  | 'outside_leads'    // OL
+  | 'resets'           // RS
+  | 'pitch_missed'     // PM
+  | 'sales'            // SALE
+  | 'leads_confirmed'  // Confirmed
+  | 'no_answers'       // N/A
+  | 'killed'           // Blowout/Disconnected (live-dispatch legacy)
+  | 'pending'          // Unconfirmed/Future
+  | null
+
+function mapScheduleOutcome(columnTitle: string, value: string): ScheduleBucket {
+  const col = (columnTitle || '').trim().toLowerCase()
+  const v = (value || '').trim().toLowerCase()
+  if (!v) return null
+
+  // BO column
+  if (col === 'bo' || col.includes('blowout')) {
+    if (v === 'no show' || v === 'no demo' || v === 'bo') return 'blowouts'
+  }
+  // OL column
+  if (col === 'ol' || col.includes('outside lead')) {
+    if (v === 'ol' || v === 'outside lead') return 'outside_leads'
+  }
+  // RS column
+  if (col === 'rs' || col.includes('reset')) {
+    if (v === 'reset' || v === 'rs') return 'resets'
+  }
+  // PM column
+  if (col === 'pm' || col.includes('pitch missed')) {
+    if (v === 'pm' || v === 'pm w/ reset' || v === 'pm w reset' || v.startsWith('pm')) return 'pitch_missed'
+  }
+  // Sale column
+  if (col === 'sale' || col.includes('sale')) {
+    if (v === 'sold' || v === 'reload' || v === 'upsell' || v === 'sale') return 'sales'
+  }
+
+  // Fallback: value-based mapping (works even if column titles don't match).
+  if (v === 'no show' || v === 'no demo') return 'blowouts'
+  if (v === 'ol') return 'outside_leads'
+  if (v === 'reset') return 'resets'
+  if (v === 'pm' || v === 'pm w/ reset' || v === 'pm w reset') return 'pitch_missed'
+  if (v === 'sold' || v === 'reload' || v === 'upsell') return 'sales'
+
+  // Live-dispatch status column legacy mapping
+  if (v === 'confirmed' || v === 'future reconf') return 'leads_confirmed'
+  if (v.startsWith('n/a')) return 'no_answers'
+  if (v === 'blowout' || v === 'disconnected') return 'killed'
+  if (v === 'unconfirmed' || v === 'future' || v === 'room lead') return 'pending'
+  return null
 }
 
 serve(async (req) => {
@@ -54,6 +101,8 @@ serve(async (req) => {
 
     const event = body?.data?.event || body?.event || body
     const pulseId = event?.pulseId || event?.itemId || event?.pulse_id
+    const boardId = String(event?.boardId || event?.board_id || '')
+    const changedColumnId: string | undefined = event?.columnId || event?.column_id
     const statusFromEvent: string | undefined =
       event?.value?.label?.text ||
       event?.value?.label ||
@@ -62,7 +111,7 @@ serve(async (req) => {
 
     await supabaseAdmin.from('webhook_logs').insert({
       step: '2_Payload_Parsed',
-      data: { pulseId, statusFromEvent },
+      data: { pulseId, boardId, changedColumnId, statusFromEvent },
     })
 
     if (!pulseId) {
@@ -70,41 +119,47 @@ serve(async (req) => {
       return new Response('No pulseId', { status: 200, headers: corsHeaders })
     }
 
-    // Step 3: Fetch Monday token (system_settings is a singleton row: id=true, monday_api_token text)
-    const { data: tokenRow, error: tokenErr } = await supabaseAdmin
+    // Step 2b: Load active board IDs from system_settings
+    const { data: settingsRow } = await supabaseAdmin
       .from('system_settings')
       .select('*')
       .maybeSingle()
 
+    const activeBoardOC = String((settingsRow as any)?.active_monday_board_oc || '')
+    const activeBoardSD = String((settingsRow as any)?.active_monday_board_sd || '')
+    let boardOffice: string | null = null
+    if (boardId && activeBoardOC && boardId === activeBoardOC) boardOffice = 'Orange County'
+    else if (boardId && activeBoardSD && boardId === activeBoardSD) boardOffice = 'San Diego'
+
     await supabaseAdmin.from('webhook_logs').insert({
-      step: '2.5_Token_Row_Inspect',
-      data: { error: tokenErr?.message, keys: tokenRow ? Object.keys(tokenRow) : [] },
+      step: '2b_Board_Resolved',
+      data: { boardId, activeBoardOC, activeBoardSD, boardOffice },
     })
 
-    // Prefer known column, fall back to any string-valued column that looks like a token
-    let mondayToken = (tokenRow as any)?.monday_api_token
-      || (tokenRow as any)?.value
-      || (tokenRow as any)?.setting_value
-      || (tokenRow as any)?.config_value
+    // Step 3: Fetch Monday token
+    let mondayToken = (settingsRow as any)?.monday_api_token
+      || (settingsRow as any)?.value
+      || (settingsRow as any)?.setting_value
+      || (settingsRow as any)?.config_value
       || null
-    if (!mondayToken && tokenRow) {
-      for (const [k, v] of Object.entries(tokenRow)) {
-        if (typeof v === 'string' && v.length > 20 && k !== 'id') { mondayToken = v; break }
+    if (!mondayToken && settingsRow) {
+      for (const [k, v] of Object.entries(settingsRow)) {
+        if (typeof v === 'string' && v.length > 20 && k !== 'id' && !k.startsWith('active_monday_board')) {
+          mondayToken = v; break
+        }
       }
     }
-
-    if (tokenErr || !mondayToken) {
+    if (!mondayToken) {
       await supabaseAdmin.from('webhook_logs').insert({
         step: 'Error_No_Token',
-        data: { error: tokenErr?.message, hasRow: !!tokenRow, keys: tokenRow ? Object.keys(tokenRow) : [] },
+        data: { keys: settingsRow ? Object.keys(settingsRow) : [] },
       })
       return new Response('No token', { status: 200, headers: corsHeaders })
     }
     mondayToken = String(mondayToken)
 
-
-    // Step 3b: Query Monday GraphQL
-    const query = `query { items(ids: [${pulseId}]) { id name column_values { id text column { title } } } }`
+    // Step 3b: Query Monday GraphQL for the item
+    const query = `query { items(ids: [${pulseId}]) { id name board { id } column_values { id text column { title id } } } }`
     let mondayJson: any = null
     let mondayError: string | null = null
     try {
@@ -124,7 +179,7 @@ serve(async (req) => {
 
     await supabaseAdmin.from('webhook_logs').insert({
       step: '3_Monday_API_Response',
-      data: { pulseId, mondayError, response: mondayJson },
+      data: { pulseId, mondayError, hasItem: !!mondayJson?.data?.items?.[0] },
     })
 
     if (!mondayJson?.data?.items?.[0]) {
@@ -136,32 +191,37 @@ serve(async (req) => {
     }
 
     const item = mondayJson.data.items[0]
-    const cols: Array<{ id: string; text: string | null; column: { title: string } }> =
+    const cols: Array<{ id: string; text: string | null; column: { title: string; id: string } }> =
       item.column_values || []
 
-    // Find canvasser: prefer "agent" or "canvasser" column title
+    // Agent name column
     const nameCol = cols.find((c) => {
       const t = (c.column?.title || '').toLowerCase()
-      return t.includes('agent') || t.includes('canvasser')
+      return t === 'agent' || t.includes('agent') || t.includes('canvasser')
     })
     const canvasserName = (nameCol?.text || '').trim()
 
-    // Find status label
-    const statusCol = cols.find((c) => {
-      const t = (c.column?.title || '').toLowerCase()
-      return t === 'status' || t.includes('status')
+    // Locate the changed column
+    const changedCol = changedColumnId
+      ? cols.find((c) => (c.id === changedColumnId) || (c.column?.id === changedColumnId))
+      : undefined
+    const changedTitle = changedCol?.column?.title || ''
+    const changedValue = (statusFromEvent || changedCol?.text || '').trim()
+
+    await supabaseAdmin.from('webhook_logs').insert({
+      step: '3b_Item_Inspect',
+      data: { itemName: item.name, canvasserName, changedTitle, changedValue },
     })
-    const rawStatus = (statusFromEvent || statusCol?.text || '').trim()
 
     if (!canvasserName) {
       await supabaseAdmin.from('webhook_logs').insert({
         step: 'Error_No_Canvasser_Name',
-        data: { pulseId, itemName: item.name, columns: cols.map((c) => c.column?.title) },
+        data: { pulseId, columns: cols.map((c) => c.column?.title) },
       })
       return new Response('No canvasser', { status: 200, headers: corsHeaders })
     }
 
-    // Step 4: Match canvasser
+    // Step 4: Fuzzy match canvasser
     const wanted = normalizeName(canvasserName)
     const { data: profiles } = await supabaseAdmin
       .from('profiles')
@@ -192,40 +252,43 @@ serve(async (req) => {
       data: { canvasserName, matchedId: match.id, matchedName: match.display_name },
     })
 
-    // Step 5: Upsert daily_metrics
-    const bucket = mapStatus(rawStatus)
-    const isSubmittedOnly = rawStatus.trim().toLowerCase() === 'submitted'
+    // Step 5: Map the outcome
+    const bucket = mapScheduleOutcome(changedTitle, changedValue)
     const metric_date = todayLA()
-    const office_location = match.office_location ?? 'San Diego'
+    const office_location = boardOffice ?? match.office_location ?? 'San Diego'
 
     const { data: existing } = await supabaseAdmin
       .from('daily_metrics')
-      .select('id, leads_submitted, leads_confirmed, no_answers, killed, pending')
+      .select('id, leads_submitted, leads_confirmed, no_answers, killed, pending, blowouts, outside_leads, resets, pitch_missed, sales')
       .eq('canvasser_id', match.id)
       .eq('metric_date', metric_date)
       .maybeSingle()
 
-    const nextSubmitted = (existing?.leads_submitted ?? 0) + 1
-    const nextConfirmed = (existing?.leads_confirmed ?? 0) + (bucket === 'leads_confirmed' ? 1 : 0)
-    const nextNoAnswers = (existing?.no_answers ?? 0) + (bucket === 'no_answers' ? 1 : 0)
-    const nextKilled = (existing?.killed ?? 0) + (bucket === 'killed' ? 1 : 0)
-    const nextPending = (existing?.pending ?? 0) + (bucket === 'pending' && !isSubmittedOnly ? 1 : 0)
+    const cur = existing ?? {
+      leads_submitted: 0, leads_confirmed: 0, no_answers: 0, killed: 0, pending: 0,
+      blowouts: 0, outside_leads: 0, resets: 0, pitch_missed: 0, sales: 0,
+    }
+    const inc = (key: string) => (bucket === key ? 1 : 0)
+
+    const payload = {
+      canvasser_id: match.id,
+      metric_date,
+      office_location,
+      leads_submitted: cur.leads_submitted ?? 0,
+      leads_confirmed: (cur.leads_confirmed ?? 0) + inc('leads_confirmed'),
+      no_answers: (cur.no_answers ?? 0) + inc('no_answers'),
+      killed: (cur.killed ?? 0) + inc('killed'),
+      pending: (cur.pending ?? 0) + inc('pending'),
+      blowouts: (cur.blowouts ?? 0) + inc('blowouts'),
+      outside_leads: (cur.outside_leads ?? 0) + inc('outside_leads'),
+      resets: (cur.resets ?? 0) + inc('resets'),
+      pitch_missed: (cur.pitch_missed ?? 0) + inc('pitch_missed'),
+      sales: (cur.sales ?? 0) + inc('sales'),
+    }
 
     const { error: upErr } = await supabaseAdmin
       .from('daily_metrics')
-      .upsert(
-        {
-          canvasser_id: match.id,
-          metric_date,
-          office_location,
-          leads_submitted: nextSubmitted,
-          leads_confirmed: nextConfirmed,
-          no_answers: nextNoAnswers,
-          killed: nextKilled,
-          pending: nextPending,
-        },
-        { onConflict: 'canvasser_id,metric_date' },
-      )
+      .upsert(payload, { onConflict: 'canvasser_id,metric_date' })
 
     if (upErr) {
       await supabaseAdmin.from('webhook_logs').insert({
@@ -236,13 +299,16 @@ serve(async (req) => {
     }
 
     await supabaseAdmin.from('webhook_logs').insert({
-      step: '5_Metrics_Updated',
+      step: 'Schedule_Outcome_Processed',
       data: {
+        boardId,
+        boardOffice,
+        agentName: match.display_name,
         canvasser_id: match.id,
+        changedColumn: changedTitle,
+        changedValue,
+        recordedAs: bucket ?? 'unmapped',
         metric_date,
-        rawStatus,
-        bucket: bucket ?? 'submitted_only',
-        totals: { nextSubmitted, nextConfirmed, nextNoAnswers, nextKilled, nextPending },
       },
     })
 
@@ -253,9 +319,7 @@ serve(async (req) => {
         step: 'Fatal_Crash',
         data: { error: err instanceof Error ? err.message : String(err) },
       })
-    } catch (_) {
-      // swallow
-    }
+    } catch (_) { /* swallow */ }
     return new Response('Caught error', { headers: corsHeaders, status: 200 })
   }
 })
