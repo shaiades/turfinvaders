@@ -206,6 +206,7 @@ export function NeonMap({
   center,
   height = 480,
   follow = false,
+  lockPolygon,
   onTerritoryClick,
 }: {
   territories: Territory[];
@@ -218,6 +219,7 @@ export function NeonMap({
   center?: LatLng;
   height?: number;
   follow?: boolean;
+  lockPolygon?: LatLng[];
   onTerritoryClick?: (id: string) => void;
 }) {
   const [draft, setDraft] = useState<LatLng[]>([]);
