@@ -81,16 +81,23 @@ const addTeamMemberSchema = z.object({
   role: z.enum(["owner", "captain", "canvasser"]),
 });
 
-/** Owner-only: create a placeholder profile (no auth login) with a generated UUID. */
+/** Managers (Owner / Captain / Admin) can add a placeholder profile with a generated UUID. */
 export const addTeamMember = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => addTeamMemberSchema.parse(data))
   .handler(async ({ data, context }) => {
-    const { data: isOwner } = await context.supabase.rpc("has_role", {
-      _user_id: context.userId,
-      _role: "owner",
-    });
-    if (!isOwner) throw new Error("Only Owners can add team members.");
+    const { data: roleRows, error: roleErr } = await context.supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId);
+    if (roleErr) throw new Error(roleErr.message);
+    const roles = (roleRows ?? []).map((r) => r.role as string);
+    const isOwner = roles.includes("owner");
+    const isManager = isOwner || roles.includes("captain") || roles.includes("office_staff");
+    if (!isManager) throw new Error("Only Owners, Captains, or Admins can add team members.");
+    if (!isOwner && !["canvasser", "captain"].includes(data.role)) {
+      throw new Error("Only Owners can add Owners or Admins.");
+    }
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const newId = crypto.randomUUID();
