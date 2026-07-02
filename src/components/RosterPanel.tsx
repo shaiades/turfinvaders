@@ -29,7 +29,7 @@ export function RosterPanel() {
   return (
     <ArcadePanel
       title="Active Company Roster"
-      right={<AddTeamMemberDialog variant="neon" />}
+      action={<AddTeamMemberDialog variant="neon" />}
     >
       {isLoading ? (
         <div className="text-sm text-muted-foreground py-6">Loading roster…</div>
