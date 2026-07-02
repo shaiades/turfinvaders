@@ -488,8 +488,7 @@ function WebhookLogsButton() {
                       <span>{new Date(l.created_at).toLocaleString()}</span>
                     </div>
                     <pre className="text-[11px] font-mono text-foreground whitespace-pre-wrap break-all max-h-64 overflow-auto">
-{JSON.stringify(l.data ?? l.raw_payload ?? {}, null, 2)}</pre>
-                      {JSON.stringify(l.raw_payload, null, 2)}
+{JSON.stringify(l.data ?? l.raw_payload ?? {}, null, 2)}
                     </pre>
                   </div>
                 ))
