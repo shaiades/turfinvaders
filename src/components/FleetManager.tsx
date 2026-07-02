@@ -64,32 +64,6 @@ export function FleetManager() {
   const [editVanColor, setEditVanColor] = useState(VAN_COLORS[0]);
   const [editVanLoc, setEditVanLoc] = useState<OfficeLocation>("San Diego");
 
-  const fleet = useQuery({
-    queryKey: ["fleet_manager"],
-    queryFn: async () => {
-      const [vansR, profilesR, rolesR, logsR] = await Promise.all([
-        supabase.from("teams").select("id, name, color, captain_id, office_location").order("name"),
-        supabase.from("profiles").select("id, display_name, team_id, office_location").order("display_name"),
-        supabase.from("user_roles").select("user_id, role"),
-        supabase.from("daily_logs").select("canvasser_id, demos_sits, sales"),
-      ]);
-      if (vansR.error) throw vansR.error;
-      if (profilesR.error) throw profilesR.error;
-      if (rolesR.error) throw rolesR.error;
-      if (logsR.error) throw logsR.error;
-      const rolesByUser = new Map<string, string[]>();
-      for (const r of rolesR.data ?? []) {
-        const arr = rolesByUser.get(r.user_id) ?? [];
-        arr.push(r.role);
-        rolesByUser.set(r.user_id, arr);
-      }
-      const pointsByUser = new Map<string, number>();
-      for (const l of logsR.data ?? []) {
-        pointsByUser.set(
-          l.canvasser_id,
-          (pointsByUser.get(l.canvasser_id) ?? 0) + (l.demos_sits ?? 0) + (l.sales ?? 0),
-        );
-      }
   // Week selector — default to current Monday-anchored week.
   const [weekStart, setWeekStart] = useState<Date>(() => startOfWeekMonday(new Date()));
   const weekEnd = useMemo(() => addDays(weekStart, 6), [weekStart]);
