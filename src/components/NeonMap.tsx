@@ -279,7 +279,8 @@ export function NeonMap({
         />
         <InvalidateOnMount />
         <ClickCapture onClick={handleClick} />
-        {follow ? <FollowMe me={me} /> : allPoints.length > 0 && <FitBounds points={allPoints} />}
+        {lockPolygon && lockPolygon.length >= 3 && <LockToPolygon polygon={lockPolygon} />}
+        {follow ? <FollowMe me={me} disableLock={!!(lockPolygon && lockPolygon.length >= 3)} /> : allPoints.length > 0 && !lockPolygon && <FitBounds points={allPoints} />}
 
         {territories.map((t) => (
           <Polygon
