@@ -321,6 +321,7 @@ function MyTerritoryPage() {
             height={560}
             follow
             mode={mapMode}
+            onTerritoryClick={isManager && !drawing ? (id) => { setEditingTurfId(id); setIsModalOpen(true); } : undefined}
           />
           {/* Floating fallback: always visible when a polygon is pending */}
           {isManager && pendingPolygon && pendingPolygon.length >= 3 && (
