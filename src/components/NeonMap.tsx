@@ -180,6 +180,8 @@ export function NeonMap({
   territories,
   pins = [],
   houses = [],
+  leads = [],
+  proximityMeters = 30,
   me,
   mode = { kind: "view" },
   center,
@@ -190,6 +192,8 @@ export function NeonMap({
   territories: Territory[];
   pins?: FieldPin[];
   houses?: HouseMarker[];
+  leads?: LeadPin[];
+  proximityMeters?: number;
   me?: LatLng | null;
   mode?: Mode;
   center?: LatLng;
