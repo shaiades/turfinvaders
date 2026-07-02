@@ -320,18 +320,26 @@ Deno.serve(async (req) => {
       },
       { onConflict: "canvasser_id,metric_date" },
     );
-    if (upErr) {
-      await supabaseAdmin.from("webhook_logs").insert({
-        source: "monday-live-dispatch",
-        raw_payload: {
-          step: "5_UpsertError",
-          message: upErr.message,
-          canvasser_id: match.id,
-          metric_date,
-        } as never,
-      });
-      return ok200("Acknowledged (upsert failed)");
-    }
+    // STEP 5: Updating Supabase
+    await supabaseAdmin.from("webhook_logs").insert({
+      source: "monday-live-dispatch",
+      raw_payload: {
+        step: "5_Updating Supabase",
+        upsertResult: upErr ? { error: upErr.message } : "Success",
+        canvasser_id: match.id,
+        metric_date,
+        bucket,
+        status,
+        totals: {
+          leads_submitted: nextSubmitted,
+          leads_confirmed: nextConfirmed,
+          no_answers: nextNoAnswers,
+          killed: nextKilled,
+          pending: nextPending,
+        },
+      } as never,
+    });
+    if (upErr) return ok200("Acknowledged (upsert failed)");
 
     return new Response("Success", {
       status: 200,
