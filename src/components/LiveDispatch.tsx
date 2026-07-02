@@ -455,7 +455,7 @@ function WebhookLogsButton() {
                   X-Ray · Raw Incoming Payloads
                 </div>
                 <div className="font-display text-sm text-neon mt-0.5">
-                  WEBHOOK LOGS (LAST 25)
+                  WEBHOOK LOGS · LIVE (LAST 50)
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -484,10 +484,11 @@ function WebhookLogsButton() {
                 logs.map((l) => (
                   <div key={l.id} className="border border-border rounded p-3 bg-surface">
                     <div className="flex justify-between text-[10px] font-display uppercase tracking-widest text-muted-foreground mb-2">
-                      <span>{l.source ?? "unknown"}</span>
+                      <span className="text-neon">{l.step ?? l.source ?? "unknown"}</span>
                       <span>{new Date(l.created_at).toLocaleString()}</span>
                     </div>
                     <pre className="text-[11px] font-mono text-foreground whitespace-pre-wrap break-all max-h-64 overflow-auto">
+{JSON.stringify(l.data ?? l.raw_payload ?? {}, null, 2)}</pre>
                       {JSON.stringify(l.raw_payload, null, 2)}
                     </pre>
                   </div>
