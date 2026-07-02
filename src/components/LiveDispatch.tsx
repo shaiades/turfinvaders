@@ -125,9 +125,10 @@ function LiveDispatchInner() {
   );
 
   const visible = useMemo(
-    () => canvassers.filter((c) => matches(c.office_location)),
+    () => canvassers.filter((c) => matches(c.office_location ?? c.team_office)),
     [canvassers, matches],
   );
+
 
   const totals = useMemo(() => {
     let sub = 0, conf = 0, na = 0, kil = 0, pen = 0;
