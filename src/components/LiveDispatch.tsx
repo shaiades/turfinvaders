@@ -131,16 +131,16 @@ function LiveDispatchInner() {
 
 
   const totals = useMemo(() => {
-    let sub = 0, conf = 0, na = 0, kil = 0, pen = 0;
+    let conf = 0, na = 0, kil = 0, pen = 0;
     visible.forEach((c) => {
       const m = metricMap[c.id];
       if (!m) return;
-      sub += m.leads_submitted ?? 0;
       conf += m.leads_confirmed ?? 0;
       na += m.no_answers ?? 0;
       kil += m.killed ?? 0;
       pen += m.pending ?? 0;
     });
+    const sub = conf + kil + pen + na;
     const conv = sub > 0 ? Math.round((conf / sub) * 100) : 0;
     return { sub, conf, na, kil, pen, conv };
   }, [visible, metricMap]);
@@ -203,11 +203,11 @@ function LiveDispatchInner() {
               <tbody>
                 {visible.map((c) => {
                   const m = metricMap[c.id];
-                  const sub = m?.leads_submitted ?? 0;
                   const conf = m?.leads_confirmed ?? 0;
                   const na = m?.no_answers ?? 0;
                   const kil = m?.killed ?? 0;
                   const pen = m?.pending ?? 0;
+                  const sub = conf + kil + pen + na;
                   const conv = sub > 0 ? Math.round((conf / sub) * 100) : 0;
                   return (
                     <tr key={c.id} className="border-b border-border/40 hover:bg-surface-elevated">
