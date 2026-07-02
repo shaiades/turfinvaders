@@ -6,8 +6,16 @@ import { useAuth } from "@/hooks/useAuth";
 import { ArcadePanel } from "@/components/arcade";
 import { NeonMap, type Territory, type FieldPin, type LatLng } from "@/components/NeonMap";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+} from "@/components/ui/dialog";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import { toast } from "sonner";
-import { Home, MessageSquare, Sparkles, Crosshair } from "lucide-react";
+import { Home, MessageSquare, Sparkles, Crosshair, Pencil, MapPin, Trash2 } from "lucide-react";
 import { GratitudeGate } from "@/components/GratitudeGate";
 
 export const Route = createFileRoute("/_authenticated/my-territory")({
@@ -31,13 +39,26 @@ function haversineMeters(a: LatLng, b: LatLng) {
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
+const TURF_COLORS = ["#39ff14", "#00e5ff", "#ffd60a", "#ff2d55", "#ff6b00", "#c77dff"];
+
 type ActivePin = FieldPin["pin_type"];
+type TurfRow = {
+  id: string;
+  name: string;
+  color: string;
+  polygon_coordinates: LatLng[];
+  assigned_user_id: string | null;
+  assignee_name?: string | null;
+};
 
 function MyTerritoryPage() {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const qc = useQueryClient();
+  const isManager = role === "owner" || role === "captain";
   const [me, setMe] = useState<LatLng | null>(null);
   const [active, setActive] = useState<ActivePin>("lead");
+  const [drawing, setDrawing] = useState(false);
+  const [pendingPolygon, setPendingPolygon] = useState<LatLng[] | null>(null);
 
   useEffect(() => {
     if (!navigator.geolocation) return;
@@ -49,16 +70,40 @@ function MyTerritoryPage() {
     return () => navigator.geolocation.clearWatch(id);
   }, []);
 
-  const territoriesQuery = useQuery({
+  // Turfs: managers see all, canvassers see only their assigned (enforced by RLS too)
+  const turfsQuery = useQuery({
     enabled: !!user?.id,
-    queryKey: ["my_territories", user?.id],
+    queryKey: ["turfs", user?.id, role],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("territories")
-        .select("id, name, color, polygon")
-        .eq("canvasser_id", user!.id);
+      let q = supabase
+        .from("turfs")
+        .select("id, name, color, polygon_coordinates, assigned_user_id");
+      if (!isManager) q = q.eq("assigned_user_id", user!.id);
+      const { data, error } = await q.order("created_at", { ascending: false });
       if (error) throw error;
-      return data ?? [];
+      return (data ?? []) as TurfRow[];
+    },
+  });
+
+  // Canvasser list — for the assign dropdown (managers only)
+  const canvassersQuery = useQuery({
+    enabled: isManager,
+    queryKey: ["assignable_canvassers"],
+    queryFn: async () => {
+      const { data: roleRows, error: rErr } = await supabase
+        .from("user_roles")
+        .select("user_id")
+        .eq("role", "canvasser");
+      if (rErr) throw rErr;
+      const ids = (roleRows ?? []).map((r) => r.user_id as string);
+      if (ids.length === 0) return [] as Array<{ id: string; display_name: string }>;
+      const { data: profs, error: pErr } = await supabase
+        .from("profiles")
+        .select("id, display_name")
+        .in("id", ids)
+        .order("display_name", { ascending: true });
+      if (pErr) throw pErr;
+      return (profs ?? []) as Array<{ id: string; display_name: string }>;
     },
   });
 
@@ -76,52 +121,50 @@ function MyTerritoryPage() {
     },
   });
 
-  const realTerritories: Territory[] = useMemo(
-    () => (territoriesQuery.data ?? []).map((t) => ({
-      id: t.id as string,
-      name: t.name as string,
-      color: (t.color as string) ?? "#39ff14",
-      polygon: t.polygon as LatLng[],
+  const territories: Territory[] = useMemo(
+    () => (turfsQuery.data ?? []).map((t, i) => ({
+      id: t.id,
+      name: t.name,
+      color: t.color ?? TURF_COLORS[i % TURF_COLORS.length],
+      polygon: (t.polygon_coordinates ?? []) as LatLng[],
     })),
-    [territoriesQuery.data],
+    [turfsQuery.data],
   );
 
-  // MOCK TURF + HOUSES for testing — only when user has no assigned territory yet.
-  // Generated around the user's live GPS so every canvasser sees their OWN turf.
-  const mock = useMemo(() => {
-    if (!me || realTerritories.length > 0) return { territories: [] as Territory[], houses: [] as Array<{ id: string; lat: number; lng: number; name: string }> };
-    // ~150m box around the user
-    const dLat = 0.00135;
-    const dLng = 0.0018;
-    const poly: LatLng[] = [
-      { lat: me.lat - dLat, lng: me.lng - dLng },
-      { lat: me.lat - dLat, lng: me.lng + dLng },
-      { lat: me.lat + dLat, lng: me.lng + dLng },
-      { lat: me.lat + dLat, lng: me.lng - dLng },
-    ];
-    const names = ["Johnson", "Smith", "Garcia", "Nguyen", "Patel", "O'Brien", "Chen", "Ruiz"];
-    const houses = names.map((n, i) => {
-      const angle = (i / names.length) * Math.PI * 2;
-      const r = 0.0009 + (i % 3) * 0.00025;
-      return {
-        id: `mock-${i}`,
-        name: n,
-        lat: me.lat + Math.sin(angle) * r,
-        lng: me.lng + Math.cos(angle) * r * 1.3,
-      };
-    });
-    return {
-      territories: [{ id: "mock-turf", name: "My Turf (Demo)", color: "#39ff14", polygon: poly }],
-      houses,
-    };
-  }, [me, realTerritories.length]);
+  const saveTurf = useMutation({
+    mutationFn: async (payload: { name: string; assigned_user_id: string; polygon: LatLng[]; color: string }) => {
+      const { error } = await supabase.from("turfs").insert({
+        name: payload.name,
+        color: payload.color,
+        polygon_coordinates: payload.polygon,
+        assigned_user_id: payload.assigned_user_id,
+        created_by: user!.id,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("🗺 Turf assigned");
+      setPendingPolygon(null);
+      setDrawing(false);
+      qc.invalidateQueries({ queryKey: ["turfs"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
 
-  const territories = realTerritories.length > 0 ? realTerritories : mock.territories;
-  const houseMarkers = mock.houses;
+  const deleteTurf = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("turfs").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Turf deleted");
+      qc.invalidateQueries({ queryKey: ["turfs"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
 
   const dropPin = useMutation({
     mutationFn: async (ll: LatLng) => {
-      // Capture a FRESH device fix at drop time (don't trust stale watch state)
       const fix = await new Promise<GeolocationPosition | null>((resolve) => {
         if (!navigator.geolocation) return resolve(null);
         navigator.geolocation.getCurrentPosition(
@@ -132,8 +175,7 @@ function MyTerritoryPage() {
       });
       const device = fix ? { lat: fix.coords.latitude, lng: fix.coords.longitude } : me;
       const distance_m = device ? haversineMeters(device, ll) : null;
-      const is_remote_drop = distance_m == null ? true : distance_m > 18; // 20 yards ≈ 18.288m
-
+      const is_remote_drop = distance_m == null ? true : distance_m > 18;
       const { error } = await supabase.from("field_pins").insert({
         canvasser_id: user!.id,
         pin_type: active,
@@ -172,53 +214,213 @@ function MyTerritoryPage() {
     };
   }, [pinsQuery.data]);
 
+  const mapMode = drawing
+    ? { kind: "draw" as const, onComplete: (poly: LatLng[]) => setPendingPolygon(poly) }
+    : { kind: "pin" as const, onDrop: (ll: LatLng) => dropPin.mutate(ll) };
+
   return (
     <GratitudeGate userId={user?.id}>
-    <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <h1 className="font-display text-2xl text-neon">MY TERRITORY</h1>
-        <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground flex items-center gap-2">
-          <Crosshair className="w-3 h-3 text-[#00e5ff]" />
-          {me ? `LIVE · ${me.lat.toFixed(4)}, ${me.lng.toFixed(4)}` : "Acquiring GPS…"}
+      <div className="space-y-6">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <h1 className="font-display text-2xl text-neon">MY TERRITORY</h1>
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground flex items-center gap-2">
+            <Crosshair className="w-3 h-3 text-[#00e5ff]" />
+            {me ? `LIVE · ${me.lat.toFixed(4)}, ${me.lng.toFixed(4)}` : "Acquiring GPS…"}
+          </div>
         </div>
+
+        {/* Manager toolbar */}
+        {isManager && (
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-neon/40 bg-surface/60 p-3">
+            <div className="font-display text-[10px] uppercase tracking-widest text-neon">Turf Tools</div>
+            {!drawing ? (
+              <Button size="sm" onClick={() => setDrawing(true)} className="gap-2">
+                <Pencil className="w-3.5 h-3.5" /> Draw New Turf
+              </Button>
+            ) : (
+              <Button size="sm" variant="outline" onClick={() => { setDrawing(false); setPendingPolygon(null); }}>
+                Cancel Drawing
+              </Button>
+            )}
+            <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
+              {drawing ? "Tap map to add vertices · Save when 3+ points" : `${territories.length} turf(s) drawn`}
+            </span>
+          </div>
+        )}
+
+        {/* Canvasser pin picker */}
+        {!isManager && (
+          <div className="grid sm:grid-cols-3 gap-3">
+            <PinPicker
+              label="Not Home" count={counts.not_home} color="#ff2d55" icon={<Home className="w-4 h-4" />}
+              active={active === "not_home"} onClick={() => setActive("not_home")}
+            />
+            <PinPicker
+              label="Talked To" count={counts.talked_to} color="#ffd60a" icon={<MessageSquare className="w-4 h-4" />}
+              active={active === "talked_to"} onClick={() => setActive("talked_to")}
+            />
+            <PinPicker
+              label="Lead Generated" count={counts.lead} color="#39ff14" icon={<Sparkles className="w-4 h-4" />}
+              active={active === "lead"} onClick={() => setActive("lead")}
+            />
+          </div>
+        )}
+
+        <NeonMap
+          territories={territories}
+          pins={isManager ? [] : (pinsQuery.data ?? [])}
+          houses={[]}
+          me={me}
+          height={560}
+          follow
+          mode={mapMode}
+        />
+
+        {/* Manager turf list */}
+        {isManager && (
+          <ArcadePanel title="Assigned Turfs">
+            {territories.length === 0 ? (
+              <div className="text-sm text-muted-foreground">No turfs yet. Click "Draw New Turf" to define one.</div>
+            ) : (
+              <ul className="space-y-2">
+                {(turfsQuery.data ?? []).map((t) => {
+                  const assignee = (canvassersQuery.data ?? []).find((c) => c.id === t.assigned_user_id);
+                  return (
+                    <li key={t.id} className="flex items-center justify-between gap-3 rounded border border-border bg-surface/60 p-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className="inline-block w-3 h-3 rounded-full" style={{ background: t.color, boxShadow: `0 0 8px ${t.color}` }} />
+                        <div className="min-w-0">
+                          <div className="font-display text-sm text-foreground truncate">{t.name}</div>
+                          <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
+                            <MapPin className="inline w-3 h-3 mr-1" />
+                            {assignee?.display_name ?? (t.assigned_user_id ? "Unknown canvasser" : "Unassigned")}
+                            {" · "}{(t.polygon_coordinates ?? []).length} vertices
+                          </div>
+                        </div>
+                      </div>
+                      <Button
+                        size="sm" variant="ghost"
+                        onClick={() => { if (confirm(`Delete turf "${t.name}"?`)) deleteTurf.mutate(t.id); }}
+                        className="text-destructive"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </ArcadePanel>
+        )}
+
+        {/* Canvasser help */}
+        {!isManager && (
+          <ArcadePanel title="How it works">
+            <ul className="text-sm text-muted-foreground space-y-1.5">
+              <li>• Your assigned turfs appear as colored boundaries on the map.</li>
+              <li>• Pick a pin type above, then tap the map where you knocked.</li>
+              <li>• <span className="text-[#39ff14]">Green</span> = Lead · <span className="text-[#ffd60a]">Yellow</span> = Talked To · <span className="text-[#ff2d55]">Red</span> = Not Home.</li>
+              <li>• Pins &gt; 20 yards from your GPS location are flagged as Remote Drops.</li>
+            </ul>
+          </ArcadePanel>
+        )}
       </div>
 
-      <div className="grid sm:grid-cols-3 gap-3">
-        <PinPicker
-          label="Not Home" count={counts.not_home} color="#ff2d55" icon={<Home className="w-4 h-4" />}
-          active={active === "not_home"} onClick={() => setActive("not_home")}
-        />
-        <PinPicker
-          label="Talked To" count={counts.talked_to} color="#ffd60a" icon={<MessageSquare className="w-4 h-4" />}
-          active={active === "talked_to"} onClick={() => setActive("talked_to")}
-        />
-        <PinPicker
-          label="Lead Generated" count={counts.lead} color="#39ff14" icon={<Sparkles className="w-4 h-4" />}
-          active={active === "lead"} onClick={() => setActive("lead")}
-        />
-      </div>
-
-      <NeonMap
-        territories={territories}
-        pins={pinsQuery.data ?? []}
-        houses={houseMarkers}
-        me={me}
-        height={560}
-        follow
-        mode={{ kind: "pin", onDrop: (ll) => dropPin.mutate(ll) }}
+      {/* Assign modal (manager-only, opens after polygon completed) */}
+      <AssignTurfDialog
+        open={!!pendingPolygon && isManager}
+        onOpenChange={(v) => { if (!v) setPendingPolygon(null); }}
+        polygon={pendingPolygon ?? []}
+        canvassers={canvassersQuery.data ?? []}
+        saving={saveTurf.isPending}
+        onSave={(name, assigneeId, color) => {
+          if (!pendingPolygon) return;
+          saveTurf.mutate({ name, assigned_user_id: assigneeId, polygon: pendingPolygon, color });
+        }}
       />
-
-
-      <ArcadePanel title="How it works">
-        <ul className="text-sm text-muted-foreground space-y-1.5">
-          <li>• Pick a pin type above, then tap the map where you knocked.</li>
-          <li>• <span className="text-[#ffd60a]">Yellow (Talked To)</span> auto-adds to your <span className="text-foreground">People Talked To</span> counter.</li>
-          <li>• <span className="text-[#39ff14]">Green (Lead Generated)</span> auto-adds to your <span className="text-foreground">Leads Called In</span> counter.</li>
-          <li>• <span className="text-[#ff2d55]">Red (Not Home)</span> is tracked for territory coverage but doesn't bump counters.</li>
-        </ul>
-      </ArcadePanel>
-    </div>
     </GratitudeGate>
+  );
+}
+
+function AssignTurfDialog({
+  open, onOpenChange, polygon, canvassers, onSave, saving,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  polygon: LatLng[];
+  canvassers: Array<{ id: string; display_name: string }>;
+  onSave: (name: string, assigneeId: string, color: string) => void;
+  saving: boolean;
+}) {
+  const [name, setName] = useState("");
+  const [assigneeId, setAssigneeId] = useState<string>("");
+  const [color, setColor] = useState<string>(TURF_COLORS[0]);
+
+  useEffect(() => {
+    if (open) { setName(""); setAssigneeId(""); setColor(TURF_COLORS[0]); }
+  }, [open]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="font-display text-neon">ASSIGN TURF</DialogTitle>
+          <DialogDescription>
+            {polygon.length} vertices drawn. Name the turf and assign a canvasser.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="turf-name">Turf Name</Label>
+            <Input
+              id="turf-name" value={name} onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Maple Heights - North Loop"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Assign to Canvasser</Label>
+            <Select value={assigneeId} onValueChange={setAssigneeId}>
+              <SelectTrigger><SelectValue placeholder="Select a canvasser…" /></SelectTrigger>
+              <SelectContent>
+                {canvassers.length === 0 && (
+                  <div className="px-3 py-2 text-xs text-muted-foreground">No canvassers found</div>
+                )}
+                {canvassers.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>{c.display_name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Boundary Color</Label>
+            <div className="flex gap-2">
+              {TURF_COLORS.map((c) => (
+                <button
+                  key={c} type="button" onClick={() => setColor(c)}
+                  className="w-8 h-8 rounded-full border-2 transition-transform"
+                  style={{
+                    background: c,
+                    borderColor: color === c ? "#fff" : "transparent",
+                    boxShadow: color === c ? `0 0 12px ${c}` : "none",
+                    transform: color === c ? "scale(1.15)" : "scale(1)",
+                  }}
+                  aria-label={`Pick ${c}`}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button
+            onClick={() => onSave(name.trim(), assigneeId, color)}
+            disabled={saving || !name.trim() || !assigneeId || polygon.length < 3}
+          >
+            {saving ? "Saving…" : "Save & Assign"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
