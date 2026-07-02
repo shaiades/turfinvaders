@@ -139,7 +139,7 @@ function MyTerritoryPage() {
       const insertRow = {
         name: payload.name,
         color: payload.color,
-        polygon_coordinates: payload.polygon as unknown as object,
+        polygon_coordinates: payload.polygon.map((p) => ({ lat: p.lat, lng: p.lng })),
         assigned_user_id: payload.assigned_user_id,
         created_by: uid,
       };
