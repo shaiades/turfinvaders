@@ -48,7 +48,7 @@ export const createCanvasser = createServerFn({ method: "POST" })
       .update({
         display_name: data.display_name,
         team_id: data.team_id ?? null,
-        office_location: data.office_location ?? null,
+        ...(data.office_location ? { office_location: data.office_location } : {}),
       })
       .eq("id", newUserId);
     if (profErr) throw new Error(profErr.message);
