@@ -404,64 +404,67 @@ function AssignTurfDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle className="font-display text-neon">ASSIGN TURF</DialogTitle>
-          <DialogDescription>
-            {polygon.length} vertices drawn. Name the turf and assign a canvasser.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="turf-name">Turf Name</Label>
-            <Input
-              id="turf-name" value={name} onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Maple Heights - North Loop"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>Assign to Canvasser</Label>
-            <Select value={assigneeId} onValueChange={setAssigneeId}>
-              <SelectTrigger><SelectValue placeholder="Select a canvasser…" /></SelectTrigger>
-              <SelectContent>
-                {canvassers.length === 0 && (
-                  <div className="px-3 py-2 text-xs text-muted-foreground">No canvassers found</div>
-                )}
-                {canvassers.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>{c.display_name}</SelectItem>
+      <DialogPortal>
+        <DialogOverlay className="fixed inset-0 z-[9999] bg-black/50" />
+        <DialogContent className="z-[9999] max-w-md overflow-visible">
+          <DialogHeader>
+            <DialogTitle className="font-display text-neon">ASSIGN TURF</DialogTitle>
+            <DialogDescription>
+              {polygon.length} vertices drawn. Name the turf and assign a canvasser.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="turf-name">Turf Name</Label>
+              <Input
+                id="turf-name" value={name} onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. Maple Heights - North Loop"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Assign to Canvasser</Label>
+              <Select value={assigneeId} onValueChange={setAssigneeId}>
+                <SelectTrigger><SelectValue placeholder="Select a canvasser…" /></SelectTrigger>
+                <SelectContent className="z-[10000]">
+                  {canvassers.length === 0 && (
+                    <div className="px-3 py-2 text-xs text-muted-foreground">No canvassers found</div>
+                  )}
+                  {canvassers.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>{c.display_name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Boundary Color</Label>
+              <div className="flex gap-2">
+                {TURF_COLORS.map((c) => (
+                  <button
+                    key={c} type="button" onClick={() => setColor(c)}
+                    className="w-8 h-8 rounded-full border-2 transition-transform"
+                    style={{
+                      background: c,
+                      borderColor: color === c ? "#fff" : "transparent",
+                      boxShadow: color === c ? `0 0 12px ${c}` : "none",
+                      transform: color === c ? "scale(1.15)" : "scale(1)",
+                    }}
+                    aria-label={`Pick ${c}`}
+                  />
                 ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label>Boundary Color</Label>
-            <div className="flex gap-2">
-              {TURF_COLORS.map((c) => (
-                <button
-                  key={c} type="button" onClick={() => setColor(c)}
-                  className="w-8 h-8 rounded-full border-2 transition-transform"
-                  style={{
-                    background: c,
-                    borderColor: color === c ? "#fff" : "transparent",
-                    boxShadow: color === c ? `0 0 12px ${c}` : "none",
-                    transform: color === c ? "scale(1.15)" : "scale(1)",
-                  }}
-                  aria-label={`Pick ${c}`}
-                />
-              ))}
+              </div>
             </div>
           </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button
-            onClick={() => onSave(name.trim(), assigneeId, color)}
-            disabled={saving || !name.trim() || !assigneeId || polygon.length < 3}
-          >
-            {saving ? "Saving…" : "Save & Assign"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button
+              onClick={() => onSave(name.trim(), assigneeId, color)}
+              disabled={saving || !name.trim() || !assigneeId || polygon.length < 3}
+            >
+              {saving ? "Saving…" : "Save & Assign"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </DialogPortal>
     </Dialog>
   );
 }
