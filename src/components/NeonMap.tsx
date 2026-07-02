@@ -133,9 +133,22 @@ type Mode =
   | { kind: "draw"; onComplete: (polygon: LatLng[]) => void }
   | { kind: "pin"; onDrop: (ll: LatLng) => void };
 
+export type HouseMarker = { id: string; lat: number; lng: number; name: string };
+
+function houseIcon(name: string) {
+  const safe = name.replace(/[<>&"']/g, "");
+  const html = `
+    <div style="display:flex;flex-direction:column;align-items:center;transform:translateY(-8px);">
+      <div style="background:rgba(11,15,26,0.85);border:1px solid #39ff14;color:#39ff14;font:700 10px/1 ui-sans-serif,system-ui;padding:3px 6px;border-radius:4px;white-space:nowrap;text-shadow:0 0 6px #39ff1488;box-shadow:0 0 8px #39ff1466;margin-bottom:2px;">${safe}</div>
+      <div style="width:14px;height:14px;background:#39ff14;border:2px solid #fff;border-radius:2px;box-shadow:0 0 10px #39ff14;transform:rotate(45deg);"></div>
+    </div>`;
+  return L.divIcon({ html, className: "neon-house", iconSize: [80, 34], iconAnchor: [40, 30] });
+}
+
 export function NeonMap({
   territories,
   pins = [],
+  houses = [],
   me,
   mode = { kind: "view" },
   center,
@@ -144,6 +157,7 @@ export function NeonMap({
 }: {
   territories: Territory[];
   pins?: FieldPin[];
+  houses?: HouseMarker[];
   me?: LatLng | null;
   mode?: Mode;
   center?: LatLng;
