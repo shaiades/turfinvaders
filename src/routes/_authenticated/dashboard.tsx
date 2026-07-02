@@ -30,7 +30,7 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
     const t = s.tab;
     return {
       tab:
-        t === "fleet" || t === "payroll" || t === "timesheets" || t === "executive"
+        t === "fleet" || t === "payroll" || t === "timesheets" || t === "executive" || t === "settings"
           ? t
           : "dispatch",
     };
