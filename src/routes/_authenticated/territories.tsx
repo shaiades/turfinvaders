@@ -27,7 +27,7 @@ function TerritoriesPage() {
   const [assignTeam, setAssignTeam] = useState<string>("");
   const [color, setColor] = useState(PALETTE[0]);
 
-  const canManage = role === "owner" || role === "captain";
+  const canManage = isManagerRole(role);
 
   const teamsQuery = useQuery({
     queryKey: ["teams_for_territory"],
