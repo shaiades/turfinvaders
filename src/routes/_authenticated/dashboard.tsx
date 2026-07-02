@@ -140,7 +140,12 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
         <TabsContent value="fleet" className="mt-0"><FleetManager /></TabsContent>
         <TabsContent value="timesheets" className="mt-0"><TimesheetEditor /></TabsContent>
         <TabsContent value="payroll" className="mt-0"><PayrollLedger /></TabsContent>
-        <TabsContent value="settings" className="mt-0"><WeeklyScheduleSettings /></TabsContent>
+        <TabsContent value="settings" className="mt-0 space-y-6">
+          <div className="flex justify-end">
+            <AddTeamMemberDialog />
+          </div>
+          <WeeklyScheduleSettings />
+        </TabsContent>
       </Tabs>
     </div>
   );
