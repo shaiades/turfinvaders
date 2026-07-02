@@ -409,12 +409,47 @@ function MyTerritoryPage() {
             territories={territories}
             pins={isManager ? [] : (pinsQuery.data ?? [])}
             houses={[]}
-            me={me}
+            leads={mockLeads}
+            proximityMeters={30}
+            me={effectiveMe}
             height={560}
             follow
             mode={mapMode}
             onTerritoryClick={isManager && !drawing ? (id) => { setEditingTurfId(id); setIsModalOpen(true); } : undefined}
           />
+
+          {/* DEV: Simulate Walk button — nudges GPS toward nearest mock lead */}
+          {!isManager && mockLeads.length > 0 && (
+            <div className="absolute top-3 left-3 z-[1000] flex flex-col gap-2">
+              <Button
+                size="sm"
+                onClick={simulateWalk}
+                className="font-display uppercase tracking-widest bg-[#00e5ff] text-black hover:bg-[#00e5ff]/90 shadow-[0_0_16px_rgba(0,229,255,0.6)] gap-2"
+              >
+                <Footprints className="w-3.5 h-3.5" /> Simulate Walk
+              </Button>
+              {(simOffset.lat !== 0 || simOffset.lng !== 0) && (
+                <Button
+                  size="sm" variant="outline"
+                  onClick={() => setSimOffset({ lat: 0, lng: 0 })}
+                  className="font-display uppercase tracking-widest text-[10px]"
+                >
+                  Reset Sim
+                </Button>
+              )}
+              <div className="rounded border border-neon/40 bg-surface/90 backdrop-blur px-2 py-1.5 font-display text-[9px] uppercase tracking-widest text-muted-foreground">
+                <div className="text-neon mb-1">Lead Legend</div>
+                <LegendRow color={LEAD_STATUS_COLORS.pending} label="Pending" />
+                <LegendRow color={LEAD_STATUS_COLORS.confirmed} label="Confirmed" />
+                <LegendRow color={LEAD_STATUS_COLORS.na} label="N/A" />
+                <LegendRow color={LEAD_STATUS_COLORS.killed} label="Killed" />
+                <div className="mt-1 pt-1 border-t border-border/50 text-[8px] normal-case tracking-normal">
+                  Hollow = &gt;30m · Solid = ≤30m
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Floating fallback: always visible when a polygon is pending */}
           {isManager && pendingPolygon && pendingPolygon.length >= 3 && (
             <div className="absolute left-1/2 -translate-x-1/2 bottom-4 z-[1000] flex gap-2">
