@@ -42,6 +42,66 @@ function haversineMeters(a: LatLng, b: LatLng) {
 
 const TURF_COLORS = ["#39ff14", "#00e5ff", "#ffd60a", "#ff2d55", "#ff6b00", "#c77dff"];
 
+// Deterministic PRNG so mock leads don't jump around between renders
+function mulberry32(seed: number) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function hashStr(s: string) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+function pointInPolygon(pt: LatLng, poly: LatLng[]) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].lng, yi = poly[i].lat;
+    const xj = poly[j].lng, yj = poly[j].lat;
+    const intersect = ((yi > pt.lat) !== (yj > pt.lat)) &&
+      (pt.lng < ((xj - xi) * (pt.lat - yi)) / (yj - yi + 1e-12) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+function polyBounds(poly: LatLng[]) {
+  let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+  for (const p of poly) {
+    if (p.lat < minLat) minLat = p.lat; if (p.lat > maxLat) maxLat = p.lat;
+    if (p.lng < minLng) minLng = p.lng; if (p.lng > maxLng) maxLng = p.lng;
+  }
+  return { minLat, maxLat, minLng, maxLng };
+}
+function polyCentroid(poly: LatLng[]) {
+  const b = polyBounds(poly);
+  return { lat: (b.minLat + b.maxLat) / 2, lng: (b.minLng + b.maxLng) / 2 };
+}
+const LEAD_STATUSES: LeadStatus[] = ["pending", "confirmed", "na", "killed"];
+function generateMockLeads(turfId: string, polygon: LatLng[], count = 18): LeadPin[] {
+  if (polygon.length < 3) return [];
+  const rand = mulberry32(hashStr(turfId));
+  const b = polyBounds(polygon);
+  const leads: LeadPin[] = [];
+  let guard = 0;
+  while (leads.length < count && guard < count * 40) {
+    guard++;
+    const p = { lat: b.minLat + rand() * (b.maxLat - b.minLat), lng: b.minLng + rand() * (b.maxLng - b.minLng) };
+    if (!pointInPolygon(p, polygon)) continue;
+    leads.push({
+      id: `${turfId}-lead-${leads.length}`,
+      lat: p.lat, lng: p.lng,
+      status: LEAD_STATUSES[Math.floor(rand() * LEAD_STATUSES.length)],
+      label: `#${leads.length + 1}`,
+    });
+  }
+  return leads;
+}
+
 type ActivePin = FieldPin["pin_type"];
 type TurfRow = {
   id: string;
