@@ -54,7 +54,8 @@ function Dashboard() {
   if (loading) return <Loading />;
   if (!role) return <NoRole />;
 
-  if (role === "owner") return <OwnerDashboard visibility={!!settings?.global_visibility} />;
+  // Owners and Office Staff (Admins) both get the full Command view.
+  if (role === "owner" || role === "office_staff") return <OwnerDashboard visibility={!!settings?.global_visibility} />;
   if (role === "captain") return <CaptainDashboard teamId={teamId} visibility={!!settings?.global_visibility} />;
   return <CanvasserDashboard displayName={displayName} teamId={teamId} userId={user?.id} visibility={!!settings?.global_visibility} />;
 }
