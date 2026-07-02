@@ -76,13 +76,48 @@ function ClickCapture({ onClick }: { onClick: (ll: LatLng) => void }) {
 
 function FitBounds({ points }: { points: LatLng[] }) {
   const map = useMap();
+  const didFit = useRef(false);
   useEffect(() => {
-    if (points.length === 0) return;
+    if (didFit.current || points.length === 0) return;
     const b = L.latLngBounds(points.map((p) => [p.lat, p.lng] as [number, number]));
     map.fitBounds(b, { padding: [40, 40], maxZoom: 16 });
+    didFit.current = true;
   }, [map, points]);
   return null;
 }
+
+function FollowMe({ me, zoom = 17 }: { me: LatLng | null | undefined; zoom?: number }) {
+  const map = useMap();
+  const didInitial = useRef(false);
+  useEffect(() => {
+    if (!me) return;
+    if (!didInitial.current) {
+      map.setView([me.lat, me.lng], zoom, { animate: false });
+      didInitial.current = true;
+    } else {
+      map.panTo([me.lat, me.lng], { animate: true });
+    }
+  }, [map, me?.lat, me?.lng, zoom]);
+  return null;
+}
+
+function InvalidateOnMount() {
+  const map = useMap();
+  useEffect(() => {
+    const run = () => map.invalidateSize();
+    run();
+    const t1 = setTimeout(run, 100);
+    const t2 = setTimeout(run, 400);
+    const t3 = setTimeout(run, 1000);
+    window.addEventListener("resize", run);
+    return () => {
+      clearTimeout(t1); clearTimeout(t2); clearTimeout(t3);
+      window.removeEventListener("resize", run);
+    };
+  }, [map]);
+  return null;
+}
+
 
 type Mode =
   | { kind: "view" }
@@ -96,6 +131,7 @@ export function NeonMap({
   mode = { kind: "view" },
   center,
   height = 480,
+  follow = false,
 }: {
   territories: Territory[];
   pins?: FieldPin[];
@@ -103,6 +139,7 @@ export function NeonMap({
   mode?: Mode;
   center?: LatLng;
   height?: number;
+  follow?: boolean;
 }) {
   const [draft, setDraft] = useState<LatLng[]>([]);
   const mapRef = useRef<L.Map | null>(null);
@@ -144,7 +181,7 @@ export function NeonMap({
     >
       <MapContainer
         center={[fallbackCenter.lat, fallbackCenter.lng]}
-        zoom={13}
+        zoom={follow ? 17 : 13}
         scrollWheelZoom
         style={{ height: "100%", width: "100%", background: "#0b0f1a" }}
         ref={(instance) => { mapRef.current = instance; }}
@@ -153,8 +190,9 @@ export function NeonMap({
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
           url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
         />
+        <InvalidateOnMount />
         <ClickCapture onClick={handleClick} />
-        {allPoints.length > 0 && <FitBounds points={allPoints} />}
+        {follow ? <FollowMe me={me} /> : allPoints.length > 0 && <FitBounds points={allPoints} />}
 
         {territories.map((t) => (
           <Polygon

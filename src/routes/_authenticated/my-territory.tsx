@@ -167,8 +167,10 @@ function MyTerritoryPage() {
         pins={pinsQuery.data ?? []}
         me={me}
         height={560}
+        follow
         mode={{ kind: "pin", onDrop: (ll) => dropPin.mutate(ll) }}
       />
+
 
       <ArcadePanel title="How it works">
         <ul className="text-sm text-muted-foreground space-y-1.5">
