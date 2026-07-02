@@ -282,15 +282,37 @@ function MyTerritoryPage() {
           </div>
         )}
 
-        <NeonMap
-          territories={territories}
-          pins={isManager ? [] : (pinsQuery.data ?? [])}
-          houses={[]}
-          me={me}
-          height={560}
-          follow
-          mode={mapMode}
-        />
+        <div className="relative">
+          <NeonMap
+            territories={territories}
+            pins={isManager ? [] : (pinsQuery.data ?? [])}
+            houses={[]}
+            me={me}
+            height={560}
+            follow
+            mode={mapMode}
+          />
+          {/* Floating fallback: always visible when a polygon is pending */}
+          {isManager && pendingPolygon && pendingPolygon.length >= 3 && (
+            <div className="absolute left-1/2 -translate-x-1/2 bottom-4 z-[1000] flex gap-2">
+              <Button
+                size="lg"
+                onClick={() => setIsModalOpen(true)}
+                className="font-display uppercase tracking-widest bg-victory text-black hover:bg-victory/90 shadow-[0_0_24px_rgba(57,255,20,0.6)] animate-pulse"
+              >
+                <MapPin className="w-4 h-4 mr-2" />
+                Assign This Territory ({pendingPolygon.length} pts)
+              </Button>
+              <Button
+                size="lg"
+                variant="outline"
+                onClick={() => { setPendingPolygon(null); setIsModalOpen(false); }}
+              >
+                Discard
+              </Button>
+            </div>
+          )}
+        </div>
 
         {/* Manager turf list */}
         {isManager && (
