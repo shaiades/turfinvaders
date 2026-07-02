@@ -51,19 +51,21 @@ function mapStatus(raw: string): Bucket {
 }
 
 function extractEvent(parsed: any): { pulseId?: number; status?: string } {
-  const ev = parsed?.event;
+  // Monday nests the event differently across integrations
+  const ev = parsed?.data?.event ?? parsed?.event ?? parsed;
+  const rawPulse = ev?.pulseId ?? ev?.itemId ?? ev?.pulse_id;
   const pulseId =
-    typeof ev?.pulseId === "number"
-      ? ev.pulseId
-      : typeof ev?.pulseId === "string"
-        ? Number(ev.pulseId)
+    typeof rawPulse === "number"
+      ? rawPulse
+      : typeof rawPulse === "string" && rawPulse.trim()
+        ? Number(rawPulse)
         : undefined;
   const status =
     ev?.value?.label?.text ??
     (typeof ev?.value?.label === "string" ? ev.value.label : undefined) ??
     ev?.value?.text ??
     (typeof parsed?.status === "string" ? parsed.status : undefined);
-  return { pulseId, status };
+  return { pulseId: Number.isFinite(pulseId) ? pulseId : undefined, status };
 }
 
 Deno.serve(async (req) => {
@@ -103,6 +105,13 @@ Deno.serve(async (req) => {
 
   try {
     if (!supabaseAdmin) throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+
+    // STEP 2: Client Created — proves env vars + client init succeeded
+    const { pulseId: earlyPulseId } = extractEvent(body);
+    await supabaseAdmin.from("webhook_logs").insert({
+      source: "monday-live-dispatch",
+      raw_payload: { step: "2_Client_Created", pulseId: earlyPulseId ?? null } as never,
+    });
 
     // Log raw payload for X-Ray
     await supabaseAdmin.from("webhook_logs").insert({
@@ -352,16 +361,16 @@ Deno.serve(async (req) => {
       if (supabaseAdmin) {
         await supabaseAdmin.from("webhook_logs").insert({
           source: "monday-live-dispatch",
-          raw_payload: { step: "Fatal_Crash", message, stack: stack ?? null } as never,
+          raw_payload: { step: "Fatal_Error", message, stack: stack ?? null } as never,
         });
       }
     } catch (logErr) {
-      console.error("Failed to write Fatal_Crash webhook log", logErr);
+      console.error("Failed to write Fatal_Error webhook log", logErr);
     }
-    // ALWAYS 200 — Monday disables webhooks that return non-2xx.
-    return new Response("Caught error but acknowledging receipt", {
-      status: 200,
-      headers: { "Content-Type": "text/plain; charset=utf-8", ...CORS },
-    });
+    // ALWAYS 200 JSON — Monday disables webhooks that return non-2xx.
+    return new Response(
+      JSON.stringify({ status: "Error but acknowledged", error: message }),
+      { status: 200, headers: { "Content-Type": "application/json", ...CORS } },
+    );
   }
 });
