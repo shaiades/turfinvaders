@@ -10,7 +10,10 @@ type Profile = {
   display_name: string | null;
   office_location: string | null;
   team_id: string | null;
+  team_office: string | null;
+  role: "canvasser" | "captain";
 };
+
 
 type Metric = {
   id: string;
@@ -52,19 +55,41 @@ function LiveDispatchInner() {
     queryFn: async () => {
       const { data: roles } = await supabase
         .from("user_roles")
-        .select("user_id")
-        .eq("role", "canvasser");
-      const ids = (roles ?? []).map((r) => r.user_id);
+        .select("user_id, role")
+        .in("role", ["canvasser", "captain"]);
+      const roleMap = new Map<string, "canvasser" | "captain">();
+      (roles ?? []).forEach((r) => {
+        // Captain wins if a user somehow has both (canvasser is default).
+        const prev = roleMap.get(r.user_id);
+        if (prev === "captain") return;
+        roleMap.set(r.user_id, r.role as "canvasser" | "captain");
+      });
+      const ids = Array.from(roleMap.keys());
       if (ids.length === 0) return [] as Profile[];
       const { data: profs } = await supabase
         .from("profiles")
-        .select("id, display_name, office_location, team_id")
+        .select("id, display_name, office_location, team_id, teams:team_id(office_location)")
         .in("id", ids);
-      return ((profs ?? []) as Profile[]).sort((a, b) =>
+      const rows: Profile[] = ((profs ?? []) as Array<{
+        id: string;
+        display_name: string | null;
+        office_location: string | null;
+        team_id: string | null;
+        teams: { office_location: string | null } | null;
+      }>).map((p) => ({
+        id: p.id,
+        display_name: p.display_name,
+        office_location: p.office_location,
+        team_id: p.team_id,
+        team_office: p.teams?.office_location ?? null,
+        role: roleMap.get(p.id) ?? "canvasser",
+      }));
+      return rows.sort((a, b) =>
         (a.display_name ?? "").localeCompare(b.display_name ?? ""),
       );
     },
   });
+
 
   const { data: metrics = [] } = useQuery({
     queryKey: ["daily-metrics", today],
@@ -100,9 +125,10 @@ function LiveDispatchInner() {
   );
 
   const visible = useMemo(
-    () => canvassers.filter((c) => matches(c.office_location)),
+    () => canvassers.filter((c) => matches(c.office_location ?? c.team_office)),
     [canvassers, matches],
   );
+
 
   const totals = useMemo(() => {
     let sub = 0, conf = 0, na = 0, kil = 0, pen = 0;
@@ -185,10 +211,18 @@ function LiveDispatchInner() {
                   const conv = sub > 0 ? Math.round((conf / sub) * 100) : 0;
                   return (
                     <tr key={c.id} className="border-b border-border/40 hover:bg-surface-elevated">
-                      <td className="py-2.5 px-3 font-medium">{c.display_name ?? "—"}</td>
-                      <td className="py-2.5 px-3 text-xs text-muted-foreground">
-                        {c.office_location ?? "—"}
+                      <td className="py-2.5 px-3 font-medium">
+                        {c.display_name ?? "—"}
+                        {c.role === "captain" && (
+                          <span className="ml-2 text-[9px] font-display uppercase tracking-widest text-accent">
+                            Captain
+                          </span>
+                        )}
                       </td>
+                      <td className="py-2.5 px-3 text-xs text-muted-foreground">
+                        {c.office_location ?? c.team_office ?? "—"}
+                      </td>
+
                       <td className="py-2.5 px-3 text-right font-display text-neon">{sub}</td>
                       <td className="py-2.5 px-3 text-right font-display text-warning">{pen}</td>
                       <td className="py-2.5 px-3 text-right font-display text-muted-foreground">{na}</td>
