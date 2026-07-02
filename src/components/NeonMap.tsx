@@ -254,6 +254,10 @@ export function NeonMap({
           </>
         )}
 
+        {houses.map((h) => (
+          <Marker key={h.id} position={[h.lat, h.lng]} icon={houseIcon(h.name)} />
+        ))}
+
         {pins.map((p) => (
           <Marker key={p.id} position={[p.lat, p.lng]} icon={p.is_remote_drop ? flaggedPinIcon() : glowingDotIcon(PIN_COLORS[p.pin_type])} />
         ))}
