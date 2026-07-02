@@ -414,6 +414,7 @@ function MyTerritoryPage() {
             me={effectiveMe}
             height={560}
             follow
+            lockPolygon={!isManager ? ((turfsQuery.data ?? [])[0]?.polygon_coordinates as LatLng[] | undefined) : undefined}
             mode={mapMode}
             onTerritoryClick={isManager && !drawing ? (id) => { setEditingTurfId(id); setIsModalOpen(true); } : undefined}
           />

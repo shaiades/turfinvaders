@@ -86,27 +86,46 @@ function FitBounds({ points }: { points: LatLng[] }) {
   return null;
 }
 
-function FollowMe({ me, zoom = 18, lockRadiusKm = 2 }: { me: LatLng | null | undefined; zoom?: number; lockRadiusKm?: number }) {
+function FollowMe({ me, zoom = 18, lockRadiusKm = 2, disableLock = false }: { me: LatLng | null | undefined; zoom?: number; lockRadiusKm?: number; disableLock?: boolean }) {
   const map = useMap();
   const didInitial = useRef(false);
   useEffect(() => {
     if (!me) return;
     if (!didInitial.current) {
-      map.setView([me.lat, me.lng], zoom, { animate: false });
-      // Lock panning to a bounding box around the user (~lockRadiusKm)
-      const dLat = lockRadiusKm / 111;
-      const dLng = lockRadiusKm / (111 * Math.cos((me.lat * Math.PI) / 180));
-      const bounds = L.latLngBounds(
-        [me.lat - dLat, me.lng - dLng],
-        [me.lat + dLat, me.lng + dLng],
-      );
-      map.setMaxBounds(bounds);
-      map.setMinZoom(15);
+      if (!disableLock) {
+        map.setView([me.lat, me.lng], zoom, { animate: false });
+        const dLat = lockRadiusKm / 111;
+        const dLng = lockRadiusKm / (111 * Math.cos((me.lat * Math.PI) / 180));
+        const bounds = L.latLngBounds(
+          [me.lat - dLat, me.lng - dLng],
+          [me.lat + dLat, me.lng + dLng],
+        );
+        map.setMaxBounds(bounds);
+        map.setMinZoom(15);
+      }
       didInitial.current = true;
     } else {
+      const mb = map.options.maxBounds as L.LatLngBounds | undefined;
+      if (mb && !mb.contains([me.lat, me.lng])) return;
       map.panTo([me.lat, me.lng], { animate: true });
     }
-  }, [map, me?.lat, me?.lng, zoom, lockRadiusKm]);
+  }, [map, me?.lat, me?.lng, zoom, lockRadiusKm, disableLock]);
+  return null;
+}
+
+function LockToPolygon({ polygon, paddingRatio = 0.08 }: { polygon: LatLng[]; paddingRatio?: number }) {
+  const map = useMap();
+  const didFit = useRef(false);
+  useEffect(() => {
+    if (didFit.current || polygon.length < 3) return;
+    const b = L.latLngBounds(polygon.map((p) => [p.lat, p.lng] as [number, number]));
+    const padded = b.pad(paddingRatio);
+    map.fitBounds(padded, { padding: [20, 20], animate: false });
+    map.setMaxBounds(padded);
+    map.setMinZoom(map.getZoom());
+    map.setMaxZoom(20);
+    didFit.current = true;
+  }, [map, polygon, paddingRatio]);
   return null;
 }
 
@@ -187,6 +206,7 @@ export function NeonMap({
   center,
   height = 480,
   follow = false,
+  lockPolygon,
   onTerritoryClick,
 }: {
   territories: Territory[];
@@ -199,6 +219,7 @@ export function NeonMap({
   center?: LatLng;
   height?: number;
   follow?: boolean;
+  lockPolygon?: LatLng[];
   onTerritoryClick?: (id: string) => void;
 }) {
   const [draft, setDraft] = useState<LatLng[]>([]);
@@ -258,7 +279,8 @@ export function NeonMap({
         />
         <InvalidateOnMount />
         <ClickCapture onClick={handleClick} />
-        {follow ? <FollowMe me={me} /> : allPoints.length > 0 && <FitBounds points={allPoints} />}
+        {lockPolygon && lockPolygon.length >= 3 && <LockToPolygon polygon={lockPolygon} />}
+        {follow ? <FollowMe me={me} disableLock={!!(lockPolygon && lockPolygon.length >= 3)} /> : allPoints.length > 0 && !lockPolygon && <FitBounds points={allPoints} />}
 
         {territories.map((t) => (
           <Polygon
