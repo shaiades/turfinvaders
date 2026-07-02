@@ -339,7 +339,7 @@ function MyTerritoryPage() {
                           <div className="font-display text-sm text-foreground truncate">{t.name}</div>
                           <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
                             <MapPin className="inline w-3 h-3 mr-1" />
-                            {assignee?.display_name ?? (t.assigned_user_id ? "Unknown canvasser" : "Unassigned")}
+                            {assignee ? formatAssignable(assignee) : (t.assigned_user_id ? "Unknown assignee" : "Unassigned")}
                             {" · "}{(t.polygon_coordinates ?? []).length} vertices
                           </div>
                         </div>
