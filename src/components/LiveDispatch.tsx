@@ -10,7 +10,10 @@ type Profile = {
   display_name: string | null;
   office_location: string | null;
   team_id: string | null;
+  team_office: string | null;
+  role: "canvasser" | "captain";
 };
+
 
 type Metric = {
   id: string;
