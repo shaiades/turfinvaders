@@ -439,6 +439,7 @@ function formatAssignable(c: { display_name: string; role: string }) {
 
 function AssignTurfDialog({
   open, onOpenChange, polygon, canvassers, onSave, saving,
+  mode = "create", initialName = "", initialAssigneeId = "", initialColor = TURF_COLORS[0],
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -446,14 +447,24 @@ function AssignTurfDialog({
   canvassers: Array<{ id: string; display_name: string; role: string }>;
   onSave: (name: string, assigneeId: string, color: string) => void;
   saving: boolean;
+  mode?: "create" | "edit";
+  initialName?: string;
+  initialAssigneeId?: string;
+  initialColor?: string;
 }) {
-  const [name, setName] = useState("");
-  const [assigneeId, setAssigneeId] = useState<string>("");
-  const [color, setColor] = useState<string>(TURF_COLORS[0]);
+  const [name, setName] = useState(initialName);
+  const [assigneeId, setAssigneeId] = useState<string>(initialAssigneeId);
+  const [color, setColor] = useState<string>(initialColor);
 
   useEffect(() => {
-    if (open) { setName(""); setAssigneeId(""); setColor(TURF_COLORS[0]); }
-  }, [open]);
+    if (open) {
+      setName(initialName);
+      setAssigneeId(initialAssigneeId);
+      setColor(initialColor || TURF_COLORS[0]);
+    }
+  }, [open, initialName, initialAssigneeId, initialColor]);
+
+  const isEdit = mode === "edit";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -461,9 +472,13 @@ function AssignTurfDialog({
         <DialogOverlay className="fixed inset-0 z-[9999] bg-black/50" />
         <DialogContent className="z-[9999] max-w-md overflow-visible">
           <DialogHeader>
-            <DialogTitle className="font-display text-neon">ASSIGN TURF</DialogTitle>
+            <DialogTitle className="font-display text-neon">
+              {isEdit ? "REASSIGN TURF" : "ASSIGN TURF"}
+            </DialogTitle>
             <DialogDescription>
-              {polygon.length} vertices drawn. Name the turf and assign a canvasser.
+              {isEdit
+                ? `Update the name, assignee, or color for this turf (${polygon.length} vertices).`
+                : `${polygon.length} vertices drawn. Name the turf and assign a canvasser.`}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
