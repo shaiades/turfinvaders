@@ -3,9 +3,10 @@ import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable";
 import { toast } from "sonner";
+import turfInvadersHero from "@/assets/turf-invaders-hero.png.asset.json";
 
 export const Route = createFileRoute("/auth")({
-  head: () => ({ meta: [{ title: "Sign in — Knockout" }] }),
+  head: () => ({ meta: [{ title: "Sign in — Turf Invaders" }] }),
   component: AuthPage,
 });
 
@@ -51,11 +52,21 @@ function AuthPage() {
   }
 
   return (
-    <div className="min-h-screen grid place-items-center px-4 py-12">
-      <div className="w-full max-w-md">
+    <div className="min-h-screen grid place-items-center px-4 py-12 relative overflow-hidden">
+      <div
+        aria-hidden
+        className="absolute inset-0 bg-cover bg-center opacity-30"
+        style={{ backgroundImage: `url(${turfInvadersHero.url})` }}
+      />
+      <div aria-hidden className="absolute inset-0 bg-gradient-to-b from-background/60 via-background/80 to-background" />
+      <div className="w-full max-w-md relative">
         <Link to="/" className="flex items-center justify-center gap-3 mb-8">
-          <div className="w-10 h-10 rounded bg-primary text-primary-foreground grid place-items-center font-display text-xs">KN</div>
-          <span className="font-display text-lg text-neon">KNOCK·OUT</span>
+          <img
+            src={turfInvadersHero.url}
+            alt="Turf Invaders"
+            className="w-12 h-12 rounded object-cover border border-[var(--neon)]/50 shadow-[0_0_18px_-2px_var(--neon)]"
+          />
+          <span className="font-display text-lg text-neon">TURF INVADERS</span>
         </Link>
         <div className="arcade-card arcade-card-glow p-8">
           <h1 className="font-display text-base text-neon text-center mb-1">

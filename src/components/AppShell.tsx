@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth, setDevRoleOverride, type AppRole } from "@/hooks/useAuth";
 import { LogOut, Users, Settings, LayoutDashboard, ShieldCheck, ClipboardList, Inbox, MapPin, FlaskConical, DollarSign, Trophy } from "lucide-react";
+import turfInvadersLogo from "@/assets/turf-invaders-hero.png.asset.json";
 
 type NavItem = {
   to: string;
@@ -93,10 +94,12 @@ export function AppShell({ children }: { children: ReactNode }) {
       <header className="border-b border-border bg-background sticky top-0 z-20">
         <div className="max-w-7xl mx-auto flex items-center gap-6 px-4 sm:px-6 py-3">
           <Link to="/dashboard" className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded bg-primary text-primary-foreground grid place-items-center font-display text-[10px]">
-              KN
-            </div>
-            <span className="font-display text-sm text-foreground hidden sm:inline">KNOCK·OUT</span>
+            <img
+              src={turfInvadersLogo.url}
+              alt="Turf Invaders"
+              className="w-9 h-9 rounded object-cover border border-[var(--neon)]/40 shadow-[0_0_12px_-2px_var(--neon)]"
+            />
+            <span className="font-display text-sm text-foreground hidden sm:inline">TURF INVADERS</span>
           </Link>
           <nav className="flex items-center gap-1 flex-1 overflow-x-auto">
             {navItems.map((item) => (
