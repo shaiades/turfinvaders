@@ -131,6 +131,7 @@ export function NeonMap({
   mode = { kind: "view" },
   center,
   height = 480,
+  follow = false,
 }: {
   territories: Territory[];
   pins?: FieldPin[];
@@ -138,6 +139,7 @@ export function NeonMap({
   mode?: Mode;
   center?: LatLng;
   height?: number;
+  follow?: boolean;
 }) {
   const [draft, setDraft] = useState<LatLng[]>([]);
   const mapRef = useRef<L.Map | null>(null);
@@ -179,7 +181,7 @@ export function NeonMap({
     >
       <MapContainer
         center={[fallbackCenter.lat, fallbackCenter.lng]}
-        zoom={13}
+        zoom={follow ? 17 : 13}
         scrollWheelZoom
         style={{ height: "100%", width: "100%", background: "#0b0f1a" }}
         ref={(instance) => { mapRef.current = instance; }}
@@ -188,8 +190,9 @@ export function NeonMap({
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
           url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
         />
+        <InvalidateOnMount />
         <ClickCapture onClick={handleClick} />
-        {allPoints.length > 0 && <FitBounds points={allPoints} />}
+        {follow ? <FollowMe me={me} /> : allPoints.length > 0 && <FitBounds points={allPoints} />}
 
         {territories.map((t) => (
           <Polygon
