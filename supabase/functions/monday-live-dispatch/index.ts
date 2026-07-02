@@ -259,13 +259,6 @@ serve(async (req) => {
       data: { canvasserName, matchedId: match.id, matchedName: match.display_name },
     })
 
-    // Step 5: Map the outcome
-    const bucket = mapScheduleOutcome(changedTitle, changedValue)
-    const metric_date = todayLA()
-    const office_location = boardOffice ?? match.office_location ?? 'San Diego'
-
-    const { data: existing } = await supabaseAdmin
-      .from('daily_metrics')
     // Step 5: Map new + previous outcomes
     const bucket = mapScheduleOutcome(changedTitle, changedValue)
     const prevBucket = previousStatusFromEvent
@@ -273,6 +266,16 @@ serve(async (req) => {
       : null
     const metric_date = todayLA()
     const office_location = boardOffice ?? match.office_location ?? 'San Diego'
+
+    // Traffic cop: if we can't map this outcome AND there's no prev bucket to
+    // decrement, there's nothing to do — ignore safely.
+    if (!bucket && !prevBucket) {
+      await supabaseAdmin.from('webhook_logs').insert({
+        step: 'Ignored_Unmapped_Outcome',
+        data: { boardId, boardOffice, changedTitle, changedValue },
+      })
+      return new Response('Ignored', { status: 200, headers: corsHeaders })
+    }
 
     // Same-bucket transition (e.g. "N/A" -> "N/A x2"): log + no-op.
     if (bucket && prevBucket && bucket === prevBucket) {
@@ -296,6 +299,7 @@ serve(async (req) => {
       .eq('canvasser_id', match.id)
       .eq('metric_date', metric_date)
       .maybeSingle()
+
 
     const cur: Record<string, number> = existing ?? {
       leads_submitted: 0, leads_confirmed: 0, no_answers: 0, killed: 0, pending: 0,
