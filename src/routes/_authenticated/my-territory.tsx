@@ -201,6 +201,7 @@ function MyTerritoryPage() {
       <NeonMap
         territories={territories}
         pins={pinsQuery.data ?? []}
+        houses={houseMarkers}
         me={me}
         height={560}
         follow
