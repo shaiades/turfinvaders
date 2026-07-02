@@ -1,5 +1,6 @@
 // Supabase Edge Function: monday-live-dispatch
-// Monday.com webhook receiver with extreme step-by-step debug logging.
+// Monday.com webhook receiver. ALWAYS returns HTTP 200 so Monday never
+// disables the automation. Errors are logged to webhook_logs.
 // Endpoint: https://<project-ref>.supabase.co/functions/v1/monday-live-dispatch
 // Auth: verify_jwt = false (see supabase/config.toml)
 
@@ -14,10 +15,14 @@ const CORS = {
   "Access-Control-Max-Age": "86400",
 };
 
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json", ...CORS },
+const ok = (body: unknown = { ok: true }) =>
+  new Response(typeof body === "string" ? body : JSON.stringify(body), {
+    status: 200,
+    headers: {
+      "Content-Type":
+        typeof body === "string" ? "text/plain; charset=utf-8" : "application/json",
+      ...CORS,
+    },
   });
 
 function normalizeName(s: string): string {
@@ -25,19 +30,18 @@ function normalizeName(s: string): string {
 }
 
 function todayLA(): string {
-  const fmt = new Intl.DateTimeFormat("en-CA", {
+  return new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Los_Angeles",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  });
-  return fmt.format(new Date());
+  }).format(new Date());
 }
 
 type Bucket = "leads_confirmed" | "no_answers" | "killed" | "pending" | null;
 
 function mapStatus(raw: string): Bucket {
-  const s = raw.trim().toLowerCase().replace(/\s+/g, " ");
+  const s = (raw ?? "").trim().toLowerCase().replace(/\s+/g, " ");
   if (s === "confirmed" || s === "future reconf") return "leads_confirmed";
   if (s === "n/a" || s === "n/a x2" || s === "n/a x3" || s === "n/a x4") return "no_answers";
   if (s === "blowout" || s === "disconnected") return "killed";
@@ -67,110 +71,90 @@ Deno.serve(async (req) => {
     return new Response(null, { status: 200, headers: CORS });
   }
   if (req.method === "GET") {
-    return json({ ok: true, endpoint: "monday-live-dispatch", method: "GET" });
-  }
-  if (req.method !== "POST") {
-    return json({ error: "Method not allowed" }, 405);
+    return ok({ ok: true, endpoint: "monday-live-dispatch" });
   }
 
-  let parsed: unknown;
+  // Parse JSON up-front so we can check challenge before anything else.
+  let parsed: any = null;
   try {
     parsed = await req.json();
   } catch {
-    return json({ error: "Invalid JSON" }, 400);
+    // Even on bad JSON, return 200 to keep Monday happy.
+    return ok({ ok: false, note: "invalid_json_ignored" });
   }
 
   // Monday handshake — naked JSON, no auth, no DB.
-  if (
-    parsed &&
-    typeof parsed === "object" &&
-    "challenge" in (parsed as Record<string, unknown>)
-  ) {
-    const challenge = (parsed as Record<string, unknown>).challenge;
-    return new Response(JSON.stringify({ challenge }), {
+  if (parsed && typeof parsed === "object" && "challenge" in parsed) {
+    return new Response(JSON.stringify({ challenge: parsed.challenge }), {
       status: 200,
       headers: { "Content-Type": "application/json", ...CORS },
     });
   }
 
   let supabaseAdmin: any = null;
-
-  try {
-    // Service-role admin client — used for EVERY DB operation so RLS cannot block logs/lookups.
+  const initAdmin = () => {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
     const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-    if (!SUPABASE_URL || !SERVICE_KEY) {
-      throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
-    }
-    supabaseAdmin = createClient(SUPABASE_URL, SERVICE_KEY, {
+    if (!SUPABASE_URL || !SERVICE_KEY) return null;
+    return createClient(SUPABASE_URL, SERVICE_KEY, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
+  };
 
-    // ───────────────────────────────────────────────────────────────
-    // STEP 1 — Webhook Received
-    // ───────────────────────────────────────────────────────────────
+  try {
+    supabaseAdmin = initAdmin();
+    if (!supabaseAdmin) throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+
     await supabaseAdmin.from("webhook_logs").insert({
       source: "monday-live-dispatch",
       raw_payload: { step: "1_Received", data: parsed } as never,
     });
 
-    // Optional shared-secret gate (no logging of the secret itself).
+    // Optional secret gate — still returns 200 if it fails.
     const secret = Deno.env.get("MONDAY_WEBHOOK_SECRET");
     const url = new URL(req.url);
     const headerSecret = req.headers.get("x-monday-secret");
     const querySecret = url.searchParams.get("secret");
     if (secret && headerSecret !== secret && querySecret !== secret) {
-      return json({ error: "Unauthorized" }, 401);
+      await supabaseAdmin.from("webhook_logs").insert({
+        source: "monday-live-dispatch",
+        raw_payload: { step: "Auth_Skip", message: "secret mismatch, acknowledged" } as never,
+      });
+      return ok("Acknowledged");
     }
 
-    // Resolve canvasser_name + status from either legacy body or Monday event.
-    const obj = parsed as Record<string, any>;
+    // Resolve inputs
     let canvasser_name: string | null =
-      typeof obj?.canvasser_name === "string" && obj.canvasser_name.trim()
-        ? obj.canvasser_name.trim()
+      typeof parsed?.canvasser_name === "string" && parsed.canvasser_name.trim()
+        ? parsed.canvasser_name.trim()
         : null;
-    const { pulseId, status: evStatus } = extractEvent(obj);
+    const { pulseId, status: evStatus } = extractEvent(parsed);
     const status =
-      typeof obj?.status === "string" && obj.status.trim()
-        ? obj.status.trim()
-        : evStatus ?? "";
+      typeof parsed?.status === "string" && parsed.status.trim()
+        ? parsed.status.trim()
+        : (evStatus ?? "");
 
     if (!canvasser_name && pulseId) {
-      // ─────────────────────────────────────────────────────────────
-      // STEP 2 — Token Check
-      // ─────────────────────────────────────────────────────────────
-      const { data: settings, error: settingsErr } = await supabaseAdmin
+      const { data: settings } = await supabaseAdmin
         .from("system_settings")
         .select("monday_api_token")
         .limit(1)
         .maybeSingle();
 
-      if (settingsErr || !settings?.monday_api_token) {
+      const mondayApiToken = settings?.monday_api_token as string | undefined;
+      if (!mondayApiToken) {
         await supabaseAdmin.from("webhook_logs").insert({
           source: "monday-live-dispatch",
-          raw_payload: {
-            step: "2_Error",
-            message: "Token not found in DB",
-            db_error: settingsErr?.message ?? null,
-            pulseId,
-          } as never,
+          raw_payload: { step: "2_Error", message: "Monday API token missing", pulseId } as never,
         });
-        return json(
-          { error: "Monday API token not found", details: settingsErr?.message ?? null },
-          500,
-        );
+        return ok("Acknowledged (no token)");
       }
 
-      const mondayApiToken = settings.monday_api_token as string;
-
-      // ─────────────────────────────────────────────────────────────
-      // STEP 3 — Monday API Call
-      // ─────────────────────────────────────────────────────────────
       const query = `query { items (ids: [${pulseId}]) { column_values { column { title } text } } }`;
       let responseJson: any = {};
-      let mondayResponse: Response | null = null;
+      let mondayStatus = 0;
       try {
-        mondayResponse = await fetch("https://api.monday.com/v2", {
+        const mondayResponse = await fetch("https://api.monday.com/v2", {
           method: "POST",
           headers: {
             Authorization: mondayApiToken,
@@ -179,6 +163,7 @@ Deno.serve(async (req) => {
           },
           body: JSON.stringify({ query }),
         });
+        mondayStatus = mondayResponse.status;
         responseJson = await mondayResponse.json().catch(() => ({}));
       } catch (err) {
         await supabaseAdmin.from("webhook_logs").insert({
@@ -190,46 +175,23 @@ Deno.serve(async (req) => {
             pulseId,
           } as never,
         });
-        return json({ error: "Monday GraphQL fetch failed", details: String(err) }, 502);
+        return ok("Acknowledged (monday fetch failed)");
       }
 
       await supabaseAdmin.from("webhook_logs").insert({
         source: "monday-live-dispatch",
         raw_payload: {
           step: "3_MondayResponse",
-          http_status: mondayResponse.status,
-          ok: mondayResponse.ok,
+          http_status: mondayStatus,
           data: responseJson,
           pulseId,
         } as never,
       });
 
-      if (!mondayResponse.ok || responseJson?.errors) {
-        await supabaseAdmin.from("webhook_logs").insert({
-          source: "monday-live-dispatch",
-          raw_payload: {
-            step: "3_Error",
-            message: "Monday API call failed",
-            http_status: mondayResponse.status,
-            monday_response: responseJson,
-            pulseId,
-          } as never,
-        });
-        return json(
-          {
-            error: "Failed to fetch data from Monday.com",
-            http_status: mondayResponse.status,
-            monday_response: responseJson,
-          },
-          502,
-        );
-      }
-
       const cols = responseJson?.data?.items?.[0]?.column_values ?? [];
-      const hit = cols.find((c: any) => {
-        const t = (c?.column?.title ?? "").toLowerCase();
-        return t.includes("agent");
-      });
+      const hit = cols.find((c: any) =>
+        (c?.column?.title ?? "").toLowerCase().includes("agent"),
+      );
       canvasser_name =
         typeof hit?.text === "string" && hit.text.trim() ? hit.text.trim() : null;
     }
@@ -245,26 +207,16 @@ Deno.serve(async (req) => {
           pulseId,
         } as never,
       });
-      return json(
-        {
-          error: "Could not resolve canvasser_name or status",
-          canvasser_name,
-          status,
-          pulseId,
-        },
-        400,
-      );
+      return ok("Acknowledged (unresolved)");
     }
 
     const bucket = mapStatus(status);
     const isSubmittedOnly = status.trim().toLowerCase() === "submitted";
 
-    // Smart fuzzy lookup
     const wanted = normalizeName(canvasser_name);
-    const { data: profiles, error: profErr } = await supabaseAdmin
+    const { data: profiles } = await supabaseAdmin
       .from("profiles")
       .select("id, display_name, office_location");
-    if (profErr) return json({ error: profErr.message }, 500);
 
     const candidates = (profiles ?? [])
       .filter((p: any) => p.display_name)
@@ -275,14 +227,9 @@ Deno.serve(async (req) => {
     if (!match) match = candidates.find((p: any) => wanted.includes(p._norm));
     if (!match) {
       const firstToken = wanted.split(" ")[0];
-      if (firstToken) {
-        match = candidates.find((p: any) => p._norm.split(" ")[0] === firstToken);
-      }
+      if (firstToken) match = candidates.find((p: any) => p._norm.split(" ")[0] === firstToken);
     }
 
-    // ───────────────────────────────────────────────────────────────
-    // STEP 4 — Match Check
-    // ───────────────────────────────────────────────────────────────
     await supabaseAdmin.from("webhook_logs").insert({
       source: "monday-live-dispatch",
       raw_payload: {
@@ -297,12 +244,7 @@ Deno.serve(async (req) => {
       } as never,
     });
 
-    if (!match) {
-      return json(
-        { error: `No canvasser matched: ${canvasser_name}`, normalized: wanted },
-        404,
-      );
-    }
+    if (!match) return ok("Acknowledged (no canvasser match)");
 
     const metric_date = todayLA();
     const office_location = match.office_location ?? "San Diego";
@@ -317,8 +259,7 @@ Deno.serve(async (req) => {
     const nextSubmitted = (existing?.leads_submitted ?? 0) + 1;
     const nextConfirmed =
       (existing?.leads_confirmed ?? 0) + (bucket === "leads_confirmed" ? 1 : 0);
-    const nextNoAnswers =
-      (existing?.no_answers ?? 0) + (bucket === "no_answers" ? 1 : 0);
+    const nextNoAnswers = (existing?.no_answers ?? 0) + (bucket === "no_answers" ? 1 : 0);
     const nextKilled = (existing?.killed ?? 0) + (bucket === "killed" ? 1 : 0);
     const nextPending =
       (existing?.pending ?? 0) + (bucket === "pending" && !isSubmittedOnly ? 1 : 0);
@@ -346,53 +287,25 @@ Deno.serve(async (req) => {
           metric_date,
         } as never,
       });
-      return json({ error: upErr.message }, 500);
+      return ok("Acknowledged (upsert failed)");
     }
 
-    return json({
-      ok: true,
-      canvasser_id: match.id,
-      canvasser_name: match.display_name,
-      resolved_from: pulseId ? "monday_graphql" : "payload",
-      pulseId,
-      metric_date,
-      status_received: status,
-      bucket: bucket ?? "submitted_only",
-      leads_submitted: nextSubmitted,
-      leads_confirmed: nextConfirmed,
-      no_answers: nextNoAnswers,
-      killed: nextKilled,
-      pending: nextPending,
-    });
+    return ok("Success");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const stack = error instanceof Error ? error.stack : undefined;
-
     try {
-      if (!supabaseAdmin) {
-        const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
-        const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-        if (SUPABASE_URL && SERVICE_KEY) {
-          supabaseAdmin = createClient(SUPABASE_URL, SERVICE_KEY, {
-            auth: { persistSession: false, autoRefreshToken: false },
-          });
-        }
-      }
-
+      if (!supabaseAdmin) supabaseAdmin = initAdmin();
       if (supabaseAdmin) {
         await supabaseAdmin.from("webhook_logs").insert({
           source: "monday-live-dispatch",
-          raw_payload: {
-            step: "Fatal_Crash",
-            message,
-            stack: stack ?? null,
-          } as never,
+          raw_payload: { step: "Fatal_Crash", message, stack: stack ?? null } as never,
         });
       }
     } catch (logError) {
       console.error("Failed to write Fatal_Crash webhook log", logError);
     }
-
-    return json({ error: "Webhook processing failed", details: message }, 500);
+    // ALWAYS 200 — Monday disables webhooks that return non-2xx.
+    return ok("Caught error but acknowledging receipt");
   }
 });
