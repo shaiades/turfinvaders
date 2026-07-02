@@ -19,20 +19,23 @@ export function AppShell({ children }: { children: ReactNode }) {
   const navItems: NavItem[] = (() => {
     if (role === "owner") {
       return [
-        { to: "/dashboard", search: { tab: "executive" }, label: "Executive Dashboard", icon: LayoutDashboard },
+        { to: "/dashboard", search: { tab: "executive" }, label: "Command Center", icon: LayoutDashboard },
+        { to: "/my-territory", label: "Territory Map", icon: MapPin },
+        { to: "/dashboard", search: { tab: "dispatch" }, label: "Live Dispatch", icon: Inbox },
         { to: "/dashboard", search: { tab: "fleet" }, label: "Fleet Manager", icon: Users },
         { to: "/dashboard", search: { tab: "payroll" }, label: "Payroll Ledger", icon: DollarSign },
       ];
     }
     if (role === "canvasser") {
       return [
-        { to: "/dashboard", label: "My Dashboard", icon: LayoutDashboard },
-        { to: "/my-territory", label: "Log a Door", icon: MapPin },
+        { to: "/dashboard", label: "Command Center", icon: LayoutDashboard },
+        { to: "/my-territory", label: "Territory Map", icon: MapPin },
       ];
     }
     if (role === "captain") {
       return [
-        { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+        { to: "/dashboard", label: "Command Center", icon: LayoutDashboard },
+        { to: "/my-territory", label: "Territory Map", icon: MapPin },
         { to: "/teams", label: "My Van", icon: Users },
         { to: "/leaderboard", label: "Leaderboard", icon: Trophy },
         { to: "/log", label: "Daily Log", icon: ClipboardList },
@@ -40,12 +43,14 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
     if (role === "office_staff") {
       return [
-        { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-        { to: "/confirmation-desk", label: "Confirmation Desk", icon: Inbox },
+        { to: "/dashboard", label: "Command Center", icon: LayoutDashboard },
+        { to: "/dashboard", search: { tab: "dispatch" }, label: "Live Dispatch", icon: Inbox },
+        { to: "/confirmation-desk", label: "Confirmation Desk", icon: ShieldCheck },
       ];
     }
     return [{ to: "/dashboard", label: "Dashboard", icon: LayoutDashboard }];
   })();
+
 
   async function signOut() {
     await supabase.auth.signOut();
