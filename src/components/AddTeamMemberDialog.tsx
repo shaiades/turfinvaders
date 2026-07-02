@@ -18,7 +18,7 @@ import { toast } from "sonner";
 import { UserPlus } from "lucide-react";
 
 type Office = "San Diego" | "Orange County";
-type Role = "owner" | "captain" | "canvasser";
+
 
 type Role = "owner" | "office_staff" | "captain" | "canvasser";
 
