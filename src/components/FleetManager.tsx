@@ -256,8 +256,54 @@ export function FleetManager() {
 
   return (
     <div className="space-y-6">
-      {/* Create Van */}
+      {/* Week Selector */}
+      <ArcadePanel title="Leaderboard Week">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setWeekStart((w) => addDays(w, -7))}
+              title="Previous week"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+            <div className="px-3 py-1.5 rounded border border-neon/40 bg-neon/5 flex items-center gap-2 min-w-[240px] justify-center">
+              <CalendarRange className="w-4 h-4 text-neon" />
+              <div className="flex flex-col leading-tight">
+                <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                  {isCurrentWeek ? "Current Week" : "Selected Week"}
+                </span>
+                <span className="text-sm font-display">{formatRange(weekStart, weekEnd)}</span>
+              </div>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setWeekStart((w) => addDays(w, 7))}
+              title="Next week"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+          </div>
+          {!isCurrentWeek && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setWeekStart(startOfWeekMonday(new Date()))}
+            >
+              Jump to current week
+            </Button>
+          )}
+        </div>
+        <p className="mt-2 text-[10px] text-muted-foreground">
+          Points below reflect Mon–Sun of the selected week (Sit = 1 pt, Sale = 2 pts).
+        </p>
+      </ArcadePanel>
+
+      {/* Create New Van */}
       <ArcadePanel title="Create New Van">
+
         <div className="grid gap-3 md:grid-cols-[1fr_180px_140px_auto] items-end">
           <div>
             <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Van Name</label>
