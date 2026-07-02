@@ -297,7 +297,7 @@ export function FleetManager() {
           )}
         </div>
         <p className="mt-2 text-[10px] text-muted-foreground">
-          Points below reflect Mon–Sun of the selected week (Sit = 1 pt, Sale = 2 pts).
+          Points below reflect Mon–Sun of the selected week (PM = 1 pt, Sale = 2 pts; BO/RS = 0).
         </p>
       </ArcadePanel>
 
