@@ -117,10 +117,7 @@ function MyTerritoryPage() {
   }, [me, realTerritories.length]);
 
   const territories = realTerritories.length > 0 ? realTerritories : mock.territories;
-  const mockHousePins: FieldPin[] = useMemo(
-    () => mock.houses.map((h) => ({ id: h.id, pin_type: "talked_to", lat: h.lat, lng: h.lng })),
-    [mock.houses],
-  );
+  const houseMarkers = mock.houses;
 
   const dropPin = useMutation({
     mutationFn: async (ll: LatLng) => {
