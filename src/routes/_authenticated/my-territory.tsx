@@ -157,6 +157,7 @@ function MyTerritoryPage() {
     onSuccess: () => {
       toast.success("🗺 Turf Assigned!");
       setPendingPolygon(null);
+      setIsModalOpen(false);
       setDrawing(false);
       qc.invalidateQueries({ queryKey: ["turfs"] });
     },
