@@ -691,3 +691,12 @@ function PinPicker({
     </button>
   );
 }
+
+function LegendRow({ color, label }: { color: string; label: string }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: color, boxShadow: `0 0 6px ${color}` }} />
+      <span>{label}</span>
+    </div>
+  );
+}
