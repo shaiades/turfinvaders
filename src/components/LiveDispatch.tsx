@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { OfficeFilterToggle, useOfficeFilter } from "@/components/OfficeFilterContext";
+import { OfficeFilterProvider, OfficeFilterToggle, useOfficeFilter } from "@/components/OfficeFilterContext";
 import { Radio, Users, FileSearch, X, Link2, Copy, Check, KeyRound, Eye, EyeOff } from "lucide-react";
 
 
@@ -35,6 +35,14 @@ function todayLA(): string {
 }
 
 export function LiveDispatch() {
+  return (
+    <OfficeFilterProvider>
+      <LiveDispatchInner />
+    </OfficeFilterProvider>
+  );
+}
+
+function LiveDispatchInner() {
   const qc = useQueryClient();
   const today = todayLA();
   const { matches } = useOfficeFilter();
