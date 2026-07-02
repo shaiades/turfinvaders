@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { isManagerRole } from "@/lib/roles";
 import { ArcadePanel } from "@/components/arcade";
 import { NeonMap, type Territory, type LatLng, type FieldPin } from "@/components/NeonMap";
 import { Input } from "@/components/ui/input";
