@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel } from "@/components/arcade";
 import { LiveFeed } from "@/components/LiveFeed";
+import turfInvadersHero from "@/assets/turf-invaders-hero.png.asset.json";
 
 type Props = {
   /** Restrict to a single van (Captain view). Omit for company-wide. */
@@ -78,6 +79,14 @@ export function CommandCenter({ teamId }: Props) {
 
   return (
     <div className="space-y-4">
+      <div className="relative overflow-hidden rounded-lg border border-[var(--neon)]/40 shadow-[0_0_32px_-8px_var(--neon)]">
+        <img src={turfInvadersHero.url} alt="Turf Invaders" className="w-full h-40 sm:h-56 object-cover object-center" />
+        <div className="absolute inset-0 bg-gradient-to-t from-background via-background/30 to-transparent" />
+        <div className="absolute bottom-3 left-4">
+          <div className="font-display text-[10px] uppercase tracking-[0.25em] text-[var(--accent)]">Turf Invaders</div>
+          <div className="font-display text-sm text-neon">Command Center</div>
+        </div>
+      </div>
       <LiveFeed />
       <ArcadePanel
         title="Command Center"
