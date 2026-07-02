@@ -86,18 +86,27 @@ function FitBounds({ points }: { points: LatLng[] }) {
   return null;
 }
 
-function FollowMe({ me, zoom = 17 }: { me: LatLng | null | undefined; zoom?: number }) {
+function FollowMe({ me, zoom = 18, lockRadiusKm = 2 }: { me: LatLng | null | undefined; zoom?: number; lockRadiusKm?: number }) {
   const map = useMap();
   const didInitial = useRef(false);
   useEffect(() => {
     if (!me) return;
     if (!didInitial.current) {
       map.setView([me.lat, me.lng], zoom, { animate: false });
+      // Lock panning to a bounding box around the user (~lockRadiusKm)
+      const dLat = lockRadiusKm / 111;
+      const dLng = lockRadiusKm / (111 * Math.cos((me.lat * Math.PI) / 180));
+      const bounds = L.latLngBounds(
+        [me.lat - dLat, me.lng - dLng],
+        [me.lat + dLat, me.lng + dLng],
+      );
+      map.setMaxBounds(bounds);
+      map.setMinZoom(15);
       didInitial.current = true;
     } else {
       map.panTo([me.lat, me.lng], { animate: true });
     }
-  }, [map, me?.lat, me?.lng, zoom]);
+  }, [map, me?.lat, me?.lng, zoom, lockRadiusKm]);
   return null;
 }
 
