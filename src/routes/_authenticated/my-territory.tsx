@@ -115,7 +115,7 @@ type TurfRow = {
 function MyTerritoryPage() {
   const { user, role } = useAuth();
   const qc = useQueryClient();
-  const isManager = role === "owner" || role === "captain";
+  const isManager = isManagerRole(role);
   const [me, setMe] = useState<LatLng | null>(null);
   const [simOffset, setSimOffset] = useState<LatLng>({ lat: 0, lng: 0 });
   const [active, setActive] = useState<ActivePin>("lead");
