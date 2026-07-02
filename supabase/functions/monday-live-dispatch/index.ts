@@ -51,19 +51,21 @@ function mapStatus(raw: string): Bucket {
 }
 
 function extractEvent(parsed: any): { pulseId?: number; status?: string } {
-  const ev = parsed?.event;
+  // Monday nests the event differently across integrations
+  const ev = parsed?.data?.event ?? parsed?.event ?? parsed;
+  const rawPulse = ev?.pulseId ?? ev?.itemId ?? ev?.pulse_id;
   const pulseId =
-    typeof ev?.pulseId === "number"
-      ? ev.pulseId
-      : typeof ev?.pulseId === "string"
-        ? Number(ev.pulseId)
+    typeof rawPulse === "number"
+      ? rawPulse
+      : typeof rawPulse === "string" && rawPulse.trim()
+        ? Number(rawPulse)
         : undefined;
   const status =
     ev?.value?.label?.text ??
     (typeof ev?.value?.label === "string" ? ev.value.label : undefined) ??
     ev?.value?.text ??
     (typeof parsed?.status === "string" ? parsed.status : undefined);
-  return { pulseId, status };
+  return { pulseId: Number.isFinite(pulseId) ? pulseId : undefined, status };
 }
 
 Deno.serve(async (req) => {
