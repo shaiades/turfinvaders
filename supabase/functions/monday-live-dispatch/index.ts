@@ -108,10 +108,17 @@ serve(async (req) => {
       event?.value?.label ||
       event?.value?.text ||
       event?.columnValue?.label?.text
+    const previousStatusFromEvent: string | undefined =
+      event?.previousValue?.label?.text ||
+      event?.previousValue?.label ||
+      event?.previousValue?.text ||
+      event?.previous_value?.label?.text ||
+      event?.previous_value?.label ||
+      event?.previous_value?.text
 
     await supabaseAdmin.from('webhook_logs').insert({
       step: '2_Payload_Parsed',
-      data: { pulseId, boardId, changedColumnId, statusFromEvent },
+      data: { pulseId, boardId, changedColumnId, statusFromEvent, previousStatusFromEvent },
     })
 
     if (!pulseId) {
