@@ -17,15 +17,20 @@ export const createCanvasser = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => createCanvasserSchema.parse(data))
   .handler(async ({ data, context }) => {
-    // Owner-only.
-    const { data: ownerRows, error: ownerErr } = await context.supabase
+    // Owners or Captains can add new players. Captains can only create canvassers.
+    const { data: roleRows, error: roleErr } = await context.supabase
       .from("user_roles")
       .select("role")
-      .eq("user_id", context.userId)
-      .eq("role", "owner");
-    if (ownerErr) throw new Error(ownerErr.message);
-    if (!ownerRows || ownerRows.length === 0) {
-      throw new Error("Only Owners can add new users.");
+      .eq("user_id", context.userId);
+    if (roleErr) throw new Error(roleErr.message);
+    const roles = (roleRows ?? []).map((r) => r.role as string);
+    const isOwner = roles.includes("owner");
+    const isCaptain = roles.includes("captain");
+    if (!isOwner && !isCaptain) {
+      throw new Error("Only Owners or Captains can add new users.");
+    }
+    if (!isOwner && data.role !== "canvasser") {
+      throw new Error("Captains can only create Canvassers.");
     }
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
