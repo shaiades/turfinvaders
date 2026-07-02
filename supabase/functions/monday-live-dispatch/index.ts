@@ -361,16 +361,16 @@ Deno.serve(async (req) => {
       if (supabaseAdmin) {
         await supabaseAdmin.from("webhook_logs").insert({
           source: "monday-live-dispatch",
-          raw_payload: { step: "Fatal_Crash", message, stack: stack ?? null } as never,
+          raw_payload: { step: "Fatal_Error", message, stack: stack ?? null } as never,
         });
       }
     } catch (logErr) {
-      console.error("Failed to write Fatal_Crash webhook log", logErr);
+      console.error("Failed to write Fatal_Error webhook log", logErr);
     }
-    // ALWAYS 200 — Monday disables webhooks that return non-2xx.
-    return new Response("Caught error but acknowledging receipt", {
-      status: 200,
-      headers: { "Content-Type": "text/plain; charset=utf-8", ...CORS },
-    });
+    // ALWAYS 200 JSON — Monday disables webhooks that return non-2xx.
+    return new Response(
+      JSON.stringify({ status: "Error but acknowledged", error: message }),
+      { status: 200, headers: { "Content-Type": "application/json", ...CORS } },
+    );
   }
 });
