@@ -235,6 +235,7 @@ export function NeonMap({
               fillColor: t.color,
               fillOpacity: 0.15,
             }}
+            eventHandlers={onTerritoryClick ? { click: () => onTerritoryClick(t.id) } : undefined}
           />
         ))}
 
