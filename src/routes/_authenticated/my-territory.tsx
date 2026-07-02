@@ -87,25 +87,32 @@ function MyTerritoryPage() {
     },
   });
 
-  // Canvasser list — for the assign dropdown (managers only)
+  // Assignable users — canvassers, captains, and owners can all be assigned a turf
   const canvassersQuery = useQuery({
     enabled: isManager,
     queryKey: ["assignable_canvassers"],
     queryFn: async () => {
       const { data: roleRows, error: rErr } = await supabase
         .from("user_roles")
-        .select("user_id")
-        .eq("role", "canvasser");
+        .select("user_id, role")
+        .in("role", ["canvasser", "captain", "owner"]);
       if (rErr) throw rErr;
+      if ((roleRows ?? []).length === 0) return [] as Array<{ id: string; display_name: string; role: string }>;
       const ids = (roleRows ?? []).map((r) => r.user_id as string);
-      if (ids.length === 0) return [] as Array<{ id: string; display_name: string }>;
       const { data: profs, error: pErr } = await supabase
         .from("profiles")
         .select("id, display_name")
         .in("id", ids)
         .order("display_name", { ascending: true });
       if (pErr) throw pErr;
-      return (profs ?? []) as Array<{ id: string; display_name: string }>;
+      const nameById = new Map((profs ?? []).map((p) => [p.id as string, p.display_name ?? p.id]));
+      return (roleRows ?? [])
+        .map((r) => ({
+          id: r.user_id as string,
+          display_name: nameById.get(r.user_id) ?? (r.user_id as string),
+          role: r.role as string,
+        }))
+        .sort((a, b) => a.display_name.localeCompare(b.display_name));
     },
   });
 
@@ -332,7 +339,7 @@ function MyTerritoryPage() {
                           <div className="font-display text-sm text-foreground truncate">{t.name}</div>
                           <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
                             <MapPin className="inline w-3 h-3 mr-1" />
-                            {assignee?.display_name ?? (t.assigned_user_id ? "Unknown canvasser" : "Unassigned")}
+                            {assignee ? formatAssignable(assignee) : (t.assigned_user_id ? "Unknown assignee" : "Unassigned")}
                             {" · "}{(t.polygon_coordinates ?? []).length} vertices
                           </div>
                         </div>
@@ -384,13 +391,18 @@ function MyTerritoryPage() {
   );
 }
 
+function formatAssignable(c: { display_name: string; role: string }) {
+  const title = c.role.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
+  return `${c.display_name} (${title})`;
+}
+
 function AssignTurfDialog({
   open, onOpenChange, polygon, canvassers, onSave, saving,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   polygon: LatLng[];
-  canvassers: Array<{ id: string; display_name: string }>;
+  canvassers: Array<{ id: string; display_name: string; role: string }>;
   onSave: (name: string, assigneeId: string, color: string) => void;
   saving: boolean;
 }) {
@@ -430,7 +442,7 @@ function AssignTurfDialog({
                     <div className="px-3 py-2 text-xs text-muted-foreground">No canvassers found</div>
                   )}
                   {canvassers.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>{c.display_name}</SelectItem>
+                    <SelectItem key={c.id} value={c.id}>{formatAssignable(c)}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
