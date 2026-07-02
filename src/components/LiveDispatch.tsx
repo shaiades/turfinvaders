@@ -393,10 +393,13 @@ type WebhookLog = {
   id: string;
   created_at: string;
   source: string | null;
+  step: string | null;
+  data: unknown;
   raw_payload: unknown;
 };
 
 function WebhookLogsButton() {
+  const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const { data: logs = [], refetch, isFetching } = useQuery({
     queryKey: ["webhook-logs"],
@@ -404,12 +407,28 @@ function WebhookLogsButton() {
     queryFn: async () => {
       const { data } = await supabase
         .from("webhook_logs")
-        .select("id, created_at, source, raw_payload")
+        .select("id, created_at, source, step, data, raw_payload")
         .order("created_at", { ascending: false })
-        .limit(25);
+        .limit(50);
       return (data ?? []) as WebhookLog[];
     },
   });
+
+  // Realtime — new webhook_logs rows pop in instantly.
+  useEffect(() => {
+    if (!open) return;
+    const channel = supabase
+      .channel("webhook-logs-live")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "webhook_logs" },
+        () => qc.invalidateQueries({ queryKey: ["webhook-logs"] }),
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [open, qc]);
 
   return (
     <>
