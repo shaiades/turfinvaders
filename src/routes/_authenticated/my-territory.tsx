@@ -442,7 +442,7 @@ function AssignTurfDialog({
                     <div className="px-3 py-2 text-xs text-muted-foreground">No canvassers found</div>
                   )}
                   {canvassers.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>{c.display_name}</SelectItem>
+                    <SelectItem key={c.id} value={c.id}>{formatAssignable(c)}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
