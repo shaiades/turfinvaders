@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth, setDevRoleOverride, type AppRole } from "@/hooks/useAuth";
 import { LogOut, Users, Settings, LayoutDashboard, ShieldCheck, ClipboardList, Inbox, MapPin, FlaskConical, DollarSign, Trophy } from "lucide-react";
-import turfInvadersLogo from "@/assets/turf-invaders-hero.png.asset.json";
+import turfInvadersWordmark from "@/assets/turf-invaders-wordmark.png.asset.json";
 
 type NavItem = {
   to: string;
@@ -91,17 +91,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </div>
       )}
-      <header className="border-b border-border bg-background sticky top-0 z-20">
-        <div className="max-w-7xl mx-auto flex items-center gap-6 px-4 sm:px-6 py-3">
-          <Link to="/dashboard" className="flex items-center gap-2">
-            <img
-              src={turfInvadersLogo.url}
-              alt="Turf Invaders"
-              className="w-9 h-9 rounded object-cover border border-[var(--neon)]/40 shadow-[0_0_12px_-2px_var(--neon)]"
-            />
-            <span className="font-display text-sm text-foreground hidden sm:inline">TURF INVADERS</span>
-          </Link>
-          <nav className="flex items-center gap-1 flex-1 overflow-x-auto">
+      <header className="border-b border-border bg-background/95 backdrop-blur sticky top-0 z-20">
+        <div className="max-w-7xl mx-auto grid grid-cols-[1fr_auto_1fr] items-center gap-4 px-4 sm:px-6 py-3">
+          <nav className="flex items-center gap-1 overflow-x-auto justify-start">
             {navItems.map((item) => (
               <Link
                 key={`${item.to}-${item.label}`}
@@ -116,8 +108,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                 activeProps={{
                   className:
                     role === "canvasser"
-                      ? "flex items-center gap-2 px-4 py-3 rounded-md text-base font-medium text-primary bg-surface-elevated min-h-12"
-                      : "flex items-center gap-2 px-3 py-2 rounded-md text-sm text-primary bg-surface-elevated",
+                      ? "flex items-center gap-2 px-4 py-3 rounded-md text-base font-medium text-primary bg-surface-elevated ring-1 ring-primary/40 min-h-12"
+                      : "flex items-center gap-2 px-3 py-2 rounded-md text-sm text-primary bg-surface-elevated ring-1 ring-primary/40",
                 }}
               >
                 <item.icon className={role === "canvasser" ? "w-5 h-5" : "w-4 h-4"} />
@@ -125,21 +117,30 @@ export function AppShell({ children }: { children: ReactNode }) {
               </Link>
             ))}
           </nav>
-          {user && (
-            <div className="flex items-center gap-3">
-              <div className="text-right hidden sm:block">
-                <div className="text-xs text-muted-foreground uppercase tracking-wider">{role}</div>
-                <div className="text-sm font-medium">{displayName}</div>
-              </div>
-              <button
-                onClick={signOut}
-                className="p-2 rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
-                aria-label="Sign out"
-              >
-                <LogOut className="w-4 h-4" />
-              </button>
-            </div>
-          )}
+          <Link to="/dashboard" className="flex items-center justify-center shrink-0" aria-label="Turf Invaders home">
+            <img
+              src={turfInvadersWordmark.url}
+              alt="Turf Invaders"
+              className="h-12 sm:h-14 md:h-16 w-auto object-contain drop-shadow-[0_0_14px_color-mix(in_oklab,var(--neon)_55%,transparent)]"
+            />
+          </Link>
+          <div className="flex items-center gap-3 justify-end">
+            {user && (
+              <>
+                <div className="text-right hidden sm:block">
+                  <div className="text-xs text-muted-foreground uppercase tracking-wider">{role}</div>
+                  <div className="text-sm font-medium">{displayName}</div>
+                </div>
+                <button
+                  onClick={signOut}
+                  className="p-2 rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
+                  aria-label="Sign out"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </header>
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-8">{children}</main>

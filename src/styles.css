@@ -57,8 +57,8 @@
   --popover: oklch(0.22 0.03 270);
   --popover-foreground: oklch(0.96 0.01 250);
 
-  /* Retro-arcade neon palette */
-  --primary: oklch(0.70 0.28 330);          /* neon magenta */
+  /* Turf Invaders wordmark palette: Neon Orange, Arcade Blue, Vivid Green, Hot Pink */
+  --primary: oklch(0.75 0.19 55);           /* neon orange */
   --primary-foreground: oklch(0.14 0.03 270);
 
   --secondary: oklch(0.28 0.04 270);
@@ -67,19 +67,22 @@
   --muted: oklch(0.26 0.03 270);
   --muted-foreground: oklch(0.68 0.03 260);
 
-  --accent: oklch(0.78 0.16 195);           /* neon cyan */
-  --accent-foreground: oklch(0.14 0.03 270);
+  --accent: oklch(0.68 0.20 245);           /* arcade blue */
+  --accent-foreground: oklch(0.98 0.01 250);
 
   --destructive: oklch(0.65 0.24 25);
   --destructive-foreground: oklch(0.98 0 0);
 
   --border: oklch(0.32 0.04 270);
   --input: oklch(0.28 0.04 270);
-  --ring: oklch(0.70 0.28 330);
+  --ring: oklch(0.75 0.19 55);
 
-  --neon: oklch(0.70 0.28 330);             /* neon magenta */
+  --neon: oklch(0.72 0.27 340);             /* hot pink */
   --neon-foreground: oklch(0.14 0.03 270);
-  --victory: oklch(0.82 0.20 145);          /* neon green */
+  --neon-magenta: oklch(0.72 0.27 340);     /* alias for legacy usage */
+  --neon-orange: oklch(0.75 0.19 55);
+  --neon-blue: oklch(0.68 0.20 245);
+  --victory: oklch(0.80 0.22 145);          /* vivid green */
   --warning: oklch(0.82 0.17 90);           /* neon yellow */
 }
 
