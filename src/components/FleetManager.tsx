@@ -226,31 +226,6 @@ export function FleetManager() {
     vansByOffice.get(loc)!.push(v);
   }
 
-  function onDragStart(e: React.DragEvent, payload: DragPayload) {
-    e.dataTransfer.setData("application/json", JSON.stringify(payload));
-    e.dataTransfer.effectAllowed = "move";
-  }
-  function onVanDragOver(e: React.DragEvent, vanId: string) {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    setDragOverVan(vanId);
-  }
-  function onVanDrop(e: React.DragEvent, vanId: string) {
-    e.preventDefault();
-    setDragOverVan(null);
-    try {
-      const p = JSON.parse(e.dataTransfer.getData("application/json")) as DragPayload;
-      if (p.id) assignCanvasser.mutate({ canvasserId: p.id, vanId });
-    } catch {/* noop */}
-  }
-  function onUnassignedDrop(e: React.DragEvent) {
-    e.preventDefault();
-    setDragOverUnassigned(false);
-    try {
-      const p = JSON.parse(e.dataTransfer.getData("application/json")) as DragPayload;
-      if (p.id) assignCanvasser.mutate({ canvasserId: p.id, vanId: null });
-    } catch {/* noop */}
-  }
 
   return (
     <div className="space-y-6">
