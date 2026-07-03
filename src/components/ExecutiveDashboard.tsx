@@ -498,8 +498,9 @@ function WeeklyResults() {
 
       const activeIds = Array.from(agg.keys());
       const pays = await Promise.all(activeIds.map((id) =>
-        supabase.rpc("calc_weekly_paycheck", { _canvasser_id: id, _week_start: toISODate(lastWeekStart) })
-          .then((r) => ({ id, pay: Number(r.data?.[0]?.total_pay ?? 0) }))
+        getWeeklyPaycheck({ data: { canvasser_id: id, week_start: toISODate(lastWeekStart) } })
+          .then((r) => ({ id, pay: Number((r as { total_pay?: number } | null)?.total_pay ?? 0) }))
+          .catch(() => ({ id, pay: 0 }))
       ));
       const payById = new Map(pays.map((p) => [p.id, p.pay]));
 
