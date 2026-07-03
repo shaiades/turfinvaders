@@ -14,16 +14,19 @@ export type Territory = {
 
 export type FieldPin = {
   id: string;
-  pin_type: "not_home" | "talked_to" | "lead";
+  pin_type: "not_home" | "talked_to" | "lead" | "knock" | "not_interested";
   lat: number;
   lng: number;
   is_remote_drop?: boolean;
   distance_m?: number | null;
 };
 
+// Standard tallies render as a vibrant neon blue dot; leads get their own star.
 const PIN_COLORS: Record<FieldPin["pin_type"], string> = {
-  not_home: "#ff2d55",
-  talked_to: "#ffd60a",
+  not_home: "#00e5ff",
+  knock: "#00e5ff",
+  talked_to: "#00e5ff",
+  not_interested: "#00e5ff",
   lead: "#39ff14",
 };
 const REMOTE_DROP_COLOR = "#8a8f99";
@@ -41,6 +44,26 @@ function glowingDotIcon(color: string, size = 18) {
     className: "neon-pin",
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
+  });
+}
+
+function leadStarIcon(size = 34) {
+  const color = "#39ff14";
+  const half = size / 2;
+  const html = `
+    <div style="position:relative;width:${size}px;height:${size}px;">
+      <div style="position:absolute;inset:-4px;border-radius:9999px;background:${color};opacity:.25;filter:blur(6px);animation:nm-star-pulse 1.8s ease-in-out infinite;"></div>
+      <svg width="${size}" height="${size}" viewBox="0 0 24 24" style="position:absolute;inset:0;filter:drop-shadow(0 0 6px ${color}) drop-shadow(0 0 12px ${color}aa);">
+        <polygon points="12,1.6 15.09,8.86 22.9,9.55 16.95,14.7 18.82,22.4 12,18.27 5.18,22.4 7.05,14.7 1.1,9.55 8.91,8.86"
+          fill="${color}" stroke="#ffffff" stroke-width="1.2" stroke-linejoin="round" />
+      </svg>
+    </div>
+    <style>@keyframes nm-star-pulse{0%,100%{transform:scale(1);opacity:.25}50%{transform:scale(1.35);opacity:.55}}</style>`;
+  return L.divIcon({
+    html,
+    className: "neon-lead-star",
+    iconSize: [size, size],
+    iconAnchor: [half, half],
   });
 }
 
@@ -319,7 +342,18 @@ export function NeonMap({
         ))}
 
         {pins.map((p) => (
-          <Marker key={p.id} position={[p.lat, p.lng]} icon={p.is_remote_drop ? flaggedPinIcon() : glowingDotIcon(PIN_COLORS[p.pin_type])} />
+          <Marker
+            key={p.id}
+            position={[p.lat, p.lng]}
+            icon={
+              p.is_remote_drop
+                ? flaggedPinIcon()
+                : p.pin_type === "lead"
+                  ? leadStarIcon()
+                  : glowingDotIcon(PIN_COLORS[p.pin_type])
+            }
+          />
+
         ))}
 
         {leads.map((l) => {
