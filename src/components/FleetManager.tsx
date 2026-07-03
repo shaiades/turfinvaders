@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Truck, Plus, Building2, Trash2, UserMinus, GripVertical, Pencil, Check, X, ChevronLeft, ChevronRight, CalendarRange } from "lucide-react";
+import { Truck, Plus, Building2, Trash2, UserMinus, Pencil, Check, X, ChevronLeft, ChevronRight, CalendarRange } from "lucide-react";
 import { deleteProfile, deleteVan } from "@/lib/fleet.functions";
 
 // Week helpers — ISO week, Monday..Sunday.
@@ -48,15 +48,13 @@ const VAN_COLORS = ["#ff007a", "#00f0ff", "#a855f7", "#f59e0b", "#22c55e", "#ef4
 export const OFFICE_LOCATIONS = ["San Diego", "Orange County"] as const;
 export type OfficeLocation = (typeof OFFICE_LOCATIONS)[number];
 
-type DragPayload = { id: string; name: string };
+
 
 export function FleetManager() {
   const qc = useQueryClient();
   const [newVanName, setNewVanName] = useState("");
   const [newVanLoc, setNewVanLoc] = useState<OfficeLocation>("San Diego");
   const [newVanColor, setNewVanColor] = useState(VAN_COLORS[0]);
-  const [dragOverVan, setDragOverVan] = useState<string | null>(null);
-  const [dragOverUnassigned, setDragOverUnassigned] = useState(false);
   const deleteProfileFn = useServerFn(deleteProfile);
   const deleteVanFn = useServerFn(deleteVan);
   const [editingVanId, setEditingVanId] = useState<string | null>(null);
@@ -228,31 +226,6 @@ export function FleetManager() {
     vansByOffice.get(loc)!.push(v);
   }
 
-  function onDragStart(e: React.DragEvent, payload: DragPayload) {
-    e.dataTransfer.setData("application/json", JSON.stringify(payload));
-    e.dataTransfer.effectAllowed = "move";
-  }
-  function onVanDragOver(e: React.DragEvent, vanId: string) {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    setDragOverVan(vanId);
-  }
-  function onVanDrop(e: React.DragEvent, vanId: string) {
-    e.preventDefault();
-    setDragOverVan(null);
-    try {
-      const p = JSON.parse(e.dataTransfer.getData("application/json")) as DragPayload;
-      if (p.id) assignCanvasser.mutate({ canvasserId: p.id, vanId });
-    } catch {/* noop */}
-  }
-  function onUnassignedDrop(e: React.DragEvent) {
-    e.preventDefault();
-    setDragOverUnassigned(false);
-    try {
-      const p = JSON.parse(e.dataTransfer.getData("application/json")) as DragPayload;
-      if (p.id) assignCanvasser.mutate({ canvasserId: p.id, vanId: null });
-    } catch {/* noop */}
-  }
 
   return (
     <div className="space-y-6">
@@ -352,15 +325,9 @@ export function FleetManager() {
                 <div className="grid gap-4 md:grid-cols-2">
                   {list.map((v) => {
                     const roster = profiles.filter((p) => p.team_id === v.id);
-                    const isOver = dragOverVan === v.id;
                     return (
-                      <div
-                        key={v.id}
-                        onDragOver={(e) => onVanDragOver(e, v.id)}
-                        onDragLeave={() => setDragOverVan((cur) => (cur === v.id ? null : cur))}
-                        onDrop={(e) => onVanDrop(e, v.id)}
-                        className={`van-card p-4 space-y-3 ${isOver ? "van-card-over" : ""}`}
-                      >
+                      <div key={v.id} className="van-card p-4 space-y-3">
+
                         {editingVanId === v.id ? (
                           <div className="space-y-2 p-2 rounded border border-neon/40 bg-neon/5">
                             <div className="grid gap-2 md:grid-cols-[1fr_160px]">
@@ -465,7 +432,6 @@ export function FleetManager() {
                                 id={r.id}
                                 name={r.display_name ?? "Unknown"}
                                 points={pointsByUser.get(r.id) ?? 0}
-                                onDragStart={(e) => onDragStart(e, { id: r.id, name: r.display_name ?? "" })}
                                 onUnassign={() => assignCanvasser.mutate({ canvasserId: r.id, vanId: null })}
                                 onDelete={() => {
                                   if (confirm(`Delete profile "${r.display_name}"? This removes the user permanently.`)) {
@@ -507,16 +473,7 @@ export function FleetManager() {
               {unassigned.length}
             </span>
           </div>
-          <div
-            onDragOver={(e) => { e.preventDefault(); setDragOverUnassigned(true); }}
-            onDragLeave={() => setDragOverUnassigned(false)}
-            onDrop={onUnassignedDrop}
-            className={`min-h-[200px] rounded-lg border border-dashed p-2 space-y-1.5 transition-colors ${
-              dragOverUnassigned
-                ? "border-[color:var(--neon-orange)] bg-[color:color-mix(in_oklab,var(--neon-orange)_8%,transparent)]"
-                : "border-border"
-            }`}
-          >
+          <div className="min-h-[120px] rounded-lg border border-dashed p-2 space-y-1.5 border-border">
             {unassigned.length === 0 ? (
               <div className="text-xs text-muted-foreground italic px-2 py-6 text-center">
                 All agents assigned to a van. New Monday.com canvassers land here automatically.
@@ -528,7 +485,9 @@ export function FleetManager() {
                   id={p.id}
                   name={p.display_name ?? "Unknown"}
                   points={pointsByUser.get(p.id) ?? 0}
-                  onDragStart={(e) => onDragStart(e, { id: p.id, name: p.display_name ?? "" })}
+                  vans={vans.map((v) => ({ id: v.id, name: v.name, color: v.color }))}
+                  currentVanId={p.team_id}
+                  onAssign={(vanId) => assignCanvasser.mutate({ canvasserId: p.id, vanId })}
                   onDelete={() => {
                     if (confirm(`Delete profile "${p.display_name}"? This removes the user permanently.`)) {
                       removeProfile.mutate(p.id);
@@ -539,7 +498,7 @@ export function FleetManager() {
             )}
           </div>
           <p className="text-[10px] text-muted-foreground">
-            Drag an agent onto a Van card to assign. Auto-created from Monday.com webhooks.
+            Tap “Assign Van” to place an agent on a roster. Auto-created from Monday.com webhooks.
           </p>
         </div>
       </div>
@@ -547,34 +506,58 @@ export function FleetManager() {
   );
 }
 
+type VanOption = { id: string; name: string; color: string };
+
 function RosterRow({
-  id, name, points, onDragStart, onUnassign, onDelete,
+  id, name, points, vans, currentVanId, onAssign, onUnassign, onDelete,
 }: {
   id: string;
   name: string;
   points: number;
-  onDragStart: (e: React.DragEvent) => void;
+  vans?: VanOption[];
+  currentVanId?: string | null;
+  onAssign?: (vanId: string) => void;
   onUnassign?: () => void;
   onDelete: () => void;
 }) {
   const isGhost = points === 0;
   return (
     <div
-      draggable
-      onDragStart={onDragStart}
       data-profile-id={id}
-      className="flex items-center gap-2 px-2 py-1.5 rounded border border-border bg-surface hover:border-neon/60 cursor-grab active:cursor-grabbing"
+      className="flex items-center gap-2 px-2 py-1.5 rounded border border-border bg-surface hover:border-neon/60"
     >
-      <GripVertical className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
       <span className="text-sm truncate flex-1">{name}</span>
       <span className={`text-[10px] font-display ${isGhost ? "text-muted-foreground px-1.5" : "points-badge-glow"}`}>
         {points}p
       </span>
+      {vans && onAssign && (
+        <Select
+          value={currentVanId ?? "none"}
+          onValueChange={(val) => { if (val && val !== "none") onAssign(val); }}
+        >
+          <SelectTrigger
+            className="h-7 min-w-[120px] text-[11px] font-display uppercase tracking-wider bg-background border-[color:var(--neon-blue)]/50 hover:border-[color:var(--neon-blue)]"
+          >
+            <SelectValue placeholder="Assign Van…" />
+          </SelectTrigger>
+          <SelectContent className="bg-background border-[color:var(--neon-blue)]/50">
+            <SelectItem value="none" disabled>— Assign Van —</SelectItem>
+            {vans.map((v) => (
+              <SelectItem key={v.id} value={v.id}>
+                <span className="inline-flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full" style={{ background: v.color }} />
+                  {v.name}
+                </span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
       {onUnassign && (
         <button
           onClick={onUnassign}
           className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-          title="Move to Unassigned"
+          title="Move to Free Agents"
         >
           <UserMinus className="w-3.5 h-3.5" />
         </button>
@@ -589,3 +572,4 @@ function RosterRow({
     </div>
   );
 }
+
