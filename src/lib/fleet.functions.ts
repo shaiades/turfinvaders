@@ -106,3 +106,44 @@ export const upsertManualWeekly = createServerFn({ method: "POST" })
     if (error) throw error;
     return { ok: true };
   });
+
+/**
+ * Compute a canvasser's weekly paycheck. The underlying SECURITY DEFINER
+ * function is no longer executable by authenticated users directly — callers
+ * must go through this server fn, which enforces role checks and invokes the
+ * RPC via the service-role client.
+ */
+export const getWeeklyPaycheck = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => {
+    const o = (data && typeof data === "object") ? data as Record<string, unknown> : {};
+    const canvasser_id = typeof o.canvasser_id === "string" ? o.canvasser_id : "";
+    const week_start = typeof o.week_start === "string" ? o.week_start : "";
+    if (!/^[0-9a-f-]{36}$/i.test(canvasser_id)) throw new Error("Invalid canvasser");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(week_start)) throw new Error("Invalid week");
+    return { canvasser_id, week_start };
+  })
+  .handler(async ({ data, context }) => {
+    // Caller must be the canvasser themselves, an owner, or a captain of their team.
+    const [rolesR, meProfR, targetProfR] = await Promise.all([
+      context.supabase.from("user_roles").select("role").eq("user_id", context.userId),
+      context.supabase.from("profiles").select("team_id").eq("id", context.userId).maybeSingle(),
+      context.supabase.from("profiles").select("team_id").eq("id", data.canvasser_id).maybeSingle(),
+    ]);
+    const roles = (rolesR.data ?? []).map((r) => r.role);
+    const isOwner = roles.includes("owner");
+    const isCaptain = roles.includes("captain");
+    const isSelf = context.userId === data.canvasser_id;
+    const sameTeam = !!meProfR.data?.team_id && meProfR.data.team_id === targetProfR.data?.team_id;
+    if (!isSelf && !isOwner && !(isCaptain && sameTeam)) {
+      throw new Error("Not authorized");
+    }
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: rows, error } = await supabaseAdmin.rpc("calc_weekly_paycheck", {
+      _canvasser_id: data.canvasser_id,
+      _week_start: data.week_start,
+    });
+    if (error) throw error;
+    return rows?.[0] ?? null;
+  });
