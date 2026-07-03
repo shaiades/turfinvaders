@@ -547,34 +547,58 @@ export function FleetManager() {
   );
 }
 
+type VanOption = { id: string; name: string; color: string };
+
 function RosterRow({
-  id, name, points, onDragStart, onUnassign, onDelete,
+  id, name, points, vans, currentVanId, onAssign, onUnassign, onDelete,
 }: {
   id: string;
   name: string;
   points: number;
-  onDragStart: (e: React.DragEvent) => void;
+  vans?: VanOption[];
+  currentVanId?: string | null;
+  onAssign?: (vanId: string) => void;
   onUnassign?: () => void;
   onDelete: () => void;
 }) {
   const isGhost = points === 0;
   return (
     <div
-      draggable
-      onDragStart={onDragStart}
       data-profile-id={id}
-      className="flex items-center gap-2 px-2 py-1.5 rounded border border-border bg-surface hover:border-neon/60 cursor-grab active:cursor-grabbing"
+      className="flex items-center gap-2 px-2 py-1.5 rounded border border-border bg-surface hover:border-neon/60"
     >
-      <GripVertical className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
       <span className="text-sm truncate flex-1">{name}</span>
       <span className={`text-[10px] font-display ${isGhost ? "text-muted-foreground px-1.5" : "points-badge-glow"}`}>
         {points}p
       </span>
+      {vans && onAssign && (
+        <Select
+          value={currentVanId ?? "none"}
+          onValueChange={(val) => { if (val && val !== "none") onAssign(val); }}
+        >
+          <SelectTrigger
+            className="h-7 min-w-[120px] text-[11px] font-display uppercase tracking-wider bg-background border-[color:var(--neon-blue)]/50 hover:border-[color:var(--neon-blue)]"
+          >
+            <SelectValue placeholder="Assign Van…" />
+          </SelectTrigger>
+          <SelectContent className="bg-background border-[color:var(--neon-blue)]/50">
+            <SelectItem value="none" disabled>— Assign Van —</SelectItem>
+            {vans.map((v) => (
+              <SelectItem key={v.id} value={v.id}>
+                <span className="inline-flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full" style={{ background: v.color }} />
+                  {v.name}
+                </span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
       {onUnassign && (
         <button
           onClick={onUnassign}
           className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-          title="Move to Unassigned"
+          title="Move to Free Agents"
         >
           <UserMinus className="w-3.5 h-3.5" />
         </button>
@@ -589,3 +613,4 @@ function RosterRow({
     </div>
   );
 }
+
