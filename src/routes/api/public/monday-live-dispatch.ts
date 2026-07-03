@@ -181,12 +181,13 @@ export const Route = createFileRoute("/api/public/monday-live-dispatch")({
           await supabaseAdmin
             .from("user_roles")
             .insert({ user_id: newId, role: "canvasser" });
-          match = { ...created, _norm: wanted } as typeof match;
+          match = { ...created, _norm: wanted };
           await supabaseAdmin.from("webhook_logs").insert({
             source: "monday-live-dispatch:auto-created",
             raw_payload: { canvasser_name, newId, office: officeGuess } as never,
           });
         }
+        if (!match) return json({ error: "match unavailable" }, 500);
 
         const metric_date = todayLA();
         const office_location = match.office_location ?? "San Diego";
