@@ -48,7 +48,7 @@ const VAN_COLORS = ["#ff007a", "#00f0ff", "#a855f7", "#f59e0b", "#22c55e", "#ef4
 export const OFFICE_LOCATIONS = ["San Diego", "Orange County"] as const;
 export type OfficeLocation = (typeof OFFICE_LOCATIONS)[number];
 
-type DragPayload = { id: string; name: string };
+
 
 export function FleetManager() {
   const qc = useQueryClient();
