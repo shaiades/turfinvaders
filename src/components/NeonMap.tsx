@@ -47,6 +47,26 @@ function glowingDotIcon(color: string, size = 18) {
   });
 }
 
+function leadStarIcon(size = 34) {
+  const color = "#39ff14";
+  const half = size / 2;
+  const html = `
+    <div style="position:relative;width:${size}px;height:${size}px;">
+      <div style="position:absolute;inset:-4px;border-radius:9999px;background:${color};opacity:.25;filter:blur(6px);animation:nm-star-pulse 1.8s ease-in-out infinite;"></div>
+      <svg width="${size}" height="${size}" viewBox="0 0 24 24" style="position:absolute;inset:0;filter:drop-shadow(0 0 6px ${color}) drop-shadow(0 0 12px ${color}aa);">
+        <polygon points="12,1.6 15.09,8.86 22.9,9.55 16.95,14.7 18.82,22.4 12,18.27 5.18,22.4 7.05,14.7 1.1,9.55 8.91,8.86"
+          fill="${color}" stroke="#ffffff" stroke-width="1.2" stroke-linejoin="round" />
+      </svg>
+    </div>
+    <style>@keyframes nm-star-pulse{0%,100%{transform:scale(1);opacity:.25}50%{transform:scale(1.35);opacity:.55}}</style>`;
+  return L.divIcon({
+    html,
+    className: "neon-lead-star",
+    iconSize: [size, size],
+    iconAnchor: [half, half],
+  });
+}
+
 function flaggedPinIcon(size = 22) {
   const color = REMOTE_DROP_COLOR;
   const html = `
