@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { deleteProfile, deleteVan, upsertManualWeekly } from "@/lib/fleet.functions";
+import { deleteProfile, deleteVan, upsertManualWeekly, getWeeklyPaycheck } from "@/lib/fleet.functions";
 import { HistoricalImporter } from "@/components/HistoricalImporter";
 import { PayrollLedger } from "@/components/PayrollLedger";
 import { toast } from "sonner";
