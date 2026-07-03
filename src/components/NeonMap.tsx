@@ -14,16 +14,19 @@ export type Territory = {
 
 export type FieldPin = {
   id: string;
-  pin_type: "not_home" | "talked_to" | "lead";
+  pin_type: "not_home" | "talked_to" | "lead" | "knock" | "not_interested";
   lat: number;
   lng: number;
   is_remote_drop?: boolean;
   distance_m?: number | null;
 };
 
+// Standard tallies render as a vibrant neon blue dot; leads get their own star.
 const PIN_COLORS: Record<FieldPin["pin_type"], string> = {
-  not_home: "#ff2d55",
-  talked_to: "#ffd60a",
+  not_home: "#00e5ff",
+  knock: "#00e5ff",
+  talked_to: "#00e5ff",
+  not_interested: "#00e5ff",
   lead: "#39ff14",
 };
 const REMOTE_DROP_COLOR = "#8a8f99";
