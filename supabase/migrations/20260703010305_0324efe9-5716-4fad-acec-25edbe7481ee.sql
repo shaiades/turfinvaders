@@ -1,0 +1,1 @@
+ALTER TABLE public.daily_logs ADD COLUMN IF NOT EXISTS not_interested integer NOT NULL DEFAULT 0;

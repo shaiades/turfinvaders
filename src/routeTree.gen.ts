@@ -18,6 +18,7 @@ import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticat
 import { Route as AuthenticatedMyTerritoryRouteImport } from './routes/_authenticated/my-territory'
 import { Route as AuthenticatedLogRouteImport } from './routes/_authenticated/log'
 import { Route as AuthenticatedLeaderboardRouteImport } from './routes/_authenticated/leaderboard'
+import { Route as AuthenticatedFieldRouteImport } from './routes/_authenticated/field'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedConfirmationDeskRouteImport } from './routes/_authenticated/confirmation-desk'
 import { Route as AuthenticatedTeamsIndexRouteImport } from './routes/_authenticated/teams.index'
@@ -74,6 +75,11 @@ const AuthenticatedLeaderboardRoute =
     path: '/leaderboard',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedFieldRoute = AuthenticatedFieldRouteImport.update({
+  id: '/field',
+  path: '/field',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -125,6 +131,7 @@ export interface FileRoutesByFullPath {
   '/auth': typeof AuthRoute
   '/confirmation-desk': typeof AuthenticatedConfirmationDeskRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/field': typeof AuthenticatedFieldRoute
   '/leaderboard': typeof AuthenticatedLeaderboardRoute
   '/log': typeof AuthenticatedLogRoute
   '/my-territory': typeof AuthenticatedMyTerritoryRoute
@@ -143,6 +150,7 @@ export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
   '/confirmation-desk': typeof AuthenticatedConfirmationDeskRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/field': typeof AuthenticatedFieldRoute
   '/leaderboard': typeof AuthenticatedLeaderboardRoute
   '/log': typeof AuthenticatedLogRoute
   '/my-territory': typeof AuthenticatedMyTerritoryRoute
@@ -163,6 +171,7 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/_authenticated/confirmation-desk': typeof AuthenticatedConfirmationDeskRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
+  '/_authenticated/field': typeof AuthenticatedFieldRoute
   '/_authenticated/leaderboard': typeof AuthenticatedLeaderboardRoute
   '/_authenticated/log': typeof AuthenticatedLogRoute
   '/_authenticated/my-territory': typeof AuthenticatedMyTerritoryRoute
@@ -183,6 +192,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/confirmation-desk'
     | '/dashboard'
+    | '/field'
     | '/leaderboard'
     | '/log'
     | '/my-territory'
@@ -201,6 +211,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/confirmation-desk'
     | '/dashboard'
+    | '/field'
     | '/leaderboard'
     | '/log'
     | '/my-territory'
@@ -220,6 +231,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/_authenticated/confirmation-desk'
     | '/_authenticated/dashboard'
+    | '/_authenticated/field'
     | '/_authenticated/leaderboard'
     | '/_authenticated/log'
     | '/_authenticated/my-territory'
@@ -307,6 +319,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedLeaderboardRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/field': {
+      id: '/_authenticated/field'
+      path: '/field'
+      fullPath: '/field'
+      preLoaderRoute: typeof AuthenticatedFieldRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/dashboard': {
       id: '/_authenticated/dashboard'
       path: '/dashboard'
@@ -384,6 +403,7 @@ const AuthenticatedCanvassersCanvasserIdRouteWithChildren =
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedConfirmationDeskRoute: typeof AuthenticatedConfirmationDeskRoute
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
+  AuthenticatedFieldRoute: typeof AuthenticatedFieldRoute
   AuthenticatedLeaderboardRoute: typeof AuthenticatedLeaderboardRoute
   AuthenticatedLogRoute: typeof AuthenticatedLogRoute
   AuthenticatedMyTerritoryRoute: typeof AuthenticatedMyTerritoryRoute
@@ -398,6 +418,7 @@ interface AuthenticatedRouteRouteChildren {
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedConfirmationDeskRoute: AuthenticatedConfirmationDeskRoute,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
+  AuthenticatedFieldRoute: AuthenticatedFieldRoute,
   AuthenticatedLeaderboardRoute: AuthenticatedLeaderboardRoute,
   AuthenticatedLogRoute: AuthenticatedLogRoute,
   AuthenticatedMyTerritoryRoute: AuthenticatedMyTerritoryRoute,

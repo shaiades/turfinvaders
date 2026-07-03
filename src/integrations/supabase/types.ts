@@ -85,6 +85,7 @@ export type Database = {
           next_days: number
           no_demo: number
           no_shows: number
+          not_interested: number
           notes: string | null
           one_legs: number
           people_talked_to: number
@@ -107,6 +108,7 @@ export type Database = {
           next_days?: number
           no_demo?: number
           no_shows?: number
+          not_interested?: number
           notes?: string | null
           one_legs?: number
           people_talked_to?: number
@@ -129,6 +131,7 @@ export type Database = {
           next_days?: number
           no_demo?: number
           no_shows?: number
+          not_interested?: number
           notes?: string | null
           one_legs?: number
           people_talked_to?: number
