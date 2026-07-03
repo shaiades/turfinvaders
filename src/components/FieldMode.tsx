@@ -116,17 +116,19 @@ export function FieldMode() {
           color="oklch(0.55 0.02 270)"
           subtle
         />
-        <button
-          type="button"
-          onClick={() => setLeadOpen(true)}
-          className="arcade-btn-3d min-h-[9.5rem] flex flex-col items-center justify-center gap-2 p-4"
-          style={{ ["--btn-color" as string]: "var(--victory)", ["--btn-fg" as string]: "#06110a" }}
-        >
-          <Zap className="w-8 h-8" />
-          <span className="font-display text-[11px] sm:text-xs uppercase tracking-widest text-center leading-tight">
-            ⚡ Submit<br />New Lead
-          </span>
-        </button>
+        <div className="pulse-glow-wrapper">
+          <button
+            type="button"
+            onClick={() => setLeadOpen(true)}
+            className="arcade-btn-3d w-full h-full min-h-[9.5rem] flex flex-col items-center justify-center gap-2 p-4"
+            style={{ ["--btn-color" as string]: "var(--victory)", ["--btn-fg" as string]: "#06110a" }}
+          >
+            <Zap className="w-8 h-8" />
+            <span className="font-display text-[11px] sm:text-xs uppercase tracking-widest text-center leading-tight">
+              ⚡ Submit<br />New Lead
+            </span>
+          </button>
+        </div>
       </div>
 
       <button
