@@ -151,7 +151,8 @@ function TallyButton({
   value,
   onClick,
   loading,
-  accent,
+  color,
+  subtle,
 }: {
   label: string;
   emoji: string;
@@ -159,38 +160,31 @@ function TallyButton({
   value: number;
   onClick: () => void;
   loading: boolean;
-  accent: "neon" | "victory" | "warning";
+  color: string;
+  subtle?: boolean;
 }) {
-  const glow =
-    accent === "neon"
-      ? "shadow-[0_0_36px_-8px_color-mix(in_oklab,var(--neon-magenta)_80%,transparent)] border-[var(--neon-magenta)]/60"
-      : accent === "victory"
-        ? "shadow-[0_0_36px_-8px_color-mix(in_oklab,var(--victory)_80%,transparent)] border-[var(--victory)]/60"
-        : "shadow-[0_0_36px_-8px_color-mix(in_oklab,var(--warning)_80%,transparent)] border-[var(--warning)]/60";
-
-  const textColor =
-    accent === "neon" ? "text-neon" : accent === "victory" ? "text-victory" : "text-[var(--warning)]";
-
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={loading}
-      className={`arcade-card ${glow} border-2 rounded-2xl p-6 min-h-[9.5rem] flex flex-col items-center justify-center gap-2 active:scale-[0.97] transition disabled:opacity-70`}
+      className="arcade-btn-3d min-h-[9.5rem] flex flex-col items-center justify-center gap-1.5 p-4"
+      style={{
+        ["--btn-color" as string]: color,
+        ["--btn-fg" as string]: subtle ? "#f4f4f8" : "#0b0b12",
+      }}
     >
-      <div className="text-4xl leading-none">{emoji}</div>
-      <div className={`font-display text-xs uppercase tracking-widest ${textColor}`}>
+      <div className="text-3xl leading-none">{emoji}</div>
+      <div className="font-display text-[11px] sm:text-xs uppercase tracking-widest text-center">
         {label}
       </div>
       <div className="flex items-center gap-2 mt-1">
         {loading ? (
-          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+          <Loader2 className="w-6 h-6 animate-spin" />
         ) : (
           <>
-            <Icon className={`w-6 h-6 ${textColor}`} />
-            <span className={`font-display text-4xl ${textColor} tabular-nums`}>
-              {value}
-            </span>
+            <Icon className="w-5 h-5" />
+            <span className="font-display text-3xl tabular-nums">{value}</span>
           </>
         )}
       </div>
