@@ -29,12 +29,14 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
     if (role === "canvasser") {
       return [
+        { to: "/field", label: "Active Run", icon: Zap },
         { to: "/dashboard", label: "Command Center", icon: LayoutDashboard },
         { to: "/my-territory", label: "Territory Map", icon: MapPin },
       ];
     }
     if (role === "captain") {
       return [
+        { to: "/field", label: "Active Run", icon: Zap },
         { to: "/dashboard", label: "Command Center", icon: LayoutDashboard },
         { to: "/my-territory", label: "Territory Map", icon: MapPin },
         { to: "/teams", label: "My Van", icon: Users },
