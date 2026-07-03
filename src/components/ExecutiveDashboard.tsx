@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { deleteProfile, deleteVan, upsertManualWeekly } from "@/lib/fleet.functions";
+import { deleteProfile, deleteVan, upsertManualWeekly, getWeeklyPaycheck } from "@/lib/fleet.functions";
 import { HistoricalImporter } from "@/components/HistoricalImporter";
 import { PayrollLedger } from "@/components/PayrollLedger";
 import { toast } from "sonner";
@@ -498,8 +498,9 @@ function WeeklyResults() {
 
       const activeIds = Array.from(agg.keys());
       const pays = await Promise.all(activeIds.map((id) =>
-        supabase.rpc("calc_weekly_paycheck", { _canvasser_id: id, _week_start: toISODate(lastWeekStart) })
-          .then((r) => ({ id, pay: Number(r.data?.[0]?.total_pay ?? 0) }))
+        getWeeklyPaycheck({ data: { canvasser_id: id, week_start: toISODate(lastWeekStart) } })
+          .then((r) => ({ id, pay: Number((r as { total_pay?: number } | null)?.total_pay ?? 0) }))
+          .catch(() => ({ id, pay: 0 }))
       ));
       const payById = new Map(pays.map((p) => [p.id, p.pay]));
 
