@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth, setDevRoleOverride, type AppRole } from "@/hooks/useAuth";
 import { LogOut, Users, Settings, LayoutDashboard, ShieldCheck, ClipboardList, Inbox, MapPin, FlaskConical, DollarSign, Trophy } from "lucide-react";
-import turfInvadersLogo from "@/assets/turf-invaders-hero.png.asset.json";
+import turfInvadersWordmark from "@/assets/turf-invaders-wordmark.png.asset.json";
 
 type NavItem = {
   to: string;
