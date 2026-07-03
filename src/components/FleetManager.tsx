@@ -506,16 +506,7 @@ export function FleetManager() {
               {unassigned.length}
             </span>
           </div>
-          <div
-            onDragOver={(e) => { e.preventDefault(); setDragOverUnassigned(true); }}
-            onDragLeave={() => setDragOverUnassigned(false)}
-            onDrop={onUnassignedDrop}
-            className={`min-h-[200px] rounded-lg border border-dashed p-2 space-y-1.5 transition-colors ${
-              dragOverUnassigned
-                ? "border-[color:var(--neon-orange)] bg-[color:color-mix(in_oklab,var(--neon-orange)_8%,transparent)]"
-                : "border-border"
-            }`}
-          >
+          <div className="min-h-[120px] rounded-lg border border-dashed p-2 space-y-1.5 border-border">
             {unassigned.length === 0 ? (
               <div className="text-xs text-muted-foreground italic px-2 py-6 text-center">
                 All agents assigned to a van. New Monday.com canvassers land here automatically.
@@ -527,7 +518,9 @@ export function FleetManager() {
                   id={p.id}
                   name={p.display_name ?? "Unknown"}
                   points={pointsByUser.get(p.id) ?? 0}
-                  onDragStart={(e) => onDragStart(e, { id: p.id, name: p.display_name ?? "" })}
+                  vans={vans.map((v) => ({ id: v.id, name: v.name, color: v.color }))}
+                  currentVanId={p.team_id}
+                  onAssign={(vanId) => assignCanvasser.mutate({ canvasserId: p.id, vanId })}
                   onDelete={() => {
                     if (confirm(`Delete profile "${p.display_name}"? This removes the user permanently.`)) {
                       removeProfile.mutate(p.id);
@@ -538,7 +531,7 @@ export function FleetManager() {
             )}
           </div>
           <p className="text-[10px] text-muted-foreground">
-            Drag an agent onto a Van card to assign. Auto-created from Monday.com webhooks.
+            Tap “Assign Van” to place an agent on a roster. Auto-created from Monday.com webhooks.
           </p>
         </div>
       </div>
