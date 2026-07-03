@@ -2,7 +2,7 @@ import { Link, useRouter } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth, setDevRoleOverride, type AppRole } from "@/hooks/useAuth";
-import { LogOut, Users, Settings, LayoutDashboard, ShieldCheck, ClipboardList, Inbox, MapPin, FlaskConical, DollarSign, Trophy } from "lucide-react";
+import { LogOut, Users, Settings, LayoutDashboard, ShieldCheck, ClipboardList, Inbox, MapPin, FlaskConical, DollarSign, Trophy, Zap } from "lucide-react";
 import turfInvadersWordmark from "@/assets/turf-invaders-wordmark.png.asset.json";
 
 type NavItem = {
