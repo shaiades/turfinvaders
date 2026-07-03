@@ -28,13 +28,17 @@ function AuthPage() {
         toast.success("Welcome back!");
         navigate({ to: "/dashboard" });
       } else {
-        const { error } = await supabase.auth.signUp({
+        const { data, error } = await supabase.auth.signUp({
           email, password,
           options: { data: { display_name: name || email.split("@")[0] }, emailRedirectTo: window.location.origin },
         });
         if (error) throw error;
-        toast.success("Account ready — Level 1 unlocked!");
-        navigate({ to: "/dashboard" });
+        if (!data.session) {
+          toast.success("Check your email to confirm your account.");
+          return;
+        }
+        toast.success("Account ready — grab your clipboard!");
+        navigate({ to: "/field" });
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Something went wrong");
