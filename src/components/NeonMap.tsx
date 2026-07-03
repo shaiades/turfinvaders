@@ -342,7 +342,18 @@ export function NeonMap({
         ))}
 
         {pins.map((p) => (
-          <Marker key={p.id} position={[p.lat, p.lng]} icon={p.is_remote_drop ? flaggedPinIcon() : glowingDotIcon(PIN_COLORS[p.pin_type])} />
+          <Marker
+            key={p.id}
+            position={[p.lat, p.lng]}
+            icon={
+              p.is_remote_drop
+                ? flaggedPinIcon()
+                : p.pin_type === "lead"
+                  ? leadStarIcon()
+                  : glowingDotIcon(PIN_COLORS[p.pin_type])
+            }
+          />
+
         ))}
 
         {leads.map((l) => {
