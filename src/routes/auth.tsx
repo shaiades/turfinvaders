@@ -60,13 +60,13 @@ function AuthPage() {
       />
       <div aria-hidden className="absolute inset-0 bg-gradient-to-b from-background/60 via-background/80 to-background" />
       <div className="w-full max-w-md relative">
-        <Link to="/" className="flex items-center justify-center gap-3 mb-8">
+        <Link to="/" className="flex items-center justify-center mb-6" aria-label="Turf Invaders">
           <img
             src={turfInvadersHero.url}
             alt="Turf Invaders"
-            className="w-12 h-12 rounded object-cover border border-[var(--neon)]/50 shadow-[0_0_18px_-2px_var(--neon)]"
+            style={{ maxWidth: 300 }}
+            className="w-full h-auto object-contain drop-shadow-[0_0_28px_color-mix(in_oklab,var(--neon)_65%,transparent)]"
           />
-          <span className="font-display text-lg text-neon">TURF INVADERS</span>
         </Link>
         <div className="arcade-card arcade-card-glow p-8">
           <h1 className="font-display text-base text-neon text-center mb-1">

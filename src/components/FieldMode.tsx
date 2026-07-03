@@ -120,7 +120,7 @@ export function FieldMode() {
       <button
         type="button"
         onClick={() => setLeadOpen(true)}
-        className="w-full rounded-2xl bg-gradient-to-r from-[var(--neon-magenta)] via-[var(--primary)] to-[var(--accent)] text-background font-display text-2xl sm:text-3xl uppercase tracking-widest py-8 sm:py-10 shadow-[0_0_48px_-8px_color-mix(in_oklab,var(--primary)_80%,transparent)] hover:brightness-110 active:scale-[0.99] transition"
+        className="w-full rounded-2xl bg-gradient-to-r from-[var(--primary)] to-[var(--accent)] text-background font-display text-2xl sm:text-3xl uppercase tracking-widest py-8 sm:py-10 shadow-[0_0_48px_-8px_color-mix(in_oklab,var(--primary)_80%,transparent)] hover:brightness-110 active:scale-[0.99] transition"
       >
         <Zap className="inline w-8 h-8 mr-3 -mt-1" />
         Submit New Lead
