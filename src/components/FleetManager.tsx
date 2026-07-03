@@ -55,8 +55,6 @@ export function FleetManager() {
   const [newVanName, setNewVanName] = useState("");
   const [newVanLoc, setNewVanLoc] = useState<OfficeLocation>("San Diego");
   const [newVanColor, setNewVanColor] = useState(VAN_COLORS[0]);
-  const [dragOverVan, setDragOverVan] = useState<string | null>(null);
-  const [dragOverUnassigned, setDragOverUnassigned] = useState(false);
   const deleteProfileFn = useServerFn(deleteProfile);
   const deleteVanFn = useServerFn(deleteVan);
   const [editingVanId, setEditingVanId] = useState<string | null>(null);
