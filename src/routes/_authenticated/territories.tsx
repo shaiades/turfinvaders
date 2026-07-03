@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -9,23 +9,33 @@ import { NeonMap, type Territory, type LatLng, type FieldPin } from "@/component
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter } from "@/components/ui/sheet";
 import { toast } from "sonner";
-import { Plus, Trash2, MapPin } from "lucide-react";
+import { Plus, Trash2, MapPin, Crosshair } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/territories")({
-  head: () => ({ meta: [{ title: "Territories — Knockout" }] }),
+  head: () => ({ meta: [{ title: "Territories — Turf Invaders" }] }),
   component: TerritoriesPage,
 });
 
-const PALETTE = ["#39ff14", "#00e5ff", "#ff2d55", "#ffd60a", "#bf5af2", "#ff9f0a"];
+const PALETTE = ["#39ff14", "#00e5ff", "#ff9f0a", "#ff2d55", "#ffd60a", "#bf5af2"];
+
+type AssignKind = "team" | "canvasser";
 
 function TerritoriesPage() {
   const { user, role } = useAuth();
   const qc = useQueryClient();
   const [drawing, setDrawing] = useState(false);
+  const [pendingPolygon, setPendingPolygon] = useState<LatLng[] | null>(null);
   const [name, setName] = useState("");
-  const [assignTeam, setAssignTeam] = useState<string>("");
-  const [color, setColor] = useState(PALETTE[0]);
+  const [assignKind, setAssignKind] = useState<AssignKind>("team");
+  const [assignId, setAssignId] = useState<string>("");
+  const [color, setColor] = useState(PALETTE[1]); // Arcade blue default
+
+  const [locating, setLocating] = useState(false);
+  const [follow, setFollow] = useState(false);
+  const [me, setMe] = useState<LatLng | null>(null);
+  const watchRef = useRef<number | null>(null);
 
   const canManage = isManagerRole(role);
 
@@ -33,6 +43,19 @@ function TerritoriesPage() {
     queryKey: ["teams_for_territory"],
     queryFn: async () => {
       const { data, error } = await supabase.from("teams").select("id, name").order("name");
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const canvassersQuery = useQuery({
+    queryKey: ["canvassers_for_territory"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, display_name, status")
+        .eq("status", "active")
+        .order("display_name");
       if (error) throw error;
       return data ?? [];
     },
@@ -73,27 +96,30 @@ function TerritoriesPage() {
         name: t.name as string,
         color: (t.color as string) ?? "#39ff14",
         polygon: t.polygon as LatLng[],
-        assignmentLabel: teamObj?.name ?? profObj?.display_name ?? "—",
+        assignmentLabel: profObj?.display_name ?? teamObj?.name ?? "—",
       };
     });
   }, [territoriesQuery.data]);
 
   const createTerritory = useMutation({
-    mutationFn: async (polygon: LatLng[]) => {
+    mutationFn: async () => {
+      if (!pendingPolygon) throw new Error("No polygon drawn");
       if (!name.trim()) throw new Error("Name the territory first");
-      if (!assignTeam) throw new Error("Choose a Van to assign");
-      const { error } = await supabase.from("territories").insert({
+      if (!assignId) throw new Error(`Choose a ${assignKind === "team" ? "Van" : "Canvasser"}`);
+      const payload = {
         name: name.trim(),
         color,
-        team_id: assignTeam,
-        polygon: polygon as unknown as never,
+        polygon: pendingPolygon as unknown as never,
         created_by: user?.id,
-      });
+        team_id: assignKind === "team" ? assignId : null,
+        canvasser_id: assignKind === "canvasser" ? assignId : null,
+      };
+      const { error } = await supabase.from("territories").insert(payload);
       if (error) throw error;
     },
     onSuccess: () => {
-      toast.success("Territory saved");
-      setName(""); setDrawing(false);
+      toast.success("Territory locked in");
+      setName(""); setAssignId(""); setPendingPolygon(null); setDrawing(false);
       qc.invalidateQueries({ queryKey: ["territories"] });
     },
     onError: (e: Error) => toast.error(e.message),
@@ -111,54 +137,74 @@ function TerritoriesPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  // Geolocation ("Locate Me")
+  function stopWatch() {
+    if (watchRef.current != null && "geolocation" in navigator) {
+      navigator.geolocation.clearWatch(watchRef.current);
+    }
+    watchRef.current = null;
+  }
+  useEffect(() => () => stopWatch(), []);
+
+  function handleLocateMe() {
+    if (!("geolocation" in navigator)) {
+      toast.error("Geolocation not available on this device");
+      return;
+    }
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setMe({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setFollow(true);
+        setLocating(false);
+        toast.success("Locked onto your position");
+        // Start live watch
+        stopWatch();
+        watchRef.current = navigator.geolocation.watchPosition(
+          (p) => setMe({ lat: p.coords.latitude, lng: p.coords.longitude }),
+          () => {},
+          { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 },
+        );
+      },
+      (err) => {
+        setLocating(false);
+        toast.error(err.message || "Could not read GPS");
+      },
+      { enableHighAccuracy: true, timeout: 12000 },
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h1 className="font-display text-2xl text-neon">TERRITORIES</h1>
-        {canManage && !drawing && (
-          <Button onClick={() => setDrawing(true)} className="bg-victory text-black hover:bg-victory/90">
-            <Plus className="w-4 h-4 mr-1" /> Draw New
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={handleLocateMe}
+            disabled={locating}
+            className="border-[#00e5ff]/60 text-[#00e5ff] hover:bg-[#00e5ff]/10"
+          >
+            <Crosshair className="w-4 h-4 mr-1" />
+            {locating ? "Locating…" : follow ? "Following" : "Locate Me"}
           </Button>
-        )}
-        {drawing && (
-          <Button variant="outline" onClick={() => setDrawing(false)}>Cancel</Button>
-        )}
+          {canManage && !drawing && (
+            <Button onClick={() => setDrawing(true)} className="bg-victory text-black hover:bg-victory/90">
+              <Plus className="w-4 h-4 mr-1" /> Draw New
+            </Button>
+          )}
+          {drawing && (
+            <Button variant="outline" onClick={() => { setDrawing(false); setPendingPolygon(null); }}>
+              Cancel
+            </Button>
+          )}
+        </div>
       </div>
 
-      {drawing && (
-        <ArcadePanel title="New Territory">
-          <div className="grid sm:grid-cols-3 gap-3">
-            <div>
-              <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Name</label>
-              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Northgate Block A" />
-            </div>
-            <div>
-              <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Assign to Van</label>
-              <Select value={assignTeam} onValueChange={setAssignTeam}>
-                <SelectTrigger><SelectValue placeholder="Pick a Van" /></SelectTrigger>
-                <SelectContent>
-                  {(teamsQuery.data ?? []).map((t) => (
-                    <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Color</label>
-              <div className="flex gap-2 mt-1">
-                {PALETTE.map((c) => (
-                  <button
-                    key={c}
-                    onClick={() => setColor(c)}
-                    className="w-7 h-7 rounded-full border-2"
-                    style={{ background: c, borderColor: color === c ? "#fff" : "transparent", boxShadow: `0 0 10px ${c}` }}
-                    aria-label={c}
-                  />
-                ))}
-              </div>
-            </div>
-          </div>
-        </ArcadePanel>
+      {drawing && !pendingPolygon && (
+        <div className="rounded border border-[#00e5ff]/60 bg-[#00e5ff]/10 px-3 py-2 font-display text-[10px] uppercase tracking-widest text-[#8ff5ff]">
+          ▸ Tap the map to drop vertices, then hit "Save Polygon" to assign this turf
+        </div>
       )}
 
       {remoteDropCount > 0 && (
@@ -171,8 +217,10 @@ function TerritoriesPage() {
       <NeonMap
         territories={territories}
         pins={pinsQuery.data ?? []}
-        height={520}
-        mode={drawing ? { kind: "draw", onComplete: (poly) => createTerritory.mutate(poly) } : { kind: "view" }}
+        me={me}
+        follow={follow}
+        height={560}
+        mode={drawing ? { kind: "draw", onComplete: (poly) => setPendingPolygon(poly) } : { kind: "view" }}
       />
 
       <ArcadePanel title={`Active Territories · ${territories.length}`}>
@@ -206,6 +254,109 @@ function TerritoriesPage() {
           </div>
         )}
       </ArcadePanel>
+
+      {/* Slide-up assignment modal */}
+      <Sheet
+        open={!!pendingPolygon}
+        onOpenChange={(o) => { if (!o) setPendingPolygon(null); }}
+      >
+        <SheetContent
+          side="bottom"
+          className="bg-surface border-t-2 border-[#00e5ff]/70 rounded-t-2xl max-h-[90vh] overflow-y-auto"
+          style={{ boxShadow: "0 -12px 60px -10px rgba(0,229,255,0.35)" }}
+        >
+          <SheetHeader>
+            <SheetTitle className="font-display text-neon uppercase tracking-widest">
+              ⚡ Assign New Turf
+            </SheetTitle>
+            <SheetDescription className="text-[11px] uppercase tracking-widest text-muted-foreground">
+              {pendingPolygon?.length ?? 0} vertices · Lock this block onto a Van or a Canvasser
+            </SheetDescription>
+          </SheetHeader>
+
+          <div className="mt-5 space-y-4">
+            <div>
+              <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Territory Name</label>
+              <Input
+                autoFocus
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. Northgate Block A"
+                className="mt-1"
+              />
+            </div>
+
+            <div>
+              <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground mb-1 block">Assign To</label>
+              <div className="grid grid-cols-2 gap-2 mb-2">
+                {(["team", "canvasser"] as AssignKind[]).map((k) => (
+                  <button
+                    key={k}
+                    onClick={() => { setAssignKind(k); setAssignId(""); }}
+                    className={`h-10 rounded font-display text-[11px] uppercase tracking-widest border-2 transition ${
+                      assignKind === k
+                        ? "border-[#00e5ff] bg-[#00e5ff]/15 text-[#8ff5ff]"
+                        : "border-border bg-surface/60 text-muted-foreground"
+                    }`}
+                  >
+                    {k === "team" ? "🚐 Van / Team" : "👤 Canvasser"}
+                  </button>
+                ))}
+              </div>
+              <Select value={assignId} onValueChange={setAssignId}>
+                <SelectTrigger>
+                  <SelectValue placeholder={assignKind === "team" ? "Pick a Van" : "Pick a Canvasser"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {assignKind === "team"
+                    ? (teamsQuery.data ?? []).map((t) => (
+                        <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                      ))
+                    : (canvassersQuery.data ?? []).map((c) => (
+                        <SelectItem key={c.id} value={c.id}>{c.display_name}</SelectItem>
+                      ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground mb-1 block">Neon Color</label>
+              <div className="flex gap-2 flex-wrap">
+                {PALETTE.map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => setColor(c)}
+                    className="w-9 h-9 rounded-full border-2 transition"
+                    style={{
+                      background: c,
+                      borderColor: color === c ? "#fff" : "transparent",
+                      boxShadow: `0 0 14px ${c}`,
+                    }}
+                    aria-label={c}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <SheetFooter className="mt-6 flex-row gap-2">
+            <Button
+              variant="outline"
+              className="flex-1"
+              onClick={() => setPendingPolygon(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              className="flex-1 bg-victory text-black hover:bg-victory/90 font-display uppercase tracking-widest"
+              disabled={createTerritory.isPending || !name.trim() || !assignId}
+              onClick={() => createTerritory.mutate()}
+            >
+              {createTerritory.isPending ? "Saving…" : "⚡ Lock In Turf"}
+            </Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
