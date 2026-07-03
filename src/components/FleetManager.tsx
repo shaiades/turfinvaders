@@ -359,10 +359,7 @@ export function FleetManager() {
                         onDragOver={(e) => onVanDragOver(e, v.id)}
                         onDragLeave={() => setDragOverVan((cur) => (cur === v.id ? null : cur))}
                         onDrop={(e) => onVanDrop(e, v.id)}
-                        className={`arcade-card p-4 space-y-3 transition-all ${
-                          isOver ? "ring-2 ring-neon shadow-[0_0_24px_color-mix(in_oklab,var(--neon)_50%,transparent)]" : ""
-                        }`}
-                        style={isOver ? { borderColor: v.color } : undefined}
+                        className={`van-card p-4 space-y-3 ${isOver ? "van-card-over" : ""}`}
                       >
                         {editingVanId === v.id ? (
                           <div className="space-y-2 p-2 rounded border border-neon/40 bg-neon/5">
@@ -493,19 +490,36 @@ export function FleetManager() {
           ))}
         </div>
 
-        {/* Unassigned holding pen */}
-        <ArcadePanel title={`Unassigned Agents (${unassigned.length})`}>
+        {/* Free Agents holding pen */}
+        <div className="free-agents-panel bg-surface p-4 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="font-display uppercase tracking-widest text-sm" style={{ color: "var(--neon-orange)" }}>
+              ⚠ Free Agents (Needs Van)
+            </h3>
+            <span
+              className="text-[10px] font-display px-2 py-0.5 rounded-full"
+              style={{
+                color: "var(--neon-orange)",
+                background: "color-mix(in oklab, var(--neon-orange) 12%, transparent)",
+                border: "1px solid color-mix(in oklab, var(--neon-orange) 45%, transparent)",
+              }}
+            >
+              {unassigned.length}
+            </span>
+          </div>
           <div
             onDragOver={(e) => { e.preventDefault(); setDragOverUnassigned(true); }}
             onDragLeave={() => setDragOverUnassigned(false)}
             onDrop={onUnassignedDrop}
             className={`min-h-[200px] rounded-lg border border-dashed p-2 space-y-1.5 transition-colors ${
-              dragOverUnassigned ? "border-neon bg-neon/5" : "border-border"
+              dragOverUnassigned
+                ? "border-[color:var(--neon-orange)] bg-[color:color-mix(in_oklab,var(--neon-orange)_8%,transparent)]"
+                : "border-border"
             }`}
           >
             {unassigned.length === 0 ? (
               <div className="text-xs text-muted-foreground italic px-2 py-6 text-center">
-                All profiles assigned. CSV-imported ghosts will appear here.
+                All agents assigned to a van. New Monday.com canvassers land here automatically.
               </div>
             ) : (
               unassigned.map((p) => (
@@ -524,10 +538,10 @@ export function FleetManager() {
               ))
             )}
           </div>
-          <p className="mt-3 text-[10px] text-muted-foreground">
-            Drag a name onto a Van to assign. New CSV agents default to San Diego.
+          <p className="text-[10px] text-muted-foreground">
+            Drag an agent onto a Van card to assign. Auto-created from Monday.com webhooks.
           </p>
-        </ArcadePanel>
+        </div>
       </div>
     </div>
   );
@@ -553,7 +567,7 @@ function RosterRow({
     >
       <GripVertical className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
       <span className="text-sm truncate flex-1">{name}</span>
-      <span className={`text-[10px] font-display ${isGhost ? "text-muted-foreground" : "text-victory"}`}>
+      <span className={`text-[10px] font-display ${isGhost ? "text-muted-foreground px-1.5" : "points-badge-glow"}`}>
         {points}p
       </span>
       {onUnassign && (

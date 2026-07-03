@@ -222,3 +222,49 @@
   will-change: transform, box-shadow;
 }
 
+/* Free Agents panel — pulsing neon-orange border to demand attention */
+@keyframes free-agents-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 0 1px color-mix(in oklab, var(--neon-orange) 60%, transparent),
+      0 0 12px 0 color-mix(in oklab, var(--neon-orange) 20%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 2px color-mix(in oklab, var(--neon-orange) 90%, transparent),
+      0 0 24px 6px color-mix(in oklab, var(--neon-orange) 55%, transparent);
+  }
+}
+@utility free-agents-panel {
+  border: 1.5px solid color-mix(in oklab, var(--neon-orange) 75%, transparent);
+  border-radius: var(--radius-lg);
+  animation: free-agents-pulse 2.2s infinite ease-in-out;
+}
+
+/* Van card — solid dark bg + arcade-blue border */
+@utility van-card {
+  background: color-mix(in oklab, var(--color-background) 88%, black);
+  border: 1.5px solid color-mix(in oklab, var(--neon-blue) 70%, transparent);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 4px 20px -6px color-mix(in oklab, var(--neon-blue) 30%, transparent);
+  transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+@utility van-card-over {
+  border-color: var(--neon-orange);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--neon-orange) 60%, transparent),
+              0 0 28px 6px color-mix(in oklab, var(--neon-orange) 45%, transparent);
+  transform: translateY(-1px);
+}
+
+/* Glowing green points badge */
+@utility points-badge-glow {
+  color: var(--victory);
+  background: color-mix(in oklab, var(--victory) 12%, transparent);
+  border: 1px solid color-mix(in oklab, var(--victory) 45%, transparent);
+  border-radius: 999px;
+  padding: 1px 8px;
+  box-shadow: 0 0 10px color-mix(in oklab, var(--victory) 45%, transparent);
+  text-shadow: 0 0 8px color-mix(in oklab, var(--victory) 60%, transparent);
+}
+
+
