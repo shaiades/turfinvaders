@@ -150,22 +150,42 @@ export const Route = createFileRoute("/api/public/monday-live-dispatch")({
         }
 
         if (!match) {
-          // Log a distinct unmatched entry so admins can see who got missed.
-          // Base X-Ray log already fired above; this is the error annotation.
+          // The Bouncer: auto-provision a Free Agent placeholder so no lead is dropped.
+          const newId = crypto.randomUUID();
+          const officeGuess = "San Diego";
+          const { data: created, error: createErr } = await supabaseAdmin
+            .from("profiles")
+            .insert({
+              id: newId,
+              display_name: canvasser_name,
+              office_location: officeGuess,
+              is_placeholder: true,
+              team_id: null,
+            })
+            .select("id, display_name, office_location")
+            .single();
+          if (createErr || !created) {
+            await supabaseAdmin.from("webhook_logs").insert({
+              source: "monday-live-dispatch:auto-create-failed",
+              raw_payload: {
+                canvasser_name,
+                normalized: wanted,
+                error: createErr?.message,
+              } as never,
+            });
+            return json(
+              { error: `Auto-create failed for: ${canvasser_name}` },
+              500,
+            );
+          }
+          await supabaseAdmin
+            .from("user_roles")
+            .insert({ user_id: newId, role: "canvasser" });
+          match = { ...created, _norm: wanted } as typeof match;
           await supabaseAdmin.from("webhook_logs").insert({
-            source: "monday-live-dispatch:unmatched",
-            raw_payload: {
-              error: "no_canvasser_match",
-              canvasser_name,
-              normalized: wanted,
-              status,
-              original_payload: parsed,
-            } as never,
+            source: "monday-live-dispatch:auto-created",
+            raw_payload: { canvasser_name, newId, office: officeGuess } as never,
           });
-          return json(
-            { error: `No canvasser matched: ${canvasser_name}`, normalized: wanted },
-            404,
-          );
         }
 
         const metric_date = todayLA();
