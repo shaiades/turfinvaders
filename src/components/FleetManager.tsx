@@ -359,10 +359,7 @@ export function FleetManager() {
                         onDragOver={(e) => onVanDragOver(e, v.id)}
                         onDragLeave={() => setDragOverVan((cur) => (cur === v.id ? null : cur))}
                         onDrop={(e) => onVanDrop(e, v.id)}
-                        className={`arcade-card p-4 space-y-3 transition-all ${
-                          isOver ? "ring-2 ring-neon shadow-[0_0_24px_color-mix(in_oklab,var(--neon)_50%,transparent)]" : ""
-                        }`}
-                        style={isOver ? { borderColor: v.color } : undefined}
+                        className={`van-card p-4 space-y-3 ${isOver ? "van-card-over" : ""}`}
                       >
                         {editingVanId === v.id ? (
                           <div className="space-y-2 p-2 rounded border border-neon/40 bg-neon/5">
