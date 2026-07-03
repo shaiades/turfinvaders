@@ -465,7 +465,6 @@ export function FleetManager() {
                                 id={r.id}
                                 name={r.display_name ?? "Unknown"}
                                 points={pointsByUser.get(r.id) ?? 0}
-                                onDragStart={(e) => onDragStart(e, { id: r.id, name: r.display_name ?? "" })}
                                 onUnassign={() => assignCanvasser.mutate({ canvasserId: r.id, vanId: null })}
                                 onDelete={() => {
                                   if (confirm(`Delete profile "${r.display_name}"? This removes the user permanently.`)) {
