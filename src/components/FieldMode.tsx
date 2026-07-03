@@ -49,17 +49,15 @@ export function FieldMode() {
     try {
       const current = today?.[key] ?? 0;
       const next = current + 1;
-      const { error } = await supabase
-        .from("daily_logs")
-        .upsert(
-          {
-            canvasser_id: user.id,
-            team_id: teamId ?? null,
-            log_date,
-            [key]: next,
-          },
-          { onConflict: "canvasser_id,log_date" },
-        );
+      const payload: Record<string, unknown> = {
+        canvasser_id: user.id,
+        log_date,
+        [key]: next,
+      };
+      if (teamId) payload.team_id = teamId;
+      const { error } = await (supabase.from("daily_logs") as unknown as {
+        upsert: (v: unknown, o: { onConflict: string }) => Promise<{ error: Error | null }>;
+      }).upsert(payload, { onConflict: "canvasser_id,log_date" });
       if (error) throw error;
       qc.setQueryData(["field-tally", user.id, log_date], {
         doors_knocked: today?.doors_knocked ?? 0,
