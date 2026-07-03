@@ -567,7 +567,7 @@ function RosterRow({
     >
       <GripVertical className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
       <span className="text-sm truncate flex-1">{name}</span>
-      <span className={`text-[10px] font-display ${isGhost ? "text-muted-foreground" : "text-victory"}`}>
+      <span className={`text-[10px] font-display ${isGhost ? "text-muted-foreground px-1.5" : "points-badge-glow"}`}>
         {points}p
       </span>
       {onUnassign && (
