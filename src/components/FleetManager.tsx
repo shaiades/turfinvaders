@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Truck, Plus, Building2, Trash2, UserMinus, GripVertical, Pencil, Check, X, ChevronLeft, ChevronRight, CalendarRange } from "lucide-react";
+import { Truck, Plus, Building2, Trash2, UserMinus, Pencil, Check, X, ChevronLeft, ChevronRight, CalendarRange } from "lucide-react";
 import { deleteProfile, deleteVan } from "@/lib/fleet.functions";
 
 // Week helpers — ISO week, Monday..Sunday.
