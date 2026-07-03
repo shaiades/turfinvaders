@@ -325,15 +325,9 @@ export function FleetManager() {
                 <div className="grid gap-4 md:grid-cols-2">
                   {list.map((v) => {
                     const roster = profiles.filter((p) => p.team_id === v.id);
-                    const isOver = dragOverVan === v.id;
                     return (
-                      <div
-                        key={v.id}
-                        onDragOver={(e) => onVanDragOver(e, v.id)}
-                        onDragLeave={() => setDragOverVan((cur) => (cur === v.id ? null : cur))}
-                        onDrop={(e) => onVanDrop(e, v.id)}
-                        className={`van-card p-4 space-y-3 ${isOver ? "van-card-over" : ""}`}
-                      >
+                      <div key={v.id} className="van-card p-4 space-y-3">
+
                         {editingVanId === v.id ? (
                           <div className="space-y-2 p-2 rounded border border-neon/40 bg-neon/5">
                             <div className="grid gap-2 md:grid-cols-[1fr_160px]">
