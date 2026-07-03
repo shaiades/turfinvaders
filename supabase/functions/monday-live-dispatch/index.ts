@@ -246,17 +246,44 @@ serve(async (req) => {
       if (firstToken) match = candidates.find((p) => p._norm.split(' ')[0] === firstToken)
     }
 
+    let autoCreated = false
     if (!match) {
+      // The Bouncer: auto-provision a Free Agent placeholder profile so
+      // no lead is ever dropped. Van assignment stays null until a Captain
+      // drags them into a Van in Fleet Manager.
+      const newId = crypto.randomUUID()
+      const officeGuess = boardOffice ?? 'San Diego'
+      const { data: created, error: createErr } = await supabaseAdmin
+        .from('profiles')
+        .insert({
+          id: newId,
+          display_name: canvasserName,
+          office_location: officeGuess,
+          is_placeholder: true,
+          team_id: null,
+        })
+        .select('id, display_name, office_location')
+        .single()
+      if (createErr || !created) {
+        await supabaseAdmin.from('webhook_logs').insert({
+          step: 'Error_Auto_Create_Failed',
+          data: { canvasserName, normalized: wanted, error: createErr?.message },
+        })
+        return new Response('Auto-create failed', { status: 200, headers: corsHeaders })
+      }
+      // Best-effort role grant (ignore duplicate/insert errors).
+      await supabaseAdmin.from('user_roles').insert({ user_id: newId, role: 'canvasser' })
+      match = { ...created, _norm: normalizeName(canvasserName) }
+      autoCreated = true
       await supabaseAdmin.from('webhook_logs').insert({
-        step: 'Error_Canvasser_Unmatched',
-        data: { canvasserName, normalized: wanted },
+        step: 'Auto_Created_Free_Agent',
+        data: { canvasserName, newId, office: officeGuess },
       })
-      return new Response('No match', { status: 200, headers: corsHeaders })
     }
 
     await supabaseAdmin.from('webhook_logs').insert({
       step: '4_Canvasser_Matched',
-      data: { canvasserName, matchedId: match.id, matchedName: match.display_name },
+      data: { canvasserName, matchedId: match.id, matchedName: match.display_name, autoCreated },
     })
 
     // Step 5: Map new + previous outcomes
