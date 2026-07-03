@@ -198,3 +198,27 @@
     0 0 18px color-mix(in oklab, #22e6ff 55%, transparent),
     0 0 32px color-mix(in oklab, #22e6ff 30%, transparent);
 }
+
+/* Focal-point pulse for the "Submit New Lead" button — subtle breathing halo */
+@keyframes pulse-glow {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow:
+      0 0 0 0 color-mix(in oklab, var(--victory) 0%, transparent),
+      0 0 0 0 color-mix(in oklab, var(--victory) 0%, transparent);
+  }
+  50% {
+    transform: scale(1.02);
+    box-shadow:
+      0 0 0 3px color-mix(in oklab, var(--victory) 25%, transparent),
+      0 0 28px 8px color-mix(in oklab, var(--victory) 55%, transparent);
+  }
+}
+@utility pulse-glow-wrapper {
+  position: relative;
+  border-radius: 1rem;
+  display: inline-flex;
+  animation: pulse-glow 2s infinite ease-in-out;
+  will-change: transform, box-shadow;
+}
+
