@@ -154,3 +154,47 @@
   color: var(--victory);
   animation: neon-mega-pulse 2.8s ease-in-out infinite;
 }
+
+/* Tactile 3D arcade button — colored top face + darker bottom "lip" and press-down */
+@utility arcade-btn-3d {
+  position: relative;
+  border-radius: 1rem;
+  border: 2px solid color-mix(in oklab, var(--btn-color, var(--primary)) 65%, black);
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--btn-color, var(--primary)) 92%, white) 0%,
+    var(--btn-color, var(--primary)) 55%,
+    color-mix(in oklab, var(--btn-color, var(--primary)) 80%, black) 100%
+  );
+  color: var(--btn-fg, #0b0b12);
+  box-shadow:
+    0 6px 0 0 color-mix(in oklab, var(--btn-color, var(--primary)) 55%, black),
+    0 10px 22px -6px color-mix(in oklab, var(--btn-color, var(--primary)) 55%, transparent),
+    inset 0 1px 0 color-mix(in oklab, white 45%, transparent),
+    inset 0 -6px 12px -6px color-mix(in oklab, black 45%, transparent);
+  transition: transform 90ms ease, box-shadow 90ms ease, filter 120ms ease;
+  will-change: transform;
+}
+.arcade-btn-3d:hover { filter: brightness(1.06); }
+.arcade-btn-3d:active,
+.arcade-btn-3d[data-pressed="true"] {
+  transform: translateY(4px);
+  box-shadow:
+    0 2px 0 0 color-mix(in oklab, var(--btn-color, var(--primary)) 55%, black),
+    0 4px 10px -6px color-mix(in oklab, var(--btn-color, var(--primary)) 55%, transparent),
+    inset 0 1px 0 color-mix(in oklab, white 25%, transparent),
+    inset 0 -3px 8px -4px color-mix(in oklab, black 55%, transparent);
+}
+.arcade-btn-3d:disabled { opacity: 0.7; cursor: not-allowed; }
+
+@utility timer-display {
+  font-family: "Orbitron", "JetBrains Mono", ui-monospace, monospace;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  font-variant-numeric: tabular-nums;
+  color: #d6feff;
+  text-shadow:
+    0 0 6px color-mix(in oklab, #22e6ff 80%, transparent),
+    0 0 18px color-mix(in oklab, #22e6ff 55%, transparent),
+    0 0 32px color-mix(in oklab, #22e6ff 30%, transparent);
+}
