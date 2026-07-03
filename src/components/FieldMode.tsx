@@ -87,7 +87,7 @@ export function FieldMode() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4">
         <TallyButton
           label="Log Knock"
           emoji="🚪"
@@ -95,7 +95,7 @@ export function FieldMode() {
           value={today?.doors_knocked ?? 0}
           onClick={() => bump("doors_knocked")}
           loading={pending === "doors_knocked"}
-          accent="neon"
+          color="var(--neon-blue)"
         />
         <TallyButton
           label="Talked To"
@@ -104,7 +104,7 @@ export function FieldMode() {
           value={today?.people_talked_to ?? 0}
           onClick={() => bump("people_talked_to")}
           loading={pending === "people_talked_to"}
-          accent="victory"
+          color="var(--neon-orange)"
         />
         <TallyButton
           label="Not Interested"
@@ -113,16 +113,29 @@ export function FieldMode() {
           value={today?.not_interested ?? 0}
           onClick={() => bump("not_interested")}
           loading={pending === "not_interested"}
-          accent="warning"
+          color="oklch(0.55 0.02 270)"
+          subtle
         />
+        <button
+          type="button"
+          onClick={() => setLeadOpen(true)}
+          className="arcade-btn-3d min-h-[9.5rem] flex flex-col items-center justify-center gap-2 p-4"
+          style={{ ["--btn-color" as string]: "var(--victory)", ["--btn-fg" as string]: "#06110a" }}
+        >
+          <Zap className="w-8 h-8" />
+          <span className="font-display text-[11px] sm:text-xs uppercase tracking-widest text-center leading-tight">
+            ⚡ Submit<br />New Lead
+          </span>
+        </button>
       </div>
 
       <button
         type="button"
         onClick={() => setLeadOpen(true)}
-        className="w-full rounded-2xl bg-gradient-to-r from-[var(--primary)] to-[var(--accent)] text-background font-display text-2xl sm:text-3xl uppercase tracking-widest py-8 sm:py-10 shadow-[0_0_48px_-8px_color-mix(in_oklab,var(--primary)_80%,transparent)] hover:brightness-110 active:scale-[0.99] transition"
+        className="arcade-btn-3d w-full py-6 sm:py-8 font-display text-xl sm:text-2xl uppercase tracking-widest hidden"
+        style={{ ["--btn-color" as string]: "var(--victory)", ["--btn-fg" as string]: "#06110a" }}
       >
-        <Zap className="inline w-8 h-8 mr-3 -mt-1" />
+        <Zap className="inline w-7 h-7 mr-2 -mt-1" />
         Submit New Lead
       </button>
 
@@ -138,7 +151,8 @@ function TallyButton({
   value,
   onClick,
   loading,
-  accent,
+  color,
+  subtle,
 }: {
   label: string;
   emoji: string;
@@ -146,38 +160,31 @@ function TallyButton({
   value: number;
   onClick: () => void;
   loading: boolean;
-  accent: "neon" | "victory" | "warning";
+  color: string;
+  subtle?: boolean;
 }) {
-  const glow =
-    accent === "neon"
-      ? "shadow-[0_0_36px_-8px_color-mix(in_oklab,var(--neon-magenta)_80%,transparent)] border-[var(--neon-magenta)]/60"
-      : accent === "victory"
-        ? "shadow-[0_0_36px_-8px_color-mix(in_oklab,var(--victory)_80%,transparent)] border-[var(--victory)]/60"
-        : "shadow-[0_0_36px_-8px_color-mix(in_oklab,var(--warning)_80%,transparent)] border-[var(--warning)]/60";
-
-  const textColor =
-    accent === "neon" ? "text-neon" : accent === "victory" ? "text-victory" : "text-[var(--warning)]";
-
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={loading}
-      className={`arcade-card ${glow} border-2 rounded-2xl p-6 min-h-[9.5rem] flex flex-col items-center justify-center gap-2 active:scale-[0.97] transition disabled:opacity-70`}
+      className="arcade-btn-3d min-h-[9.5rem] flex flex-col items-center justify-center gap-1.5 p-4"
+      style={{
+        ["--btn-color" as string]: color,
+        ["--btn-fg" as string]: subtle ? "#f4f4f8" : "#0b0b12",
+      }}
     >
-      <div className="text-4xl leading-none">{emoji}</div>
-      <div className={`font-display text-xs uppercase tracking-widest ${textColor}`}>
+      <div className="text-3xl leading-none">{emoji}</div>
+      <div className="font-display text-[11px] sm:text-xs uppercase tracking-widest text-center">
         {label}
       </div>
       <div className="flex items-center gap-2 mt-1">
         {loading ? (
-          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+          <Loader2 className="w-6 h-6 animate-spin" />
         ) : (
           <>
-            <Icon className={`w-6 h-6 ${textColor}`} />
-            <span className={`font-display text-4xl ${textColor} tabular-nums`}>
-              {value}
-            </span>
+            <Icon className="w-5 h-5" />
+            <span className="font-display text-3xl tabular-nums">{value}</span>
           </>
         )}
       </div>

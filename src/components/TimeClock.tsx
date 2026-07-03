@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Clock, Play, Square } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { Button } from "@/components/ui/button";
+
 import { ArcadePanel } from "@/components/arcade";
 
 function fmtDuration(ms: number) {
@@ -114,54 +114,54 @@ export function TimeClock({ userId }: { userId: string }) {
 
   return (
     <ArcadePanel title="Time Clock">
-      <div className="flex flex-wrap items-center justify-between gap-6">
-        <div className="flex items-center gap-4">
+      <div className="flex flex-col items-center gap-5">
+        <div className="flex items-center gap-3">
           <div
-            className={`w-12 h-12 rounded-full flex items-center justify-center border ${
+            className={`w-10 h-10 rounded-full flex items-center justify-center border ${
               isClockedIn
                 ? "bg-victory/10 border-victory text-victory animate-pulse"
                 : "bg-surface-elevated border-border text-muted-foreground"
             }`}
           >
-            <Clock className="w-5 h-5" />
+            <Clock className="w-4 h-4" />
           </div>
-          <div>
-            <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-              {isClockedIn ? "On the clock" : "Off the clock"}
-            </div>
-            <div className="font-display text-2xl text-neon tabular-nums">
-              {isClockedIn ? fmtDuration(liveMs) : "00:00:00"}
-            </div>
-            <div className="text-xs text-muted-foreground mt-1">
-              Today billable: <span className="text-victory">{todayHours.toFixed(2)}h</span>
-              <span className="mx-2">·</span>
-              Daily cap: {cap}h
-              <span className="mx-2">·</span>
-              Lunch auto-deducted
-            </div>
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            {isClockedIn ? "On the clock" : "Off the clock"}
           </div>
         </div>
 
+        <div className="timer-display text-5xl sm:text-6xl text-center">
+          {isClockedIn ? fmtDuration(liveMs) : "00:00:00"}
+        </div>
+
+        <div className="text-xs text-muted-foreground text-center">
+          Today billable: <span className="text-victory">{todayHours.toFixed(2)}h</span>
+          <span className="mx-2">·</span>
+          Daily cap: {cap}h
+          <span className="mx-2">·</span>
+          Lunch auto-deducted
+        </div>
+
         {isClockedIn ? (
-          <Button
-            size="lg"
+          <button
             onClick={() => clockOut.mutate()}
             disabled={clockOut.isPending}
-            className="bg-[var(--destructive)] hover:bg-[var(--destructive)]/90 text-white font-display tracking-widest uppercase shadow-[0_0_24px_color-mix(in_oklab,var(--destructive)_55%,transparent)]"
+            className="arcade-btn-3d w-full sm:w-auto px-8 py-4 font-display text-sm uppercase tracking-widest flex items-center justify-center gap-2"
+            style={{ ["--btn-color" as string]: "var(--destructive)", ["--btn-fg" as string]: "#fff" }}
           >
-            <Square className="w-4 h-4 mr-2" />
+            <Square className="w-4 h-4" />
             Clock Out
-          </Button>
+          </button>
         ) : (
-          <Button
-            size="lg"
+          <button
             onClick={() => clockIn.mutate()}
             disabled={clockIn.isPending}
-            className="bg-victory text-background hover:bg-victory/90 font-display tracking-widest uppercase shadow-[0_0_24px_color-mix(in_oklab,var(--victory)_55%,transparent)]"
+            className="arcade-btn-3d w-full sm:w-auto px-8 py-4 font-display text-sm uppercase tracking-widest flex items-center justify-center gap-2"
+            style={{ ["--btn-color" as string]: "var(--victory)", ["--btn-fg" as string]: "#06110a" }}
           >
-            <Play className="w-4 h-4 mr-2" />
+            <Play className="w-4 h-4" />
             Clock In
-          </Button>
+          </button>
         )}
       </div>
 
