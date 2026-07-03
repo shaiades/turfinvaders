@@ -822,7 +822,7 @@ export type Database = {
         | "inactive"
         | "suspension_review"
       lead_status: "pending" | "confirmed" | "denied"
-      pin_type: "not_home" | "talked_to" | "lead"
+      pin_type: "not_home" | "talked_to" | "lead" | "knock" | "not_interested"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -958,7 +958,7 @@ export const Constants = {
         "suspension_review",
       ],
       lead_status: ["pending", "confirmed", "denied"],
-      pin_type: ["not_home", "talked_to", "lead"],
+      pin_type: ["not_home", "talked_to", "lead", "knock", "not_interested"],
     },
   },
 } as const
