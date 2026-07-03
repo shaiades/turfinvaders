@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import turfInvadersHero from "@/assets/turf-invaders-hero.png.asset.json";
 
 export const Route = createFileRoute("/auth")({
-  head: () => ({ meta: [{ title: "Sign in — Turf Invaders" }] }),
+  head: () => ({ meta: [{ title: "Turf Invaders" }] }),
   component: AuthPage,
 });
 
