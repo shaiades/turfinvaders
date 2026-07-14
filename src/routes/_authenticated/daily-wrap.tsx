@@ -10,17 +10,50 @@ export const Route = createFileRoute("/_authenticated/daily-wrap")({
   component: DailyWrap,
 });
 
-function todayISO(offset = 0) {
-  const d = new Date();
-  d.setDate(d.getDate() + offset);
-  return d.toISOString().slice(0, 10);
+const PT_TZ = "America/Los_Angeles";
+const PT_PARTS = new Intl.DateTimeFormat("en-US", {
+  timeZone: PT_TZ,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  hour12: false,
+});
+
+/** Parts of `now` in America/Los_Angeles. */
+function ptNow() {
+  const parts = Object.fromEntries(
+    PT_PARTS.formatToParts(new Date()).map((p) => [p.type, p.value]),
+  );
+  const year = Number(parts.year);
+  const month = Number(parts.month);
+  const day = Number(parts.day);
+  const hour = Number(parts.hour === "24" ? "0" : parts.hour);
+  return { year, month, day, hour };
 }
-function weekStartISO() {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  const day = d.getDay() === 0 ? 7 : d.getDay();
-  d.setDate(d.getDate() - (day - 1));
-  return d.toISOString().slice(0, 10);
+function addDaysISO(iso: string, delta: number) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + delta);
+  return dt.toISOString().slice(0, 10);
+}
+/**
+ * The report-date is the PT calendar date whose 7:00 PM boundary is the "lock".
+ * Before 7 PM PT → report-date = current PT date (live preview of today's totals).
+ * At/after 7 PM PT → report-date rolls forward: today's totals seed the NEXT PT date.
+ */
+function reportDates() {
+  const { year, month, day, hour } = ptNow();
+  const currentPT = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  const today = hour >= 19 ? addDaysISO(currentPT, 1) : currentPT;
+  const yday = addDaysISO(today, -1);
+  // ISO week (Mon-start) of the report-date, computed in PT.
+  const [ry, rm, rd] = today.split("-").map(Number);
+  const anchor = new Date(Date.UTC(ry, rm - 1, rd));
+  const dow = anchor.getUTCDay() === 0 ? 7 : anchor.getUTCDay();
+  anchor.setUTCDate(anchor.getUTCDate() - (dow - 1));
+  const wkStart = anchor.toISOString().slice(0, 10);
+  return { today, yday, wkStart, beforeLock: hour < 19 };
 }
 
 type Row = {
