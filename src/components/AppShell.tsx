@@ -42,6 +42,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         { to: "/my-territory", label: "Territory", icon: MapPin },
         { to: "/teams", label: "My Van", icon: Users },
         { to: "/leaderboard", label: "Leaders", icon: Trophy },
+        { to: "/daily-wrap", label: "Wrap-Up", icon: Flame },
         { to: "/log", label: "Log", icon: ClipboardList },
       ];
     }
