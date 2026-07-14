@@ -640,7 +640,6 @@ export function FleetManager() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      </div>
     </div>
   );
 }
