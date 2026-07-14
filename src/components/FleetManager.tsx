@@ -464,18 +464,24 @@ export function FleetManager() {
 
                         <div>
                           <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Captain</label>
-                          <Select
-                            value={v.captain_id ?? "none"}
-                            onValueChange={(val) => setCaptain.mutate({ vanId: v.id, captainId: val === "none" ? null : val })}
-                          >
-                            <SelectTrigger><SelectValue placeholder="No captain" /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="none">— No captain —</SelectItem>
-                              {captains.map((c) => (
-                                <SelectItem key={c.id} value={c.id}>{c.display_name}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          {canManage ? (
+                            <Select
+                              value={v.captain_id ?? "none"}
+                              onValueChange={(val) => setCaptain.mutate({ vanId: v.id, captainId: val === "none" ? null : val })}
+                            >
+                              <SelectTrigger><SelectValue placeholder="No captain" /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">— No captain —</SelectItem>
+                                {captains.map((c) => (
+                                  <SelectItem key={c.id} value={c.id}>{c.display_name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <div className="text-sm px-2 py-1.5 rounded border border-border bg-surface">
+                              {captains.find((c) => c.id === v.captain_id)?.display_name ?? "— No captain —"}
+                            </div>
+                          )}
                         </div>
 
                         <div>
