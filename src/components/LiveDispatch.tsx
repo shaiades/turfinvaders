@@ -241,6 +241,15 @@ function LiveDispatchInner() {
   );
 }
 
+const metricColorClass = {
+  neon: "text-neon",
+  warning: "text-warning",
+  "muted-foreground": "text-muted-foreground",
+  victory: "text-victory",
+  destructive: "text-destructive",
+  accent: "text-accent",
+};
+
 function MetricCell({
   value,
   color,
@@ -251,7 +260,7 @@ function MetricCell({
   suffix?: string;
 }) {
   const active = value > 0;
-  const colorClass = active ? `text-${color}` : "text-muted-foreground/40";
+  const colorClass = active ? metricColorClass[color] : "text-muted-foreground/40";
   return (
     <td className={`py-2.5 px-3 text-right font-display ${colorClass}`}>
       {value}{suffix}
