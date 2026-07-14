@@ -59,15 +59,22 @@ export type OfficeLocation = (typeof OFFICE_LOCATIONS)[number];
 
 export function FleetManager() {
   const qc = useQueryClient();
+  const { realRole } = useAuth();
+  const canManage = isManagerRole(realRole);
+  const isOwnerRole = realRole === "owner";
   const [newVanName, setNewVanName] = useState("");
   const [newVanLoc, setNewVanLoc] = useState<OfficeLocation>("San Diego");
   const [newVanColor, setNewVanColor] = useState(VAN_COLORS[0]);
   const deleteProfileFn = useServerFn(deleteProfile);
   const deleteVanFn = useServerFn(deleteVan);
+  const addTeamMemberFn = useServerFn(addTeamMember);
   const [editingVanId, setEditingVanId] = useState<string | null>(null);
   const [editVanName, setEditVanName] = useState("");
   const [editVanColor, setEditVanColor] = useState(VAN_COLORS[0]);
   const [editVanLoc, setEditVanLoc] = useState<OfficeLocation>("San Diego");
+  const [addAgentOpen, setAddAgentOpen] = useState(false);
+  const [newAgentName, setNewAgentName] = useState("");
+  const [newAgentOffice, setNewAgentOffice] = useState<OfficeLocation>("San Diego");
 
   // Week selector — default to current Monday-anchored week.
   const [weekStart, setWeekStart] = useState<Date>(() => startOfWeekMonday(new Date()));
