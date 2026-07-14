@@ -319,42 +319,50 @@ export function FleetManager() {
         </p>
       </ArcadePanel>
 
-      {/* Create New Van */}
-      <ArcadePanel title="Create New Van">
-
-        <div className="grid gap-3 md:grid-cols-[1fr_180px_140px_auto] items-end">
-          <div>
-            <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Van Name</label>
-            <Input value={newVanName} onChange={(e) => setNewVanName(e.target.value)} placeholder="e.g. Phoenix Strike" />
-          </div>
-          <div>
-            <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Office Location</label>
-            <Select value={newVanLoc} onValueChange={(v) => setNewVanLoc(v as OfficeLocation)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {OFFICE_LOCATIONS.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Color</label>
-            <div className="flex gap-1 mt-1">
-              {VAN_COLORS.map((c) => (
-                <button
-                  key={c}
-                  onClick={() => setNewVanColor(c)}
-                  className={`w-6 h-6 rounded ${newVanColor === c ? "ring-2 ring-offset-1 ring-offset-background ring-foreground" : ""}`}
-                  style={{ background: c }}
-                  aria-label={`color ${c}`}
-                />
-              ))}
-            </div>
-          </div>
-          <Button onClick={() => createVan.mutate()} disabled={createVan.isPending} className="bg-neon text-background hover:bg-neon/90">
-            <Plus className="w-4 h-4 mr-1" /> Create Van
-          </Button>
+      {/* Read-only banner for canvassers */}
+      {!canManage && (
+        <div className="arcade-card p-3 flex items-center gap-2 text-xs text-muted-foreground border border-border">
+          <Lock className="w-3.5 h-3.5" /> Read-only view. Van assignments and roster edits are limited to Captains, Admins, and Owners.
         </div>
-      </ArcadePanel>
+      )}
+
+      {/* Create New Van — managers only */}
+      {canManage && (
+        <ArcadePanel title="Create New Van">
+          <div className="grid gap-3 md:grid-cols-[1fr_180px_140px_auto] items-end">
+            <div>
+              <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Van Name</label>
+              <Input value={newVanName} onChange={(e) => setNewVanName(e.target.value)} placeholder="e.g. Phoenix Strike" />
+            </div>
+            <div>
+              <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Office Location</label>
+              <Select value={newVanLoc} onValueChange={(v) => setNewVanLoc(v as OfficeLocation)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {OFFICE_LOCATIONS.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Color</label>
+              <div className="flex gap-1 mt-1">
+                {VAN_COLORS.map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => setNewVanColor(c)}
+                    className={`w-6 h-6 rounded ${newVanColor === c ? "ring-2 ring-offset-1 ring-offset-background ring-foreground" : ""}`}
+                    style={{ background: c }}
+                    aria-label={`color ${c}`}
+                  />
+                ))}
+              </div>
+            </div>
+            <Button onClick={() => createVan.mutate()} disabled={createVan.isPending} className="bg-neon text-background hover:bg-neon/90">
+              <Plus className="w-4 h-4 mr-1" /> Create Van
+            </Button>
+          </div>
+        </ArcadePanel>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
         {/* Vans grouped by office */}
