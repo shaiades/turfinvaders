@@ -65,9 +65,8 @@ type Row = {
 };
 
 function DailyWrap() {
-  const today = todayISO(0);
-  const yday = todayISO(-1);
-  const wkStart = weekStartISO();
+  const { today, yday, wkStart, beforeLock } = reportDates();
+
 
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ["daily_wrap", today],
