@@ -25,6 +25,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         { to: "/dashboard", search: { tab: "dispatch" }, label: "Dispatch", icon: Inbox },
         { to: "/dashboard", search: { tab: "fleet" }, label: "Fleet", icon: Users },
         { to: "/dashboard", search: { tab: "payroll" }, label: "Payroll", icon: DollarSign },
+        { to: "/daily-wrap", label: "Wrap-Up", icon: Flame },
       ];
     }
     if (role === "canvasser") {
