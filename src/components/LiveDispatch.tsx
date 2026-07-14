@@ -210,7 +210,7 @@ function LiveDispatchInner() {
                   const sub = conf + kil + pen + na;
                   const conv = sub > 0 ? Math.round((conf / sub) * 100) : 0;
                   return (
-                    <tr key={c.id} className="border-b border-border/40 hover:bg-surface-elevated">
+                    <tr key={c.id} className="border-b border-border/40 hover:bg-gray-800/50 transition-colors">
                       <td className="py-2.5 px-3 font-medium">
                         {c.display_name ?? "—"}
                         {c.role === "captain" && (
@@ -223,12 +223,12 @@ function LiveDispatchInner() {
                         {c.office_location ?? c.team_office ?? "—"}
                       </td>
 
-                      <td className="py-2.5 px-3 text-right font-display text-neon">{sub}</td>
-                      <td className="py-2.5 px-3 text-right font-display text-warning">{pen}</td>
-                      <td className="py-2.5 px-3 text-right font-display text-muted-foreground">{na}</td>
-                      <td className="py-2.5 px-3 text-right font-display text-victory">{conf}</td>
-                      <td className="py-2.5 px-3 text-right font-display text-destructive">{kil}</td>
-                      <td className="py-2.5 px-3 text-right font-display text-accent">{conv}%</td>
+                      <MetricCell value={sub} color="neon" />
+                      <MetricCell value={pen} color="warning" />
+                      <MetricCell value={na} color="muted-foreground" />
+                      <MetricCell value={conf} color="victory" />
+                      <MetricCell value={kil} color="destructive" />
+                      <MetricCell value={conv} color="accent" suffix="%" />
                     </tr>
                   );
                 })}
