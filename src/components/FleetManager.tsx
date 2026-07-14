@@ -5,10 +5,17 @@ import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel, TeamBadge } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Truck, Plus, Building2, Trash2, UserMinus, Pencil, Check, X, ChevronLeft, ChevronRight, CalendarRange } from "lucide-react";
+import { Truck, Plus, Building2, Trash2, UserMinus, Pencil, Check, X, ChevronLeft, ChevronRight, CalendarRange, UserPlus, Lock } from "lucide-react";
 import { deleteProfile, deleteVan } from "@/lib/fleet.functions";
+import { addTeamMember } from "@/lib/users.functions";
+import { useAuth } from "@/hooks/useAuth";
+import { isManagerRole } from "@/lib/roles";
 
 // Week helpers — ISO week, Monday..Sunday.
 function startOfWeekMonday(d: Date): Date {
