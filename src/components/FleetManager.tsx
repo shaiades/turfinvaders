@@ -229,6 +229,24 @@ export function FleetManager() {
     onError: (e: Error) => toast.error(e.message ?? "Failed to delete van"),
   });
 
+  const addAgent = useMutation({
+    mutationFn: async () => {
+      const name = newAgentName.trim();
+      if (!name) throw new Error("Full Name required");
+      await addTeamMemberFn({
+        data: { full_name: name, office_location: newAgentOffice, role: "canvasser" },
+      });
+    },
+    onSuccess: () => {
+      toast.success(`${newAgentName.trim()} added to Free Agents`);
+      setNewAgentName("");
+      setAddAgentOpen(false);
+      qc.invalidateQueries({ queryKey: ["fleet_manager"] });
+      qc.invalidateQueries({ queryKey: ["manage_users"] });
+    },
+    onError: (e: Error) => toast.error(e.message ?? "Failed to add agent"),
+  });
+
   function startEditVan(v: { id: string; name: string; color: string; office_location: string | null }) {
     setEditingVanId(v.id);
     setEditVanName(v.name);
