@@ -80,12 +80,12 @@ function AuthPage() {
             {mode === "signin" ? "Continue your run" : "Press start to begin"}
           </p>
 
-          <form onSubmit={submit} className="space-y-3">
+          <form onSubmit={submit} className="space-y-3" method="post" autoComplete="on">
             {mode === "signup" && (
-              <Field label="Player name" value={name} onChange={setName} placeholder="Your name" />
+              <Field label="Player name" value={name} onChange={setName} placeholder="Your name" autoComplete="name" name="name" />
             )}
-            <Field label="Email" type="email" value={email} onChange={setEmail} required />
-            <Field label="Password" type="password" value={password} onChange={setPassword} required minLength={6} />
+            <Field label="Email" type="email" value={email} onChange={setEmail} required autoComplete="email" name="email" />
+            <Field label="Password" type="password" value={password} onChange={setPassword} required minLength={6} autoComplete={mode === "signin" ? "current-password" : "new-password"} name="password" />
             <button
               disabled={busy}
               className="w-full bg-primary text-primary-foreground font-display text-xs uppercase tracking-widest py-3 rounded-md hover:opacity-90 disabled:opacity-50"
