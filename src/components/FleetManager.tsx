@@ -75,7 +75,7 @@ export function FleetManager() {
   const fleet = useQuery({
     queryKey: ["fleet_manager", weekStartISO, weekEndISO],
     queryFn: async () => {
-      const [vansR, profilesR, rolesR, metricsR] = await Promise.all([
+      const [vansR, profilesR, rolesR, metricsR, logsR] = await Promise.all([
         supabase.from("teams").select("id, name, color, captain_id, office_location").order("name"),
         supabase.from("profiles").select("id, display_name, team_id, office_location").order("display_name"),
         supabase.from("user_roles").select("user_id, role"),
@@ -84,22 +84,34 @@ export function FleetManager() {
           .select("canvasser_id, pitch_missed, sales, metric_date")
           .gte("metric_date", weekStartISO)
           .lte("metric_date", weekEndISO),
+        supabase
+          .from("daily_logs")
+          .select("canvasser_id, demos_sits, sales, log_date")
+          .gte("log_date", weekStartISO)
+          .lte("log_date", weekEndISO),
       ]);
       if (vansR.error) throw vansR.error;
       if (profilesR.error) throw profilesR.error;
       if (rolesR.error) throw rolesR.error;
       if (metricsR.error) throw metricsR.error;
+      if (logsR.error) throw logsR.error;
       const rolesByUser = new Map<string, string[]>();
       for (const r of rolesR.data ?? []) {
         const arr = rolesByUser.get(r.user_id) ?? [];
         arr.push(r.role);
         rolesByUser.set(r.user_id, arr);
       }
-      // Weekly points: PM = 1 pt, Sale = 2 pts. BO/RS/basic leads = 0.
+      // Weekly points: PM/sit = 1 pt, Sale = 2 pts. BO/RS/basic leads = 0.
+      // Merge live daily_metrics (webhook) with historical daily_logs (CSV import).
       const pointsByUser = new Map<string, number>();
       for (const m of metricsR.data ?? []) {
         const pts = (m.pitch_missed ?? 0) * 1 + (m.sales ?? 0) * 2;
         pointsByUser.set(m.canvasser_id, (pointsByUser.get(m.canvasser_id) ?? 0) + pts);
+      }
+      for (const l of logsR.data ?? []) {
+        if (!l.canvasser_id) continue;
+        const pts = (l.demos_sits ?? 0) * 1 + (l.sales ?? 0) * 2;
+        pointsByUser.set(l.canvasser_id, (pointsByUser.get(l.canvasser_id) ?? 0) + pts);
       }
       return {
         vans: vansR.data ?? [],
@@ -109,6 +121,7 @@ export function FleetManager() {
       };
     },
   });
+
 
   const createVan = useMutation({
     mutationFn: async () => {
