@@ -436,24 +436,28 @@ export function FleetManager() {
                               <span className="text-[10px] font-display uppercase tracking-widest flex items-center gap-1 mr-1 text-muted-foreground">
                                 <Building2 className="w-3 h-3" /> {v.office_location ?? "San Diego"}
                               </span>
-                              <button
-                                onClick={() => startEditVan(v)}
-                                className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-                                title="Edit van"
-                              >
-                                <Pencil className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                onClick={() => {
-                                  if (confirm(`Delete van "${v.name}"? Members will be moved to Unassigned. This cannot be undone.`)) {
-                                    removeVan.mutate(v.id);
-                                  }
-                                }}
-                                className="p-1 rounded hover:bg-destructive/20 text-destructive"
-                                title="Delete van"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                              {canManage && (
+                                <button
+                                  onClick={() => startEditVan(v)}
+                                  className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                                  title="Edit van"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                              {isOwnerRole && (
+                                <button
+                                  onClick={() => {
+                                    if (confirm(`Delete van "${v.name}"? Members will be moved to Unassigned. This cannot be undone.`)) {
+                                      removeVan.mutate(v.id);
+                                    }
+                                  }}
+                                  className="p-1 rounded hover:bg-destructive/20 text-destructive"
+                                  title="Delete van (Owner only)"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                             </div>
                           </div>
                         )}
