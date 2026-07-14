@@ -118,12 +118,29 @@ function DailyWrap() {
 
   return (
     <div className="space-y-6">
+      {beforeLock && (
+        <div
+          className="rounded-md border-2 px-4 py-2 text-center font-display text-xs uppercase tracking-widest"
+          style={{
+            borderColor: "var(--warning)",
+            color: "var(--warning)",
+            background: "color-mix(in oklab, var(--warning) 10%, transparent)",
+            animation: "suspend-pulse 1.8s ease-in-out infinite",
+          }}
+        >
+          ⚡ Live Preview · Report finalizes at 7:00 PM Pacific
+        </div>
+      )}
       <div>
         <h1 className="font-display text-2xl text-neon">DAILY WRAP-UP</h1>
         <p className="text-xs text-muted-foreground mt-1 font-display uppercase tracking-widest">
-          {new Date().toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}
+          End of Day Report · Locks at 7:00 PM Pacific
+        </p>
+        <p className="text-[10px] text-muted-foreground mt-0.5 font-display uppercase tracking-widest">
+          Report date {today} (PT) · Prior {yday}
         </p>
       </div>
+
 
       {/* Suspension Zone */}
       <section
