@@ -118,8 +118,8 @@ function AuthPage() {
   );
 }
 
-function Field({ label, value, onChange, type = "text", required, minLength, placeholder }: {
-  label: string; value: string; onChange: (v: string) => void; type?: string; required?: boolean; minLength?: number; placeholder?: string;
+function Field({ label, value, onChange, type = "text", required, minLength, placeholder, autoComplete, name }: {
+  label: string; value: string; onChange: (v: string) => void; type?: string; required?: boolean; minLength?: number; placeholder?: string; autoComplete?: string; name?: string;
 }) {
   return (
     <label className="block">
@@ -127,6 +127,7 @@ function Field({ label, value, onChange, type = "text", required, minLength, pla
       <input
         type={type} value={value} onChange={(e) => onChange(e.target.value)}
         required={required} minLength={minLength} placeholder={placeholder}
+        autoComplete={autoComplete} name={name}
         className="mt-1 w-full bg-input border border-border rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
       />
     </label>
