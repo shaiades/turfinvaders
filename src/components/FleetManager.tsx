@@ -5,10 +5,17 @@ import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel, TeamBadge } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Truck, Plus, Building2, Trash2, UserMinus, Pencil, Check, X, ChevronLeft, ChevronRight, CalendarRange } from "lucide-react";
+import { Truck, Plus, Building2, Trash2, UserMinus, Pencil, Check, X, ChevronLeft, ChevronRight, CalendarRange, UserPlus, Lock } from "lucide-react";
 import { deleteProfile, deleteVan } from "@/lib/fleet.functions";
+import { addTeamMember } from "@/lib/users.functions";
+import { useAuth } from "@/hooks/useAuth";
+import { isManagerRole } from "@/lib/roles";
 
 // Week helpers — ISO week, Monday..Sunday.
 function startOfWeekMonday(d: Date): Date {
@@ -52,15 +59,22 @@ export type OfficeLocation = (typeof OFFICE_LOCATIONS)[number];
 
 export function FleetManager() {
   const qc = useQueryClient();
+  const { realRole } = useAuth();
+  const canManage = isManagerRole(realRole);
+  const isOwnerRole = realRole === "owner";
   const [newVanName, setNewVanName] = useState("");
   const [newVanLoc, setNewVanLoc] = useState<OfficeLocation>("San Diego");
   const [newVanColor, setNewVanColor] = useState(VAN_COLORS[0]);
   const deleteProfileFn = useServerFn(deleteProfile);
   const deleteVanFn = useServerFn(deleteVan);
+  const addTeamMemberFn = useServerFn(addTeamMember);
   const [editingVanId, setEditingVanId] = useState<string | null>(null);
   const [editVanName, setEditVanName] = useState("");
   const [editVanColor, setEditVanColor] = useState(VAN_COLORS[0]);
   const [editVanLoc, setEditVanLoc] = useState<OfficeLocation>("San Diego");
+  const [addAgentOpen, setAddAgentOpen] = useState(false);
+  const [newAgentName, setNewAgentName] = useState("");
+  const [newAgentOffice, setNewAgentOffice] = useState<OfficeLocation>("San Diego");
 
   // Week selector — default to current Monday-anchored week.
   const [weekStart, setWeekStart] = useState<Date>(() => startOfWeekMonday(new Date()));
@@ -215,6 +229,24 @@ export function FleetManager() {
     onError: (e: Error) => toast.error(e.message ?? "Failed to delete van"),
   });
 
+  const addAgent = useMutation({
+    mutationFn: async () => {
+      const name = newAgentName.trim();
+      if (!name) throw new Error("Full Name required");
+      await addTeamMemberFn({
+        data: { full_name: name, office_location: newAgentOffice, role: "canvasser" },
+      });
+    },
+    onSuccess: () => {
+      toast.success(`${newAgentName.trim()} added to Free Agents`);
+      setNewAgentName("");
+      setAddAgentOpen(false);
+      qc.invalidateQueries({ queryKey: ["fleet_manager"] });
+      qc.invalidateQueries({ queryKey: ["manage_users"] });
+    },
+    onError: (e: Error) => toast.error(e.message ?? "Failed to add agent"),
+  });
+
   function startEditVan(v: { id: string; name: string; color: string; office_location: string | null }) {
     setEditingVanId(v.id);
     setEditVanName(v.name);
@@ -287,42 +319,50 @@ export function FleetManager() {
         </p>
       </ArcadePanel>
 
-      {/* Create New Van */}
-      <ArcadePanel title="Create New Van">
-
-        <div className="grid gap-3 md:grid-cols-[1fr_180px_140px_auto] items-end">
-          <div>
-            <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Van Name</label>
-            <Input value={newVanName} onChange={(e) => setNewVanName(e.target.value)} placeholder="e.g. Phoenix Strike" />
-          </div>
-          <div>
-            <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Office Location</label>
-            <Select value={newVanLoc} onValueChange={(v) => setNewVanLoc(v as OfficeLocation)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {OFFICE_LOCATIONS.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Color</label>
-            <div className="flex gap-1 mt-1">
-              {VAN_COLORS.map((c) => (
-                <button
-                  key={c}
-                  onClick={() => setNewVanColor(c)}
-                  className={`w-6 h-6 rounded ${newVanColor === c ? "ring-2 ring-offset-1 ring-offset-background ring-foreground" : ""}`}
-                  style={{ background: c }}
-                  aria-label={`color ${c}`}
-                />
-              ))}
-            </div>
-          </div>
-          <Button onClick={() => createVan.mutate()} disabled={createVan.isPending} className="bg-neon text-background hover:bg-neon/90">
-            <Plus className="w-4 h-4 mr-1" /> Create Van
-          </Button>
+      {/* Read-only banner for canvassers */}
+      {!canManage && (
+        <div className="arcade-card p-3 flex items-center gap-2 text-xs text-muted-foreground border border-border">
+          <Lock className="w-3.5 h-3.5" /> Read-only view. Van assignments and roster edits are limited to Captains, Admins, and Owners.
         </div>
-      </ArcadePanel>
+      )}
+
+      {/* Create New Van — managers only */}
+      {canManage && (
+        <ArcadePanel title="Create New Van">
+          <div className="grid gap-3 md:grid-cols-[1fr_180px_140px_auto] items-end">
+            <div>
+              <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Van Name</label>
+              <Input value={newVanName} onChange={(e) => setNewVanName(e.target.value)} placeholder="e.g. Phoenix Strike" />
+            </div>
+            <div>
+              <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Office Location</label>
+              <Select value={newVanLoc} onValueChange={(v) => setNewVanLoc(v as OfficeLocation)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {OFFICE_LOCATIONS.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Color</label>
+              <div className="flex gap-1 mt-1">
+                {VAN_COLORS.map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => setNewVanColor(c)}
+                    className={`w-6 h-6 rounded ${newVanColor === c ? "ring-2 ring-offset-1 ring-offset-background ring-foreground" : ""}`}
+                    style={{ background: c }}
+                    aria-label={`color ${c}`}
+                  />
+                ))}
+              </div>
+            </div>
+            <Button onClick={() => createVan.mutate()} disabled={createVan.isPending} className="bg-neon text-background hover:bg-neon/90">
+              <Plus className="w-4 h-4 mr-1" /> Create Van
+            </Button>
+          </div>
+        </ArcadePanel>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
         {/* Vans grouped by office */}
@@ -396,42 +436,52 @@ export function FleetManager() {
                               <span className="text-[10px] font-display uppercase tracking-widest flex items-center gap-1 mr-1 text-muted-foreground">
                                 <Building2 className="w-3 h-3" /> {v.office_location ?? "San Diego"}
                               </span>
-                              <button
-                                onClick={() => startEditVan(v)}
-                                className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-                                title="Edit van"
-                              >
-                                <Pencil className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                onClick={() => {
-                                  if (confirm(`Delete van "${v.name}"? Members will be moved to Unassigned. This cannot be undone.`)) {
-                                    removeVan.mutate(v.id);
-                                  }
-                                }}
-                                className="p-1 rounded hover:bg-destructive/20 text-destructive"
-                                title="Delete van"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                              {canManage && (
+                                <button
+                                  onClick={() => startEditVan(v)}
+                                  className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                                  title="Edit van"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                              {isOwnerRole && (
+                                <button
+                                  onClick={() => {
+                                    if (confirm(`Delete van "${v.name}"? Members will be moved to Unassigned. This cannot be undone.`)) {
+                                      removeVan.mutate(v.id);
+                                    }
+                                  }}
+                                  className="p-1 rounded hover:bg-destructive/20 text-destructive"
+                                  title="Delete van (Owner only)"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                             </div>
                           </div>
                         )}
 
                         <div>
                           <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Captain</label>
-                          <Select
-                            value={v.captain_id ?? "none"}
-                            onValueChange={(val) => setCaptain.mutate({ vanId: v.id, captainId: val === "none" ? null : val })}
-                          >
-                            <SelectTrigger><SelectValue placeholder="No captain" /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="none">— No captain —</SelectItem>
-                              {captains.map((c) => (
-                                <SelectItem key={c.id} value={c.id}>{c.display_name}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          {canManage ? (
+                            <Select
+                              value={v.captain_id ?? "none"}
+                              onValueChange={(val) => setCaptain.mutate({ vanId: v.id, captainId: val === "none" ? null : val })}
+                            >
+                              <SelectTrigger><SelectValue placeholder="No captain" /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">— No captain —</SelectItem>
+                                {captains.map((c) => (
+                                  <SelectItem key={c.id} value={c.id}>{c.display_name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <div className="text-sm px-2 py-1.5 rounded border border-border bg-surface">
+                              {captains.find((c) => c.id === v.captain_id)?.display_name ?? "— No captain —"}
+                            </div>
+                          )}
                         </div>
 
                         <div>
@@ -439,20 +489,25 @@ export function FleetManager() {
                             Roster ({roster.length}) <span className="opacity-60">· drop agents here</span>
                           </div>
                           <div className="space-y-1.5 min-h-[40px]">
-                            {roster.map((r) => (
-                              <RosterRow
-                                key={r.id}
-                                id={r.id}
-                                name={r.display_name ?? "Unknown"}
-                                points={pointsByUser.get(r.id) ?? 0}
-                                onUnassign={() => assignCanvasser.mutate({ canvasserId: r.id, vanId: null })}
-                                onDelete={() => {
-                                  if (confirm(`Delete profile "${r.display_name}"? This removes the user permanently.`)) {
-                                    removeProfile.mutate(r.id);
-                                  }
-                                }}
-                              />
-                            ))}
+                            {roster.map((r) => {
+                              const targetIsOwner = (rolesByUser.get(r.id) ?? []).includes("owner");
+                              const canModify = canManage && (isOwnerRole || !targetIsOwner);
+                              return (
+                                <RosterRow
+                                  key={r.id}
+                                  id={r.id}
+                                  name={r.display_name ?? "Unknown"}
+                                  points={pointsByUser.get(r.id) ?? 0}
+                                  canManage={canModify}
+                                  onUnassign={canModify ? () => assignCanvasser.mutate({ canvasserId: r.id, vanId: null }) : undefined}
+                                  onDelete={isOwnerRole ? () => {
+                                    if (confirm(`Delete profile "${r.display_name}"? This removes the user permanently.`)) {
+                                      removeProfile.mutate(r.id);
+                                    }
+                                  } : undefined}
+                                />
+                              );
+                            })}
                             {roster.length === 0 && (
                               <div className="text-xs text-muted-foreground italic px-2 py-3 border border-dashed border-border rounded">
                                 Drop agents here
@@ -471,20 +526,36 @@ export function FleetManager() {
 
         {/* Free Agents holding pen */}
         <div className="free-agents-panel bg-surface p-4 space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="font-display uppercase tracking-widest text-sm" style={{ color: "var(--neon-orange)" }}>
-              ⚠ Free Agents (Needs Van)
-            </h3>
-            <span
-              className="text-[10px] font-display px-2 py-0.5 rounded-full"
-              style={{
-                color: "var(--neon-orange)",
-                background: "color-mix(in oklab, var(--neon-orange) 12%, transparent)",
-                border: "1px solid color-mix(in oklab, var(--neon-orange) 45%, transparent)",
-              }}
-            >
-              {unassigned.length}
-            </span>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-2">
+              <h3 className="font-display uppercase tracking-widest text-sm" style={{ color: "var(--neon-orange)" }}>
+                ⚠ Free Agents (Needs Van)
+              </h3>
+              <span
+                className="text-[10px] font-display px-2 py-0.5 rounded-full"
+                style={{
+                  color: "var(--neon-orange)",
+                  background: "color-mix(in oklab, var(--neon-orange) 12%, transparent)",
+                  border: "1px solid color-mix(in oklab, var(--neon-orange) 45%, transparent)",
+                }}
+              >
+                {unassigned.length}
+              </span>
+            </div>
+            {canManage && (
+              <Button
+                size="sm"
+                onClick={() => setAddAgentOpen(true)}
+                className="gap-1 font-display uppercase tracking-widest text-[10px] bg-background border text-foreground hover:bg-[color:var(--neon-blue)]/10"
+                style={{
+                  borderColor: "var(--neon-blue)",
+                  color: "var(--neon-blue)",
+                  boxShadow: "0 0 12px -4px color-mix(in oklab, var(--neon-blue) 70%, transparent)",
+                }}
+              >
+                <UserPlus className="w-3.5 h-3.5" /> + Add Agent
+              </Button>
+            )}
           </div>
           <div className="min-h-[120px] rounded-lg border border-dashed p-2 space-y-1.5 border-border">
             {unassigned.length === 0 ? (
@@ -492,29 +563,82 @@ export function FleetManager() {
                 All agents assigned to a van. New Monday.com canvassers land here automatically.
               </div>
             ) : (
-              unassigned.map((p) => (
-                <RosterRow
-                  key={p.id}
-                  id={p.id}
-                  name={p.display_name ?? "Unknown"}
-                  points={pointsByUser.get(p.id) ?? 0}
-                  vans={vans.map((v) => ({ id: v.id, name: v.name, color: v.color }))}
-                  currentVanId={p.team_id}
-                  onAssign={(vanId) => assignCanvasser.mutate({ canvasserId: p.id, vanId })}
-                  onDelete={() => {
-                    if (confirm(`Delete profile "${p.display_name}"? This removes the user permanently.`)) {
-                      removeProfile.mutate(p.id);
-                    }
-                  }}
-                />
-              ))
+              unassigned.map((p) => {
+                const targetIsOwner = (rolesByUser.get(p.id) ?? []).includes("owner");
+                const canModify = canManage && (isOwnerRole || !targetIsOwner);
+                return (
+                  <RosterRow
+                    key={p.id}
+                    id={p.id}
+                    name={p.display_name ?? "Unknown"}
+                    points={pointsByUser.get(p.id) ?? 0}
+                    canManage={canModify}
+                    vans={canModify ? vans.map((v) => ({ id: v.id, name: v.name, color: v.color })) : undefined}
+                    currentVanId={p.team_id}
+                    onAssign={canModify ? (vanId) => assignCanvasser.mutate({ canvasserId: p.id, vanId }) : undefined}
+                    onDelete={isOwnerRole ? () => {
+                      if (confirm(`Delete profile "${p.display_name}"? This removes the user permanently.`)) {
+                        removeProfile.mutate(p.id);
+                      }
+                    } : undefined}
+                  />
+                );
+              })
             )}
           </div>
           <p className="text-[10px] text-muted-foreground">
-            Tap “Assign Van” to place an agent on a roster. Auto-created from Monday.com webhooks.
+            {canManage
+              ? "Tap “Assign Van” to place an agent on a roster. Auto-created from Monday.com webhooks."
+              : "Free Agents auto-populate from Monday.com webhooks."}
           </p>
         </div>
       </div>
+
+      {/* Add Agent modal */}
+      <Dialog open={addAgentOpen} onOpenChange={setAddAgentOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="font-display uppercase tracking-widest">Add Agent</DialogTitle>
+            <DialogDescription>
+              Creates a placeholder Canvasser in Free Agents. They can be assigned to a van right after.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div>
+              <Label htmlFor="agent-name" className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                Full Name
+              </Label>
+              <Input
+                id="agent-name"
+                autoFocus
+                value={newAgentName}
+                onChange={(e) => setNewAgentName(e.target.value)}
+                placeholder="e.g. Alex Morgan"
+                onKeyDown={(e) => { if (e.key === "Enter") addAgent.mutate(); }}
+              />
+            </div>
+            <div>
+              <Label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Office</Label>
+              <Select value={newAgentOffice} onValueChange={(v) => setNewAgentOffice(v as OfficeLocation)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {OFFICE_LOCATIONS.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setAddAgentOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => addAgent.mutate()}
+              disabled={addAgent.isPending || !newAgentName.trim()}
+              className="bg-neon text-background hover:bg-neon/90"
+            >
+              <UserPlus className="w-4 h-4 mr-1" /> Add to Free Agents
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -522,7 +646,7 @@ export function FleetManager() {
 type VanOption = { id: string; name: string; color: string };
 
 function RosterRow({
-  id, name, points, vans, currentVanId, onAssign, onUnassign, onDelete,
+  id, name, points, vans, currentVanId, onAssign, onUnassign, onDelete, canManage = true,
 }: {
   id: string;
   name: string;
@@ -531,7 +655,8 @@ function RosterRow({
   currentVanId?: string | null;
   onAssign?: (vanId: string) => void;
   onUnassign?: () => void;
-  onDelete: () => void;
+  onDelete?: () => void;
+  canManage?: boolean;
 }) {
   const isGhost = points === 0;
   return (
@@ -575,13 +700,15 @@ function RosterRow({
           <UserMinus className="w-3.5 h-3.5" />
         </button>
       )}
-      <button
-        onClick={onDelete}
-        className="p-1 rounded hover:bg-destructive/20 text-destructive"
-        title={isGhost ? "Delete ghost profile" : "Delete profile (has data)"}
-      >
-        <Trash2 className="w-3.5 h-3.5" />
-      </button>
+      {onDelete && (
+        <button
+          onClick={onDelete}
+          className="p-1 rounded hover:bg-destructive/20 text-destructive"
+          title={isGhost ? "Delete ghost profile" : "Delete profile (has data)"}
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      )}
     </div>
   );
 }
