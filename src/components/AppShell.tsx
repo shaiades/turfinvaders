@@ -2,7 +2,7 @@ import { Link, useRouter } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth, setDevRoleOverride, type AppRole } from "@/hooks/useAuth";
-import { LogOut, Users, Settings, LayoutDashboard, ShieldCheck, ClipboardList, Inbox, MapPin, FlaskConical, DollarSign, Trophy, Zap } from "lucide-react";
+import { LogOut, Users, Settings, LayoutDashboard, ShieldCheck, ClipboardList, Inbox, MapPin, FlaskConical, DollarSign, Trophy, Zap, Flame } from "lucide-react";
 import turfInvadersWordmark from "@/assets/turf-invaders-wordmark.png.asset.json";
 
 type NavItem = {
@@ -25,6 +25,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         { to: "/dashboard", search: { tab: "dispatch" }, label: "Dispatch", icon: Inbox },
         { to: "/dashboard", search: { tab: "fleet" }, label: "Fleet", icon: Users },
         { to: "/dashboard", search: { tab: "payroll" }, label: "Payroll", icon: DollarSign },
+        { to: "/daily-wrap", label: "Wrap-Up", icon: Flame },
       ];
     }
     if (role === "canvasser") {
@@ -41,6 +42,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         { to: "/my-territory", label: "Territory", icon: MapPin },
         { to: "/teams", label: "My Van", icon: Users },
         { to: "/leaderboard", label: "Leaders", icon: Trophy },
+        { to: "/daily-wrap", label: "Wrap-Up", icon: Flame },
         { to: "/log", label: "Log", icon: ClipboardList },
       ];
     }

@@ -268,3 +268,45 @@
 }
 
 
+
+/* Daily Wrap animations */
+@keyframes frozen-shake {
+  0%,100% { transform: translate(0,0) rotate(0deg); }
+  10% { transform: translate(-4px,-2px) rotate(-8deg); }
+  20% { transform: translate(5px,1px) rotate(7deg); }
+  30% { transform: translate(-6px,2px) rotate(-6deg); }
+  40% { transform: translate(4px,-3px) rotate(9deg); }
+  50% { transform: translate(-5px,2px) rotate(-8deg); }
+  60% { transform: translate(6px,-1px) rotate(6deg); }
+  70% { transform: translate(-3px,3px) rotate(-9deg); }
+  80% { transform: translate(4px,2px) rotate(8deg); }
+  90% { transform: translate(-4px,-2px) rotate(-6deg); }
+}
+@utility frozen-doughnut {
+  display: inline-block;
+  filter: grayscale(1) brightness(0.7) drop-shadow(0 0 6px rgba(255,255,255,0.15));
+  animation: frozen-shake 0.35s infinite;
+}
+
+@keyframes doughnut-bounce {
+  0%,100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+@utility bouncing-doughnut {
+  display: inline-block;
+  animation: doughnut-bounce 0.9s infinite ease-in-out;
+}
+
+@keyframes confetti-fall {
+  0% { transform: translate3d(0,-20px,0) rotate(0deg); opacity: 1; }
+  100% { transform: translate3d(var(--dx,20px), 320px, 0) rotate(720deg); opacity: 0; }
+}
+.confetti-piece {
+  position: absolute;
+  top: 0;
+  width: 8px;
+  height: 14px;
+  border-radius: 2px;
+  animation: confetti-fall 2.4s ease-in forwards;
+  pointer-events: none;
+}
