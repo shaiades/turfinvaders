@@ -647,7 +647,7 @@ export function FleetManager() {
 type VanOption = { id: string; name: string; color: string };
 
 function RosterRow({
-  id, name, points, vans, currentVanId, onAssign, onUnassign, onDelete,
+  id, name, points, vans, currentVanId, onAssign, onUnassign, onDelete, canManage = true,
 }: {
   id: string;
   name: string;
@@ -656,7 +656,8 @@ function RosterRow({
   currentVanId?: string | null;
   onAssign?: (vanId: string) => void;
   onUnassign?: () => void;
-  onDelete: () => void;
+  onDelete?: () => void;
+  canManage?: boolean;
 }) {
   const isGhost = points === 0;
   return (
