@@ -700,13 +700,15 @@ function RosterRow({
           <UserMinus className="w-3.5 h-3.5" />
         </button>
       )}
-      <button
-        onClick={onDelete}
-        className="p-1 rounded hover:bg-destructive/20 text-destructive"
-        title={isGhost ? "Delete ghost profile" : "Delete profile (has data)"}
-      >
-        <Trash2 className="w-3.5 h-3.5" />
-      </button>
+      {onDelete && (
+        <button
+          onClick={onDelete}
+          className="p-1 rounded hover:bg-destructive/20 text-destructive"
+          title={isGhost ? "Delete ghost profile" : "Delete profile (has data)"}
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      )}
     </div>
   );
 }
