@@ -527,20 +527,36 @@ export function FleetManager() {
 
         {/* Free Agents holding pen */}
         <div className="free-agents-panel bg-surface p-4 space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="font-display uppercase tracking-widest text-sm" style={{ color: "var(--neon-orange)" }}>
-              ⚠ Free Agents (Needs Van)
-            </h3>
-            <span
-              className="text-[10px] font-display px-2 py-0.5 rounded-full"
-              style={{
-                color: "var(--neon-orange)",
-                background: "color-mix(in oklab, var(--neon-orange) 12%, transparent)",
-                border: "1px solid color-mix(in oklab, var(--neon-orange) 45%, transparent)",
-              }}
-            >
-              {unassigned.length}
-            </span>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-2">
+              <h3 className="font-display uppercase tracking-widest text-sm" style={{ color: "var(--neon-orange)" }}>
+                ⚠ Free Agents (Needs Van)
+              </h3>
+              <span
+                className="text-[10px] font-display px-2 py-0.5 rounded-full"
+                style={{
+                  color: "var(--neon-orange)",
+                  background: "color-mix(in oklab, var(--neon-orange) 12%, transparent)",
+                  border: "1px solid color-mix(in oklab, var(--neon-orange) 45%, transparent)",
+                }}
+              >
+                {unassigned.length}
+              </span>
+            </div>
+            {canManage && (
+              <Button
+                size="sm"
+                onClick={() => setAddAgentOpen(true)}
+                className="gap-1 font-display uppercase tracking-widest text-[10px] bg-background border text-foreground hover:bg-[color:var(--neon-blue)]/10"
+                style={{
+                  borderColor: "var(--neon-blue)",
+                  color: "var(--neon-blue)",
+                  boxShadow: "0 0 12px -4px color-mix(in oklab, var(--neon-blue) 70%, transparent)",
+                }}
+              >
+                <UserPlus className="w-3.5 h-3.5" /> + Add Agent
+              </Button>
+            )}
           </div>
           <div className="min-h-[120px] rounded-lg border border-dashed p-2 space-y-1.5 border-border">
             {unassigned.length === 0 ? (
@@ -548,28 +564,82 @@ export function FleetManager() {
                 All agents assigned to a van. New Monday.com canvassers land here automatically.
               </div>
             ) : (
-              unassigned.map((p) => (
-                <RosterRow
-                  key={p.id}
-                  id={p.id}
-                  name={p.display_name ?? "Unknown"}
-                  points={pointsByUser.get(p.id) ?? 0}
-                  vans={vans.map((v) => ({ id: v.id, name: v.name, color: v.color }))}
-                  currentVanId={p.team_id}
-                  onAssign={(vanId) => assignCanvasser.mutate({ canvasserId: p.id, vanId })}
-                  onDelete={() => {
-                    if (confirm(`Delete profile "${p.display_name}"? This removes the user permanently.`)) {
-                      removeProfile.mutate(p.id);
-                    }
-                  }}
-                />
-              ))
+              unassigned.map((p) => {
+                const targetIsOwner = (rolesByUser.get(p.id) ?? []).includes("owner");
+                const canModify = canManage && (isOwnerRole || !targetIsOwner);
+                return (
+                  <RosterRow
+                    key={p.id}
+                    id={p.id}
+                    name={p.display_name ?? "Unknown"}
+                    points={pointsByUser.get(p.id) ?? 0}
+                    canManage={canModify}
+                    vans={canModify ? vans.map((v) => ({ id: v.id, name: v.name, color: v.color })) : undefined}
+                    currentVanId={p.team_id}
+                    onAssign={canModify ? (vanId) => assignCanvasser.mutate({ canvasserId: p.id, vanId }) : undefined}
+                    onDelete={isOwnerRole ? () => {
+                      if (confirm(`Delete profile "${p.display_name}"? This removes the user permanently.`)) {
+                        removeProfile.mutate(p.id);
+                      }
+                    } : undefined}
+                  />
+                );
+              })
             )}
           </div>
           <p className="text-[10px] text-muted-foreground">
-            Tap “Assign Van” to place an agent on a roster. Auto-created from Monday.com webhooks.
+            {canManage
+              ? "Tap “Assign Van” to place an agent on a roster. Auto-created from Monday.com webhooks."
+              : "Free Agents auto-populate from Monday.com webhooks."}
           </p>
         </div>
+      </div>
+
+      {/* Add Agent modal */}
+      <Dialog open={addAgentOpen} onOpenChange={setAddAgentOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="font-display uppercase tracking-widest">Add Agent</DialogTitle>
+            <DialogDescription>
+              Creates a placeholder Canvasser in Free Agents. They can be assigned to a van right after.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div>
+              <Label htmlFor="agent-name" className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                Full Name
+              </Label>
+              <Input
+                id="agent-name"
+                autoFocus
+                value={newAgentName}
+                onChange={(e) => setNewAgentName(e.target.value)}
+                placeholder="e.g. Alex Morgan"
+                onKeyDown={(e) => { if (e.key === "Enter") addAgent.mutate(); }}
+              />
+            </div>
+            <div>
+              <Label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Office</Label>
+              <Select value={newAgentOffice} onValueChange={(v) => setNewAgentOffice(v as OfficeLocation)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {OFFICE_LOCATIONS.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setAddAgentOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => addAgent.mutate()}
+              disabled={addAgent.isPending || !newAgentName.trim()}
+              className="bg-neon text-background hover:bg-neon/90"
+            >
+              <UserPlus className="w-4 h-4 mr-1" /> Add to Free Agents
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       </div>
     </div>
   );
