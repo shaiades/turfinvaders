@@ -20,6 +20,7 @@ import { Route as AuthenticatedLogRouteImport } from './routes/_authenticated/lo
 import { Route as AuthenticatedLeaderboardRouteImport } from './routes/_authenticated/leaderboard'
 import { Route as AuthenticatedFieldRouteImport } from './routes/_authenticated/field'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
+import { Route as AuthenticatedDailyWrapRouteImport } from './routes/_authenticated/daily-wrap'
 import { Route as AuthenticatedConfirmationDeskRouteImport } from './routes/_authenticated/confirmation-desk'
 import { Route as AuthenticatedTeamsIndexRouteImport } from './routes/_authenticated/teams.index'
 import { Route as ApiPublicMondayWebhookRouteImport } from './routes/api/public/monday-webhook'
@@ -85,6 +86,11 @@ const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedDailyWrapRoute = AuthenticatedDailyWrapRouteImport.update({
+  id: '/daily-wrap',
+  path: '/daily-wrap',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedConfirmationDeskRoute =
   AuthenticatedConfirmationDeskRouteImport.update({
     id: '/confirmation-desk',
@@ -130,6 +136,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/confirmation-desk': typeof AuthenticatedConfirmationDeskRoute
+  '/daily-wrap': typeof AuthenticatedDailyWrapRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/field': typeof AuthenticatedFieldRoute
   '/leaderboard': typeof AuthenticatedLeaderboardRoute
@@ -149,6 +156,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/confirmation-desk': typeof AuthenticatedConfirmationDeskRoute
+  '/daily-wrap': typeof AuthenticatedDailyWrapRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/field': typeof AuthenticatedFieldRoute
   '/leaderboard': typeof AuthenticatedLeaderboardRoute
@@ -170,6 +178,7 @@ export interface FileRoutesById {
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
   '/_authenticated/confirmation-desk': typeof AuthenticatedConfirmationDeskRoute
+  '/_authenticated/daily-wrap': typeof AuthenticatedDailyWrapRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/field': typeof AuthenticatedFieldRoute
   '/_authenticated/leaderboard': typeof AuthenticatedLeaderboardRoute
@@ -191,6 +200,7 @@ export interface FileRouteTypes {
     | '/'
     | '/auth'
     | '/confirmation-desk'
+    | '/daily-wrap'
     | '/dashboard'
     | '/field'
     | '/leaderboard'
@@ -210,6 +220,7 @@ export interface FileRouteTypes {
     | '/'
     | '/auth'
     | '/confirmation-desk'
+    | '/daily-wrap'
     | '/dashboard'
     | '/field'
     | '/leaderboard'
@@ -230,6 +241,7 @@ export interface FileRouteTypes {
     | '/_authenticated'
     | '/auth'
     | '/_authenticated/confirmation-desk'
+    | '/_authenticated/daily-wrap'
     | '/_authenticated/dashboard'
     | '/_authenticated/field'
     | '/_authenticated/leaderboard'
@@ -333,6 +345,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedDashboardRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/daily-wrap': {
+      id: '/_authenticated/daily-wrap'
+      path: '/daily-wrap'
+      fullPath: '/daily-wrap'
+      preLoaderRoute: typeof AuthenticatedDailyWrapRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/confirmation-desk': {
       id: '/_authenticated/confirmation-desk'
       path: '/confirmation-desk'
@@ -402,6 +421,7 @@ const AuthenticatedCanvassersCanvasserIdRouteWithChildren =
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedConfirmationDeskRoute: typeof AuthenticatedConfirmationDeskRoute
+  AuthenticatedDailyWrapRoute: typeof AuthenticatedDailyWrapRoute
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
   AuthenticatedFieldRoute: typeof AuthenticatedFieldRoute
   AuthenticatedLeaderboardRoute: typeof AuthenticatedLeaderboardRoute
@@ -417,6 +437,7 @@ interface AuthenticatedRouteRouteChildren {
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedConfirmationDeskRoute: AuthenticatedConfirmationDeskRoute,
+  AuthenticatedDailyWrapRoute: AuthenticatedDailyWrapRoute,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
   AuthenticatedFieldRoute: AuthenticatedFieldRoute,
   AuthenticatedLeaderboardRoute: AuthenticatedLeaderboardRoute,
