@@ -80,12 +80,12 @@ function AuthPage() {
             {mode === "signin" ? "Continue your run" : "Press start to begin"}
           </p>
 
-          <form onSubmit={submit} className="space-y-3">
+          <form onSubmit={submit} className="space-y-3" method="post" autoComplete="on">
             {mode === "signup" && (
-              <Field label="Player name" value={name} onChange={setName} placeholder="Your name" />
+              <Field label="Player name" value={name} onChange={setName} placeholder="Your name" autoComplete="name" name="name" />
             )}
-            <Field label="Email" type="email" value={email} onChange={setEmail} required />
-            <Field label="Password" type="password" value={password} onChange={setPassword} required minLength={6} />
+            <Field label="Email" type="email" value={email} onChange={setEmail} required autoComplete="email" name="email" />
+            <Field label="Password" type="password" value={password} onChange={setPassword} required minLength={6} autoComplete={mode === "signin" ? "current-password" : "new-password"} name="password" />
             <button
               disabled={busy}
               className="w-full bg-primary text-primary-foreground font-display text-xs uppercase tracking-widest py-3 rounded-md hover:opacity-90 disabled:opacity-50"
@@ -118,8 +118,8 @@ function AuthPage() {
   );
 }
 
-function Field({ label, value, onChange, type = "text", required, minLength, placeholder }: {
-  label: string; value: string; onChange: (v: string) => void; type?: string; required?: boolean; minLength?: number; placeholder?: string;
+function Field({ label, value, onChange, type = "text", required, minLength, placeholder, autoComplete, name }: {
+  label: string; value: string; onChange: (v: string) => void; type?: string; required?: boolean; minLength?: number; placeholder?: string; autoComplete?: string; name?: string;
 }) {
   return (
     <label className="block">
@@ -127,6 +127,7 @@ function Field({ label, value, onChange, type = "text", required, minLength, pla
       <input
         type={type} value={value} onChange={(e) => onChange(e.target.value)}
         required={required} minLength={minLength} placeholder={placeholder}
+        autoComplete={autoComplete} name={name}
         className="mt-1 w-full bg-input border border-border rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
       />
     </label>
