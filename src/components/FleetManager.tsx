@@ -489,20 +489,26 @@ export function FleetManager() {
                             Roster ({roster.length}) <span className="opacity-60">· drop agents here</span>
                           </div>
                           <div className="space-y-1.5 min-h-[40px]">
-                            {roster.map((r) => (
-                              <RosterRow
-                                key={r.id}
-                                id={r.id}
-                                name={r.display_name ?? "Unknown"}
-                                points={pointsByUser.get(r.id) ?? 0}
-                                onUnassign={() => assignCanvasser.mutate({ canvasserId: r.id, vanId: null })}
-                                onDelete={() => {
-                                  if (confirm(`Delete profile "${r.display_name}"? This removes the user permanently.`)) {
-                                    removeProfile.mutate(r.id);
-                                  }
-                                }}
-                              />
-                            ))}
+                            {roster.map((r) => {
+                              const targetIsOwner = (rolesByUser.get(r.id) ?? []).includes("owner");
+                              const canModify = canManage && (isOwnerRole || !targetIsOwner);
+                              return (
+                                <RosterRow
+                                  key={r.id}
+                                  id={r.id}
+                                  name={r.display_name ?? "Unknown"}
+                                  points={pointsByUser.get(r.id) ?? 0}
+                                  canManage={canModify}
+                                  canDelete={isOwnerRole && !targetIsOwner ? true : (isOwnerRole ? true : false)}
+                                  onUnassign={canModify ? () => assignCanvasser.mutate({ canvasserId: r.id, vanId: null }) : undefined}
+                                  onDelete={isOwnerRole ? () => {
+                                    if (confirm(`Delete profile "${r.display_name}"? This removes the user permanently.`)) {
+                                      removeProfile.mutate(r.id);
+                                    }
+                                  } : undefined}
+                                />
+                              );
+                            })}
                             {roster.length === 0 && (
                               <div className="text-xs text-muted-foreground italic px-2 py-3 border border-dashed border-border rounded">
                                 Drop agents here
