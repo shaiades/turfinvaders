@@ -499,7 +499,6 @@ export function FleetManager() {
                                   name={r.display_name ?? "Unknown"}
                                   points={pointsByUser.get(r.id) ?? 0}
                                   canManage={canModify}
-                                  canDelete={isOwnerRole && !targetIsOwner ? true : (isOwnerRole ? true : false)}
                                   onUnassign={canModify ? () => assignCanvasser.mutate({ canvasserId: r.id, vanId: null }) : undefined}
                                   onDelete={isOwnerRole ? () => {
                                     if (confirm(`Delete profile "${r.display_name}"? This removes the user permanently.`)) {
