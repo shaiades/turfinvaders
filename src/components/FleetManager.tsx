@@ -37,6 +37,17 @@ function toISODate(d: Date): string {
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 }
+function toUtcDayBoundaryISO(d: Date, endOfDay = false): string {
+  return new Date(Date.UTC(
+    d.getFullYear(),
+    d.getMonth(),
+    d.getDate(),
+    endOfDay ? 23 : 0,
+    endOfDay ? 59 : 0,
+    endOfDay ? 59 : 0,
+    endOfDay ? 999 : 0,
+  )).toISOString();
+}
 function formatRange(start: Date, end: Date): string {
   const sameMonth = start.getMonth() === end.getMonth();
   const sameYear = start.getFullYear() === end.getFullYear();
@@ -81,28 +92,36 @@ export function FleetManager() {
   const weekEnd = useMemo(() => addDays(weekStart, 6), [weekStart]);
   const weekStartISO = useMemo(() => toISODate(weekStart), [weekStart]);
   const weekEndISO = useMemo(() => toISODate(weekEnd), [weekEnd]);
+  const selectedDateRange = useMemo(
+    () => ({
+      startDate: toUtcDayBoundaryISO(weekStart),
+      endDate: toUtcDayBoundaryISO(weekEnd, true),
+    }),
+    [weekStart, weekEnd],
+  );
   const isCurrentWeek = useMemo(
     () => toISODate(startOfWeekMonday(new Date())) === weekStartISO,
     [weekStartISO],
   );
 
   const fleet = useQuery({
-    queryKey: ["fleet_manager", weekStartISO, weekEndISO],
+    queryKey: ["fleet_manager", selectedDateRange.startDate, selectedDateRange.endDate],
     queryFn: async () => {
+      const { startDate, endDate } = selectedDateRange;
       const [vansR, profilesR, rolesR, metricsR, logsR] = await Promise.all([
         supabase.from("teams").select("id, name, color, captain_id, office_location").order("name"),
         supabase.from("profiles").select("id, display_name, team_id, office_location").order("display_name"),
         supabase.from("user_roles").select("user_id, role"),
         supabase
           .from("daily_metrics")
-          .select("canvasser_id, pitch_missed, sales, metric_date")
-          .gte("metric_date", weekStartISO)
-          .lte("metric_date", weekEndISO),
+          .select("canvasser_id, pitch_missed, sales, metric_date, created_at")
+          .gte("created_at", startDate)
+          .lte("created_at", endDate),
         supabase
           .from("daily_logs")
-          .select("canvasser_id, demos_sits, sales, log_date")
-          .gte("log_date", weekStartISO)
-          .lte("log_date", weekEndISO),
+          .select("canvasser_id, demos_sits, sales, log_date, created_at")
+          .gte("created_at", startDate)
+          .lte("created_at", endDate),
       ]);
       if (vansR.error) throw vansR.error;
       if (profilesR.error) throw profilesR.error;
@@ -127,6 +146,12 @@ export function FleetManager() {
         const pts = (l.demos_sits ?? 0) * 1 + (l.sales ?? 0) * 2;
         pointsByUser.set(l.canvasser_id, (pointsByUser.get(l.canvasser_id) ?? 0) + pts);
       }
+      console.log("[FleetManager] fetched weekly points", {
+        selectedDateRange: { startDate, endDate },
+        dailyMetrics: metricsR.data ?? [],
+        dailyLogs: logsR.data ?? [],
+        pointsByUser: Object.fromEntries(pointsByUser),
+      });
       return {
         vans: vansR.data ?? [],
         profiles: profilesR.data ?? [],
