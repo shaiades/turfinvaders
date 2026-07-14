@@ -241,6 +241,23 @@ function LiveDispatchInner() {
   );
 }
 
+function MetricCell({
+  value,
+  color,
+  suffix = "",
+}: {
+  value: number;
+  color: "neon" | "warning" | "muted-foreground" | "victory" | "destructive" | "accent";
+  suffix?: string;
+}) {
+  const active = value > 0;
+  const colorClass = active ? `text-${color}` : "text-muted-foreground/40";
+  return (
+    <td className={`py-2.5 px-3 text-right font-display ${colorClass}`}>
+      {value}{suffix}
+    </td>
+  );
+}
 
 function WebhookUrlBanner() {
   const [copied, setCopied] = useState(false);
