@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { RankPill } from "@/components/RankPill";
-import { useOfficeFilter, OfficeFilterToggle } from "@/components/OfficeFilterContext";
+import { useOfficeFilter } from "@/components/OfficeFilterContext";
 import { cn } from "@/lib/utils";
 
 type LogRow = {
