@@ -288,14 +288,13 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
                 {rows.map((r, i) => {
                   const isFire = r.sub > 0;
                   const emoji = isFire ? "🔥" : "🍩";
-                  const emojiClass = isFire ? "" : "inline-block animate-[doughnut-bounce_0.9s_ease-in-out_infinite]";
                   return (
                     <tr key={r.c.id} className="border-b border-border/40 hover:bg-gray-800/50 transition-colors">
                       <td className="py-2.5 px-3 text-muted-foreground font-display text-xs">
                         {i + 1}
                       </td>
                       <td className="py-2.5 px-3 font-medium">
-                        <span className={`mr-2 ${emojiClass}`} aria-hidden>{emoji}</span>
+                        <span className="mr-2 inline-block" aria-hidden>{emoji}</span>
                         {r.c.display_name ?? "—"}
                         {r.c.role === "captain" && (
                           <span className="ml-2 text-[9px] font-display uppercase tracking-widest text-accent">
@@ -340,10 +339,7 @@ function SuspensionBanner({ rows }: { rows: Array<{ c: Profile }> }) {
             key={r.c.id}
             className="flex items-center gap-2 arcade-card px-3 py-1.5 border-destructive/40"
           >
-            <span
-              className="inline-block grayscale animate-[frozen-shake_0.35s_infinite]"
-              aria-hidden
-            >
+            <span className="frozen-doughnut" aria-hidden>
               🍩
             </span>
             <span className="text-sm font-medium">{r.c.display_name ?? "—"}</span>
