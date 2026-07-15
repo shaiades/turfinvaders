@@ -389,6 +389,11 @@ export function FleetManager() {
     vansByOffice.get(loc)!.push(v);
   }
 
+  // Total team stats — sum every point across the fleet for the selected week.
+  const totalFleetPoints = Array.from(pointsByUser.values()).reduce((a, b) => a + b, 0);
+  const activeAgentCount = profiles.filter((p) => (pointsByUser.get(p.id) ?? 0) > 0).length;
+
+
 
   return (
     <div className="space-y-6">
