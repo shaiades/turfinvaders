@@ -224,7 +224,7 @@ function ManualEntryBar() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="lg" className="w-full h-14 text-base font-display uppercase tracking-widest bg-victory text-background hover:bg-victory/90">
+        <Button size="lg" className="w-full h-12 md:h-14 py-3 md:py-4 text-sm md:text-base font-display uppercase tracking-widest bg-victory text-background hover:bg-victory/90">
           <Plus className="w-5 h-5 mr-2" /> Manual Data Entry
         </Button>
       </DialogTrigger>
