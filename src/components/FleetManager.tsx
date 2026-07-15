@@ -984,3 +984,21 @@ function RosterRow({
   );
 }
 
+function ScoreTile({ label, value, color }: { label: string; value: number; color: "neon" | "victory" | "accent" }) {
+  const textClass =
+    color === "neon" ? "text-neon" : color === "victory" ? "text-victory" : "text-accent";
+  const borderClass =
+    color === "neon" ? "border-neon/40" : color === "victory" ? "border-victory/40" : "border-accent/40";
+  return (
+    <div className={`arcade-card px-2 py-1.5 md:px-3 md:py-2 border ${borderClass} bg-background/60 text-center min-w-0`}>
+      <div className="text-[9px] md:text-[10px] font-display uppercase tracking-widest text-muted-foreground truncate">
+        {label}
+      </div>
+      <div className={`font-display text-lg md:text-2xl leading-tight ${textClass}`}>
+        {value.toLocaleString()}
+      </div>
+    </div>
+  );
+}
+
+
