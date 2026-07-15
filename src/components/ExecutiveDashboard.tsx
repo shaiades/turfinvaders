@@ -12,7 +12,7 @@ import { deleteProfile, deleteVan, upsertManualWeekly, getWeeklyPaycheck } from 
 import { HistoricalImporter } from "@/components/HistoricalImporter";
 import { PayrollLedger } from "@/components/PayrollLedger";
 import { toast } from "sonner";
-import { Plus, Trash2, Truck, User, Building2 } from "lucide-react";
+import { Plus, Trash2, Truck, User } from "lucide-react";
 import { OfficeFilterProvider, OfficeFilterToggle, useOfficeFilter } from "@/components/OfficeFilterContext";
 
 
@@ -38,18 +38,13 @@ export function ExecutiveDashboard() {
   return (
     <OfficeFilterProvider>
       <div className="space-y-6">
-        <div className="arcade-card p-4 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2 min-w-0">
-            <Building2 className="w-4 h-4 text-neon shrink-0" />
-            <div>
-              <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">View</div>
-              <div className="text-sm font-medium">Office Location Filter</div>
-            </div>
-          </div>
-          <OfficeFilterToggle />
+        <div className="flex items-center justify-center">
+          <OfficeFilterToggle compact className="w-full max-w-md" />
         </div>
         <ManualEntryBar />
-        <HistoricalImporter />
+        <div className="hidden md:block">
+          <HistoricalImporter />
+        </div>
         <WeeklyResults />
         <PayrollLedger />
         <LiveDailyAction />
@@ -229,7 +224,7 @@ function ManualEntryBar() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="lg" className="w-full h-14 text-base font-display uppercase tracking-widest bg-victory text-background hover:bg-victory/90">
+        <Button size="lg" className="w-full h-12 md:h-14 py-3 md:py-4 text-sm md:text-base font-display uppercase tracking-widest bg-victory text-background hover:bg-victory/90">
           <Plus className="w-5 h-5 mr-2" /> Manual Data Entry
         </Button>
       </DialogTrigger>

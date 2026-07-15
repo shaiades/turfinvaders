@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { RankPill } from "@/components/RankPill";
-import { useOfficeFilter, OfficeFilterToggle } from "@/components/OfficeFilterContext";
+import { useOfficeFilter } from "@/components/OfficeFilterContext";
 import { cn } from "@/lib/utils";
 
 type LogRow = {
@@ -284,14 +284,11 @@ export function PayrollLedger() {
           <div className="text-xs text-muted-foreground mt-1">
             Assumed hours: {ASSUMED_HOURS}/wk · Hourly tier by points · Commission by Sale Price · Sit & Monster bonuses included
           </div>
-          <div className="mt-3">
-            <OfficeFilterToggle />
-            {office !== "All" && (
-              <span className="ml-3 text-[10px] font-display uppercase tracking-widest text-neon">
-                Filtered · {office}
-              </span>
-            )}
-          </div>
+          {office !== "All" && (
+            <div className="mt-3 text-[10px] font-display uppercase tracking-widest text-neon">
+              Filtered · {office}
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <Button variant="outline" size="sm" onClick={() => shiftWeek(-1)} className="font-display text-[10px] uppercase tracking-widest">
