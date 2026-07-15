@@ -471,32 +471,21 @@ export function FleetManager() {
         </p>
       </ArcadePanel>
 
-      {/* Total Team Stats — combined weekly points for the entire fleet */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="arcade-card p-4">
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-            Total Fleet Points
-          </div>
-          <div className="font-display text-3xl mt-1 text-neon">{totalFleetPoints}</div>
-          <div className="text-[10px] text-muted-foreground mt-1">
-            {isCurrentWeek ? "Live · this week" : formatRange(weekStart, weekEnd)}
-          </div>
+      {/* Tier 1 — Global Fleet Scoreboard (sticky on scroll) */}
+      <div className="sticky top-0 z-20 -mx-2 md:mx-0 px-2 md:px-0 py-2 bg-background/85 backdrop-blur border-b border-neon/20">
+        <div className="grid grid-cols-3 gap-2 md:gap-3">
+          <ScoreTile label="Submits" value={totalSubmits} color="neon" />
+          <ScoreTile label="Confirmed" value={totalConfirmed} color="victory" />
+          <ScoreTile label="Fleet Points" value={totalFleetPoints} color="accent" />
         </div>
-        <div className="arcade-card p-4">
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-            Active Agents
-          </div>
-          <div className="font-display text-3xl mt-1 text-accent">{activeAgentCount}</div>
-          <div className="text-[10px] text-muted-foreground mt-1">Scored 1+ point</div>
-        </div>
-        <div className="arcade-card p-4">
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-            Vans Deployed
-          </div>
-          <div className="font-display text-3xl mt-1 text-victory">{vans.length}</div>
-          <div className="text-[10px] text-muted-foreground mt-1">Across offices</div>
+        <div className="mt-1.5 text-[9px] text-muted-foreground text-center uppercase tracking-widest font-display">
+          {isCurrentWeek ? "Live · this week" : formatRange(weekStart, weekEnd)}
+          <span className="mx-1.5 opacity-40">·</span>
+          {activeAgentCount} active · {vans.length} vans
         </div>
       </div>
+
+
 
 
 
