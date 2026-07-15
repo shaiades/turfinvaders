@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel, TeamBadge } from "@/components/arcade";
@@ -251,6 +252,21 @@ export function FleetManager() {
     },
   });
 
+  // Live updates — refresh weekly points as Monday webhooks arrive.
+  useEffect(() => {
+    const ch = supabase
+      .channel("fleet-live-metrics")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "daily_metrics" },
+        () => qc.invalidateQueries({ queryKey: ["fleet_manager"] }),
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [qc]);
+
+
+
 
   const createVan = useMutation({
     mutationFn: async () => {
@@ -388,6 +404,11 @@ export function FleetManager() {
     vansByOffice.get(loc)!.push(v);
   }
 
+  // Total team stats — sum every point across the fleet for the selected week.
+  const totalFleetPoints = Array.from(pointsByUser.values()).reduce((a, b) => a + b, 0);
+  const activeAgentCount = profiles.filter((p) => (pointsByUser.get(p.id) ?? 0) > 0).length;
+
+
 
   return (
     <div className="space-y-6">
@@ -438,6 +459,35 @@ export function FleetManager() {
           Records found: {debugRecordCount}
         </p>
       </ArcadePanel>
+
+      {/* Total Team Stats — combined weekly points for the entire fleet */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="arcade-card p-4">
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            Total Fleet Points
+          </div>
+          <div className="font-display text-3xl mt-1 text-neon">{totalFleetPoints}</div>
+          <div className="text-[10px] text-muted-foreground mt-1">
+            {isCurrentWeek ? "Live · this week" : formatRange(weekStart, weekEnd)}
+          </div>
+        </div>
+        <div className="arcade-card p-4">
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            Active Agents
+          </div>
+          <div className="font-display text-3xl mt-1 text-accent">{activeAgentCount}</div>
+          <div className="text-[10px] text-muted-foreground mt-1">Scored 1+ point</div>
+        </div>
+        <div className="arcade-card p-4">
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            Vans Deployed
+          </div>
+          <div className="font-display text-3xl mt-1 text-victory">{vans.length}</div>
+          <div className="text-[10px] text-muted-foreground mt-1">Across offices</div>
+        </div>
+      </div>
+
+
 
       {/* Read-only banner for canvassers */}
       {!canManage && (
@@ -497,7 +547,21 @@ export function FleetManager() {
               ) : (
                 <div className="grid gap-4 md:grid-cols-2">
                   {list.map((v) => {
-                    const roster = profiles.filter((p) => p.team_id === v.id);
+                    // Dedupe roster by normalized display name — if a person exists as
+                    // both Captain and Canvasser under the same van, show one row.
+                    const rosterRaw = profiles.filter((p) => p.team_id === v.id);
+                    const rosterMap = new Map<string, typeof rosterRaw[number]>();
+                    for (const p of rosterRaw) {
+                      const key = (p.display_name ?? "").trim().toLowerCase().replace(/\s+/g, " ") || `id:${p.id}`;
+                      const prev = rosterMap.get(key);
+                      if (!prev) rosterMap.set(key, p);
+                      else if ((rolesByUser.get(p.id) ?? []).includes("captain") && !(rolesByUser.get(prev.id) ?? []).includes("captain")) {
+                        // Prefer the captain profile as the representative row.
+                        rosterMap.set(key, p);
+                      }
+                    }
+                    const roster = Array.from(rosterMap.values());
+
                     return (
                       <div key={v.id} className="van-card p-4 space-y-3">
 
@@ -612,12 +676,21 @@ export function FleetManager() {
                             {roster.map((r) => {
                               const targetIsOwner = (rolesByUser.get(r.id) ?? []).includes("owner");
                               const canModify = canManage && (isOwnerRole || !targetIsOwner);
+                              // Sum points across every profile with the same display name in this van.
+                              const nameKey = (r.display_name ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+                              const aggregatedPoints = rosterRaw
+                                .filter((p) => ((p.display_name ?? "").trim().toLowerCase().replace(/\s+/g, " ")) === nameKey)
+                                .reduce((sum, p) => sum + (pointsByUser.get(p.id) ?? 0), 0);
+                              const rIsCaptain =
+                                v.captain_id === r.id ||
+                                (rolesByUser.get(r.id) ?? []).includes("captain");
                               return (
                                 <RosterRow
                                   key={r.id}
                                   id={r.id}
                                   name={r.display_name ?? "Unknown"}
-                                  points={pointsByUser.get(r.id) ?? 0}
+                                  points={aggregatedPoints}
+                                  isCaptain={rIsCaptain}
                                   canManage={canModify}
                                   onUnassign={canModify ? () => assignCanvasser.mutate({ canvasserId: r.id, vanId: null }) : undefined}
                                   onDelete={isOwnerRole ? () => {
@@ -628,6 +701,7 @@ export function FleetManager() {
                                 />
                               );
                             })}
+
                             {roster.length === 0 && (
                               <div className="text-xs text-muted-foreground italic px-2 py-3 border border-dashed border-border rounded">
                                 Drop agents here
@@ -822,7 +896,7 @@ export function FleetManager() {
 type VanOption = { id: string; name: string; color: string };
 
 function RosterRow({
-  id, name, points, vans, currentVanId, onAssign, onUnassign, onDelete, canManage = true,
+  id, name, points, vans, currentVanId, onAssign, onUnassign, onDelete, canManage = true, isCaptain = false,
 }: {
   id: string;
   name: string;
@@ -833,6 +907,7 @@ function RosterRow({
   onUnassign?: () => void;
   onDelete?: () => void;
   canManage?: boolean;
+  isCaptain?: boolean;
 }) {
   const isGhost = points === 0;
   return (
@@ -840,10 +915,18 @@ function RosterRow({
       data-profile-id={id}
       className="flex items-center gap-2 px-2 py-1.5 rounded border border-border bg-surface hover:border-neon/60"
     >
-      <span className="text-sm truncate flex-1">{name}</span>
+      <span className="text-sm truncate flex-1 flex items-center gap-2 min-w-0">
+        <span className="truncate">{name}</span>
+        {isCaptain && (
+          <span className="shrink-0 text-[9px] font-display uppercase tracking-widest px-1.5 py-0.5 rounded border border-accent/60 text-accent bg-accent/10">
+            Captain
+          </span>
+        )}
+      </span>
       <span className={`text-[10px] font-display ${isGhost ? "text-muted-foreground px-1.5" : "points-badge-glow"}`}>
         {points}p
       </span>
+
       {vans && onAssign && (
         <Select
           value={currentVanId ?? "none"}

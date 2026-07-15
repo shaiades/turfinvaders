@@ -68,9 +68,16 @@ export function LiveDispatch({ readOnly = false }: { readOnly?: boolean }) {
   );
 }
 
+type Preset = "today" | "yesterday" | "last7";
+
+function normalizeName(s: string | null | undefined): string {
+  return (s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
 function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
   const qc = useQueryClient();
   const [{ today, yday, locked }, setDates] = useState(reportDates);
+  const [preset, setPreset] = useState<Preset>("today");
   const { matches } = useOfficeFilter();
   const confettiFired = useRef(false);
 
@@ -90,6 +97,12 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
     const id = window.setInterval(tick, 30_000);
     return () => window.clearInterval(id);
   }, []);
+
+  const range = useMemo(() => {
+    if (preset === "yesterday") return { start: yday, end: yday, label: "Yesterday" };
+    if (preset === "last7") return { start: addDaysISO(today, -6), end: today, label: "Last 7 Days" };
+    return { start: today, end: today, label: "Today" };
+  }, [preset, today, yday]);
 
   const { data: canvassers = [] } = useQuery({
     queryKey: ["dispatch-canvassers"],
@@ -131,14 +144,15 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
 
 
   const { data: metrics = [] } = useQuery({
-    queryKey: ["daily-metrics", today],
+    queryKey: ["daily-metrics", range.start, range.end],
     queryFn: async () => {
       const { data } = await supabase
         .from("daily_metrics")
         .select(
           "id, canvasser_id, metric_date, leads_submitted, leads_confirmed, no_answers, killed, pending, office_location",
         )
-        .eq("metric_date", today);
+        .gte("metric_date", range.start)
+        .lte("metric_date", range.end);
       return (data ?? []) as Metric[];
     },
   });
@@ -162,18 +176,27 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
         "postgres_changes",
         { event: "*", schema: "public", table: "daily_metrics" },
         () => {
-          qc.invalidateQueries({ queryKey: ["daily-metrics", today] });
-          qc.invalidateQueries({ queryKey: ["daily-metrics", yday] });
+          qc.invalidateQueries({ queryKey: ["daily-metrics"] });
         },
       )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [qc, today, yday]);
+  }, [qc]);
 
-  const metricMap = useMemo(
-    () => Object.fromEntries(metrics.map((m) => [m.canvasser_id, m])),
-    [metrics],
-  );
+  // Sum all metric rows per canvasser_id across the selected range.
+  const metricByCanvasser = useMemo(() => {
+    const acc = new Map<string, { conf: number; na: number; kil: number; pen: number }>();
+    for (const m of metrics) {
+      const prev = acc.get(m.canvasser_id) ?? { conf: 0, na: 0, kil: 0, pen: 0 };
+      prev.conf += m.leads_confirmed ?? 0;
+      prev.na += m.no_answers ?? 0;
+      prev.kil += m.killed ?? 0;
+      prev.pen += m.pending ?? 0;
+      acc.set(m.canvasser_id, prev);
+    }
+    return acc;
+  }, [metrics]);
+
   const ydayMap = useMemo(
     () => Object.fromEntries(ydayMetrics.map((m) => [m.canvasser_id, m])),
     [ydayMetrics],
@@ -184,24 +207,55 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
     [canvassers, matches],
   );
 
-  // Rows enriched + sorted (desc by Submitted, then Confirmed). Zeros sink.
+  // De-duplicate by normalized display_name. If any duplicate is a captain,
+  // the merged row inherits the captain role. Metrics from every duplicate
+  // canvasser_id aggregate into a single row.
   const rows = useMemo(() => {
-    const enriched = visible.map((c) => {
-      const m = metricMap[c.id];
-      const conf = m?.leads_confirmed ?? 0;
-      const na = m?.no_answers ?? 0;
-      const kil = m?.killed ?? 0;
-      const pen = m?.pending ?? 0;
+    type Group = {
+      key: string;
+      ids: string[];
+      display_name: string | null;
+      office_location: string | null;
+      team_office: string | null;
+      role: "canvasser" | "captain";
+    };
+    const groups = new Map<string, Group>();
+    for (const c of visible) {
+      const key = normalizeName(c.display_name) || `id:${c.id}`;
+      const g = groups.get(key);
+      if (!g) {
+        groups.set(key, {
+          key,
+          ids: [c.id],
+          display_name: c.display_name,
+          office_location: c.office_location,
+          team_office: c.team_office,
+          role: c.role,
+        });
+      } else {
+        g.ids.push(c.id);
+        if (c.role === "captain") g.role = "captain";
+        if (!g.office_location && c.office_location) g.office_location = c.office_location;
+        if (!g.team_office && c.team_office) g.team_office = c.team_office;
+      }
+    }
+    const enriched = Array.from(groups.values()).map((g) => {
+      let conf = 0, na = 0, kil = 0, pen = 0;
+      for (const id of g.ids) {
+        const m = metricByCanvasser.get(id);
+        if (!m) continue;
+        conf += m.conf; na += m.na; kil += m.kil; pen += m.pen;
+      }
       const sub = conf + kil + pen + na;
       const conv = sub > 0 ? Math.round((conf / sub) * 100) : 0;
-      return { c, conf, na, kil, pen, sub, conv };
+      return { g, conf, na, kil, pen, sub, conv };
     });
     return enriched.sort((a, b) => {
       if (b.sub !== a.sub) return b.sub - a.sub;
       if (b.conf !== a.conf) return b.conf - a.conf;
-      return (a.c.display_name ?? "").localeCompare(b.c.display_name ?? "");
+      return (a.g.display_name ?? "").localeCompare(b.g.display_name ?? "");
     });
-  }, [visible, metricMap]);
+  }, [visible, metricByCanvasser]);
 
   const totals = useMemo(() => {
     let conf = 0, na = 0, kil = 0, pen = 0;
@@ -211,15 +265,21 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
     return { sub, conf, na, kil, pen, conv };
   }, [rows]);
 
-  // Suspension warning — 0 today AND 0 yesterday.
+  // Suspension warning — 0 today AND 0 yesterday. Only meaningful for "today" preset.
   const suspensionRows = useMemo(() => {
+    if (preset !== "today") return [];
     return rows.filter((r) => {
       if (r.sub !== 0) return false;
-      const y = ydayMap[r.c.id];
-      const ySub = (y?.leads_confirmed ?? 0) + (y?.no_answers ?? 0) + (y?.killed ?? 0) + (y?.pending ?? 0);
+      // yesterday sum across all IDs in the group.
+      let ySub = 0;
+      for (const id of r.g.ids) {
+        const y = ydayMap[id];
+        if (!y) continue;
+        ySub += (y.leads_confirmed ?? 0) + (y.no_answers ?? 0) + (y.killed ?? 0) + (y.pending ?? 0);
+      }
       return ySub === 0;
     });
-  }, [rows, ydayMap]);
+  }, [rows, ydayMap, preset]);
 
   return (
     <div className="space-y-4">
@@ -228,8 +288,8 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
           <Radio className="w-4 h-4 text-victory animate-pulse" />
           <div>
             <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground flex items-center gap-2">
-              Live Dispatch · {today}
-              {locked && (
+              Live Dispatch · {range.label}
+              {locked && preset === "today" && (
                 <span className="inline-flex items-center gap-1 text-warning">
                   <Lock className="w-3 h-3" /> 7PM LOCK
                 </span>
@@ -246,6 +306,34 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
             <OfficeFilterToggle />
           </div>
         )}
+      </div>
+
+      {/* Fast-switch date presets */}
+      <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide">
+        {([
+          { id: "today", label: "Today" },
+          { id: "yesterday", label: "Yesterday" },
+          { id: "last7", label: "Last 7 Days" },
+        ] as Array<{ id: Preset; label: string }>).map((p) => {
+          const active = preset === p.id;
+          return (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => setPreset(p.id)}
+              className={`px-3 py-1.5 rounded-full text-[10px] font-display uppercase tracking-widest whitespace-nowrap border transition-colors ${
+                active
+                  ? "bg-neon text-background border-neon"
+                  : "border-border text-muted-foreground hover:text-foreground hover:border-neon/40"
+              }`}
+            >
+              {p.label}
+            </button>
+          );
+        })}
+        <span className="ml-2 text-[10px] text-muted-foreground font-mono whitespace-nowrap">
+          {range.start === range.end ? range.start : `${range.start} → ${range.end}`}
+        </span>
       </div>
 
       {!readOnly && <WebhookUrlBanner />}
@@ -289,21 +377,21 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
                   const isFire = r.sub > 0;
                   const emoji = isFire ? "🔥" : "🍩";
                   return (
-                    <tr key={r.c.id} className="border-b border-border/40 hover:bg-gray-800/50 transition-colors">
+                    <tr key={r.g.key} className="border-b border-border/40 hover:bg-gray-800/50 transition-colors">
                       <td className="py-2.5 px-3 text-muted-foreground font-display text-xs">
                         {i + 1}
                       </td>
                       <td className="py-2.5 px-3 font-medium">
                         <span className="mr-2 inline-block" aria-hidden>{emoji}</span>
-                        {r.c.display_name ?? "—"}
-                        {r.c.role === "captain" && (
+                        {r.g.display_name ?? "—"}
+                        {r.g.role === "captain" && (
                           <span className="ml-2 text-[9px] font-display uppercase tracking-widest text-accent">
                             Captain
                           </span>
                         )}
                       </td>
                       <td className="py-2.5 px-3 text-xs text-muted-foreground">
-                        {r.c.office_location ?? r.c.team_office ?? "—"}
+                        {r.g.office_location ?? r.g.team_office ?? "—"}
                       </td>
                       <MetricCell value={r.sub} color="neon" />
                       <MetricCell value={r.pen} color="warning" />
@@ -323,7 +411,7 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
   );
 }
 
-function SuspensionBanner({ rows }: { rows: Array<{ c: Profile }> }) {
+function SuspensionBanner({ rows }: { rows: Array<{ g: { key: string; display_name: string | null } }> }) {
   if (rows.length === 0) return null;
   return (
     <div className="arcade-card p-4 border-destructive/60 bg-destructive/10">
@@ -336,19 +424,20 @@ function SuspensionBanner({ rows }: { rows: Array<{ c: Profile }> }) {
       <div className="flex flex-wrap gap-2">
         {rows.map((r) => (
           <div
-            key={r.c.id}
+            key={r.g.key}
             className="flex items-center gap-2 arcade-card px-3 py-1.5 border-destructive/40"
           >
             <span className="frozen-doughnut" aria-hidden>
               🍩
             </span>
-            <span className="text-sm font-medium">{r.c.display_name ?? "—"}</span>
+            <span className="text-sm font-medium">{r.g.display_name ?? "—"}</span>
           </div>
         ))}
       </div>
     </div>
   );
 }
+
 
 function fireEndOfDayConfetti() {
   const duration = 3000;
