@@ -547,7 +547,21 @@ export function FleetManager() {
               ) : (
                 <div className="grid gap-4 md:grid-cols-2">
                   {list.map((v) => {
-                    const roster = profiles.filter((p) => p.team_id === v.id);
+                    // Dedupe roster by normalized display name — if a person exists as
+                    // both Captain and Canvasser under the same van, show one row.
+                    const rosterRaw = profiles.filter((p) => p.team_id === v.id);
+                    const rosterMap = new Map<string, typeof rosterRaw[number]>();
+                    for (const p of rosterRaw) {
+                      const key = (p.display_name ?? "").trim().toLowerCase().replace(/\s+/g, " ") || `id:${p.id}`;
+                      const prev = rosterMap.get(key);
+                      if (!prev) rosterMap.set(key, p);
+                      else if ((rolesByUser.get(p.id) ?? []).includes("captain") && !(rolesByUser.get(prev.id) ?? []).includes("captain")) {
+                        // Prefer the captain profile as the representative row.
+                        rosterMap.set(key, p);
+                      }
+                    }
+                    const roster = Array.from(rosterMap.values());
+
                     return (
                       <div key={v.id} className="van-card p-4 space-y-3">
 
