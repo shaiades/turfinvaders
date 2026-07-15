@@ -339,10 +339,7 @@ function SuspensionBanner({ rows }: { rows: Array<{ c: Profile }> }) {
             key={r.c.id}
             className="flex items-center gap-2 arcade-card px-3 py-1.5 border-destructive/40"
           >
-            <span
-              className="inline-block grayscale animate-[frozen-shake_0.35s_infinite]"
-              aria-hidden
-            >
+            <span className="frozen-doughnut" aria-hidden>
               🍩
             </span>
             <span className="text-sm font-medium">{r.c.display_name ?? "—"}</span>
