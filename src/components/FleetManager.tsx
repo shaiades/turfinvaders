@@ -150,14 +150,15 @@ export function FleetManager() {
         // Monday.com webhooks save schedule outcomes into daily_metrics.
         supabase
           .from("daily_metrics")
-          .select("id, canvasser_id, pitch_missed, sales, metric_date, created_at")
+          .select("id, canvasser_id, pitch_missed, sales, leads_submitted, leads_confirmed, no_answers, killed, pending, metric_date, created_at")
           .gte("created_at", startDate)
           .lte("created_at", endDate),
         supabase
           .from("daily_metrics")
-          .select("id, canvasser_id, pitch_missed, sales, metric_date, created_at")
+          .select("id, canvasser_id, pitch_missed, sales, leads_submitted, leads_confirmed, no_answers, killed, pending, metric_date, created_at")
           .gte("metric_date", weekStartISO)
           .lte("metric_date", weekEndISO),
+
         supabase
           .from("daily_logs")
           .select("id, canvasser_id, demos_sits, sales, log_date, created_at")
