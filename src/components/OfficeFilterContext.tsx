@@ -36,7 +36,7 @@ export function useOfficeFilter(): Ctx {
   );
 }
 
-export function OfficeFilterToggle({ className = "" }: { className?: string }) {
+export function OfficeFilterToggle({ className = "", compact = false }: { className?: string; compact?: boolean }) {
   const { office, setOffice } = useOfficeFilter();
   return (
     <div className={`inline-flex rounded-md border border-neon/40 bg-surface p-0.5 ${className}`}>
@@ -44,11 +44,11 @@ export function OfficeFilterToggle({ className = "" }: { className?: string }) {
         <button
           key={o}
           onClick={() => setOffice(o)}
-          className={`px-3 py-1.5 text-[10px] font-display uppercase tracking-widest rounded-sm transition ${
+          className={`${compact ? "px-2 py-1" : "px-3 py-1.5"} text-[10px] font-display uppercase tracking-widest rounded-sm transition ${
             office === o ? "bg-neon text-background" : "text-muted-foreground hover:text-foreground"
           }`}
         >
-          {o === "All" ? "All Offices" : o}
+          {o === "All" ? (compact ? "All" : "All Offices") : o}
         </button>
       ))}
     </div>
