@@ -97,29 +97,31 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
           <h1 className="font-display text-lg md:text-2xl text-foreground truncate">COMMAND</h1>
           <VisibilityChip on={visibility} />
         </div>
-        <Dialog open={importOpen} onOpenChange={setImportOpen}>
-          <DialogTrigger asChild>
-            <Button
-              size="sm"
-              variant="outline"
-              className="font-display text-[10px] tracking-widest uppercase shrink-0"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5 mr-2" />
-              Import CSV
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-3xl">
-            <DialogHeader>
-              <DialogTitle className="font-display uppercase tracking-widest text-sm">
-                Import Monday.com CSV
-              </DialogTitle>
-              <DialogDescription>
-                Auto-detects BO/OL/RS/PM/Sale outcomes and pipes totals into the Paycheck Engine.
-              </DialogDescription>
-            </DialogHeader>
-            <HistoricalImporter onImported={() => setImportOpen(false)} />
-          </DialogContent>
-        </Dialog>
+        <div className="hidden md:block shrink-0">
+          <Dialog open={importOpen} onOpenChange={setImportOpen}>
+            <DialogTrigger asChild>
+              <Button
+                size="sm"
+                variant="outline"
+                className="font-display text-[10px] tracking-widest uppercase shrink-0"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 mr-2" />
+                Import CSV
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-3xl">
+              <DialogHeader>
+                <DialogTitle className="font-display uppercase tracking-widest text-sm">
+                  Import Monday.com CSV
+                </DialogTitle>
+                <DialogDescription>
+                  Auto-detects BO/OL/RS/PM/Sale outcomes and pipes totals into the Paycheck Engine.
+                </DialogDescription>
+              </DialogHeader>
+              <HistoricalImporter onImported={() => setImportOpen(false)} />
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
       <Tabs
