@@ -391,7 +391,7 @@ export function FleetManager() {
     return <div className="text-sm text-muted-foreground">Loading fleet…</div>;
   }
 
-  const { vans, profiles: allProfiles, rolesByUser, pointsByUser, debugRecordCount } = fleet.data;
+  const { vans, profiles: allProfiles, rolesByUser, pointsByUser, submitsByUser, confirmedByUser, debugRecordCount } = fleet.data;
   const profiles = allProfiles.filter((p) => p.is_active !== false);
   const archivedProfiles = allProfiles.filter((p) => p.is_active === false);
   const captains = profiles.filter((p) => (rolesByUser.get(p.id) ?? []).includes("captain"));
@@ -408,7 +408,16 @@ export function FleetManager() {
 
   // Total team stats — sum every point across the fleet for the selected week.
   const totalFleetPoints = Array.from(pointsByUser.values()).reduce((a, b) => a + b, 0);
+  const totalSubmits = Array.from(submitsByUser.values()).reduce((a, b) => a + b, 0);
+  const totalConfirmed = Array.from(confirmedByUser.values()).reduce((a, b) => a + b, 0);
   const activeAgentCount = profiles.filter((p) => (pointsByUser.get(p.id) ?? 0) > 0).length;
+
+  // Van-level aggregate helpers.
+  const vanTotalPoints = (vanId: string) =>
+    profiles
+      .filter((p) => p.team_id === vanId)
+      .reduce((sum, p) => sum + (pointsByUser.get(p.id) ?? 0), 0);
+
 
 
 
