@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { OfficeFilterProvider, OfficeFilterToggle, useOfficeFilter } from "@/components/OfficeFilterContext";
-import { Radio, Users, FileSearch, X, Link2, Copy, Check, KeyRound, Eye, EyeOff } from "lucide-react";
+import { Radio, Users, Link2, Copy, Check, KeyRound, Eye, EyeOff, AlertTriangle, Lock } from "lucide-react";
+import confetti from "canvas-confetti";
 
 
 type Profile = {
@@ -27,28 +28,68 @@ type Metric = {
   office_location: string;
 };
 
-function todayLA(): string {
-  const fmt = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Los_Angeles",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  return fmt.format(new Date());
+const PT_TZ = "America/Los_Angeles";
+const PT_PARTS = new Intl.DateTimeFormat("en-US", {
+  timeZone: PT_TZ,
+  year: "numeric", month: "2-digit", day: "2-digit",
+  hour: "2-digit", minute: "2-digit", hour12: false,
+});
+
+function ptNow() {
+  const parts = Object.fromEntries(
+    PT_PARTS.formatToParts(new Date()).map((p) => [p.type, p.value]),
+  );
+  return {
+    year: Number(parts.year), month: Number(parts.month), day: Number(parts.day),
+    hour: Number(parts.hour === "24" ? "0" : parts.hour), minute: Number(parts.minute),
+  };
+}
+function addDaysISO(iso: string, delta: number) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + delta);
+  return dt.toISOString().slice(0, 10);
+}
+/** Report date: before 7 PM PT → current PT date; at/after 7 PM PT → next PT date. */
+function reportDates() {
+  const { year, month, day, hour } = ptNow();
+  const currentPT = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  const locked = hour >= 19;
+  const today = locked ? addDaysISO(currentPT, 1) : currentPT;
+  const yday = addDaysISO(today, -1);
+  return { today, yday, locked };
 }
 
-export function LiveDispatch() {
+export function LiveDispatch({ readOnly = false }: { readOnly?: boolean }) {
   return (
     <OfficeFilterProvider>
-      <LiveDispatchInner />
+      <LiveDispatchInner readOnly={readOnly} />
     </OfficeFilterProvider>
   );
 }
 
-function LiveDispatchInner() {
+function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
   const qc = useQueryClient();
-  const today = todayLA();
+  const [{ today, yday, locked }, setDates] = useState(reportDates);
   const { matches } = useOfficeFilter();
+  const confettiFired = useRef(false);
+
+  // Re-evaluate report date every 30s; fire confetti once when we cross 7 PM PT.
+  useEffect(() => {
+    const tick = () => {
+      const next = reportDates();
+      setDates((prev) => {
+        if (!prev.locked && next.locked && !confettiFired.current) {
+          confettiFired.current = true;
+          fireEndOfDayConfetti();
+        }
+        if (prev.today === next.today && prev.locked === next.locked) return prev;
+        return next;
+      });
+    };
+    const id = window.setInterval(tick, 30_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   const { data: canvassers = [] } = useQuery({
     queryKey: ["dispatch-canvassers"],
@@ -59,7 +100,6 @@ function LiveDispatchInner() {
         .in("role", ["canvasser", "captain"]);
       const roleMap = new Map<string, "canvasser" | "captain">();
       (roles ?? []).forEach((r) => {
-        // Captain wins if a user somehow has both (canvasser is default).
         const prev = roleMap.get(r.user_id);
         if (prev === "captain") return;
         roleMap.set(r.user_id, r.role as "canvasser" | "captain");
@@ -84,9 +124,7 @@ function LiveDispatchInner() {
         team_office: p.teams?.office_location ?? null,
         role: roleMap.get(p.id) ?? "canvasser",
       }));
-      return rows.sort((a, b) =>
-        (a.display_name ?? "").localeCompare(b.display_name ?? ""),
-      );
+      return rows;
     },
   });
 
@@ -104,24 +142,40 @@ function LiveDispatchInner() {
     },
   });
 
-  // Realtime subscription — instant updates when Monday webhook upserts.
+  const { data: ydayMetrics = [] } = useQuery({
+    queryKey: ["daily-metrics", yday],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("daily_metrics")
+        .select("canvasser_id, leads_confirmed, no_answers, killed, pending")
+        .eq("metric_date", yday);
+      return (data ?? []) as Array<Pick<Metric, "canvasser_id" | "leads_confirmed" | "no_answers" | "killed" | "pending">>;
+    },
+  });
+
+  // Realtime — instant updates when Monday webhook upserts.
   useEffect(() => {
     const channel = supabase
       .channel("dispatch-daily-metrics")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "daily_metrics" },
-        () => qc.invalidateQueries({ queryKey: ["daily-metrics", today] }),
+        () => {
+          qc.invalidateQueries({ queryKey: ["daily-metrics", today] });
+          qc.invalidateQueries({ queryKey: ["daily-metrics", yday] });
+        },
       )
       .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [qc, today]);
+    return () => { supabase.removeChannel(channel); };
+  }, [qc, today, yday]);
 
   const metricMap = useMemo(
     () => Object.fromEntries(metrics.map((m) => [m.canvasser_id, m])),
     [metrics],
+  );
+  const ydayMap = useMemo(
+    () => Object.fromEntries(ydayMetrics.map((m) => [m.canvasser_id, m])),
+    [ydayMetrics],
   );
 
   const visible = useMemo(
@@ -129,21 +183,42 @@ function LiveDispatchInner() {
     [canvassers, matches],
   );
 
+  // Rows enriched + sorted (desc by Submitted, then Confirmed). Zeros sink.
+  const rows = useMemo(() => {
+    const enriched = visible.map((c) => {
+      const m = metricMap[c.id];
+      const conf = m?.leads_confirmed ?? 0;
+      const na = m?.no_answers ?? 0;
+      const kil = m?.killed ?? 0;
+      const pen = m?.pending ?? 0;
+      const sub = conf + kil + pen + na;
+      const conv = sub > 0 ? Math.round((conf / sub) * 100) : 0;
+      return { c, conf, na, kil, pen, sub, conv };
+    });
+    return enriched.sort((a, b) => {
+      if (b.sub !== a.sub) return b.sub - a.sub;
+      if (b.conf !== a.conf) return b.conf - a.conf;
+      return (a.c.display_name ?? "").localeCompare(b.c.display_name ?? "");
+    });
+  }, [visible, metricMap]);
 
   const totals = useMemo(() => {
     let conf = 0, na = 0, kil = 0, pen = 0;
-    visible.forEach((c) => {
-      const m = metricMap[c.id];
-      if (!m) return;
-      conf += m.leads_confirmed ?? 0;
-      na += m.no_answers ?? 0;
-      kil += m.killed ?? 0;
-      pen += m.pending ?? 0;
-    });
+    rows.forEach((r) => { conf += r.conf; na += r.na; kil += r.kil; pen += r.pen; });
     const sub = conf + kil + pen + na;
     const conv = sub > 0 ? Math.round((conf / sub) * 100) : 0;
     return { sub, conf, na, kil, pen, conv };
-  }, [visible, metricMap]);
+  }, [rows]);
+
+  // Suspension warning — 0 today AND 0 yesterday.
+  const suspensionRows = useMemo(() => {
+    return rows.filter((r) => {
+      if (r.sub !== 0) return false;
+      const y = ydayMap[r.c.id];
+      const ySub = (y?.leads_confirmed ?? 0) + (y?.no_answers ?? 0) + (y?.killed ?? 0) + (y?.pending ?? 0);
+      return ySub === 0;
+    });
+  }, [rows, ydayMap]);
 
   return (
     <div className="space-y-4">
@@ -151,26 +226,31 @@ function LiveDispatchInner() {
         <div className="flex items-center gap-2">
           <Radio className="w-4 h-4 text-victory animate-pulse" />
           <div>
-            <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground flex items-center gap-2">
               Live Dispatch · {today}
+              {locked && (
+                <span className="inline-flex items-center gap-1 text-warning">
+                  <Lock className="w-3 h-3" /> 7PM LOCK
+                </span>
+              )}
             </div>
             <div className="font-display text-sm text-neon mt-0.5">
-              READ-ONLY · MONDAY.COM FEED
+              {readOnly ? "LEADERBOARD · LIVE" : "READ-ONLY · MONDAY.COM FEED"}
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <WebhookLogsButton />
-          <OfficeFilterToggle />
-        </div>
+        {!readOnly && (
+          <div className="flex items-center gap-2">
+            <WebhookLogsButton />
+            <OfficeFilterToggle />
+          </div>
+        )}
       </div>
 
-
-      <WebhookUrlBanner />
-      <MondayTokenCard />
+      {!readOnly && <WebhookUrlBanner />}
+      {!readOnly && <MondayTokenCard />}
 
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-
         <TotalTile label="Submitted" value={totals.sub} accent="neon" />
         <TotalTile label="Pending" value={totals.pen} accent="warning" />
         <TotalTile label="N/A" value={totals.na} accent="muted" />
@@ -179,8 +259,10 @@ function LiveDispatchInner() {
         <TotalTile label="Conversion" value={`${totals.conv}%`} accent="accent" />
       </div>
 
+      <SuspensionBanner rows={suspensionRows} />
+
       <div className="arcade-card overflow-hidden">
-        {visible.length === 0 ? (
+        {rows.length === 0 ? (
           <div className="p-8 text-center text-sm text-muted-foreground flex flex-col items-center gap-2">
             <Users className="w-5 h-5" />
             No canvassers in this office yet.
@@ -190,6 +272,7 @@ function LiveDispatchInner() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border bg-surface">
+                  <th className="text-left py-2.5 px-3 w-10">#</th>
                   <th className="text-left py-2.5 px-3">Canvasser</th>
                   <th className="text-left py-2.5 px-3">Office</th>
                   <th className="text-right py-2.5 px-3">Submitted</th>
@@ -201,34 +284,33 @@ function LiveDispatchInner() {
                 </tr>
               </thead>
               <tbody>
-                {visible.map((c) => {
-                  const m = metricMap[c.id];
-                  const conf = m?.leads_confirmed ?? 0;
-                  const na = m?.no_answers ?? 0;
-                  const kil = m?.killed ?? 0;
-                  const pen = m?.pending ?? 0;
-                  const sub = conf + kil + pen + na;
-                  const conv = sub > 0 ? Math.round((conf / sub) * 100) : 0;
+                {rows.map((r, i) => {
+                  const isFire = r.sub > 0;
+                  const emoji = isFire ? "🔥" : "🍩";
+                  const emojiClass = isFire ? "" : "inline-block animate-[doughnut-bounce_0.9s_ease-in-out_infinite]";
                   return (
-                    <tr key={c.id} className="border-b border-border/40 hover:bg-gray-800/50 transition-colors">
+                    <tr key={r.c.id} className="border-b border-border/40 hover:bg-gray-800/50 transition-colors">
+                      <td className="py-2.5 px-3 text-muted-foreground font-display text-xs">
+                        {i + 1}
+                      </td>
                       <td className="py-2.5 px-3 font-medium">
-                        {c.display_name ?? "—"}
-                        {c.role === "captain" && (
+                        <span className={`mr-2 ${emojiClass}`} aria-hidden>{emoji}</span>
+                        {r.c.display_name ?? "—"}
+                        {r.c.role === "captain" && (
                           <span className="ml-2 text-[9px] font-display uppercase tracking-widest text-accent">
                             Captain
                           </span>
                         )}
                       </td>
                       <td className="py-2.5 px-3 text-xs text-muted-foreground">
-                        {c.office_location ?? c.team_office ?? "—"}
+                        {r.c.office_location ?? r.c.team_office ?? "—"}
                       </td>
-
-                      <MetricCell value={sub} color="neon" />
-                      <MetricCell value={pen} color="warning" />
-                      <MetricCell value={na} color="muted-foreground" />
-                      <MetricCell value={conf} color="victory" />
-                      <MetricCell value={kil} color="destructive" />
-                      <MetricCell value={conv} color="accent" suffix="%" />
+                      <MetricCell value={r.sub} color="neon" />
+                      <MetricCell value={r.pen} color="warning" />
+                      <MetricCell value={r.na} color="muted-foreground" />
+                      <MetricCell value={r.conf} color="victory" />
+                      <MetricCell value={r.kil} color="destructive" />
+                      <MetricCell value={r.conv} color="accent" suffix="%" />
                     </tr>
                   );
                 })}
@@ -240,6 +322,49 @@ function LiveDispatchInner() {
     </div>
   );
 }
+
+function SuspensionBanner({ rows }: { rows: Array<{ c: Profile }> }) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="arcade-card p-4 border-destructive/60 bg-destructive/10">
+      <div className="flex items-center gap-2 mb-3">
+        <AlertTriangle className="w-4 h-4 text-destructive animate-pulse" />
+        <div className="font-display text-sm text-destructive uppercase tracking-widest">
+          🚨 Suspension Warning · 2+ Zeros
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {rows.map((r) => (
+          <div
+            key={r.c.id}
+            className="flex items-center gap-2 arcade-card px-3 py-1.5 border-destructive/40"
+          >
+            <span
+              className="inline-block grayscale animate-[frozen-shake_0.35s_infinite]"
+              aria-hidden
+            >
+              🍩
+            </span>
+            <span className="text-sm font-medium">{r.c.display_name ?? "—"}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function fireEndOfDayConfetti() {
+  const duration = 3000;
+  const end = Date.now() + duration;
+  const colors = ["#39FF14", "#00E5FF", "#FF7A00", "#FF3366"];
+  (function frame() {
+    confetti({ particleCount: 4, angle: 60, spread: 55, origin: { x: 0 }, colors });
+    confetti({ particleCount: 4, angle: 120, spread: 55, origin: { x: 1 }, colors });
+    if (Date.now() < end) requestAnimationFrame(frame);
+  })();
+}
+
+
 
 const metricColorClass = {
   neon: "text-neon",
