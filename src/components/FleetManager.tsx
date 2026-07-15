@@ -107,6 +107,19 @@ export function FleetManager() {
   const [addAgentOpen, setAddAgentOpen] = useState(false);
   const [newAgentName, setNewAgentName] = useState("");
   const [newAgentOffice, setNewAgentOffice] = useState<OfficeLocation>("San Diego");
+  const [archivedOpen, setArchivedOpen] = useState(false);
+
+  const reactivateAgent = useMutation({
+    mutationFn: async (userId: string) => {
+      const { error } = await supabase.rpc("reactivate_agent", { _user_id: userId });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Agent reactivated");
+      qc.invalidateQueries({ queryKey: ["fleet_manager"] });
+    },
+    onError: (e: Error) => toast.error(e.message ?? "Failed to reactivate"),
+  });
 
   // Week selector — default to current Monday-anchored week.
   const [weekStart, setWeekStart] = useState<Date>(() => startOfWeekMonday(new Date()));
