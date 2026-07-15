@@ -131,7 +131,7 @@ export function FleetManager() {
       const { startDate, endDate } = selectedDateRange;
       const [vansR, profilesR, rolesR, metricsByCreatedR, metricsByDateR, logsByCreatedR, logsByDateR, webhookOutcomeLogsR] = await Promise.all([
         supabase.from("teams").select("id, name, color, captain_id, office_location").order("name"),
-        supabase.from("profiles").select("id, display_name, team_id, office_location").order("display_name"),
+        supabase.from("profiles").select("id, display_name, team_id, office_location, is_active").order("display_name"),
         supabase.from("user_roles").select("user_id, role"),
         // Monday.com webhooks save schedule outcomes into daily_metrics.
         supabase
