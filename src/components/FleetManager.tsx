@@ -460,6 +460,35 @@ export function FleetManager() {
         </p>
       </ArcadePanel>
 
+      {/* Total Team Stats — combined weekly points for the entire fleet */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="arcade-card p-4">
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            Total Fleet Points
+          </div>
+          <div className="font-display text-3xl mt-1 text-neon">{totalFleetPoints}</div>
+          <div className="text-[10px] text-muted-foreground mt-1">
+            {isCurrentWeek ? "Live · this week" : formatRange(weekStart, weekEnd)}
+          </div>
+        </div>
+        <div className="arcade-card p-4">
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            Active Agents
+          </div>
+          <div className="font-display text-3xl mt-1 text-accent">{activeAgentCount}</div>
+          <div className="text-[10px] text-muted-foreground mt-1">Scored 1+ point</div>
+        </div>
+        <div className="arcade-card p-4">
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            Vans Deployed
+          </div>
+          <div className="font-display text-3xl mt-1 text-victory">{vans.length}</div>
+          <div className="text-[10px] text-muted-foreground mt-1">Across offices</div>
+        </div>
+      </div>
+
+
+
       {/* Read-only banner for canvassers */}
       {!canManage && (
         <div className="arcade-card p-3 flex items-center gap-2 text-xs text-muted-foreground border border-border">
