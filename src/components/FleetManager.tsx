@@ -360,7 +360,9 @@ export function FleetManager() {
     return <div className="text-sm text-muted-foreground">Loading fleet…</div>;
   }
 
-  const { vans, profiles, rolesByUser, pointsByUser, debugRecordCount } = fleet.data;
+  const { vans, profiles: allProfiles, rolesByUser, pointsByUser, debugRecordCount } = fleet.data;
+  const profiles = allProfiles.filter((p) => p.is_active !== false);
+  const archivedProfiles = allProfiles.filter((p) => p.is_active === false);
   const captains = profiles.filter((p) => (rolesByUser.get(p.id) ?? []).includes("captain"));
   const unassigned = profiles.filter((p) => !p.team_id && !(rolesByUser.get(p.id) ?? []).includes("owner"));
 
