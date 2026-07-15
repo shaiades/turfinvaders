@@ -203,9 +203,19 @@ export function FleetManager() {
       const logPointsByUser = new Map<string, number>();
       const webhookFallbackPointsByUser = new Map<string, number>();
       const pointsByUser = new Map<string, number>();
+      const submitsByUser = new Map<string, number>();
+      const confirmedByUser = new Map<string, number>();
       for (const m of metricRows) {
         addMappedPoints(metricPointsByUser, m.canvasser_id, "PM", m.pitch_missed ?? 0);
         addMappedPoints(metricPointsByUser, m.canvasser_id, "Sale", m.sales ?? 0);
+        if (!m.canvasser_id) continue;
+        const conf = m.leads_confirmed ?? 0;
+        const kil = (m as { killed?: number | null }).killed ?? 0;
+        const pen = (m as { pending?: number | null }).pending ?? 0;
+        const na = (m as { no_answers?: number | null }).no_answers ?? 0;
+        const sub = conf + kil + pen + na;
+        submitsByUser.set(m.canvasser_id, (submitsByUser.get(m.canvasser_id) ?? 0) + sub);
+        confirmedByUser.set(m.canvasser_id, (confirmedByUser.get(m.canvasser_id) ?? 0) + conf);
       }
       for (const l of logRows) {
         addMappedPoints(logPointsByUser, l.canvasser_id, "PM", l.demos_sits ?? 0);
@@ -231,25 +241,16 @@ export function FleetManager() {
         );
         pointsByUser.set(userId, webhookPoints + (logPointsByUser.get(userId) ?? 0));
       }
-      console.log("[FleetManager] fetched weekly points", {
-        selectedDateRange: { startDate, endDate, weekStartISO, weekEndISO },
-        targetTables: ["daily_metrics", "daily_logs", "webhook_logs"],
-        recordCount: metricRows.length + logRows.length + outcomeLogRows.length,
-        dailyMetrics: metricRows,
-        dailyLogs: logRows,
-        webhookOutcomeLogs: outcomeLogRows,
-        metricPointsByUser: Object.fromEntries(metricPointsByUser),
-        logPointsByUser: Object.fromEntries(logPointsByUser),
-        webhookFallbackPointsByUser: Object.fromEntries(webhookFallbackPointsByUser),
-        pointsByUser: Object.fromEntries(pointsByUser),
-      });
       return {
         vans: vansR.data ?? [],
         profiles: profilesR.data ?? [],
         rolesByUser,
         pointsByUser,
+        submitsByUser,
+        confirmedByUser,
         debugRecordCount: metricRows.length + logRows.length + outcomeLogRows.length,
       };
+
     },
   });
 
