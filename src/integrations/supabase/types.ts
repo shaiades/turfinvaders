@@ -440,6 +440,7 @@ export type Database = {
           current_rank: string | null
           display_name: string
           id: string
+          is_active: boolean
           is_placeholder: boolean
           level: number
           monthly_goal: number
@@ -461,6 +462,7 @@ export type Database = {
           current_rank?: string | null
           display_name: string
           id: string
+          is_active?: boolean
           is_placeholder?: boolean
           level?: number
           monthly_goal?: number
@@ -482,6 +484,7 @@ export type Database = {
           current_rank?: string | null
           display_name?: string
           id?: string
+          is_active?: boolean
           is_placeholder?: boolean
           level?: number
           monthly_goal?: number
@@ -761,6 +764,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      auto_archive_agents: { Args: never; Returns: number }
       auto_clock_out_expired: { Args: never; Returns: number }
       calc_monthly_paycheck: {
         Args: { _canvasser_id: string; _month_start: string }
@@ -809,6 +813,7 @@ export type Database = {
         Returns: boolean
       }
       my_team_id: { Args: { _user_id: string }; Returns: string }
+      reactivate_agent: { Args: { _user_id: string }; Returns: undefined }
       refresh_canvasser_rank: {
         Args: { _canvasser_id: string }
         Returns: string

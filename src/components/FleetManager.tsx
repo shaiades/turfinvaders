@@ -107,6 +107,19 @@ export function FleetManager() {
   const [addAgentOpen, setAddAgentOpen] = useState(false);
   const [newAgentName, setNewAgentName] = useState("");
   const [newAgentOffice, setNewAgentOffice] = useState<OfficeLocation>("San Diego");
+  const [archivedOpen, setArchivedOpen] = useState(false);
+
+  const reactivateAgent = useMutation({
+    mutationFn: async (userId: string) => {
+      const { error } = await supabase.rpc("reactivate_agent", { _user_id: userId });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Agent reactivated");
+      qc.invalidateQueries({ queryKey: ["fleet_manager"] });
+    },
+    onError: (e: Error) => toast.error(e.message ?? "Failed to reactivate"),
+  });
 
   // Week selector — default to current Monday-anchored week.
   const [weekStart, setWeekStart] = useState<Date>(() => startOfWeekMonday(new Date()));
@@ -131,7 +144,7 @@ export function FleetManager() {
       const { startDate, endDate } = selectedDateRange;
       const [vansR, profilesR, rolesR, metricsByCreatedR, metricsByDateR, logsByCreatedR, logsByDateR, webhookOutcomeLogsR] = await Promise.all([
         supabase.from("teams").select("id, name, color, captain_id, office_location").order("name"),
-        supabase.from("profiles").select("id, display_name, team_id, office_location").order("display_name"),
+        supabase.from("profiles").select("id, display_name, team_id, office_location, is_active").order("display_name"),
         supabase.from("user_roles").select("user_id, role"),
         // Monday.com webhooks save schedule outcomes into daily_metrics.
         supabase
@@ -360,7 +373,9 @@ export function FleetManager() {
     return <div className="text-sm text-muted-foreground">Loading fleet…</div>;
   }
 
-  const { vans, profiles, rolesByUser, pointsByUser, debugRecordCount } = fleet.data;
+  const { vans, profiles: allProfiles, rolesByUser, pointsByUser, debugRecordCount } = fleet.data;
+  const profiles = allProfiles.filter((p) => p.is_active !== false);
+  const archivedProfiles = allProfiles.filter((p) => p.is_active === false);
   const captains = profiles.filter((p) => (rolesByUser.get(p.id) ?? []).includes("captain"));
   const unassigned = profiles.filter((p) => !p.team_id && !(rolesByUser.get(p.id) ?? []).includes("owner"));
 
@@ -698,6 +713,62 @@ export function FleetManager() {
           </p>
         </div>
       </div>
+
+      {/* Archived Agents link — managers/owners only */}
+      {canManage && (
+        <div className="pt-2 text-center">
+          <button
+            onClick={() => setArchivedOpen(true)}
+            className="text-[11px] text-muted-foreground/70 hover:text-muted-foreground underline underline-offset-4"
+          >
+            View Archived Agents ({archivedProfiles.length})
+          </button>
+        </div>
+      )}
+
+      {/* Archived Agents modal */}
+      <Dialog open={archivedOpen} onOpenChange={setArchivedOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="font-display uppercase tracking-widest">Archived Agents</DialogTitle>
+            <DialogDescription>
+              Canvassers auto-archived after 14 days of inactivity. Historical data is preserved.
+              Reactivate to bring them back to Free Agents.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[420px] overflow-y-auto space-y-1.5 py-2">
+            {archivedProfiles.length === 0 ? (
+              <div className="text-xs text-muted-foreground italic px-2 py-6 text-center">
+                No archived agents.
+              </div>
+            ) : (
+              archivedProfiles.map((p) => (
+                <div
+                  key={p.id}
+                  className="flex items-center gap-2 px-2 py-1.5 rounded border border-border bg-surface"
+                >
+                  <span className="text-sm truncate flex-1">{p.display_name ?? "Unknown"}</span>
+                  <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                    {p.office_location ?? "—"}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={reactivateAgent.isPending}
+                    onClick={() => reactivateAgent.mutate(p.id)}
+                    className="h-7 text-[11px] font-display uppercase tracking-wider"
+                  >
+                    Reactivate
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setArchivedOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Add Agent modal */}
       <Dialog open={addAgentOpen} onOpenChange={setAddAgentOpen}>
