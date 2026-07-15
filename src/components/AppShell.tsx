@@ -63,14 +63,15 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-background">
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden flex flex-col bg-background">
       {user && (
         <div className="border-b border-[var(--neon-magenta)]/30 bg-background text-xs">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2 flex items-center gap-3 flex-wrap">
-            <FlaskConical className="w-3.5 h-3.5 text-[var(--neon-magenta)]" />
-            <span className="font-display uppercase tracking-widest text-[10px] text-[var(--neon-magenta)]">
-              Dev · View As
+          <div className="max-w-7xl mx-auto px-3 sm:px-6 py-1 sm:py-2 flex items-center gap-2 overflow-x-auto scrollbar-hide whitespace-nowrap">
+            <FlaskConical className="w-3.5 h-3.5 text-[var(--neon-magenta)] shrink-0" />
+            <span className="font-display uppercase tracking-widest text-[10px] text-[var(--neon-magenta)] shrink-0">
+              View As
             </span>
+
             <select
               value={role ?? ""}
               onChange={(e) => {
@@ -166,7 +167,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </div>
       </header>
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 md:py-8 pb-28 md:pb-8">{children}</main>
+      <main className="flex-1 max-w-7xl w-full min-w-0 mx-auto px-4 sm:px-6 py-4 md:py-8 pb-28 md:pb-8">{children}</main>
 
       {/* Mobile bottom tab bar */}
       {user && (

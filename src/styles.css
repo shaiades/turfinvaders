@@ -310,3 +310,9 @@
   animation: confetti-fall 2.4s ease-in forwards;
   pointer-events: none;
 }
+
+@utility scrollbar-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  &::-webkit-scrollbar { display: none; }
+}
