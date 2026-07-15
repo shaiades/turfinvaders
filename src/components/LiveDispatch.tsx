@@ -109,7 +109,8 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
       const { data: profs } = await supabase
         .from("profiles")
         .select("id, display_name, office_location, team_id, teams:team_id(office_location)")
-        .in("id", ids);
+        .in("id", ids)
+        .eq("is_active", true);
       const rows: Profile[] = ((profs ?? []) as Array<{
         id: string;
         display_name: string | null;
