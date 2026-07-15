@@ -150,14 +150,15 @@ export function FleetManager() {
         // Monday.com webhooks save schedule outcomes into daily_metrics.
         supabase
           .from("daily_metrics")
-          .select("id, canvasser_id, pitch_missed, sales, metric_date, created_at")
+          .select("id, canvasser_id, pitch_missed, sales, leads_submitted, leads_confirmed, no_answers, killed, pending, metric_date, created_at")
           .gte("created_at", startDate)
           .lte("created_at", endDate),
         supabase
           .from("daily_metrics")
-          .select("id, canvasser_id, pitch_missed, sales, metric_date, created_at")
+          .select("id, canvasser_id, pitch_missed, sales, leads_submitted, leads_confirmed, no_answers, killed, pending, metric_date, created_at")
           .gte("metric_date", weekStartISO)
           .lte("metric_date", weekEndISO),
+
         supabase
           .from("daily_logs")
           .select("id, canvasser_id, demos_sits, sales, log_date, created_at")
@@ -202,9 +203,19 @@ export function FleetManager() {
       const logPointsByUser = new Map<string, number>();
       const webhookFallbackPointsByUser = new Map<string, number>();
       const pointsByUser = new Map<string, number>();
+      const submitsByUser = new Map<string, number>();
+      const confirmedByUser = new Map<string, number>();
       for (const m of metricRows) {
         addMappedPoints(metricPointsByUser, m.canvasser_id, "PM", m.pitch_missed ?? 0);
         addMappedPoints(metricPointsByUser, m.canvasser_id, "Sale", m.sales ?? 0);
+        if (!m.canvasser_id) continue;
+        const conf = m.leads_confirmed ?? 0;
+        const kil = (m as { killed?: number | null }).killed ?? 0;
+        const pen = (m as { pending?: number | null }).pending ?? 0;
+        const na = (m as { no_answers?: number | null }).no_answers ?? 0;
+        const sub = conf + kil + pen + na;
+        submitsByUser.set(m.canvasser_id, (submitsByUser.get(m.canvasser_id) ?? 0) + sub);
+        confirmedByUser.set(m.canvasser_id, (confirmedByUser.get(m.canvasser_id) ?? 0) + conf);
       }
       for (const l of logRows) {
         addMappedPoints(logPointsByUser, l.canvasser_id, "PM", l.demos_sits ?? 0);
@@ -230,25 +241,16 @@ export function FleetManager() {
         );
         pointsByUser.set(userId, webhookPoints + (logPointsByUser.get(userId) ?? 0));
       }
-      console.log("[FleetManager] fetched weekly points", {
-        selectedDateRange: { startDate, endDate, weekStartISO, weekEndISO },
-        targetTables: ["daily_metrics", "daily_logs", "webhook_logs"],
-        recordCount: metricRows.length + logRows.length + outcomeLogRows.length,
-        dailyMetrics: metricRows,
-        dailyLogs: logRows,
-        webhookOutcomeLogs: outcomeLogRows,
-        metricPointsByUser: Object.fromEntries(metricPointsByUser),
-        logPointsByUser: Object.fromEntries(logPointsByUser),
-        webhookFallbackPointsByUser: Object.fromEntries(webhookFallbackPointsByUser),
-        pointsByUser: Object.fromEntries(pointsByUser),
-      });
       return {
         vans: vansR.data ?? [],
         profiles: profilesR.data ?? [],
         rolesByUser,
         pointsByUser,
+        submitsByUser,
+        confirmedByUser,
         debugRecordCount: metricRows.length + logRows.length + outcomeLogRows.length,
       };
+
     },
   });
 
@@ -389,7 +391,7 @@ export function FleetManager() {
     return <div className="text-sm text-muted-foreground">Loading fleet…</div>;
   }
 
-  const { vans, profiles: allProfiles, rolesByUser, pointsByUser, debugRecordCount } = fleet.data;
+  const { vans, profiles: allProfiles, rolesByUser, pointsByUser, submitsByUser, confirmedByUser, debugRecordCount } = fleet.data;
   const profiles = allProfiles.filter((p) => p.is_active !== false);
   const archivedProfiles = allProfiles.filter((p) => p.is_active === false);
   const captains = profiles.filter((p) => (rolesByUser.get(p.id) ?? []).includes("captain"));
@@ -406,7 +408,16 @@ export function FleetManager() {
 
   // Total team stats — sum every point across the fleet for the selected week.
   const totalFleetPoints = Array.from(pointsByUser.values()).reduce((a, b) => a + b, 0);
+  const totalSubmits = Array.from(submitsByUser.values()).reduce((a, b) => a + b, 0);
+  const totalConfirmed = Array.from(confirmedByUser.values()).reduce((a, b) => a + b, 0);
   const activeAgentCount = profiles.filter((p) => (pointsByUser.get(p.id) ?? 0) > 0).length;
+
+  // Van-level aggregate helpers.
+  const vanTotalPoints = (vanId: string) =>
+    profiles
+      .filter((p) => p.team_id === vanId)
+      .reduce((sum, p) => sum + (pointsByUser.get(p.id) ?? 0), 0);
+
 
 
 
@@ -460,32 +471,21 @@ export function FleetManager() {
         </p>
       </ArcadePanel>
 
-      {/* Total Team Stats — combined weekly points for the entire fleet */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="arcade-card p-4">
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-            Total Fleet Points
-          </div>
-          <div className="font-display text-3xl mt-1 text-neon">{totalFleetPoints}</div>
-          <div className="text-[10px] text-muted-foreground mt-1">
-            {isCurrentWeek ? "Live · this week" : formatRange(weekStart, weekEnd)}
-          </div>
+      {/* Tier 1 — Global Fleet Scoreboard (sticky on scroll) */}
+      <div className="sticky top-0 z-20 -mx-2 md:mx-0 px-2 md:px-0 py-2 bg-background/85 backdrop-blur border-b border-neon/20">
+        <div className="grid grid-cols-3 gap-2 md:gap-3">
+          <ScoreTile label="Submits" value={totalSubmits} color="neon" />
+          <ScoreTile label="Confirmed" value={totalConfirmed} color="victory" />
+          <ScoreTile label="Fleet Points" value={totalFleetPoints} color="accent" />
         </div>
-        <div className="arcade-card p-4">
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-            Active Agents
-          </div>
-          <div className="font-display text-3xl mt-1 text-accent">{activeAgentCount}</div>
-          <div className="text-[10px] text-muted-foreground mt-1">Scored 1+ point</div>
-        </div>
-        <div className="arcade-card p-4">
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-            Vans Deployed
-          </div>
-          <div className="font-display text-3xl mt-1 text-victory">{vans.length}</div>
-          <div className="text-[10px] text-muted-foreground mt-1">Across offices</div>
+        <div className="mt-1.5 text-[9px] text-muted-foreground text-center uppercase tracking-widest font-display">
+          {isCurrentWeek ? "Live · this week" : formatRange(weekStart, weekEnd)}
+          <span className="mx-1.5 opacity-40">·</span>
+          {activeAgentCount} active · {vans.length} vans
         </div>
       </div>
+
+
 
 
 
@@ -612,10 +612,22 @@ export function FleetManager() {
                           </div>
                         ) : (
                           <div className="flex items-center justify-between gap-2 flex-wrap">
-                            <div className="flex items-center gap-2 min-w-0">
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
                               <Truck className="w-4 h-4 shrink-0" style={{ color: v.color }} />
                               <TeamBadge name={v.name} color={v.color} />
+                              <span
+                                className="shrink-0 text-[10px] font-display uppercase tracking-widest px-1.5 py-0.5 rounded border border-neon/50 text-neon bg-neon/10"
+                                title="Total van points this week"
+                              >
+                                {vanTotalPoints(v.id)}p
+                              </span>
+                              {v.captain_id && (
+                                <span className="hidden sm:inline text-[10px] text-muted-foreground truncate min-w-0">
+                                  · {captains.find((c) => c.id === v.captain_id)?.display_name ?? ""}
+                                </span>
+                              )}
                             </div>
+
                             <div className="flex items-center gap-1">
                               <span className="text-[10px] font-display uppercase tracking-widest flex items-center gap-1 mr-1 text-muted-foreground">
                                 <Building2 className="w-3 h-3" /> {v.office_location ?? "San Diego"}
@@ -971,4 +983,22 @@ function RosterRow({
     </div>
   );
 }
+
+function ScoreTile({ label, value, color }: { label: string; value: number; color: "neon" | "victory" | "accent" }) {
+  const textClass =
+    color === "neon" ? "text-neon" : color === "victory" ? "text-victory" : "text-accent";
+  const borderClass =
+    color === "neon" ? "border-neon/40" : color === "victory" ? "border-victory/40" : "border-accent/40";
+  return (
+    <div className={`arcade-card px-2 py-1.5 md:px-3 md:py-2 border ${borderClass} bg-background/60 text-center min-w-0`}>
+      <div className="text-[9px] md:text-[10px] font-display uppercase tracking-widest text-muted-foreground truncate">
+        {label}
+      </div>
+      <div className={`font-display text-lg md:text-2xl leading-tight ${textClass}`}>
+        {value.toLocaleString()}
+      </div>
+    </div>
+  );
+}
+
 
