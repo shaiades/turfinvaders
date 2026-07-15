@@ -37,7 +37,7 @@ function toISODate(d: Date): string {
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 }
-function toUtcDayBoundaryISO(d: Date, endOfDay = false): string {
+function toStrictIsoDayBoundary(d: Date, endOfDay = false): string {
   return new Date(Date.UTC(
     d.getFullYear(),
     d.getMonth(),
@@ -59,6 +59,27 @@ function formatRange(start: Date, end: Date): string {
   if (sameMonth && sameYear) return `${sM} ${sD} – ${eD}, ${end.getFullYear()}`;
   if (sameYear) return `${sM} ${sD} – ${eM} ${eD}, ${end.getFullYear()}`;
   return `${sM} ${sD}, ${start.getFullYear()} – ${eM} ${eD}, ${end.getFullYear()}`;
+}
+
+function outcomePointValue(outcomeOrStatus: unknown): number {
+  const normalized = String(outcomeOrStatus ?? "").trim().toLowerCase();
+  if (normalized === "pm") return 1;
+  if (normalized === "sale" || normalized === "$$") return 2;
+  return 0;
+}
+
+function addMappedPoints(pointsByUser: Map<string, number>, canvasserId: string | null | undefined, outcomeOrStatus: unknown, count = 1) {
+  if (!canvasserId || count <= 0) return;
+  const pointValue = outcomePointValue(outcomeOrStatus);
+  if (pointValue <= 0) return;
+  pointsByUser.set(canvasserId, (pointsByUser.get(canvasserId) ?? 0) + pointValue * count);
+}
+
+function webhookStatusForPointMapping(raw: unknown): string {
+  const normalized = String(raw ?? "").trim().toLowerCase();
+  if (normalized === "pitch_missed") return "PM";
+  if (normalized === "sales") return "Sale";
+  return String(raw ?? "");
 }
 
 
@@ -94,8 +115,8 @@ export function FleetManager() {
   const weekEndISO = useMemo(() => toISODate(weekEnd), [weekEnd]);
   const selectedDateRange = useMemo(
     () => ({
-      startDate: toUtcDayBoundaryISO(weekStart),
-      endDate: toUtcDayBoundaryISO(weekEnd, true),
+      startDate: toStrictIsoDayBoundary(weekStart),
+      endDate: toStrictIsoDayBoundary(weekEnd, true),
     }),
     [weekStart, weekEnd],
   );
@@ -105,51 +126,106 @@ export function FleetManager() {
   );
 
   const fleet = useQuery({
-    queryKey: ["fleet_manager", selectedDateRange.startDate, selectedDateRange.endDate],
+    queryKey: ["fleet_manager", weekStartISO, weekEndISO, selectedDateRange.startDate, selectedDateRange.endDate],
     queryFn: async () => {
       const { startDate, endDate } = selectedDateRange;
-      const [vansR, profilesR, rolesR, metricsR, logsR] = await Promise.all([
+      const [vansR, profilesR, rolesR, metricsByCreatedR, metricsByDateR, logsByCreatedR, logsByDateR, webhookOutcomeLogsR] = await Promise.all([
         supabase.from("teams").select("id, name, color, captain_id, office_location").order("name"),
         supabase.from("profiles").select("id, display_name, team_id, office_location").order("display_name"),
         supabase.from("user_roles").select("user_id, role"),
+        // Monday.com webhooks save schedule outcomes into daily_metrics.
         supabase
           .from("daily_metrics")
-          .select("canvasser_id, pitch_missed, sales, metric_date, created_at")
+          .select("id, canvasser_id, pitch_missed, sales, metric_date, created_at")
+          .gte("created_at", startDate)
+          .lte("created_at", endDate),
+        supabase
+          .from("daily_metrics")
+          .select("id, canvasser_id, pitch_missed, sales, metric_date, created_at")
+          .gte("metric_date", weekStartISO)
+          .lte("metric_date", weekEndISO),
+        supabase
+          .from("daily_logs")
+          .select("id, canvasser_id, demos_sits, sales, log_date, created_at")
           .gte("created_at", startDate)
           .lte("created_at", endDate),
         supabase
           .from("daily_logs")
-          .select("canvasser_id, demos_sits, sales, log_date, created_at")
-          .gte("created_at", startDate)
-          .lte("created_at", endDate),
+          .select("id, canvasser_id, demos_sits, sales, log_date, created_at")
+          .gte("log_date", weekStartISO)
+          .lte("log_date", weekEndISO),
+        supabase
+          .from("webhook_logs")
+          .select("id, data, created_at")
+          .eq("step", "Schedule_Outcome_Processed")
+          .filter("data->>metric_date", "gte", weekStartISO)
+          .filter("data->>metric_date", "lte", weekEndISO),
       ]);
       if (vansR.error) throw vansR.error;
       if (profilesR.error) throw profilesR.error;
       if (rolesR.error) throw rolesR.error;
-      if (metricsR.error) throw metricsR.error;
-      if (logsR.error) throw logsR.error;
+      if (metricsByCreatedR.error) throw metricsByCreatedR.error;
+      if (metricsByDateR.error) throw metricsByDateR.error;
+      if (logsByCreatedR.error) throw logsByCreatedR.error;
+      if (logsByDateR.error) throw logsByDateR.error;
+      if (webhookOutcomeLogsR.error) console.warn("[FleetManager] webhook_logs fallback unavailable", webhookOutcomeLogsR.error);
       const rolesByUser = new Map<string, string[]>();
       for (const r of rolesR.data ?? []) {
         const arr = rolesByUser.get(r.user_id) ?? [];
         arr.push(r.role);
         rolesByUser.set(r.user_id, arr);
       }
+      const metricRows = Array.from(
+        new Map([...(metricsByCreatedR.data ?? []), ...(metricsByDateR.data ?? [])].map((row) => [row.id, row])).values(),
+      );
+      const logRows = Array.from(
+        new Map([...(logsByCreatedR.data ?? []), ...(logsByDateR.data ?? [])].map((row) => [row.id, row])).values(),
+      );
+      const outcomeLogRows = webhookOutcomeLogsR.error ? [] : webhookOutcomeLogsR.data ?? [];
       // Weekly points: PM/sit = 1 pt, Sale = 2 pts. BO/RS/basic leads = 0.
-      // Merge live daily_metrics (webhook) with historical daily_logs (CSV import).
+      // Merge live daily_metrics (Monday webhook target table) with historical daily_logs (CSV import).
+      const metricPointsByUser = new Map<string, number>();
+      const logPointsByUser = new Map<string, number>();
+      const webhookFallbackPointsByUser = new Map<string, number>();
       const pointsByUser = new Map<string, number>();
-      for (const m of metricsR.data ?? []) {
-        const pts = (m.pitch_missed ?? 0) * 1 + (m.sales ?? 0) * 2;
-        pointsByUser.set(m.canvasser_id, (pointsByUser.get(m.canvasser_id) ?? 0) + pts);
+      for (const m of metricRows) {
+        addMappedPoints(metricPointsByUser, m.canvasser_id, "PM", m.pitch_missed ?? 0);
+        addMappedPoints(metricPointsByUser, m.canvasser_id, "Sale", m.sales ?? 0);
       }
-      for (const l of logsR.data ?? []) {
-        if (!l.canvasser_id) continue;
-        const pts = (l.demos_sits ?? 0) * 1 + (l.sales ?? 0) * 2;
-        pointsByUser.set(l.canvasser_id, (pointsByUser.get(l.canvasser_id) ?? 0) + pts);
+      for (const l of logRows) {
+        addMappedPoints(logPointsByUser, l.canvasser_id, "PM", l.demos_sits ?? 0);
+        addMappedPoints(logPointsByUser, l.canvasser_id, "Sale", l.sales ?? 0);
+      }
+      for (const row of outcomeLogRows) {
+        const payload = row.data && typeof row.data === "object" && !Array.isArray(row.data)
+          ? row.data as Record<string, unknown>
+          : {};
+        const canvasserId = typeof payload.canvasser_id === "string" ? payload.canvasser_id : null;
+        const rawOutcome = payload.changedValue ?? payload.status ?? payload.recordedAs;
+        addMappedPoints(webhookFallbackPointsByUser, canvasserId, webhookStatusForPointMapping(rawOutcome), 1);
+      }
+      const allPointUserIds = new Set([
+        ...metricPointsByUser.keys(),
+        ...logPointsByUser.keys(),
+        ...webhookFallbackPointsByUser.keys(),
+      ]);
+      for (const userId of allPointUserIds) {
+        const webhookPoints = Math.max(
+          metricPointsByUser.get(userId) ?? 0,
+          webhookFallbackPointsByUser.get(userId) ?? 0,
+        );
+        pointsByUser.set(userId, webhookPoints + (logPointsByUser.get(userId) ?? 0));
       }
       console.log("[FleetManager] fetched weekly points", {
-        selectedDateRange: { startDate, endDate },
-        dailyMetrics: metricsR.data ?? [],
-        dailyLogs: logsR.data ?? [],
+        selectedDateRange: { startDate, endDate, weekStartISO, weekEndISO },
+        targetTables: ["daily_metrics", "daily_logs", "webhook_logs"],
+        recordCount: metricRows.length + logRows.length + outcomeLogRows.length,
+        dailyMetrics: metricRows,
+        dailyLogs: logRows,
+        webhookOutcomeLogs: outcomeLogRows,
+        metricPointsByUser: Object.fromEntries(metricPointsByUser),
+        logPointsByUser: Object.fromEntries(logPointsByUser),
+        webhookFallbackPointsByUser: Object.fromEntries(webhookFallbackPointsByUser),
         pointsByUser: Object.fromEntries(pointsByUser),
       });
       return {
@@ -157,6 +233,7 @@ export function FleetManager() {
         profiles: profilesR.data ?? [],
         rolesByUser,
         pointsByUser,
+        debugRecordCount: metricRows.length + logRows.length + outcomeLogRows.length,
       };
     },
   });
@@ -283,7 +360,7 @@ export function FleetManager() {
     return <div className="text-sm text-muted-foreground">Loading fleet…</div>;
   }
 
-  const { vans, profiles, rolesByUser, pointsByUser } = fleet.data;
+  const { vans, profiles, rolesByUser, pointsByUser, debugRecordCount } = fleet.data;
   const captains = profiles.filter((p) => (rolesByUser.get(p.id) ?? []).includes("captain"));
   const unassigned = profiles.filter((p) => !p.team_id && !(rolesByUser.get(p.id) ?? []).includes("owner"));
 
@@ -341,6 +418,9 @@ export function FleetManager() {
         </div>
         <p className="mt-2 text-[10px] text-muted-foreground">
           Points below reflect Mon–Sun of the selected week (PM = 1 pt, Sale = 2 pts; BO/RS = 0).
+        </p>
+        <p className="mt-1 text-[10px] text-muted-foreground/60">
+          Records found: {debugRecordCount}
         </p>
       </ArcadePanel>
 
