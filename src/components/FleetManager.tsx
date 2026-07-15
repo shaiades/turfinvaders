@@ -714,6 +714,62 @@ export function FleetManager() {
         </div>
       </div>
 
+      {/* Archived Agents link — managers/owners only */}
+      {canManage && (
+        <div className="pt-2 text-center">
+          <button
+            onClick={() => setArchivedOpen(true)}
+            className="text-[11px] text-muted-foreground/70 hover:text-muted-foreground underline underline-offset-4"
+          >
+            View Archived Agents ({archivedProfiles.length})
+          </button>
+        </div>
+      )}
+
+      {/* Archived Agents modal */}
+      <Dialog open={archivedOpen} onOpenChange={setArchivedOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="font-display uppercase tracking-widest">Archived Agents</DialogTitle>
+            <DialogDescription>
+              Canvassers auto-archived after 14 days of inactivity. Historical data is preserved.
+              Reactivate to bring them back to Free Agents.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[420px] overflow-y-auto space-y-1.5 py-2">
+            {archivedProfiles.length === 0 ? (
+              <div className="text-xs text-muted-foreground italic px-2 py-6 text-center">
+                No archived agents.
+              </div>
+            ) : (
+              archivedProfiles.map((p) => (
+                <div
+                  key={p.id}
+                  className="flex items-center gap-2 px-2 py-1.5 rounded border border-border bg-surface"
+                >
+                  <span className="text-sm truncate flex-1">{p.display_name ?? "Unknown"}</span>
+                  <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                    {p.office_location ?? "—"}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={reactivateAgent.isPending}
+                    onClick={() => reactivateAgent.mutate(p.id)}
+                    className="h-7 text-[11px] font-display uppercase tracking-wider"
+                  >
+                    Reactivate
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setArchivedOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Add Agent modal */}
       <Dialog open={addAgentOpen} onOpenChange={setAddAgentOpen}>
         <DialogContent>
