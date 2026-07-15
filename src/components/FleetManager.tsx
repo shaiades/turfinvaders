@@ -252,6 +252,21 @@ export function FleetManager() {
     },
   });
 
+  // Live updates — refresh weekly points as Monday webhooks arrive.
+  useEffect(() => {
+    const ch = supabase
+      .channel("fleet-live-metrics")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "daily_metrics" },
+        () => qc.invalidateQueries({ queryKey: ["fleet_manager"] }),
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [qc]);
+
+
+
 
   const createVan = useMutation({
     mutationFn: async () => {
