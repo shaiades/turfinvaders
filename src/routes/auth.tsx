@@ -18,15 +18,25 @@ function AuthPage() {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
 
+  async function redirectByRole(userId: string) {
+    const { data } = await supabase.from("user_roles").select("role").eq("user_id", userId);
+    const roles = (data ?? []).map((r) => r.role as string);
+    const isCanvasserOnly =
+      roles.includes("canvasser") &&
+      !roles.some((r) => r === "owner" || r === "captain" || r === "office_staff");
+    navigate({ to: isCanvasserOnly ? "/field" : "/dashboard", search: isCanvasserOnly ? undefined : { tab: "executive" } as never });
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     try {
       if (mode === "signin") {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
         toast.success("Welcome back!");
-        navigate({ to: "/dashboard" });
+        if (data.user) await redirectByRole(data.user.id);
+        else navigate({ to: "/field" });
       } else {
         const { data, error } = await supabase.auth.signUp({
           email, password,
@@ -52,7 +62,9 @@ function AuthPage() {
     const result = await lovable.auth.signInWithOAuth("google", { redirect_uri: window.location.origin });
     if (result.error) { toast.error(result.error.message); setBusy(false); return; }
     if (result.redirected) return;
-    navigate({ to: "/dashboard" });
+    const { data } = await supabase.auth.getUser();
+    if (data.user) await redirectByRole(data.user.id);
+    else navigate({ to: "/field" });
   }
 
   return (
