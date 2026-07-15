@@ -91,38 +91,35 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
   const navigate = Route.useNavigate();
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Owner</div>
-          <h1 className="font-display text-2xl text-foreground mt-1">COMMAND</h1>
-        </div>
-        <div className="flex items-center gap-3">
+    <div className="space-y-4 md:space-y-6">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-3 min-w-0">
+          <h1 className="font-display text-lg md:text-2xl text-foreground truncate">COMMAND</h1>
           <VisibilityChip on={visibility} />
-          <Dialog open={importOpen} onOpenChange={setImportOpen}>
-            <DialogTrigger asChild>
-              <Button
-                size="sm"
-                variant="outline"
-                className="font-display text-[10px] tracking-widest uppercase"
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5 mr-2" />
-                Import CSV
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-3xl">
-              <DialogHeader>
-                <DialogTitle className="font-display uppercase tracking-widest text-sm">
-                  Import Monday.com CSV
-                </DialogTitle>
-                <DialogDescription>
-                  Auto-detects BO/OL/RS/PM/Sale outcomes and pipes totals into the Paycheck Engine.
-                </DialogDescription>
-              </DialogHeader>
-              <HistoricalImporter onImported={() => setImportOpen(false)} />
-            </DialogContent>
-          </Dialog>
         </div>
+        <Dialog open={importOpen} onOpenChange={setImportOpen}>
+          <DialogTrigger asChild>
+            <Button
+              size="sm"
+              variant="outline"
+              className="font-display text-[10px] tracking-widest uppercase shrink-0"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 mr-2" />
+              Import CSV
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-3xl">
+            <DialogHeader>
+              <DialogTitle className="font-display uppercase tracking-widest text-sm">
+                Import Monday.com CSV
+              </DialogTitle>
+              <DialogDescription>
+                Auto-detects BO/OL/RS/PM/Sale outcomes and pipes totals into the Paycheck Engine.
+              </DialogDescription>
+            </DialogHeader>
+            <HistoricalImporter onImported={() => setImportOpen(false)} />
+          </DialogContent>
+        </Dialog>
       </div>
 
       <Tabs
@@ -130,14 +127,17 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
         onValueChange={(v) => navigate({ search: { tab: v as OwnerTab }, replace: true })}
         className="space-y-4"
       >
-        <TabsList className="bg-surface">
-          <TabsTrigger value="dispatch">Live Dispatch</TabsTrigger>
-          <TabsTrigger value="executive">Executive Dashboard</TabsTrigger>
-          <TabsTrigger value="fleet">Fleet Manager</TabsTrigger>
-          <TabsTrigger value="timesheets">Timesheets</TabsTrigger>
-          <TabsTrigger value="payroll">Payroll</TabsTrigger>
-          <TabsTrigger value="settings">Settings</TabsTrigger>
-        </TabsList>
+        <div className="-mx-4 sm:mx-0 overflow-x-auto scrollbar-hide">
+          <TabsList className="bg-surface flex w-max min-w-full flex-nowrap whitespace-nowrap px-4 sm:px-0">
+            <TabsTrigger value="dispatch">Live Dispatch</TabsTrigger>
+            <TabsTrigger value="executive">Executive Dashboard</TabsTrigger>
+            <TabsTrigger value="fleet">Fleet Manager</TabsTrigger>
+            <TabsTrigger value="timesheets">Timesheets</TabsTrigger>
+            <TabsTrigger value="payroll">Payroll</TabsTrigger>
+            <TabsTrigger value="settings">Settings</TabsTrigger>
+          </TabsList>
+        </div>
+
         <TabsContent value="dispatch" className="mt-0"><LiveDispatch /></TabsContent>
         <TabsContent value="executive" className="mt-0"><ExecutiveDashboard /></TabsContent>
         <TabsContent value="fleet" className="mt-0"><FleetManager /></TabsContent>
