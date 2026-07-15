@@ -1,8 +1,8 @@
-import { Link, useRouter } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { Link, useRouter, useRouterState } from "@tanstack/react-router";
+import { useEffect, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth, setDevRoleOverride, type AppRole } from "@/hooks/useAuth";
-import { LogOut, Users, Settings, LayoutDashboard, ShieldCheck, ClipboardList, Inbox, MapPin, FlaskConical, DollarSign, Trophy, Zap, Flame } from "lucide-react";
+import { LogOut, Users, LayoutDashboard, Inbox, MapPin, FlaskConical, DollarSign, Zap, Flame } from "lucide-react";
 import turfInvadersWordmark from "@/assets/turf-invaders-wordmark.png.asset.json";
 
 type NavItem = {
@@ -12,48 +12,40 @@ type NavItem = {
   search?: Record<string, string>;
 };
 
+// Routes a Canvasser is allowed to visit. Anything else → redirect to /field.
+const CANVASSER_ALLOWED = ["/field", "/active-run", "/my-territory", "/daily-wrap"];
+
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, role, realRole, displayName } = useAuth();
   const router = useRouter();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isOverridden = role !== realRole && realRole !== null;
 
-  const navItems: NavItem[] = (() => {
-    if (role === "owner") {
-      return [
-        { to: "/dashboard", search: { tab: "executive" }, label: "Command", icon: LayoutDashboard },
-        { to: "/my-territory", label: "Territory", icon: MapPin },
-        { to: "/dashboard", search: { tab: "dispatch" }, label: "Dispatch", icon: Inbox },
-        { to: "/dashboard", search: { tab: "fleet" }, label: "Fleet", icon: Users },
-        { to: "/dashboard", search: { tab: "payroll" }, label: "Payroll", icon: DollarSign },
-        { to: "/daily-wrap", label: "Wrap-Up", icon: Flame },
-      ];
+  // Canvasser guard: block manual navigation to leadership routes.
+  useEffect(() => {
+    if (role !== "canvasser") return;
+    const allowed = CANVASSER_ALLOWED.some((p) => pathname === p || pathname.startsWith(p + "/"));
+    if (!allowed) {
+      router.navigate({ to: "/field", replace: true });
     }
+  }, [role, pathname, router]);
+
+  const navItems: NavItem[] = (() => {
     if (role === "canvasser") {
       return [
         { to: "/field", label: "Active Run", icon: Zap },
-        { to: "/dashboard", label: "Command", icon: LayoutDashboard },
         { to: "/my-territory", label: "Territory", icon: MapPin },
+        { to: "/daily-wrap", label: "Daily Wrap", icon: Flame },
       ];
     }
-    if (role === "captain") {
-      return [
-        { to: "/field", label: "Active Run", icon: Zap },
-        { to: "/dashboard", label: "Command", icon: LayoutDashboard },
-        { to: "/my-territory", label: "Territory", icon: MapPin },
-        { to: "/teams", label: "My Van", icon: Users },
-        { to: "/leaderboard", label: "Leaders", icon: Trophy },
-        { to: "/daily-wrap", label: "Wrap-Up", icon: Flame },
-        { to: "/log", label: "Log", icon: ClipboardList },
-      ];
-    }
-    if (role === "office_staff") {
-      return [
-        { to: "/dashboard", label: "Command", icon: LayoutDashboard },
-        { to: "/dashboard", search: { tab: "dispatch" }, label: "Dispatch", icon: Inbox },
-        { to: "/confirmation-desk", label: "Desk", icon: ShieldCheck },
-      ];
-    }
-    return [{ to: "/dashboard", label: "Dashboard", icon: LayoutDashboard }];
+    // Leadership: owner, captain, office_staff (manager suite)
+    return [
+      { to: "/dashboard", search: { tab: "executive" }, label: "Command", icon: LayoutDashboard },
+      { to: "/my-territory", label: "Territory", icon: MapPin },
+      { to: "/dashboard", search: { tab: "dispatch" }, label: "Dispatch", icon: Inbox },
+      { to: "/dashboard", search: { tab: "fleet" }, label: "Fleet", icon: Users },
+      { to: "/dashboard", search: { tab: "payroll" }, label: "Payroll", icon: DollarSign },
+    ];
   })();
 
 
