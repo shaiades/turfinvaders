@@ -612,10 +612,22 @@ export function FleetManager() {
                           </div>
                         ) : (
                           <div className="flex items-center justify-between gap-2 flex-wrap">
-                            <div className="flex items-center gap-2 min-w-0">
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
                               <Truck className="w-4 h-4 shrink-0" style={{ color: v.color }} />
                               <TeamBadge name={v.name} color={v.color} />
+                              <span
+                                className="shrink-0 text-[10px] font-display uppercase tracking-widest px-1.5 py-0.5 rounded border border-neon/50 text-neon bg-neon/10"
+                                title="Total van points this week"
+                              >
+                                {vanTotalPoints(v.id)}p
+                              </span>
+                              {v.captain_id && (
+                                <span className="hidden sm:inline text-[10px] text-muted-foreground truncate min-w-0">
+                                  · {captains.find((c) => c.id === v.captain_id)?.display_name ?? ""}
+                                </span>
+                              )}
                             </div>
+
                             <div className="flex items-center gap-1">
                               <span className="text-[10px] font-display uppercase tracking-widest flex items-center gap-1 mr-1 text-muted-foreground">
                                 <Building2 className="w-3 h-3" /> {v.office_location ?? "San Diego"}
