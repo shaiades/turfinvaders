@@ -37,15 +37,16 @@ function toISODate(d: Date): string {
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 }
-function toDayBoundaryISO(d: Date, endOfDay = false): string {
-  const boundary = new Date(d);
-  boundary.setHours(
+function toStrictIsoDayBoundary(d: Date, endOfDay = false): string {
+  return new Date(Date.UTC(
+    d.getFullYear(),
+    d.getMonth(),
+    d.getDate(),
     endOfDay ? 23 : 0,
     endOfDay ? 59 : 0,
     endOfDay ? 59 : 0,
     endOfDay ? 999 : 0,
-  );
-  return boundary.toISOString();
+  )).toISOString();
 }
 function formatRange(start: Date, end: Date): string {
   const sameMonth = start.getMonth() === end.getMonth();
@@ -114,8 +115,8 @@ export function FleetManager() {
   const weekEndISO = useMemo(() => toISODate(weekEnd), [weekEnd]);
   const selectedDateRange = useMemo(
     () => ({
-      startDate: toDayBoundaryISO(weekStart),
-      endDate: toDayBoundaryISO(weekEnd, true),
+      startDate: toStrictIsoDayBoundary(weekStart),
+      endDate: toStrictIsoDayBoundary(weekEnd, true),
     }),
     [weekStart, weekEnd],
   );
