@@ -676,12 +676,21 @@ export function FleetManager() {
                             {roster.map((r) => {
                               const targetIsOwner = (rolesByUser.get(r.id) ?? []).includes("owner");
                               const canModify = canManage && (isOwnerRole || !targetIsOwner);
+                              // Sum points across every profile with the same display name in this van.
+                              const nameKey = (r.display_name ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+                              const aggregatedPoints = rosterRaw
+                                .filter((p) => ((p.display_name ?? "").trim().toLowerCase().replace(/\s+/g, " ")) === nameKey)
+                                .reduce((sum, p) => sum + (pointsByUser.get(p.id) ?? 0), 0);
+                              const rIsCaptain =
+                                v.captain_id === r.id ||
+                                (rolesByUser.get(r.id) ?? []).includes("captain");
                               return (
                                 <RosterRow
                                   key={r.id}
                                   id={r.id}
                                   name={r.display_name ?? "Unknown"}
-                                  points={pointsByUser.get(r.id) ?? 0}
+                                  points={aggregatedPoints}
+                                  isCaptain={rIsCaptain}
                                   canManage={canModify}
                                   onUnassign={canModify ? () => assignCanvasser.mutate({ canvasserId: r.id, vanId: null }) : undefined}
                                   onDelete={isOwnerRole ? () => {
@@ -692,6 +701,7 @@ export function FleetManager() {
                                 />
                               );
                             })}
+
                             {roster.length === 0 && (
                               <div className="text-xs text-muted-foreground italic px-2 py-3 border border-dashed border-border rounded">
                                 Drop agents here
