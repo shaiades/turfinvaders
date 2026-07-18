@@ -13,7 +13,7 @@ type NavItem = {
 };
 
 // Routes a Canvasser is allowed to visit. Anything else → redirect to /field.
-const CANVASSER_ALLOWED = ["/field", "/active-run", "/my-territory", "/leaderboard"];
+const CANVASSER_ALLOWED = ["/field", "/active-run", "/my-territory", "/leaderboard", "/playbook"];
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, role, realRole, displayName } = useAuth();
@@ -35,6 +35,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       return [
         { to: "/field", label: "Active Run", icon: Zap },
         { to: "/my-territory", label: "Territory", icon: MapPin },
+        { to: "/playbook", label: "Playbook", icon: Target },
         { to: "/leaderboard", label: "Leaderboard", icon: Trophy },
       ];
     }
