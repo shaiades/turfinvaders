@@ -116,6 +116,34 @@ SELECT monday_item_id, count(*) FROM leads
 WHERE monday_item_id IS NOT NULL GROUP BY 1 HAVING count(*) > 1;
 ```
 
+## Phase 5 — Pay policy features (owner-confirmed 2026-07-18)
+
+Migration `20260718183328_*.sql` + app changes add:
+
+1. **Monthly Volume Bonus surfaced** — the pay engine's existing
+   "$1,500 per full $100k confirmed sale volume per calendar month" is now
+   shown: a "Monthly Volume Bonus" panel under the Payroll tab (month of the
+   selected week) and an MTD estimate line on each canvasser's Take-Home
+   widget. No formula change — the SQL already computed it.
+2. **Starting Pay Lock automation** — Jr. Diamond/Sr. Diamond/Captain keep
+   the $35/hr + 2% lock only while their rolling 4-week sit average
+   (completed Mon–Sat weeks) stays at 5+. First violation → "Lock warning"
+   (chip in the Payroll Ledger, banner on the canvasser's dashboard).
+   Second violation within 90 days → "Lock reverted": they are paid on the
+   normal weekly point tiers (rank and $75 sit bonus retained). Reinstatement
+   is automatic after 3 consecutive completed weeks at 7+ sits. Evaluated
+   weekly (on activity, plus a Monday 8am PT cron for zero-activity weeks).
+3. **Security hardening** — pay-affecting profile columns (current_rank,
+   the sit counters, recruits_count, pay-lock state) can no longer be edited
+   by canvassers on their own row; only the engine and owners can write them.
+
+**Known policy tension to be aware of:** the poster says a reverted lock
+retains rank, but the rank engine independently demotes ranks when the
+qualifying streaks lapse (pre-existing behavior). Someone slumping hard
+enough may simply lose the Diamond rank (and with it the lock) before the
+pay-lock state machine matters. The state machine governs the window where
+the rank is still held.
+
 ## Rollback
 
 - Revert the deploy commit (forward-only `git revert`, never rewrite history —
