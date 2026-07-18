@@ -269,6 +269,12 @@ export const Route = createFileRoute("/api/public/monday-webhook")({
           .eq("id", row.id);
         if (wErr) return json({ error: wErr.message }, 500);
 
+        // Rank + pay-lock evaluation runs from write paths (the per-row
+        // daily_logs trigger was dropped for bulk-import cost). Best effort.
+        await supabaseAdmin
+          .rpc("refresh_canvasser_rank", { _canvasser_id: profile.id })
+          .then(null, () => undefined);
+
         // For Sale: create a confirmed lead with sale_amount → feeds Paycheck
         // Engine (revenue/commission) and fires the live lead counter trigger.
         let leadId: string | null = null;

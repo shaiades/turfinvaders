@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { deleteProfile, deleteVan, upsertManualWeekly, getWeeklyPaycheck } from "@/lib/fleet.functions";
+import { deleteProfile, deleteVan, upsertManualWeekly, getWeeklyPaychecks } from "@/lib/fleet.functions";
 import { HistoricalImporter } from "@/components/HistoricalImporter";
 import { PayrollLedger } from "@/components/PayrollLedger";
 import { toast } from "sonner";
@@ -456,6 +456,7 @@ type WeeklyRow = {
   totalSales: number;
   totalPoints: number;
   totalPay: number;
+  payError: string | null;
 };
 
 function WeeklyResults() {
@@ -492,12 +493,26 @@ function WeeklyResults() {
       }
 
       const activeIds = Array.from(agg.keys());
-      const pays = await Promise.all(activeIds.map((id) =>
-        getWeeklyPaycheck({ data: { canvasser_id: id, week_start: toISODate(lastWeekStart) } })
-          .then((r) => ({ id, pay: Number((r as { total_pay?: number } | null)?.total_pay ?? 0) }))
-          .catch(() => ({ id, pay: 0 }))
-      ));
-      const payById = new Map(pays.map((p) => [p.id, p.pay]));
+      // Batched calls to the pay engine (chunked under the server fn's 300-id
+      // cap) — same code path as the Payroll tab.
+      const payById = new Map<string, { pay: number; error: string | null }>();
+      for (let i = 0; i < activeIds.length; i += 300) {
+        const chunk = activeIds.slice(i, i + 300);
+        try {
+          const { results } = await getWeeklyPaychecks({
+            data: { week_start: toISODate(lastWeekStart), canvasser_ids: chunk },
+          });
+          for (const r of results) {
+            payById.set(r.canvasser_id, {
+              pay: Number(r.paycheck?.total_pay ?? 0),
+              error: r.error,
+            });
+          }
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          for (const id of chunk) payById.set(id, { pay: 0, error: msg });
+        }
+      }
 
       const rows: WeeklyRow[] = [];
       for (const id of activeIds) {
@@ -517,7 +532,8 @@ function WeeklyResults() {
           totalResets: a.resets,
           totalSales: a.sales,
           totalPoints,
-          totalPay: payById.get(id) ?? 0,
+          totalPay: payById.get(id)?.pay ?? 0,
+          payError: payById.get(id)?.error ?? null,
         });
       }
       rows.sort((a, b) => b.totalPay - a.totalPay);
@@ -584,7 +600,13 @@ function WeeklyResults() {
                   <td className="px-4 py-2.5 text-right font-display text-[var(--accent)]">{r.totalResets}</td>
                   <td className="px-4 py-2.5 text-right font-display text-victory">{r.totalSales}</td>
                   <td className="px-4 py-2.5 text-right font-display text-neon">{r.totalPoints}</td>
-                  <td className="px-4 py-2.5 text-right font-display text-victory">${r.totalPay.toFixed(2)}</td>
+                  <td className="px-4 py-2.5 text-right font-display text-victory">
+                    {r.payError ? (
+                      <span className="text-destructive text-xs" title={r.payError}>—</span>
+                    ) : (
+                      <>${r.totalPay.toFixed(2)}</>
+                    )}
+                  </td>
                 </tr>
               ))}
               <tr className="border-t-2 border-neon/60 bg-surface">

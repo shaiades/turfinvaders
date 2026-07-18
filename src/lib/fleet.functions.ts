@@ -104,6 +104,12 @@ export const upsertManualWeekly = createServerFn({ method: "POST" })
       no_demo,
     }, { onConflict: "canvasser_id,log_date" });
     if (error) throw error;
+
+    // Rank + pay-lock evaluation runs from write paths (the per-row
+    // daily_logs trigger was dropped for bulk-import cost). Best effort.
+    await supabaseAdmin
+      .rpc("refresh_canvasser_rank", { _canvasser_id: data.canvasser_id })
+      .then(null, () => undefined);
     return { ok: true };
   });
 
@@ -146,4 +152,189 @@ export const getWeeklyPaycheck = createServerFn({ method: "POST" })
     });
     if (error) throw error;
     return rows?.[0] ?? null;
+  });
+
+/** Row shape returned by the calc_weekly_paycheck RPC. */
+export type PaycheckRow = {
+  week_start: string;
+  week_end: string;
+  sits: number;
+  points: number;
+  sales: number;
+  sale_price_total: number;
+  hours: number;
+  hourly_rate: number;
+  base_pay: number;
+  commission_rate: number;
+  commission: number;
+  sit_bonus: number;
+  monster_bonus: number;
+  total_pay: number;
+  rank: string;
+};
+
+export type PaycheckResult = {
+  canvasser_id: string;
+  paycheck: PaycheckRow | null;
+  error: string | null;
+};
+
+/**
+ * Batched weekly paychecks for the Payroll Ledger and Last Week's Results —
+ * same engine as getWeeklyPaycheck (calc_weekly_paycheck via service role),
+ * one server round-trip for many canvassers. Authorization mirrors the
+ * Payroll tab audience: owners and office staff may fetch any canvasser,
+ * captains only their own team, everyone else only themselves. Unauthorized
+ * ids are silently dropped from the result rather than failing the batch.
+ */
+export const getWeeklyPaychecks = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => {
+    const o = (data && typeof data === "object") ? data as Record<string, unknown> : {};
+    const week_start = typeof o.week_start === "string" ? o.week_start : "";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(week_start)) throw new Error("Invalid week");
+    const raw = Array.isArray(o.canvasser_ids) ? o.canvasser_ids : [];
+    if (raw.length > 300) throw new Error("Too many canvassers");
+    const canvasser_ids = raw.map((id) => {
+      if (typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id)) throw new Error("Invalid canvasser id");
+      return id;
+    });
+    return { week_start, canvasser_ids };
+  })
+  .handler(async ({ data, context }) => {
+    const { data: roles, error: rolesErr } = await context.supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId);
+    if (rolesErr) throw rolesErr;
+    const roleSet = new Set((roles ?? []).map((r) => r.role));
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    let allowedIds = data.canvasser_ids;
+    if (roleSet.has("owner") || roleSet.has("office_staff")) {
+      // Full access — the Payroll tab audience.
+    } else if (roleSet.has("captain")) {
+      const { data: meProf } = await supabaseAdmin
+        .from("profiles").select("team_id").eq("id", context.userId).maybeSingle();
+      const myTeam = meProf?.team_id ?? null;
+      const { data: teamProfiles } = myTeam
+        ? await supabaseAdmin
+            .from("profiles").select("id").in("id", data.canvasser_ids).eq("team_id", myTeam)
+        : { data: [] as { id: string }[] };
+      const permitted = new Set((teamProfiles ?? []).map((p) => p.id));
+      permitted.add(context.userId);
+      allowedIds = data.canvasser_ids.filter((id) => permitted.has(id));
+    } else {
+      allowedIds = data.canvasser_ids.filter((id) => id === context.userId);
+    }
+
+    const results: PaycheckResult[] = new Array(allowedIds.length);
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < allowedIds.length) {
+        const idx = cursor++;
+        const id = allowedIds[idx];
+        try {
+          const { data: rows, error } = await supabaseAdmin.rpc("calc_weekly_paycheck", {
+            _canvasser_id: id,
+            _week_start: data.week_start,
+          });
+          if (error) throw error;
+          results[idx] = { canvasser_id: id, paycheck: (rows?.[0] as PaycheckRow | undefined) ?? null, error: null };
+        } catch (e) {
+          results[idx] = { canvasser_id: id, paycheck: null, error: e instanceof Error ? e.message : String(e) };
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(8, Math.max(allowedIds.length, 1)) }, () => worker()));
+    return { week_start: data.week_start, results };
+  });
+
+/** Row shape returned by the calc_monthly_paycheck RPC. */
+export type MonthlyPaycheckRow = {
+  month_start: string;
+  month_end: string;
+  total_sits: number;
+  total_points: number;
+  total_sales: number;
+  sale_price_total: number;
+  weekly_pay_total: number;
+  volume_bonus: number;
+  total_pay: number;
+};
+
+export type MonthlyPaycheckResult = {
+  canvasser_id: string;
+  paycheck: MonthlyPaycheckRow | null;
+  error: string | null;
+};
+
+/**
+ * Batched monthly paychecks (calc_monthly_paycheck: weekly pay totals plus the
+ * $1,500-per-$100k Volume Bonus). Same authorization as getWeeklyPaychecks.
+ * Lower concurrency — each monthly RPC internally walks ~5 weekly calcs.
+ */
+export const getMonthlyPaychecks = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => {
+    const o = (data && typeof data === "object") ? data as Record<string, unknown> : {};
+    const month_start = typeof o.month_start === "string" ? o.month_start : "";
+    if (!/^\d{4}-\d{2}-01$/.test(month_start)) throw new Error("Invalid month");
+    const raw = Array.isArray(o.canvasser_ids) ? o.canvasser_ids : [];
+    if (raw.length > 300) throw new Error("Too many canvassers");
+    const canvasser_ids = raw.map((id) => {
+      if (typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id)) throw new Error("Invalid canvasser id");
+      return id;
+    });
+    return { month_start, canvasser_ids };
+  })
+  .handler(async ({ data, context }) => {
+    const { data: roles, error: rolesErr } = await context.supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId);
+    if (rolesErr) throw rolesErr;
+    const roleSet = new Set((roles ?? []).map((r) => r.role));
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    let allowedIds = data.canvasser_ids;
+    if (roleSet.has("owner") || roleSet.has("office_staff")) {
+      // Full access — the Payroll tab audience.
+    } else if (roleSet.has("captain")) {
+      const { data: meProf } = await supabaseAdmin
+        .from("profiles").select("team_id").eq("id", context.userId).maybeSingle();
+      const myTeam = meProf?.team_id ?? null;
+      const { data: teamProfiles } = myTeam
+        ? await supabaseAdmin
+            .from("profiles").select("id").in("id", data.canvasser_ids).eq("team_id", myTeam)
+        : { data: [] as { id: string }[] };
+      const permitted = new Set((teamProfiles ?? []).map((p) => p.id));
+      permitted.add(context.userId);
+      allowedIds = data.canvasser_ids.filter((id) => permitted.has(id));
+    } else {
+      allowedIds = data.canvasser_ids.filter((id) => id === context.userId);
+    }
+
+    const results: MonthlyPaycheckResult[] = new Array(allowedIds.length);
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < allowedIds.length) {
+        const idx = cursor++;
+        const id = allowedIds[idx];
+        try {
+          const { data: rows, error } = await supabaseAdmin.rpc("calc_monthly_paycheck", {
+            _canvasser_id: id,
+            _month_start: data.month_start,
+          });
+          if (error) throw error;
+          results[idx] = { canvasser_id: id, paycheck: (rows?.[0] as MonthlyPaycheckRow | undefined) ?? null, error: null };
+        } catch (e) {
+          results[idx] = { canvasser_id: id, paycheck: null, error: e instanceof Error ? e.message : String(e) };
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(4, Math.max(allowedIds.length, 1)) }, () => worker()));
+    return { month_start: data.month_start, results };
   });

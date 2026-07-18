@@ -90,10 +90,12 @@ export function TimeClock({ userId }: { userId: string }) {
       if (error) throw error;
     },
     onSuccess: () => {
-      toast.success("Clocked out · lunch deducted, hours capped");
+      toast.success("Clocked out · 30-min lunch deducted");
       qc.invalidateQueries({ queryKey: ["time-clock-open", userId] });
       qc.invalidateQueries({ queryKey: ["time-clock-today", userId] });
       qc.invalidateQueries({ queryKey: ["take-home"] });
+      // Weekly pay projection is driven by clocked hours now — refresh it.
+      qc.invalidateQueries({ queryKey: ["my_clocked_hours"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -108,9 +110,6 @@ export function TimeClock({ userId }: { userId: string }) {
     () => (todayEntries ?? []).reduce((s, r) => s + Number(r.billable_hours ?? 0), 0),
     [todayEntries],
   );
-
-  const dow = new Date().getDay(); // 0 Sun, 6 Sat
-  const cap = dow === 0 ? 0 : dow === 6 ? 6.5 : 7.5;
 
   return (
     <ArcadePanel title="Time Clock">
@@ -137,9 +136,11 @@ export function TimeClock({ userId }: { userId: string }) {
         <div className="text-xs text-muted-foreground text-center">
           Today billable: <span className="text-victory">{todayHours.toFixed(2)}h</span>
           <span className="mx-2">·</span>
-          Daily cap: {cap}h
-          <span className="mx-2">·</span>
-          Lunch auto-deducted
+          {new Date().getDay() === 0 ? (
+            <span className="text-warning">Sundays are unpaid — today's time bills 0h</span>
+          ) : (
+            <>30-min lunch auto-deducted per shift</>
+          )}
         </div>
 
         {isClockedIn ? (
