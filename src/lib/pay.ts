@@ -1,7 +1,7 @@
 // DISPLAY-ONLY mirror of public.calc_weekly_paycheck.
 //
 // The authoritative pay engine lives in Postgres — latest definition:
-// supabase/migrations/20260718183328_2ff3e696-8536-402a-b53c-e6d69f4f9fcc.sql.
+// supabase/migrations/20260718192842_2f90b1c4-b52e-45f8-94a6-ed821aab8869.sql.
 // If the SQL changes, change this file in the same commit. These helpers are
 // for dashboard hints and projections only; real paychecks must come from the
 // calc_weekly_paycheck RPC (via getWeeklyPaycheck/getWeeklyPaychecks server fns).
@@ -63,10 +63,7 @@ export function sitBonusPerForRank(rank?: string | null): number {
     : SIT_BONUS_PER;
 }
 
-/** Assumed billable hours for a log date when no time was clocked (Sun 0 / Sat 6.5 / Mon–Fri 7.5). */
-export function hoursForLogDate(isoDate: string): number {
-  const dow = new Date(isoDate + "T00:00:00Z").getUTCDay();
-  if (dow === 0) return 0;
-  if (dow === 6) return 6.5;
-  return 7.5;
-}
+/** Base-pay hours come exclusively from clocked time_entries (no daily caps,
+ *  30-min lunch deducted per closed shift, Sundays unpaid). There is NO
+ *  activity-based hour estimate: no clock-in means no base pay. */
+export const LUNCH_DEDUCTION_HOURS = 0.5;

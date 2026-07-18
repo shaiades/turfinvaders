@@ -14,7 +14,6 @@ import { DoorOpen, CalendarClock, CalendarDays, PhoneCall, DollarSign, Target, G
 import {
   payRateForPoints,
   commissionRateForPoints,
-  hoursForLogDate,
   COMMISSION_BASE,
   POINTS_TIER_MID,
   POINTS_TIER_TOP,
@@ -28,8 +27,8 @@ import { getMonthlyPaychecks } from "@/lib/fleet.functions";
 /**
  * Paycheck engine — automated.
  *
- * Hours: auto-derived from days the canvasser submitted a Daily Log.
- *   Mon–Fri log → 7.5 hrs    |    Sat log → 6.5 hrs    |    Sun → 0
+ * Hours: real clocked time only (time_entries; 30-min lunch deducted per
+ *   shift, no daily caps, Sundays unpaid). No clock-in = no base pay.
  *
  * Weekly Points (Sits): pitch-miss sit = 1 pt, sale = 2 pts.
  *   → weekPoints = demos_sits + sales
@@ -188,6 +187,27 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
     },
   });
 
+  // Real clocked hours this week — base pay comes only from clocked time
+  // (no activity-based estimates; no clock-in means no base pay).
+  const clockedQuery = useQuery({
+    queryKey: ["my_clocked_hours", "week", userId],
+    queryFn: async () => {
+      // Mon–Sat window, matching calc_weekly_paycheck exactly.
+      const weekStart = startOfWeekISO();
+      const saturday = new Date(`${weekStart}T00:00:00Z`);
+      saturday.setUTCDate(saturday.getUTCDate() + 5);
+      const { data, error } = await supabase
+        .from("time_entries")
+        .select("billable_hours")
+        .eq("user_id", userId)
+        .gte("log_date", weekStart)
+        .lte("log_date", saturday.toISOString().slice(0, 10))
+        .not("clock_out", "is", null);
+      if (error) throw error;
+      return (data ?? []).reduce((a, r) => a + Number(r.billable_hours ?? 0), 0);
+    },
+  });
+
   const { today, week, month, monthRevenue, weekRevenue, weekPoints,
           weekHours, hourlyRate, weekBase, weekCommission, monthCommission, funnel } = useMemo(() => {
     const allRows = (logsQuery.data ?? []) as unknown as Array<Record<string, number | null> & { log_date: string }>;
@@ -207,8 +227,7 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
       .reduce((a, r) => a + Number(r.sale_amount ?? 0), 0);
 
     const weekPoints = week.demos_sits + week.sales;
-    const weekDates = new Set(allRows.filter((r) => r.log_date >= w).map((r) => r.log_date));
-    const weekHours = Array.from(weekDates).reduce((sum, d) => sum + hoursForLogDate(d), 0);
+    const weekHours = clockedQuery.data ?? 0;
     const hourlyRate = payRateForPoints(weekPoints);
     const weekBase = weekHours * hourlyRate;
     const weekCommission = weekRevenue * commissionRateForPoints(weekPoints);
@@ -251,7 +270,7 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
       today, week, month, monthRevenue, weekRevenue, weekPoints,
       weekHours, hourlyRate, weekBase, weekCommission, monthCommission, funnel,
     };
-  }, [logsQuery.data, salesQuery.data, companyAvgQuery.data]);
+  }, [logsQuery.data, salesQuery.data, companyAvgQuery.data, clockedQuery.data]);
 
   const weeklyPay = weekBase + weekCommission;
 
@@ -670,10 +689,10 @@ function PaycheckEngineWidget({
           </div>
         </div>
         <div>
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Auto Hours</div>
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Clocked Hours</div>
           <div className="font-display text-3xl text-neon mt-1">{hours.toFixed(1)}</div>
           <div className="text-[10px] uppercase tracking-widest text-muted-foreground mt-1">
-            M–F 7.5 · Sat 6.5 · per log day
+            from time clock · lunch deducted
           </div>
         </div>
         <div>
@@ -1046,8 +1065,8 @@ function TakeHomeWidget({ userId, weeklyPay, hourlyRate, weekPoints }: {
           </div>
           {monthly && (
             <div className="mt-1 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-              Volume bonus (MTD) · <span className={Number(monthly.volume_bonus) > 0 ? "text-victory" : ""}>{formatUSD(Number(monthly.volume_bonus))}</span>
-              {" · "}{formatUSD(VOLUME_BONUS_STEP - (Number(monthly.sale_price_total) % VOLUME_BONUS_STEP))} to next $1,500
+              Volume bonus earned this month · <span className={Number(monthly.volume_bonus) > 0 ? "text-victory" : ""}>{formatUSD(Number(monthly.volume_bonus))}</span>
+              {" (paid next month) · "}{formatUSD(VOLUME_BONUS_STEP - (Number(monthly.sale_price_total) % VOLUME_BONUS_STEP))} to next $1,500
             </div>
           )}
         </div>

@@ -185,7 +185,7 @@ export function PayrollLedger() {
         const rank = pc?.rank ?? (profile as { current_rank?: string | null } | undefined)?.current_rank ?? "Jr. Silver";
         const payLock = (profile as { pay_lock_status?: string | null } | undefined)?.pay_lock_status ?? "active";
         const clocked = hoursByCanv.get(cid) ?? 0;
-        const hoursSource: "clocked" | "estimated" = clocked > 0 ? "clocked" : "estimated";
+        const hoursSource: "clocked" | "none" = clocked > 0 ? "clocked" : "none";
         const sitBonus = Number(pc?.sit_bonus ?? 0);
         const monster = Number(pc?.monster_bonus ?? 0);
         return {
@@ -295,7 +295,7 @@ export function PayrollLedger() {
             {format(weekStart, "MMM d")} → {format(weekEnd, "MMM d, yyyy")}
           </h2>
           <div className="text-xs text-muted-foreground mt-1">
-            Official pay engine · Hours: clocked, else est. 7.5/day Mon–Fri + 6.5 Sat from active days · Hourly tier by points · Commission by Sale Price · Sit & Monster bonuses included
+            Official pay engine · Hours: clocked time only (30-min lunch deducted per shift, no daily caps) — no clock-in, no base pay · Hourly tier by points · Commission by Sale Price · Sit & Monster bonuses included
           </div>
           {office !== "All" && (
             <div className="mt-3 text-[10px] font-display uppercase tracking-widest text-neon">
@@ -420,7 +420,7 @@ export function PayrollLedger() {
                     <td className="py-2.5 pr-3 text-right">
                       <div className="font-display text-neon">{r.hours.toFixed(2)}h</div>
                       <div className="text-[9px] text-muted-foreground">
-                        {r.hoursSource === "clocked" ? "clocked" : "est. from logs"}
+                        {r.hoursSource === "clocked" ? "clocked" : "no time clocked"}
                       </div>
                     </td>
                     <td className="py-2.5 pr-3 text-right font-display text-victory">
@@ -524,14 +524,17 @@ function MonthlyVolumeBonusPanel({ monthStart }: { monthStart: string }) {
 
   const totalBonus = rows.reduce((s, r) => s + r.bonus, 0);
   const monthLabel = format(new Date(`${monthStart}T00:00:00`), "MMMM yyyy");
+  const [mYear, mMonth] = monthStart.split("-").map(Number);
+  const payableLabel = format(new Date(mYear, mMonth, 1), "MMMM yyyy");
 
   return (
     <ArcadePanel
-      title={`Monthly Volume Bonus · ${monthLabel}`}
+      title={`Monthly Volume Bonus · Earned ${monthLabel} — payable ${payableLabel}`}
       action={<span className="font-display text-xs text-victory">TOTAL · ${totalBonus.toFixed(2)}</span>}
     >
       <div className="text-xs text-muted-foreground mb-3">
         $1,500 per full $100k of confirmed sale volume in the calendar month, per agent.
+        Bonuses are paid out the following month — this table is what goes on the {payableLabel} payroll.
       </div>
       {isLoading ? (
         <div className="text-sm text-muted-foreground">Loading volume bonuses…</div>

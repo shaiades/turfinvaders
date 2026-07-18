@@ -191,8 +191,10 @@ export function TimesheetEditor() {
         <div className="mt-3 flex items-start gap-2 text-[11px] text-muted-foreground border-l-2 border-warning/60 pl-2">
           <AlertTriangle className="w-3.5 h-3.5 mt-0.5 text-warning shrink-0" />
           <span>
-            Lunch deduction (30 min) and daily caps (7.5h M–F, 6.5h Sat) recalculate automatically on save.
-            Forgotten shifts auto-close at 6:00 PM weekdays / 5:00 PM Saturdays.
+            Lunch deduction (30 min per shift) recalculates automatically on save — clocked hours are
+            otherwise paid in full (no daily caps). Sunday entries always bill 0h (Sundays are unpaid).
+            Forgotten shifts auto-close at 6:00 PM weekdays / 5:00 PM Saturdays; review unusually long
+            spans before paying.
           </span>
         </div>
       </ArcadePanel>

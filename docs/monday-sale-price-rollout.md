@@ -144,6 +144,32 @@ enough may simply lose the Diamond rank (and with it the lock) before the
 pay-lock state machine matters. The state machine governs the window where
 the rank is still held.
 
+## Phase 6 — Pay rules correction (owner-confirmed 2026-07-18)
+
+Migration `20260718192842_*.sql` + app changes:
+
+1. **Clocked hours paid in full** — the 7.5/6.5 daily caps are gone (early
+   training time must be paid by law). A **30-minute lunch is deducted from
+   every closed shift** (the UI always said this; now the math does it).
+   Sundays remain unpaid; the pay week remains Mon–Sat. All existing closed
+   time entries were recomputed under the new rules.
+2. **No more estimated hours** — base pay comes only from clocked time.
+   Activity on a day no longer credits hours (leads can land on days the
+   canvasser didn't work). **No clock-in = no base pay**, including for
+   historical weeks (owner accepted past unclocked weeks showing $0 base).
+   Commission, sit bonuses, and monster bonuses are unaffected by hours.
+3. **Monthly volume bonus timing** — earned in month M, **paid in month
+   M+1**. The Payroll tab's panel and the canvasser dashboard line now say
+   so explicitly.
+
+**Cautions:**
+- Canvassers MUST clock in/out to earn base pay — communicate this before
+  deploy or paychecks will drop to commission+bonuses only.
+- With caps removed, a **forgotten clock-out** auto-closes at 6:00 PM
+  weekdays / 5:00 PM Saturdays and now pays the full span (9am→6pm = 9h −
+  0.5 lunch = 8.5h, where it used to cap at 7.5). Review the Timesheets tab
+  weekly for unusually long spans.
+
 ## Rollback
 
 - Revert the deploy commit (forward-only `git revert`, never rewrite history —
