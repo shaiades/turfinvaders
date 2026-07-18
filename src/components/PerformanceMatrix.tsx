@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel, StatCard, TeamBadge } from "@/components/arcade";
 import { RankPill } from "@/components/RankPill";
+import { payRateForPoints } from "@/lib/pay";
 
 type Row = {
   canvasser_id: string;
@@ -25,12 +26,6 @@ function weekRange() {
   saturday.setDate(monday.getDate() + 5);
   const iso = (d: Date) => d.toISOString().slice(0, 10);
   return { start: iso(monday), end: iso(saturday) };
-}
-
-function payRate(points: number) {
-  if (points >= 7) return 35;
-  if (points >= 3) return 30;
-  return 18;
 }
 
 type Totals = { bo: number; ol: number; rs: number; pm: number; sales: number; total: number; points: number };
@@ -112,7 +107,7 @@ export function PerformanceMatrix() {
           name: profile?.display_name ?? "Unknown",
           team,
           totals,
-          rate: payRate(totals.points),
+          rate: payRateForPoints(totals.points),
           rank,
         };
       })
