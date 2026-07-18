@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel } from "@/components/arcade";
 import { LiveFeed } from "@/components/LiveFeed";
-import turfInvadersHero from "@/assets/turf-invaders-hero.png.asset.json";
+const turfInvadersHero = { url: "/turf-invaders-hero.png" };
 
 type Props = {
   /** Restrict to a single van (Captain view). Omit for company-wide. */

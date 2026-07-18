@@ -3,7 +3,7 @@ import { useEffect, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth, setDevRoleOverride, type AppRole } from "@/hooks/useAuth";
 import { LogOut, Users, LayoutDashboard, Inbox, MapPin, FlaskConical, DollarSign, Zap, Trophy, Target } from "lucide-react";
-import turfInvadersWordmark from "@/assets/turf-invaders-wordmark.png.asset.json";
+const turfInvadersWordmark = { url: "/turf-invaders-wordmark.png" };
 
 type NavItem = {
   to: string;

@@ -3,7 +3,7 @@ import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { destinationByRole } from "@/lib/redirect-by-role";
 import { toast } from "sonner";
-import turfInvadersHero from "@/assets/turf-invaders-hero.png.asset.json";
+const turfInvadersHeroUrl = "/turf-invaders-hero.png";
 
 export const Route = createFileRoute("/auth")({
   head: () => ({ meta: [{ title: "Turf Invaders" }] }),
@@ -75,7 +75,7 @@ function AuthPage() {
       <div
         aria-hidden
         className="absolute inset-0 bg-cover bg-center opacity-30"
-        style={{ backgroundImage: `url(${turfInvadersHero.url})` }}
+        style={{ backgroundImage: `url(${turfInvadersHeroUrl})` }}
       />
       <div
         aria-hidden
@@ -84,7 +84,7 @@ function AuthPage() {
       <div className="w-full max-w-md relative">
         <Link to="/" className="flex items-center justify-center mb-6" aria-label="Turf Invaders">
           <img
-            src={turfInvadersHero.url}
+            src={turfInvadersHeroUrl}
             alt="Turf Invaders"
             style={{ maxWidth: 300 }}
             className="w-full h-auto object-contain drop-shadow-[0_0_28px_color-mix(in_oklab,var(--neon)_65%,transparent)]"
