@@ -59,10 +59,10 @@ gate "tables without RLS" "none" "$NO_RLS"
 SECDEF=$("${DEST[@]}" -Atc "SELECT count(*) FROM pg_proc p
   JOIN pg_namespace n ON n.oid=p.pronamespace
   WHERE n.nspname='public' AND p.prosecdef")
-gate "SECURITY DEFINER functions" "17" "$SECDEF"
+gate "SECURITY DEFINER functions" "18" "$SECDEF"
 
 CRON=$("${DEST[@]}" -Atc "SELECT COALESCE(string_agg(jobname || '[' || schedule || ':' || active || ']', ',' ORDER BY jobname), 'MISSING') FROM cron.job")
-gate "cron jobs" "auto-archive-agents-daily[0 8 * * *:t],time-entries-auto-clock-out[*/15 * * * *:t]" "$CRON"
+gate "cron jobs" "auto-archive-agents-daily[0 8 * * *:t],time-entries-auto-clock-out[*/15 * * * *:t],weekly-pay-lock-refresh[0 15 * * 1:t]" "$CRON"
 
 PUBTABLES=$("${DEST[@]}" -Atc "SELECT COALESCE(string_agg(tablename, ',' ORDER BY tablename), 'MISSING')
   FROM pg_publication_tables WHERE pubname='supabase_realtime'")
