@@ -161,6 +161,7 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
 /* ============ CAPTAIN ============ */
 function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visibility: boolean }) {
   const qc = useQueryClient();
+  const { user } = useAuth();
   const { data: leads } = useTodayLeads();
 
   const teamQuery = useQuery({
@@ -169,7 +170,7 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
     queryFn: async () => {
       const { data, error } = await supabase
         .from("teams")
-        .select("id, name, color")
+        .select("id, name, color, captain_id")
         .eq("id", teamId!)
         .maybeSingle();
       if (error) throw error;
@@ -177,10 +178,14 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
     },
   });
 
-  // Roster + week-to-date totals from real daily_logs/leads (captain RLS scopes
-  // both to the team this captain owns — same window CommandCenter shows below).
+  // daily_logs/leads RLS grants captains rows only for teams where they are the
+  // captain_id — which can diverge from profiles.team_id (e.g. a replaced captain
+  // still assigned to the van as a member). Only query when we're the real captain,
+  // and say so instead of rendering misleading zeros.
+  const isVanCaptain = !!user && teamQuery.data?.captain_id === user.id;
+
   const rosterQuery = useQuery({
-    enabled: !!teamId,
+    enabled: !!teamId && isVanCaptain,
     queryKey: ["captain_roster", teamId],
     queryFn: async () => {
       const monday = weekStartMonday();
@@ -328,7 +333,19 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
       </div>
 
       {teamId ? (
-        <CommandCenter teamId={teamId} />
+        isVanCaptain ? (
+          <CommandCenter teamId={teamId} />
+        ) : teamQuery.isSuccess ? (
+          <div className="arcade-card p-8 text-center">
+            <h2 className="font-display text-sm text-neon">MEMBER VIEW</h2>
+            <p className="mt-3 text-sm text-muted-foreground">
+              You're assigned to this van as a member — live team stats are visible to the van's
+              captain. Ask an Owner if you should be set as this van's captain.
+            </p>
+          </div>
+        ) : (
+          <div className="text-sm text-muted-foreground">Loading van…</div>
+        )
       ) : (
         <div className="arcade-card p-8 text-center">
           <h2 className="font-display text-sm text-neon">NO VAN ASSIGNED</h2>
@@ -338,37 +355,46 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
         </div>
       )}
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard
-          label="Team Revenue"
-          value={formatCurrency(totals.revenue)}
-          sublabel="Week to date"
-          accent="victory"
-        />
-        <StatCard
-          label="Doors"
-          value={totals.doors.toLocaleString()}
-          sublabel="Week to date"
-          accent="neon"
-        />
-        <StatCard
-          label="Sales"
-          value={totals.sales.toLocaleString()}
-          sublabel="Week to date"
-          accent="accent"
-        />
-        <StatCard label="Roster" value={totals.members} sublabel="Active members" accent="warning" />
-      </div>
+      {isVanCaptain && (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <StatCard
+              label="Team Revenue"
+              value={formatCurrency(totals.revenue)}
+              sublabel="Week to date"
+              accent="victory"
+            />
+            <StatCard
+              label="Doors"
+              value={totals.doors.toLocaleString()}
+              sublabel="Week to date"
+              accent="neon"
+            />
+            <StatCard
+              label="Sales"
+              value={totals.sales.toLocaleString()}
+              sublabel="Week to date"
+              accent="accent"
+            />
+            <StatCard
+              label="Roster"
+              value={totals.members}
+              sublabel="Active members"
+              accent="warning"
+            />
+          </div>
 
-      <ArcadePanel title="Team Roster">
-        {rosterQuery.isLoading && teamId ? (
-          <div className="text-sm text-muted-foreground">Loading roster…</div>
-        ) : members.length === 0 ? (
-          <div className="text-sm text-muted-foreground">No active members on this van yet.</div>
-        ) : (
-          <RosterTable members={members} />
-        )}
-      </ArcadePanel>
+          <ArcadePanel title="Team Roster">
+            {rosterQuery.isLoading ? (
+              <div className="text-sm text-muted-foreground">Loading roster…</div>
+            ) : members.length === 0 ? (
+              <div className="text-sm text-muted-foreground">No active members on this van yet.</div>
+            ) : (
+              <RosterTable members={members} />
+            )}
+          </ArcadePanel>
+        </>
+      )}
 
       {visibility ? (
         <ArcadePanel title="Other Vans">

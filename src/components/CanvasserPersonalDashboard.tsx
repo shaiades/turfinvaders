@@ -646,7 +646,9 @@ function PaycheckEngineWidget({
   const atTop = hourlyRate >= HOURLY_TOP;
   const nextTarget = points >= POINTS_TIER_MID ? POINTS_TIER_TOP : POINTS_TIER_MID;
   const nextRate = points >= POINTS_TIER_MID ? HOURLY_TOP : HOURLY_MID;
-  const pct = Math.min(1, points / nextTarget);
+  // Monotonic progress toward the top tier so the bar never shrinks as points grow.
+  const pct = Math.min(1, points / POINTS_TIER_TOP);
+  const commissionPct = Math.round(commissionRateForPoints(points) * 100);
   const accent = atTop ? "var(--victory)" : "var(--neon)";
   return (
     <ArcadePanel title="Paycheck Engine"
@@ -682,7 +684,10 @@ function PaycheckEngineWidget({
       <NeonBar pct={pct} accent={accent} />
       <div className="mt-3 grid sm:grid-cols-3 gap-2 text-[11px] text-muted-foreground border-t border-border pt-3">
         <div>Base · <span className="text-foreground">{formatUSD(base)}</span></div>
-        <div>Commission (1% of {formatUSD(revenue)}) · <span className="text-victory">{formatUSD(commission)}</span></div>
+        <div>
+          Commission ({commissionPct}% of {formatUSD(revenue)}) ·{" "}
+          <span className="text-victory">{formatUSD(commission)}</span>
+        </div>
         <div className="sm:text-right">Total · <span className="font-display text-victory">{formatUSD(base + commission)}</span></div>
       </div>
     </ArcadePanel>
