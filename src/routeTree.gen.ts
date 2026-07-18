@@ -15,6 +15,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedUsersRouteImport } from './routes/_authenticated/users'
 import { Route as AuthenticatedTerritoriesRouteImport } from './routes/_authenticated/territories'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
+import { Route as AuthenticatedPlaybookRouteImport } from './routes/_authenticated/playbook'
 import { Route as AuthenticatedPayrollRouteImport } from './routes/_authenticated/payroll'
 import { Route as AuthenticatedMyTerritoryRouteImport } from './routes/_authenticated/my-territory'
 import { Route as AuthenticatedLogRouteImport } from './routes/_authenticated/log'
@@ -62,6 +63,11 @@ const AuthenticatedTerritoriesRoute =
 const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedPlaybookRoute = AuthenticatedPlaybookRouteImport.update({
+  id: '/playbook',
+  path: '/playbook',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedPayrollRoute = AuthenticatedPayrollRouteImport.update({
@@ -177,6 +183,7 @@ export interface FileRoutesByFullPath {
   '/log': typeof AuthenticatedLogRoute
   '/my-territory': typeof AuthenticatedMyTerritoryRoute
   '/payroll': typeof AuthenticatedPayrollRoute
+  '/playbook': typeof AuthenticatedPlaybookRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/territories': typeof AuthenticatedTerritoriesRoute
   '/users': typeof AuthenticatedUsersRoute
@@ -202,6 +209,7 @@ export interface FileRoutesByTo {
   '/log': typeof AuthenticatedLogRoute
   '/my-territory': typeof AuthenticatedMyTerritoryRoute
   '/payroll': typeof AuthenticatedPayrollRoute
+  '/playbook': typeof AuthenticatedPlaybookRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/territories': typeof AuthenticatedTerritoriesRoute
   '/users': typeof AuthenticatedUsersRoute
@@ -229,6 +237,7 @@ export interface FileRoutesById {
   '/_authenticated/log': typeof AuthenticatedLogRoute
   '/_authenticated/my-territory': typeof AuthenticatedMyTerritoryRoute
   '/_authenticated/payroll': typeof AuthenticatedPayrollRoute
+  '/_authenticated/playbook': typeof AuthenticatedPlaybookRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/territories': typeof AuthenticatedTerritoriesRoute
   '/_authenticated/users': typeof AuthenticatedUsersRoute
@@ -256,6 +265,7 @@ export interface FileRouteTypes {
     | '/log'
     | '/my-territory'
     | '/payroll'
+    | '/playbook'
     | '/settings'
     | '/territories'
     | '/users'
@@ -281,6 +291,7 @@ export interface FileRouteTypes {
     | '/log'
     | '/my-territory'
     | '/payroll'
+    | '/playbook'
     | '/settings'
     | '/territories'
     | '/users'
@@ -307,6 +318,7 @@ export interface FileRouteTypes {
     | '/_authenticated/log'
     | '/_authenticated/my-territory'
     | '/_authenticated/payroll'
+    | '/_authenticated/playbook'
     | '/_authenticated/settings'
     | '/_authenticated/territories'
     | '/_authenticated/users'
@@ -368,6 +380,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof AuthenticatedSettingsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/playbook': {
+      id: '/_authenticated/playbook'
+      path: '/playbook'
+      fullPath: '/playbook'
+      preLoaderRoute: typeof AuthenticatedPlaybookRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/payroll': {
@@ -527,6 +546,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedLogRoute: typeof AuthenticatedLogRoute
   AuthenticatedMyTerritoryRoute: typeof AuthenticatedMyTerritoryRoute
   AuthenticatedPayrollRoute: typeof AuthenticatedPayrollRoute
+  AuthenticatedPlaybookRoute: typeof AuthenticatedPlaybookRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
   AuthenticatedTerritoriesRoute: typeof AuthenticatedTerritoriesRoute
   AuthenticatedUsersRoute: typeof AuthenticatedUsersRoute
@@ -548,6 +568,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedLogRoute: AuthenticatedLogRoute,
   AuthenticatedMyTerritoryRoute: AuthenticatedMyTerritoryRoute,
   AuthenticatedPayrollRoute: AuthenticatedPayrollRoute,
+  AuthenticatedPlaybookRoute: AuthenticatedPlaybookRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
   AuthenticatedTerritoriesRoute: AuthenticatedTerritoriesRoute,
   AuthenticatedUsersRoute: AuthenticatedUsersRoute,
@@ -570,13 +591,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
