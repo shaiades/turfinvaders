@@ -11,6 +11,16 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { DoorOpen, CalendarClock, CalendarDays, PhoneCall, DollarSign, Target, Gauge, Trophy, Sparkles, Pencil, Check, X, Crosshair, Zap, Users, Swords, Flame } from "lucide-react";
+import {
+  payRateForPoints,
+  commissionRateForPoints,
+  hoursForLogDate,
+  COMMISSION_BASE,
+  POINTS_TIER_MID,
+  POINTS_TIER_TOP,
+  HOURLY_MID,
+  HOURLY_TOP,
+} from "@/lib/pay";
 
 /**
  * Paycheck engine — automated.
@@ -21,23 +31,11 @@ import { DoorOpen, CalendarClock, CalendarDays, PhoneCall, DollarSign, Target, G
  * Weekly Points (Sits): pitch-miss sit = 1 pt, sale = 2 pts.
  *   → weekPoints = demos_sits + sales
  *
- * Hourly threshold (end-of-week rule):
- *   < 3 pts  → $18/hr  base + 1% commission
- *   ≥ 3 pts  → $30/hr  base + 1% commission
+ * Hourly threshold (end-of-week rule, from @/lib/pay which mirrors calc_weekly_paycheck):
+ *   < 3 pts  → $18/hr + 1% commission
+ *   ≥ 3 pts  → $30/hr + 1% commission
+ *   ≥ 7 pts  → $35/hr + 2% commission
  */
-const COMMISSION_RATE = 0.01;
-const POINTS_THRESHOLD = 3;
-const HOURLY_LOW = 18;
-const HOURLY_HIGH = 30;
-
-function hoursForDate(iso: string): number {
-  // JS: 0=Sun, 1=Mon, …, 6=Sat. Use UTC to match log_date (DATE type)
-  const d = new Date(iso + "T00:00:00Z");
-  const dow = d.getUTCDay();
-  if (dow === 0) return 0;          // Sun
-  if (dow === 6) return 6.5;        // Sat
-  return 7.5;                       // Mon–Fri
-}
 
 /** Fallback monthly financial goal default (USD) until canvasser sets their own. */
 const DEFAULT_MONTHLY_GOAL = 10_000;
@@ -207,11 +205,12 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
 
     const weekPoints = week.demos_sits + week.sales;
     const weekDates = new Set(allRows.filter((r) => r.log_date >= w).map((r) => r.log_date));
-    const weekHours = Array.from(weekDates).reduce((sum, d) => sum + hoursForDate(d), 0);
-    const hourlyRate = weekPoints >= POINTS_THRESHOLD ? HOURLY_HIGH : HOURLY_LOW;
+    const weekHours = Array.from(weekDates).reduce((sum, d) => sum + hoursForLogDate(d), 0);
+    const hourlyRate = payRateForPoints(weekPoints);
     const weekBase = weekHours * hourlyRate;
-    const weekCommission = weekRevenue * COMMISSION_RATE;
-    const monthCommission = monthRevenue * COMMISSION_RATE;
+    const weekCommission = weekRevenue * commissionRateForPoints(weekPoints);
+    // Month-level projection uses the base rate — the real per-week rate comes from the RPC.
+    const monthCommission = monthRevenue * COMMISSION_BASE;
 
     // ===== Funnel math (reverse engineering) =====
     // Personal conversion rates from last 60 days of logs (full sample).
@@ -234,7 +233,8 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
     const talkDoorRate = src.doors > 0 && usePersonal
       ? (personalAgg.people_talked_to / personalAgg.doors_knocked)
       : 0.27; // industry-typical fallback ~27%
-    const avgCommissionPerSale = src.avgSale * COMMISSION_RATE;
+    // Projections deliberately use the base 1% rate (conservative estimate).
+    const avgCommissionPerSale = src.avgSale * COMMISSION_BASE;
 
     const funnel = {
       usePersonal,
@@ -333,7 +333,7 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
     const doorsPerDay = workdaysLeft > 0 ? doorsRemaining / workdaysLeft : doorsRemaining;
     const talksPerDay = workdaysLeft > 0 ? talksRemaining / workdaysLeft : talksRemaining;
 
-    const targetValuePerDoor = requiredDoors > 0 ? monthlyGoal * COMMISSION_RATE / requiredDoors : 0;
+    const targetValuePerDoor = requiredDoors > 0 ? (monthlyGoal * COMMISSION_BASE) / requiredDoors : 0;
 
     return {
       ready: true,
@@ -643,8 +643,10 @@ function RankProgress({
 function PaycheckEngineWidget({
   points, hours, hourlyRate, base, commission, revenue,
 }: { points: number; hours: number; hourlyRate: number; base: number; commission: number; revenue: number }) {
-  const atTop = hourlyRate >= HOURLY_HIGH;
-  const pct = Math.min(1, points / POINTS_THRESHOLD);
+  const atTop = hourlyRate >= HOURLY_TOP;
+  const nextTarget = points >= POINTS_TIER_MID ? POINTS_TIER_TOP : POINTS_TIER_MID;
+  const nextRate = points >= POINTS_TIER_MID ? HOURLY_TOP : HOURLY_MID;
+  const pct = Math.min(1, points / nextTarget);
   const accent = atTop ? "var(--victory)" : "var(--neon)";
   return (
     <ArcadePanel title="Paycheck Engine"
@@ -657,7 +659,9 @@ function PaycheckEngineWidget({
             ${hourlyRate}/hr
           </div>
           <div className="text-[10px] uppercase tracking-widest text-muted-foreground mt-1">
-            {atTop ? "🔥 $30 tier unlocked" : `${Math.max(0, POINTS_THRESHOLD - points)} pt(s) to $30/hr`}
+            {atTop
+              ? `🔥 $${HOURLY_TOP} tier unlocked`
+              : `${Math.max(0, nextTarget - points)} pt(s) to $${nextRate}/hr`}
           </div>
         </div>
         <div>

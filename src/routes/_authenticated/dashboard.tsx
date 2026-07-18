@@ -19,7 +19,11 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { CanvasserPersonalDashboard } from "@/components/CanvasserPersonalDashboard";
-import { SuspendedBadge, useCanvasserStatuses } from "@/components/SuspendedBadge";
+import {
+  SuspendedBadge,
+  useCanvasserStatuses,
+  isSuspendedStatus,
+} from "@/components/SuspendedBadge";
 import { useTodayLeads } from "@/hooks/useTodayLeads";
 import { formatCurrency } from "@/lib/utils";
 import { weekStartMonday, toISODate } from "@/lib/dates";
@@ -485,7 +489,7 @@ function RosterTable({ members }: { members: RosterRow[] }) {
         </thead>
         <tbody>
           {members.map((m, i) => {
-            const suspended = statuses?.[m.id] === "suspended";
+            const suspended = isSuspendedStatus(statuses?.[m.id]);
             return (
               <tr key={m.id} className="border-b border-border/40 hover:bg-surface-elevated">
                 <td className="py-2.5 font-display text-xs text-muted-foreground">{String(i + 1).padStart(2, "0")}</td>

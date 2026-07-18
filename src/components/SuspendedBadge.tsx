@@ -2,7 +2,12 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AlertTriangle } from "lucide-react";
 
-export type StatusMap = Record<string, "active" | "suspended" | "inactive">;
+export type StatusMap = Record<string, "active" | "suspended" | "suspension_review" | "inactive">;
+
+/** True for both suspension statuses the DB has used over time. */
+export function isSuspendedStatus(status: string | null | undefined): boolean {
+  return status === "suspended" || status === "suspension_review";
+}
 
 export function useCanvasserStatuses() {
   return useQuery({

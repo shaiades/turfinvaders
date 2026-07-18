@@ -6,6 +6,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { ArcadePanel, StatCard } from "@/components/arcade";
 import { NeonMap, type FieldPin, type Territory, type LatLng } from "@/components/NeonMap";
 import { Home, MessageSquare, Sparkles, DollarSign, AlertTriangle, ArrowLeft } from "lucide-react";
+import { commissionRateForPoints } from "@/lib/pay";
 
 export const Route = createFileRoute("/_authenticated/canvassers/$canvasserId/field")({
   head: () => ({ meta: [{ title: "Field Activity — Knockout" }] }),
@@ -82,7 +83,7 @@ function FieldActivityPage() {
       return rows.reduce((a, r) => a + (r.demos_sits ?? 0) + (r.sales ?? 0), 0);
     },
   });
-  const commissionRate = (pointsQuery.data ?? 0) >= 7 ? 0.02 : 0.01;
+  const commissionRate = commissionRateForPoints(pointsQuery.data ?? 0);
 
   const pins = pinsQuery.data ?? [];
   const sales = salesQuery.data ?? [];
