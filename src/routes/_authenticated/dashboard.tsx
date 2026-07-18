@@ -21,7 +21,8 @@ import { Button } from "@/components/ui/button";
 import { CanvasserPersonalDashboard } from "@/components/CanvasserPersonalDashboard";
 import { SuspendedBadge, useCanvasserStatuses } from "@/components/SuspendedBadge";
 import { useTodayLeads } from "@/hooks/useTodayLeads";
-import { DEMO_TEAMS, demoCanvassers, teamTotals, formatCurrency } from "@/lib/demo-data";
+import { DEMO_TEAMS, demoCanvassers, teamTotals } from "@/lib/demo-data";
+import { formatCurrency } from "@/lib/utils";
 import { Zap, DoorOpen, Truck, FileSpreadsheet } from "lucide-react";
 
 type OwnerTab = "dispatch" | "executive" | "fleet" | "timesheets" | "payroll" | "settings";
@@ -279,7 +280,16 @@ function Mini({ label, value }: { label: string; value: string }) {
   );
 }
 
-function RosterTable({ members }: { members: ReturnType<typeof demoCanvassers> }) {
+type RosterRow = {
+  id: string;
+  name: string;
+  level: number;
+  doorsKnocked: number;
+  salesClosed: number;
+  revenueGenerated: number;
+};
+
+function RosterTable({ members }: { members: RosterRow[] }) {
   const { data: statuses } = useCanvasserStatuses();
   return (
     <div className="overflow-x-auto">

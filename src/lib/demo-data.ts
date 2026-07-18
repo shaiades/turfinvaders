@@ -52,7 +52,3 @@ export function teamTotals(teamId: string) {
     { doors: 0, contacts: 0, sales: 0, revenue: 0, members: 0 },
   );
 }
-
-export function formatCurrency(n: number) {
-  return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
-}

@@ -1,5 +1,6 @@
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
-import { DEMO_TEAMS, demoCanvassers, formatCurrency } from "@/lib/demo-data";
+import { DEMO_TEAMS, demoCanvassers } from "@/lib/demo-data";
+import { formatCurrency } from "@/lib/utils";
 import { StatCard, ArcadePanel, TeamBadge } from "@/components/arcade";
 import { useAuth } from "@/hooks/useAuth";
 import { useQuery } from "@tanstack/react-query";
