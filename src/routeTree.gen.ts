@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthCallbackRouteImport } from './routes/auth_.callback'
 import { Route as AuthenticatedUsersRouteImport } from './routes/_authenticated/users'
 import { Route as AuthenticatedTerritoriesRouteImport } from './routes/_authenticated/territories'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
@@ -47,6 +48,11 @@ const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthCallbackRoute = AuthCallbackRouteImport.update({
+  id: '/auth_/callback',
+  path: '/auth/callback',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedUsersRoute = AuthenticatedUsersRouteImport.update({
@@ -187,6 +193,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AuthenticatedSettingsRoute
   '/territories': typeof AuthenticatedTerritoriesRoute
   '/users': typeof AuthenticatedUsersRoute
+  '/auth/callback': typeof AuthCallbackRoute
   '/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRouteWithChildren
   '/teams/$teamId': typeof AuthenticatedTeamsTeamIdRoute
   '/api/public/monday-live-dispatch': typeof ApiPublicMondayLiveDispatchRoute
@@ -213,6 +220,7 @@ export interface FileRoutesByTo {
   '/settings': typeof AuthenticatedSettingsRoute
   '/territories': typeof AuthenticatedTerritoriesRoute
   '/users': typeof AuthenticatedUsersRoute
+  '/auth/callback': typeof AuthCallbackRoute
   '/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRouteWithChildren
   '/teams/$teamId': typeof AuthenticatedTeamsTeamIdRoute
   '/api/public/monday-live-dispatch': typeof ApiPublicMondayLiveDispatchRoute
@@ -241,6 +249,7 @@ export interface FileRoutesById {
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/territories': typeof AuthenticatedTerritoriesRoute
   '/_authenticated/users': typeof AuthenticatedUsersRoute
+  '/auth_/callback': typeof AuthCallbackRoute
   '/_authenticated/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRouteWithChildren
   '/_authenticated/teams/$teamId': typeof AuthenticatedTeamsTeamIdRoute
   '/api/public/monday-live-dispatch': typeof ApiPublicMondayLiveDispatchRoute
@@ -269,6 +278,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/territories'
     | '/users'
+    | '/auth/callback'
     | '/canvassers/$canvasserId'
     | '/teams/$teamId'
     | '/api/public/monday-live-dispatch'
@@ -295,6 +305,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/territories'
     | '/users'
+    | '/auth/callback'
     | '/canvassers/$canvasserId'
     | '/teams/$teamId'
     | '/api/public/monday-live-dispatch'
@@ -322,6 +333,7 @@ export interface FileRouteTypes {
     | '/_authenticated/settings'
     | '/_authenticated/territories'
     | '/_authenticated/users'
+    | '/auth_/callback'
     | '/_authenticated/canvassers/$canvasserId'
     | '/_authenticated/teams/$teamId'
     | '/api/public/monday-live-dispatch'
@@ -334,6 +346,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  AuthCallbackRoute: typeof AuthCallbackRoute
   ApiPublicMondayLiveDispatchRoute: typeof ApiPublicMondayLiveDispatchRoute
   ApiPublicMondayWebhookRoute: typeof ApiPublicMondayWebhookRoute
 }
@@ -359,6 +372,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth_/callback': {
+      id: '/auth_/callback'
+      path: '/auth/callback'
+      fullPath: '/auth/callback'
+      preLoaderRoute: typeof AuthCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/users': {
@@ -585,6 +605,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  AuthCallbackRoute: AuthCallbackRoute,
   ApiPublicMondayLiveDispatchRoute: ApiPublicMondayLiveDispatchRoute,
   ApiPublicMondayWebhookRoute: ApiPublicMondayWebhookRoute,
 }

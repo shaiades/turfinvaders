@@ -16,6 +16,12 @@ dist-ssr
 .nitro
 *.local
 
+# Local env files (use .env.example as the template)
+.env
+
+# Vercel
+.vercel
+
 # Wrangler / Cloudflare
 .wrangler/
 .dev.vars
