@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useAuth } from "@/hooks/useAuth";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { StatCard, ArcadePanel, TeamBadge } from "@/components/arcade";
 import { LiveLeadCounter } from "@/components/LiveLeadCounter";
@@ -21,8 +21,8 @@ import { Button } from "@/components/ui/button";
 import { CanvasserPersonalDashboard } from "@/components/CanvasserPersonalDashboard";
 import { SuspendedBadge, useCanvasserStatuses } from "@/components/SuspendedBadge";
 import { useTodayLeads } from "@/hooks/useTodayLeads";
-import { DEMO_TEAMS, demoCanvassers, teamTotals } from "@/lib/demo-data";
 import { formatCurrency } from "@/lib/utils";
+import { weekStartMonday, toISODate } from "@/lib/dates";
 import { Zap, DoorOpen, Truck, FileSpreadsheet } from "lucide-react";
 
 type OwnerTab = "dispatch" | "executive" | "fleet" | "timesheets" | "payroll" | "settings";
@@ -156,12 +156,142 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
 }
 /* ============ CAPTAIN ============ */
 function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visibility: boolean }) {
-  const PLACEHOLDER_TEAM = { id: "", name: "Unassigned", color: "#10b981", captain: "" };
-  const myTeamId = teamId ?? DEMO_TEAMS[0]?.id ?? "";
-  const myTeam = DEMO_TEAMS.find((t) => t.id === myTeamId) ?? DEMO_TEAMS[0] ?? PLACEHOLDER_TEAM;
-  const members = demoCanvassers().filter((c) => c.teamId === myTeam.id).sort((a, b) => b.revenueGenerated - a.revenueGenerated);
-  const totals = teamTotals(myTeam.id);
+  const qc = useQueryClient();
   const { data: leads } = useTodayLeads();
+
+  const teamQuery = useQuery({
+    enabled: !!teamId,
+    queryKey: ["captain_team", teamId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("teams")
+        .select("id, name, color")
+        .eq("id", teamId!)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  // Roster + week-to-date totals from real daily_logs/leads (captain RLS scopes
+  // both to the team this captain owns — same window CommandCenter shows below).
+  const rosterQuery = useQuery({
+    enabled: !!teamId,
+    queryKey: ["captain_roster", teamId],
+    queryFn: async () => {
+      const monday = weekStartMonday();
+      const since = toISODate(monday);
+      const [profilesRes, logsRes, salesRes] = await Promise.all([
+        supabase
+          .from("profiles")
+          .select("id, display_name, level, is_active")
+          .eq("team_id", teamId!),
+        supabase
+          .from("daily_logs")
+          .select("canvasser_id, doors_knocked, sales")
+          .eq("team_id", teamId!)
+          .gte("log_date", since),
+        supabase
+          .from("leads")
+          .select("canvasser_id, sale_amount")
+          .eq("team_id", teamId!)
+          .eq("status", "confirmed")
+          .eq("is_sale", true)
+          .gte("created_at", monday.toISOString()),
+      ]);
+      if (profilesRes.error) throw profilesRes.error;
+      if (logsRes.error) throw logsRes.error;
+      if (salesRes.error) throw salesRes.error;
+
+      const byId = new Map<string, RosterRow>();
+      for (const p of profilesRes.data ?? []) {
+        if (p.is_active === false) continue;
+        byId.set(p.id, {
+          id: p.id,
+          name: p.display_name ?? "Player",
+          level: p.level ?? 1,
+          doorsKnocked: 0,
+          salesClosed: 0,
+          revenueGenerated: 0,
+        });
+      }
+      for (const l of logsRes.data ?? []) {
+        const m = byId.get(l.canvasser_id);
+        if (!m) continue;
+        m.doorsKnocked += l.doors_knocked ?? 0;
+        m.salesClosed += l.sales ?? 0;
+      }
+      for (const s of salesRes.data ?? []) {
+        const m = s.canvasser_id ? byId.get(s.canvasser_id) : undefined;
+        if (!m) continue;
+        m.revenueGenerated += Number(s.sale_amount ?? 0);
+      }
+      const members = [...byId.values()].sort((a, b) => b.revenueGenerated - a.revenueGenerated);
+      const totals = members.reduce(
+        (acc, m) => ({
+          doors: acc.doors + m.doorsKnocked,
+          sales: acc.sales + m.salesClosed,
+          revenue: acc.revenue + m.revenueGenerated,
+          members: acc.members + 1,
+        }),
+        { doors: 0, sales: 0, revenue: 0, members: 0 },
+      );
+      return { members, totals };
+    },
+  });
+
+  // Cross-van cards read daily_metrics (the leaderboard pipeline) because
+  // captains cannot read other teams' daily_logs/leads under RLS by design.
+  const otherVansQuery = useQuery({
+    enabled: visibility,
+    queryKey: ["captain_other_vans"],
+    queryFn: async () => {
+      const since = toISODate(weekStartMonday());
+      const [teamsRes, profilesRes, metricsRes] = await Promise.all([
+        supabase.from("teams").select("id, name, color"),
+        supabase.from("profiles").select("id, team_id"),
+        supabase
+          .from("daily_metrics")
+          .select("canvasser_id, leads_submitted, leads_confirmed, sales")
+          .gte("metric_date", since),
+      ]);
+      if (teamsRes.error) throw teamsRes.error;
+      if (profilesRes.error) throw profilesRes.error;
+      if (metricsRes.error) throw metricsRes.error;
+
+      const teamByCanvasser = new Map((profilesRes.data ?? []).map((p) => [p.id, p.team_id]));
+      const perTeam = new Map<string, { submits: number; confirmed: number; sales: number }>();
+      for (const m of metricsRes.data ?? []) {
+        const tid = teamByCanvasser.get(m.canvasser_id);
+        if (!tid) continue;
+        const t = perTeam.get(tid) ?? { submits: 0, confirmed: 0, sales: 0 };
+        t.submits += m.leads_submitted ?? 0;
+        t.confirmed += m.leads_confirmed ?? 0;
+        t.sales += m.sales ?? 0;
+        perTeam.set(tid, t);
+      }
+      return { teams: teamsRes.data ?? [], perTeam };
+    },
+  });
+
+  // Live: refresh the roster/totals as team logs land (same pattern as
+  // ExecutiveDashboard's 'live-daily-action' channel).
+  useEffect(() => {
+    if (!teamId) return;
+    const ch = supabase
+      .channel("captain-dashboard-live")
+      .on("postgres_changes", { event: "*", schema: "public", table: "daily_logs" }, () => {
+        qc.invalidateQueries({ queryKey: ["captain_roster", teamId] });
+      })
+      .subscribe();
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, [teamId, qc]);
+
+  const myTeam = teamQuery.data ?? { id: teamId ?? "", name: "Unassigned", color: "#10b981" };
+  const members = rosterQuery.data?.members ?? [];
+  const totals = rosterQuery.data?.totals ?? { doors: 0, sales: 0, revenue: 0, members: 0 };
 
   return (
     <div className="space-y-8">
@@ -193,38 +323,74 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
         <LiveLeadCounter value={leads.byTeam[myTeam.id] ?? 0} size="md" accent="victory" />
       </div>
 
-      <CommandCenter teamId={myTeam.id} />
+      {teamId ? (
+        <CommandCenter teamId={teamId} />
+      ) : (
+        <div className="arcade-card p-8 text-center">
+          <h2 className="font-display text-sm text-neon">NO VAN ASSIGNED</h2>
+          <p className="mt-3 text-sm text-muted-foreground">
+            You are not assigned to a van yet. Ask an Owner to add you to a team to see your roster and stats.
+          </p>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard label="Team Revenue" value={formatCurrency(totals.revenue)} accent="victory" />
-        <StatCard label="Doors" value={totals.doors.toLocaleString()} accent="neon" />
-        <StatCard label="Sales" value={totals.sales.toLocaleString()} accent="accent" />
-        <StatCard label="Roster" value={totals.members} accent="warning" />
+        <StatCard
+          label="Team Revenue"
+          value={formatCurrency(totals.revenue)}
+          sublabel="Week to date"
+          accent="victory"
+        />
+        <StatCard
+          label="Doors"
+          value={totals.doors.toLocaleString()}
+          sublabel="Week to date"
+          accent="neon"
+        />
+        <StatCard
+          label="Sales"
+          value={totals.sales.toLocaleString()}
+          sublabel="Week to date"
+          accent="accent"
+        />
+        <StatCard label="Roster" value={totals.members} sublabel="Active members" accent="warning" />
       </div>
 
       <ArcadePanel title="Team Roster">
-        <RosterTable members={members} />
+        {rosterQuery.isLoading && teamId ? (
+          <div className="text-sm text-muted-foreground">Loading roster…</div>
+        ) : members.length === 0 ? (
+          <div className="text-sm text-muted-foreground">No active members on this van yet.</div>
+        ) : (
+          <RosterTable members={members} />
+        )}
       </ArcadePanel>
 
       {visibility ? (
         <ArcadePanel title="Other Vans">
           <div className="grid sm:grid-cols-2 gap-4">
-            {DEMO_TEAMS.filter((t) => t.id !== myTeam.id).map((t) => {
-              const tt = teamTotals(t.id);
-              return (
-                <Link key={t.id} to="/teams/$teamId" params={{ teamId: t.id }} className="arcade-card p-4 hover:arcade-card-glow">
-                  <div className="flex items-center justify-between mb-3">
-                    <TeamBadge name={t.name} color={t.color} />
-                    <LiveLeadCounter value={leads.byTeam[t.id] ?? 0} size="sm" label="LEADS" />
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    <Mini label="Doors" value={tt.doors.toLocaleString()} />
-                    <Mini label="Sales" value={tt.sales.toLocaleString()} />
-                    <Mini label="Rev" value={formatCurrency(tt.revenue)} />
-                  </div>
-                </Link>
-              );
-            })}
+            {(otherVansQuery.data?.teams ?? [])
+              .filter((t) => t.id !== teamId)
+              .map((t) => {
+                const tt = otherVansQuery.data?.perTeam.get(t.id) ?? {
+                  submits: 0,
+                  confirmed: 0,
+                  sales: 0,
+                };
+                return (
+                  <Link key={t.id} to="/teams/$teamId" params={{ teamId: t.id }} className="arcade-card p-4 hover:arcade-card-glow">
+                    <div className="flex items-center justify-between mb-3">
+                      <TeamBadge name={t.name} color={t.color ?? "#10b981"} />
+                      <LiveLeadCounter value={leads.byTeam[t.id] ?? 0} size="sm" label="LEADS" />
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <Mini label="Submits" value={tt.submits.toLocaleString()} />
+                      <Mini label="Confirmed" value={tt.confirmed.toLocaleString()} />
+                      <Mini label="Sales" value={tt.sales.toLocaleString()} />
+                    </div>
+                  </Link>
+                );
+              })}
           </div>
         </ArcadePanel>
       ) : (
@@ -238,7 +404,20 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
 
 /* ============ CANVASSER ============ */
 function CanvasserDashboard({ displayName, teamId, userId, visibility: _v }: { displayName: string | null; teamId: string | null; userId?: string; visibility: boolean }) {
-  const myTeam = DEMO_TEAMS.find((t) => t.id === teamId) ?? DEMO_TEAMS[0] ?? { id: "", name: "Unassigned", color: "#10b981", captain: "" };
+  const teamQuery = useQuery({
+    enabled: !!teamId,
+    queryKey: ["canvasser_team", teamId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("teams")
+        .select("id, name, color")
+        .eq("id", teamId!)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+  });
+  const myTeam = teamQuery.data ?? { id: "", name: "Unassigned", color: "#10b981" };
 
   return (
     <div className="space-y-6">
