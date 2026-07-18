@@ -3,6 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { CalendarIcon, Download } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { getWeeklyPaychecks, type PaycheckResult } from "@/lib/fleet.functions";
+import { sitBonusPerForRank } from "@/lib/pay";
 import { ArcadePanel, TeamBadge } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -21,14 +23,6 @@ type LogRow = {
   sales: number;
 };
 
-type LeadRow = {
-  canvasser_id: string;
-  sale_amount: number | null;
-  status: string;
-  reviewed_at: string | null;
-  created_at: string;
-};
-
 function weekStartOf(d: Date) {
   const x = new Date(d);
   x.setHours(0, 0, 0, 0);
@@ -41,18 +35,6 @@ function weekStartOf(d: Date) {
 function iso(d: Date) {
   return d.toISOString().slice(0, 10);
 }
-
-function payRate(points: number) {
-  if (points >= 7) return 35;
-  if (points >= 3) return 30;
-  return 18;
-}
-
-function commissionRate(points: number) {
-  return points >= 7 ? 0.02 : 0.01;
-}
-
-const ASSUMED_HOURS = 37.5;
 
 type Agg = {
   bo: number;
@@ -92,18 +74,24 @@ export function PayrollLedger() {
   const { data, isLoading } = useQuery({
     queryKey: ["payroll-ledger", startStr, endStr],
     queryFn: async () => {
+      const windowStart = `${startStr}T00:00:00Z`;
+      const windowEnd = `${endStr}T23:59:59Z`;
       const [logsRes, leadsRes, profilesRes, teamsRes, timeRes] = await Promise.all([
         supabase
           .from("daily_logs")
           .select("canvasser_id, team_id, no_demo, one_legs, future_leads, demos_sits, sales, log_date")
           .gte("log_date", startStr)
           .lte("log_date", endStr),
+        // Only used to include sale-only canvassers in the roster; amounts come
+        // from the pay engine. Windowed on both dates to match its
+        // COALESCE(reviewed_at, created_at) week attribution.
         supabase
           .from("leads")
-          .select("canvasser_id, sale_amount, status, reviewed_at, created_at")
+          .select("canvasser_id")
           .eq("status", "confirmed")
-          .gte("created_at", `${startStr}T00:00:00Z`)
-          .lte("created_at", `${endStr}T23:59:59Z`),
+          .or(
+            `and(created_at.gte.${windowStart},created_at.lte.${windowEnd}),and(reviewed_at.gte.${windowStart},reviewed_at.lte.${windowEnd})`,
+          ),
         supabase.from("profiles").select("id, display_name, team_id, current_rank, office_location"),
         supabase.from("teams").select("id, name, color"),
         supabase
@@ -118,12 +106,34 @@ export function PayrollLedger() {
       if (profilesRes.error) throw profilesRes.error;
       if (teamsRes.error) throw teamsRes.error;
       if (timeRes.error) throw timeRes.error;
+
+      const logs = (logsRes.data ?? []) as LogRow[];
+      const timeEntries = (timeRes.data ?? []) as { user_id: string; billable_hours: number }[];
+      const canvasserIds = Array.from(
+        new Set([
+          ...logs.map((r) => r.canvasser_id),
+          ...(leadsRes.data ?? []).map((l) => l.canvasser_id),
+          ...timeEntries.map((t) => t.user_id),
+        ]),
+      );
+
+      // The authoritative pay engine — batched calls, chunked under the
+      // server fn's 300-id input cap so a large roster can never fail whole.
+      const paychecks: PaycheckResult[] = [];
+      for (let i = 0; i < canvasserIds.length; i += 300) {
+        const chunk = canvasserIds.slice(i, i + 300);
+        const { results } = await getWeeklyPaychecks({
+          data: { week_start: startStr, canvasser_ids: chunk },
+        });
+        paychecks.push(...results);
+      }
+
       return {
-        logs: (logsRes.data ?? []) as LogRow[],
-        leads: (leadsRes.data ?? []) as LeadRow[],
+        logs,
+        paychecks,
         profiles: profilesRes.data ?? [],
         teams: teamsRes.data ?? [],
-        timeEntries: (timeRes.data ?? []) as { user_id: string; billable_hours: number }[],
+        timeEntries,
       };
     },
   });
@@ -134,6 +144,8 @@ export function PayrollLedger() {
     const teamById = new Map(data.teams.map((t) => [t.id, t]));
     const aggByCanv = new Map<string, Agg>();
 
+    // Outcome breakdown (BO/OL/RS/Sit/Sale) comes from daily_logs; all pay
+    // figures come from the calc_weekly_paycheck engine below.
     for (const r of data.logs) {
       const a = aggByCanv.get(r.canvasser_id) ?? emptyAgg();
       const pmOnly = Math.max(0, (r.demos_sits ?? 0) - (r.sales ?? 0));
@@ -142,15 +154,7 @@ export function PayrollLedger() {
       a.rs += r.future_leads ?? 0;
       a.pm += pmOnly;
       a.sales += r.sales ?? 0;
-      a.sits += r.demos_sits ?? 0; // demos_sits already includes sales (every sale is a sit)
-      a.points += (r.demos_sits ?? 0) + (r.sales ?? 0);
       aggByCanv.set(r.canvasser_id, a);
-    }
-
-    for (const l of data.leads) {
-      const a = aggByCanv.get(l.canvasser_id) ?? emptyAgg();
-      a.sale_amount += Number(l.sale_amount ?? 0);
-      aggByCanv.set(l.canvasser_id, a);
     }
 
     const hoursByCanv = new Map<string, number>();
@@ -158,54 +162,52 @@ export function PayrollLedger() {
       hoursByCanv.set(t.user_id, (hoursByCanv.get(t.user_id) ?? 0) + Number(t.billable_hours ?? 0));
     }
 
-    return Array.from(aggByCanv.entries())
-      .map(([cid, a]) => {
+    return data.paychecks
+      .map((res) => {
+        const cid = res.canvasser_id;
+        const pc = res.paycheck;
+        const a = aggByCanv.get(cid) ?? emptyAgg();
         a.total = a.bo + a.ol + a.rs + a.pm + a.sales;
+        a.sits = Number(pc?.sits ?? 0);
+        a.points = Number(pc?.points ?? 0);
+        a.sale_amount = Number(pc?.sale_price_total ?? 0);
         const profile = profileById.get(cid);
         const team = profile?.team_id ? teamById.get(profile.team_id) : null;
-        const rank = (profile as any)?.current_rank ?? "Jr. Silver";
-        const isDiamondLock = rank === "Jr. Diamond" || rank === "Sr. Diamond" || rank === "Captain";
-        const isSrGoldPlus = isDiamondLock || rank === "Sr. Gold";
-        const rate = isDiamondLock ? 35 : payRate(a.points);
-        const commRate = isDiamondLock ? 0.02 : commissionRate(a.points);
-        const sitBonusPer = isSrGoldPlus ? 75 : 50;
+        const rank = pc?.rank ?? (profile as { current_rank?: string | null } | undefined)?.current_rank ?? "Jr. Silver";
         const clocked = hoursByCanv.get(cid) ?? 0;
-        const hours = clocked > 0 ? clocked : ASSUMED_HOURS;
         const hoursSource: "clocked" | "estimated" = clocked > 0 ? "clocked" : "estimated";
-        const base = hours * rate;
-        const commission = a.sale_amount * commRate;
-        const sitBonus = Math.max(0, a.sits - 3) * sitBonusPer;
-        const monster = a.points >= 10 ? 500 : 0;
-        const bonuses = sitBonus + monster;
-        const total = base + commission + bonuses;
+        const sitBonus = Number(pc?.sit_bonus ?? 0);
+        const monster = Number(pc?.monster_bonus ?? 0);
         return {
           id: cid,
           name: profile?.display_name ?? "Unknown",
           team,
           rank,
           ...a,
-          hours,
+          hours: Number(pc?.hours ?? 0),
           hoursSource,
-          rate,
-          commRate,
-          base,
-          commission,
+          rate: Number(pc?.hourly_rate ?? 0),
+          commRate: Number(pc?.commission_rate ?? 0),
+          base: Number(pc?.base_pay ?? 0),
+          commission: Number(pc?.commission ?? 0),
           sitBonus,
-          sitBonusPer,
+          sitBonusPer: sitBonusPerForRank(rank),
           monster,
-          bonuses,
-          totalPay: total,
+          bonuses: sitBonus + monster,
+          totalPay: Number(pc?.total_pay ?? 0),
+          payError: res.error,
         };
       })
-      .filter((r) => r.total > 0 || r.sale_amount > 0 || r.hours > 0)
+      .filter((r) => r.total > 0 || r.sale_amount > 0 || r.hours > 0 || r.payError)
       .filter((r) => {
-        const p = data.profiles.find((x) => x.id === r.id) as { office_location?: string | null } | undefined;
+        const p = profileById.get(r.id) as { office_location?: string | null } | undefined;
         return matches(p?.office_location ?? null);
       })
       .sort((a, b) => b.totalPay - a.totalPay);
   }, [data, matches]);
 
   const grandTotal = rows.reduce((s, r) => s + r.totalPay, 0);
+  const payErrorCount = rows.filter((r) => r.payError).length;
 
   function shiftWeek(delta: number) {
     const next = new Date(weekStart);
@@ -257,7 +259,7 @@ export function PayrollLedger() {
         r.sitBonus.toFixed(2),
         r.monster.toFixed(2),
         r.bonuses.toFixed(2),
-        r.totalPay.toFixed(2),
+        r.payError ? "ERROR" : r.totalPay.toFixed(2),
       ];
       lines.push(cells.map(csvCell).join(","));
     }
@@ -282,7 +284,7 @@ export function PayrollLedger() {
             {format(weekStart, "MMM d")} → {format(weekEnd, "MMM d, yyyy")}
           </h2>
           <div className="text-xs text-muted-foreground mt-1">
-            Assumed hours: {ASSUMED_HOURS}/wk · Hourly tier by points · Commission by Sale Price · Sit & Monster bonuses included
+            Official pay engine · Hours: clocked, else est. 7.5/day Mon–Fri + 6.5 Sat from active days · Hourly tier by points · Commission by Sale Price · Sit & Monster bonuses included
           </div>
           {office !== "All" && (
             <div className="mt-3 text-[10px] font-display uppercase tracking-widest text-neon">
@@ -343,6 +345,13 @@ export function PayrollLedger() {
         ) : rows.length === 0 ? (
           <div className="text-sm text-muted-foreground">No activity recorded for this week.</div>
         ) : (
+          <>
+          {payErrorCount > 0 && (
+            <div className="mb-3 text-xs text-destructive">
+              ⚠ Pay could not be computed for {payErrorCount} agent{payErrorCount === 1 ? "" : "s"} (marked ERROR below).
+              The grand total and CSV export exclude them — retry or investigate before paying out.
+            </div>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -406,7 +415,13 @@ export function PayrollLedger() {
                         </div>
                       )}
                     </td>
-                    <td className="py-2.5 pr-1 text-right font-display text-victory">${r.totalPay.toFixed(2)}</td>
+                    <td className="py-2.5 pr-1 text-right font-display text-victory">
+                      {r.payError ? (
+                        <span className="text-destructive text-xs" title={r.payError}>ERROR</span>
+                      ) : (
+                        <>${r.totalPay.toFixed(2)}</>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -418,6 +433,7 @@ export function PayrollLedger() {
               </tfoot>
             </table>
           </div>
+          </>
         )}
       </ArcadePanel>
     </div>
