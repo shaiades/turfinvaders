@@ -356,6 +356,7 @@ export type Database = {
           deny_reason: string | null
           id: string
           is_sale: boolean
+          monday_item_id: string | null
           notes: string | null
           reviewed_at: string | null
           reviewed_by: string | null
@@ -372,6 +373,7 @@ export type Database = {
           deny_reason?: string | null
           id?: string
           is_sale?: boolean
+          monday_item_id?: string | null
           notes?: string | null
           reviewed_at?: string | null
           reviewed_by?: string | null
@@ -388,6 +390,7 @@ export type Database = {
           deny_reason?: string | null
           id?: string
           is_sale?: boolean
+          monday_item_id?: string | null
           notes?: string | null
           reviewed_at?: string | null
           reviewed_by?: string | null
@@ -445,6 +448,13 @@ export type Database = {
           level: number
           monthly_goal: number
           office_location: string
+          pay_lock_evaluated_week: string | null
+          pay_lock_prev_reverted_on: string | null
+          pay_lock_prev_status: string | null
+          pay_lock_prev_warned_on: string | null
+          pay_lock_reverted_on: string | null
+          pay_lock_status: string
+          pay_lock_warned_on: string | null
           recruits_count: number
           rolling_4_week_sit_avg: number
           status: Database["public"]["Enums"]["canvasser_status"]
@@ -467,6 +477,13 @@ export type Database = {
           level?: number
           monthly_goal?: number
           office_location?: string
+          pay_lock_evaluated_week?: string | null
+          pay_lock_prev_reverted_on?: string | null
+          pay_lock_prev_status?: string | null
+          pay_lock_prev_warned_on?: string | null
+          pay_lock_reverted_on?: string | null
+          pay_lock_status?: string
+          pay_lock_warned_on?: string | null
           recruits_count?: number
           rolling_4_week_sit_avg?: number
           status?: Database["public"]["Enums"]["canvasser_status"]
@@ -489,6 +506,13 @@ export type Database = {
           level?: number
           monthly_goal?: number
           office_location?: string
+          pay_lock_evaluated_week?: string | null
+          pay_lock_prev_reverted_on?: string | null
+          pay_lock_prev_status?: string | null
+          pay_lock_prev_warned_on?: string | null
+          pay_lock_reverted_on?: string | null
+          pay_lock_status?: string
+          pay_lock_warned_on?: string | null
           recruits_count?: number
           rolling_4_week_sit_avg?: number
           status?: Database["public"]["Enums"]["canvasser_status"]

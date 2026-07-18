@@ -1,7 +1,7 @@
 // DISPLAY-ONLY mirror of public.calc_weekly_paycheck.
 //
 // The authoritative pay engine lives in Postgres — latest definition:
-// supabase/migrations/20260703004617_7b8873d1-6f9c-4079-a542-82c838b1d00e.sql.
+// supabase/migrations/20260718183328_2ff3e696-8536-402a-b53c-e6d69f4f9fcc.sql.
 // If the SQL changes, change this file in the same commit. These helpers are
 // for dashboard hints and projections only; real paychecks must come from the
 // calc_weekly_paycheck RPC (via getWeeklyPaycheck/getWeeklyPaychecks server fns).
@@ -28,6 +28,22 @@ export const MONSTER_THRESHOLD = 10;
 export const RATE_LOCK_RANKS = ["Jr. Diamond", "Sr. Diamond", "Captain"] as const;
 /** Ranks that earn the elevated per-sit bonus. */
 export const ELEVATED_SIT_BONUS_RANKS = ["Sr. Gold", ...RATE_LOCK_RANKS] as const;
+
+/** Monthly Volume Bonus: $1,500 per full $100k of confirmed sale volume
+ *  in a calendar month (computed by calc_monthly_paycheck). */
+export const VOLUME_BONUS_STEP = 100_000;
+export const VOLUME_BONUS_PER = 1_500;
+
+export function volumeBonusForMonthRevenue(revenue: number): number {
+  return Math.floor(Math.max(0, revenue) / VOLUME_BONUS_STEP) * VOLUME_BONUS_PER;
+}
+
+/** Starting Pay Lock lifecycle (profiles.pay_lock_status). While 'reverted',
+ *  the RATE_LOCK_RANKS rate lock is suspended and comp follows the normal
+ *  weekly point tiers; rank and the $75 sit bonus are retained. */
+export type PayLockStatus = "active" | "warned" | "reverted";
+/** Minimum rolling 4-week sit average to keep the pay lock. */
+export const PAY_LOCK_MIN_ROLLING_AVG = 5;
 
 export function payRateForPoints(points: number, rank?: string | null): number {
   if (rank && (RATE_LOCK_RANKS as readonly string[]).includes(rank)) return HOURLY_TOP;

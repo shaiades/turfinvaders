@@ -3,7 +3,12 @@ import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { CalendarIcon, Download } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import { getWeeklyPaychecks, type PaycheckResult } from "@/lib/fleet.functions";
+import {
+  getWeeklyPaychecks,
+  getMonthlyPaychecks,
+  type PaycheckResult,
+  type MonthlyPaycheckResult,
+} from "@/lib/fleet.functions";
 import { sitBonusPerForRank } from "@/lib/pay";
 import { ArcadePanel, TeamBadge } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
@@ -71,11 +76,15 @@ export function PayrollLedger() {
   const startStr = iso(weekStart);
   const endStr = iso(weekEnd);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["payroll-ledger", startStr, endStr],
     queryFn: async () => {
       const windowStart = `${startStr}T00:00:00Z`;
-      const windowEnd = `${endStr}T23:59:59Z`;
+      // Exclusive upper bound (start of the next day) so timestamps in the
+      // final second of the window are not missed.
+      const dayAfterEnd = new Date(`${endStr}T00:00:00Z`);
+      dayAfterEnd.setUTCDate(dayAfterEnd.getUTCDate() + 1);
+      const windowEnd = `${dayAfterEnd.toISOString().slice(0, 10)}T00:00:00Z`;
       const [logsRes, leadsRes, profilesRes, teamsRes, timeRes] = await Promise.all([
         supabase
           .from("daily_logs")
@@ -90,9 +99,9 @@ export function PayrollLedger() {
           .select("canvasser_id")
           .eq("status", "confirmed")
           .or(
-            `and(created_at.gte.${windowStart},created_at.lte.${windowEnd}),and(reviewed_at.gte.${windowStart},reviewed_at.lte.${windowEnd})`,
+            `and(created_at.gte.${windowStart},created_at.lt.${windowEnd}),and(reviewed_at.gte.${windowStart},reviewed_at.lt.${windowEnd})`,
           ),
-        supabase.from("profiles").select("id, display_name, team_id, current_rank, office_location"),
+        supabase.from("profiles").select("id, display_name, team_id, current_rank, office_location, pay_lock_status"),
         supabase.from("teams").select("id, name, color"),
         supabase
           .from("time_entries")
@@ -174,6 +183,7 @@ export function PayrollLedger() {
         const profile = profileById.get(cid);
         const team = profile?.team_id ? teamById.get(profile.team_id) : null;
         const rank = pc?.rank ?? (profile as { current_rank?: string | null } | undefined)?.current_rank ?? "Jr. Silver";
+        const payLock = (profile as { pay_lock_status?: string | null } | undefined)?.pay_lock_status ?? "active";
         const clocked = hoursByCanv.get(cid) ?? 0;
         const hoursSource: "clocked" | "estimated" = clocked > 0 ? "clocked" : "estimated";
         const sitBonus = Number(pc?.sit_bonus ?? 0);
@@ -186,6 +196,7 @@ export function PayrollLedger() {
           ...a,
           hours: Number(pc?.hours ?? 0),
           hoursSource,
+          payLock,
           rate: Number(pc?.hourly_rate ?? 0),
           commRate: Number(pc?.commission_rate ?? 0),
           base: Number(pc?.base_pay ?? 0),
@@ -342,6 +353,10 @@ export function PayrollLedger() {
       }>
         {isLoading ? (
           <div className="text-sm text-muted-foreground">Loading payroll…</div>
+        ) : isError ? (
+          <div className="text-sm text-destructive">
+            Couldn't load payroll for this week — check your connection and reload. Totals shown elsewhere may be incomplete.
+          </div>
         ) : rows.length === 0 ? (
           <div className="text-sm text-muted-foreground">No activity recorded for this week.</div>
         ) : (
@@ -375,7 +390,19 @@ export function PayrollLedger() {
                 {rows.map((r) => (
                   <tr key={r.id} className="border-b border-border/40 hover:bg-surface-elevated">
                     <td className="py-2.5 pr-3 font-medium">{r.name}</td>
-                    <td className="py-2.5 pr-3"><RankPill rank={r.rank} /></td>
+                    <td className="py-2.5 pr-3">
+                      <RankPill rank={r.rank} />
+                      {r.payLock !== "active" && (
+                        <div
+                          className={`mt-1 text-[9px] font-display uppercase tracking-widest ${r.payLock === "reverted" ? "text-destructive" : "text-warning"}`}
+                          title={r.payLock === "reverted"
+                            ? "Starting Pay Lock reverted — paid on weekly point tiers until 3 consecutive 7+ sit weeks"
+                            : "Pay Lock warning — 4-week sit average below 5"}
+                        >
+                          {r.payLock === "reverted" ? "Lock reverted" : "Lock warning"}
+                        </div>
+                      )}
+                    </td>
                     <td className="py-2.5 pr-3">
                       {r.team ? <TeamBadge name={r.team.name} color={r.team.color} /> : <span className="text-xs text-muted-foreground">—</span>}
                     </td>
@@ -436,7 +463,121 @@ export function PayrollLedger() {
           </>
         )}
       </ArcadePanel>
+
+      <MonthlyVolumeBonusPanel monthStart={`${startStr.slice(0, 7)}-01`} />
     </div>
+  );
+}
+
+/** "$1,500 Bonus — Every 100k In Sales for Month", per canvasser, from the
+ *  calc_monthly_paycheck engine. Shows the month containing the selected week. */
+function MonthlyVolumeBonusPanel({ monthStart }: { monthStart: string }) {
+  const { matches } = useOfficeFilter();
+
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ["monthly-volume-bonus", monthStart],
+    queryFn: async () => {
+      const windowStart = `${monthStart}T00:00:00Z`;
+      // Exclusive upper bound (start of next month) so timestamps in the
+      // final second of the month are not missed.
+      const [y, m] = monthStart.split("-").map(Number);
+      const windowEnd = `${new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10)}T00:00:00Z`;
+      const [leadsRes, profilesRes] = await Promise.all([
+        supabase
+          .from("leads")
+          .select("canvasser_id")
+          .eq("status", "confirmed")
+          .or(
+            `and(created_at.gte.${windowStart},created_at.lt.${windowEnd}),and(reviewed_at.gte.${windowStart},reviewed_at.lt.${windowEnd})`,
+          ),
+        supabase.from("profiles").select("id, display_name, office_location"),
+      ]);
+      if (leadsRes.error) throw leadsRes.error;
+      if (profilesRes.error) throw profilesRes.error;
+
+      const ids = Array.from(new Set((leadsRes.data ?? []).map((l) => l.canvasser_id)));
+      const results: MonthlyPaycheckResult[] = [];
+      for (let i = 0; i < ids.length; i += 300) {
+        const { results: chunk } = await getMonthlyPaychecks({
+          data: { month_start: monthStart, canvasser_ids: ids.slice(i, i + 300) },
+        });
+        results.push(...chunk);
+      }
+      return { results, profiles: profilesRes.data ?? [] };
+    },
+  });
+
+  const rows = (data?.results ?? [])
+    .map((res) => {
+      const profile = data?.profiles.find((p) => p.id === res.canvasser_id);
+      return {
+        id: res.canvasser_id,
+        name: profile?.display_name ?? "Unknown",
+        office: (profile as { office_location?: string | null } | undefined)?.office_location ?? null,
+        volume: Number(res.paycheck?.sale_price_total ?? 0),
+        bonus: Number(res.paycheck?.volume_bonus ?? 0),
+        error: res.error,
+      };
+    })
+    .filter((r) => (r.volume > 0 || r.error) && matches(r.office))
+    .sort((a, b) => b.volume - a.volume);
+
+  const totalBonus = rows.reduce((s, r) => s + r.bonus, 0);
+  const monthLabel = format(new Date(`${monthStart}T00:00:00`), "MMMM yyyy");
+
+  return (
+    <ArcadePanel
+      title={`Monthly Volume Bonus · ${monthLabel}`}
+      action={<span className="font-display text-xs text-victory">TOTAL · ${totalBonus.toFixed(2)}</span>}
+    >
+      <div className="text-xs text-muted-foreground mb-3">
+        $1,500 per full $100k of confirmed sale volume in the calendar month, per agent.
+      </div>
+      {isLoading ? (
+        <div className="text-sm text-muted-foreground">Loading volume bonuses…</div>
+      ) : isError ? (
+        <div className="text-sm text-destructive">
+          Couldn't load volume bonuses — check your connection and reload. Do not treat this as $0 owed.
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="text-sm text-muted-foreground">No confirmed sale volume this month.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border">
+                <th className="text-left py-2 pr-3">Agent</th>
+                <th className="text-right py-2 pr-3">Month Volume ($)</th>
+                <th className="text-right py-2 pr-3">Progress to Next $1,500</th>
+                <th className="text-right py-2 pr-1">Volume Bonus ($)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id} className="border-b border-border/40 hover:bg-surface-elevated">
+                  <td className="py-2.5 pr-3 font-medium">{r.name}</td>
+                  <td className="py-2.5 pr-3 text-right font-display text-victory">
+                    {r.error ? "—" : `$${r.volume.toFixed(2)}`}
+                  </td>
+                  <td className="py-2.5 pr-3 text-right text-xs text-muted-foreground">
+                    {r.error ? "—" : `$${(100000 - (r.volume % 100000)).toFixed(0)} to go`}
+                  </td>
+                  <td className="py-2.5 pr-1 text-right font-display">
+                    {r.error ? (
+                      <span className="text-destructive text-xs" title={r.error}>ERROR</span>
+                    ) : r.bonus > 0 ? (
+                      <span className="text-victory">${r.bonus.toFixed(2)}</span>
+                    ) : (
+                      <span className="text-muted-foreground">$0.00</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </ArcadePanel>
   );
 }
 

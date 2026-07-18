@@ -20,7 +20,10 @@ import {
   POINTS_TIER_TOP,
   HOURLY_MID,
   HOURLY_TOP,
+  VOLUME_BONUS_STEP,
+  PAY_LOCK_MIN_ROLLING_AVG,
 } from "@/lib/pay";
+import { getMonthlyPaychecks } from "@/lib/fleet.functions";
 
 /**
  * Paycheck engine — automated.
@@ -944,7 +947,7 @@ function SCCERankBanner({ userId }: { userId: string }) {
     queryFn: async () => {
       const { data } = await supabase
         .from("profiles")
-        .select("current_rank, consecutive_weeks_3_plus_sits, consecutive_weeks_7_plus_sits, rolling_4_week_sit_avg, recruits_count")
+        .select("current_rank, consecutive_weeks_3_plus_sits, consecutive_weeks_7_plus_sits, rolling_4_week_sit_avg, recruits_count, pay_lock_status")
         .eq("id", userId)
         .maybeSingle();
       return data as {
@@ -953,11 +956,26 @@ function SCCERankBanner({ userId }: { userId: string }) {
         consecutive_weeks_7_plus_sits: number;
         rolling_4_week_sit_avg: number;
         recruits_count: number;
+        pay_lock_status: string | null;
       } | null;
     },
   });
   const rank = data?.current_rank ?? "Jr. Silver";
+  const payLock = data?.pay_lock_status ?? "active";
   return (
+    <>
+    {payLock === "warned" && (
+      <div className="rounded-xl border border-warning/50 bg-warning/10 p-4 text-xs">
+        <span className="font-display uppercase tracking-widest text-warning">⚠ Pay Lock Warning</span>
+        <span className="text-muted-foreground"> — your rolling 4-week sit average is below {PAY_LOCK_MIN_ROLLING_AVG}. A second violation within 90 days reverts your comp to the weekly tier reset (rank retained).</span>
+      </div>
+    )}
+    {payLock === "reverted" && (
+      <div className="rounded-xl border border-destructive/50 bg-destructive/10 p-4 text-xs">
+        <span className="font-display uppercase tracking-widest text-destructive">Pay Lock Reverted</span>
+        <span className="text-muted-foreground"> — you're currently paid on the weekly point tiers. Reinstatement: 3 consecutive weeks at 7+ sits.</span>
+      </div>
+    )}
     <div className="arcade-card p-4 flex flex-wrap items-center justify-between gap-4">
       <div className="flex items-center gap-3 min-w-0">
         <RankPill rank={rank} size="md" />
@@ -973,6 +991,7 @@ function SCCERankBanner({ userId }: { userId: string }) {
         <span>recruits · <span className="text-foreground">{data?.recruits_count ?? 0}</span></span>
       </div>
     </div>
+    </>
   );
 }
 
@@ -997,6 +1016,21 @@ function TakeHomeWidget({ userId, weeklyPay, hourlyRate, weekPoints }: {
   });
   const rank = (data?.current_rank ?? "Jr. Silver") as string;
 
+  // Authoritative MTD volume bonus from the pay engine (calc_monthly_paycheck)
+  // — the same source the owner's payroll screen pays from. Hidden on error
+  // rather than showing a possibly-wrong dollar figure.
+  const now = new Date();
+  const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+  const { data: monthly } = useQuery({
+    queryKey: ["takehome_volume_bonus", userId, monthStart],
+    queryFn: async () => {
+      const { results } = await getMonthlyPaychecks({
+        data: { month_start: monthStart, canvasser_ids: [userId] },
+      });
+      return results[0]?.paycheck ?? null;
+    },
+  });
+
   return (
     <div className="rounded-xl border border-victory/40 bg-[color-mix(in_oklab,var(--victory)_8%,var(--surface))] p-5 sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-6">
@@ -1010,6 +1044,12 @@ function TakeHomeWidget({ userId, weeklyPay, hourlyRate, weekPoints }: {
           <div className="mt-2 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
             ${hourlyRate}/hr · {weekPoints} pts this week
           </div>
+          {monthly && (
+            <div className="mt-1 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+              Volume bonus (MTD) · <span className={Number(monthly.volume_bonus) > 0 ? "text-victory" : ""}>{formatUSD(Number(monthly.volume_bonus))}</span>
+              {" · "}{formatUSD(VOLUME_BONUS_STEP - (Number(monthly.sale_price_total) % VOLUME_BONUS_STEP))} to next $1,500
+            </div>
+          )}
         </div>
         <div className="text-right">
           <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">

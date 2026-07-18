@@ -689,6 +689,13 @@ serve(async (req) => {
       })
     }
 
+    // Refresh rank + pay-lock evaluation for this canvasser (the old per-row
+    // daily_logs trigger was dropped for bulk-import cost; write paths call
+    // the engine explicitly instead). Best effort — never breaks the pipeline.
+    try {
+      await supabaseAdmin.rpc('refresh_canvasser_rank', { _canvasser_id: match.id })
+    } catch (_) { /* rank refresh is best-effort */ }
+
     await supabaseAdmin.from('webhook_logs').insert({
       step: 'Schedule_Outcome_Processed',
       data: {
