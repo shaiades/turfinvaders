@@ -12,8 +12,8 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Truck, Plus, Building2, Trash2, UserMinus, Pencil, Check, X, ChevronLeft, ChevronRight, CalendarRange, UserPlus, Lock } from "lucide-react";
-import { deleteProfile, deleteVan } from "@/lib/fleet.functions";
+import { Truck, Plus, Building2, Trash2, UserMinus, Pencil, Check, X, ChevronLeft, ChevronRight, CalendarRange, UserPlus, Lock, AlertTriangle } from "lucide-react";
+import { deleteProfile, deleteVan, setVanCaptain, demoteStrandedCaptain } from "@/lib/fleet.functions";
 import { addTeamMember } from "@/lib/users.functions";
 import { useAuth } from "@/hooks/useAuth";
 import { isManagerRole } from "@/lib/roles";
@@ -101,6 +101,8 @@ export function FleetManager() {
   const deleteProfileFn = useServerFn(deleteProfile);
   const deleteVanFn = useServerFn(deleteVan);
   const addTeamMemberFn = useServerFn(addTeamMember);
+  const setVanCaptainFn = useServerFn(setVanCaptain);
+  const demoteStrandedFn = useServerFn(demoteStrandedCaptain);
   const [editingVanId, setEditingVanId] = useState<string | null>(null);
   const [editVanName, setEditVanName] = useState("");
   const [editVanColor, setEditVanColor] = useState(VAN_COLORS[0]);
@@ -145,7 +147,7 @@ export function FleetManager() {
       const { startDate, endDate } = selectedDateRange;
       const [vansR, profilesR, rolesR, metricsByCreatedR, metricsByDateR, logsByCreatedR, logsByDateR, webhookOutcomeLogsR] = await Promise.all([
         supabase.from("teams").select("id, name, color, captain_id, office_location").order("name"),
-        supabase.from("profiles").select("id, display_name, team_id, office_location, is_active").order("display_name"),
+        supabase.from("profiles").select("id, display_name, team_id, office_location, is_active, is_placeholder").order("display_name"),
         supabase.from("user_roles").select("user_id, role"),
         // Monday.com webhooks save schedule outcomes into daily_metrics.
         supabase
@@ -286,20 +288,31 @@ export function FleetManager() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  // Server fn keeps user_roles in sync: promotes the incoming captain and
+  // returns the outgoing one to canvasser when they lead no other van.
   const setCaptain = useMutation({
-    mutationFn: async ({ vanId, captainId }: { vanId: string; captainId: string | null }) => {
-      const { error } = await supabase.from("teams").update({ captain_id: captainId }).eq("id", vanId);
-      if (error) throw error;
-      if (captainId) {
-        // Captain inherits van's office.
-        const van = fleet.data?.vans.find((v) => v.id === vanId);
-        const patch: { team_id: string; office_location?: string } = { team_id: vanId };
-        if (van?.office_location) patch.office_location = van.office_location;
-        await supabase.from("profiles").update(patch).eq("id", captainId);
-      }
+    mutationFn: async ({ vanId, captainId }: { vanId: string; captainId: string | null }) =>
+      await setVanCaptainFn({ data: { van_id: vanId, captain_id: captainId } }),
+    onSuccess: (res) => {
+      toast.success(
+        res?.demoted_previous
+          ? "Captain assigned — previous captain is now a canvasser"
+          : "Captain assigned",
+      );
+      qc.invalidateQueries({ queryKey: ["fleet_manager"] });
+      qc.invalidateQueries({ queryKey: ["manage_users"] });
     },
-    onSuccess: () => { toast.success("Captain assigned"); qc.invalidateQueries({ queryKey: ["fleet_manager"] }); },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(e.message ?? "Failed to assign captain"),
+  });
+
+  const demoteStranded = useMutation({
+    mutationFn: async (userId: string) => { await demoteStrandedFn({ data: { id: userId } }); },
+    onSuccess: () => {
+      toast.success("Captain demoted to canvasser");
+      qc.invalidateQueries({ queryKey: ["fleet_manager"] });
+      qc.invalidateQueries({ queryKey: ["manage_users"] });
+    },
+    onError: (e: Error) => toast.error(e.message ?? "Failed to demote"),
   });
 
   const assignCanvasser = useMutation({
@@ -394,7 +407,22 @@ export function FleetManager() {
   const { vans, profiles: allProfiles, rolesByUser, pointsByUser, submitsByUser, confirmedByUser, debugRecordCount } = fleet.data;
   const profiles = allProfiles.filter((p) => p.is_active !== false);
   const archivedProfiles = allProfiles.filter((p) => p.is_active === false);
-  const captains = profiles.filter((p) => (rolesByUser.get(p.id) ?? []).includes("captain"));
+  const profileNameById = new Map(allProfiles.map((p) => [p.id, p.display_name]));
+  const hasProtectedRole = (id: string) => {
+    const rs = rolesByUser.get(id) ?? [];
+    return rs.includes("owner") || rs.includes("office_staff");
+  };
+  // Anyone on the active roster can be picked as captain — the server fn
+  // promotes/demotes user_roles to match teams.captain_id.
+  const captainCandidates = profiles.filter((p) => !hasProtectedRole(p.id) && !p.is_placeholder);
+  // Data hygiene from before the server fn existed: captain role, but captain
+  // of no van — RLS gives them no team access, so surface them for the owner.
+  const strandedCaptains = profiles.filter(
+    (p) =>
+      (rolesByUser.get(p.id) ?? []).includes("captain") &&
+      !hasProtectedRole(p.id) &&
+      !vans.some((v) => v.captain_id === p.id),
+  );
   const unassigned = profiles.filter((p) => !p.team_id && !(rolesByUser.get(p.id) ?? []).includes("owner"));
 
   // Group vans by office location.
@@ -534,6 +562,39 @@ export function FleetManager() {
         </ArcadePanel>
       )}
 
+      {/* Captains whose role outlived their van assignment — RLS gives them no
+          team access, so either re-assign them a van or return them to canvasser. */}
+      {isOwnerRole && strandedCaptains.length > 0 && (
+        <div className="arcade-card p-4 border border-[var(--warning)]/50">
+          <div className="flex items-center gap-2 text-[10px] font-display uppercase tracking-widest text-warning">
+            <AlertTriangle className="w-3.5 h-3.5" /> Captains without a van
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            These players hold the Captain role but aren't the captain of any van, so they can't see
+            their team's logs or leads. Pick them as a van's captain above, or demote them to
+            canvasser.
+          </p>
+          <div className="mt-3 space-y-1.5">
+            {strandedCaptains.map((p) => (
+              <div
+                key={p.id}
+                className="flex items-center justify-between gap-2 rounded border border-border bg-surface px-2 py-1.5"
+              >
+                <span className="text-sm truncate">{p.display_name}</span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={demoteStranded.isPending}
+                  onClick={() => demoteStranded.mutate(p.id)}
+                >
+                  <UserMinus className="w-3.5 h-3.5 mr-1" /> Demote to canvasser
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
         {/* Vans grouped by office */}
         <div className="space-y-4">
@@ -561,6 +622,15 @@ export function FleetManager() {
                       }
                     }
                     const roster = Array.from(rosterMap.values());
+
+                    // Current captain stays selectable even if archived/placeholder.
+                    const captainOptions =
+                      v.captain_id && !captainCandidates.some((c) => c.id === v.captain_id)
+                        ? [
+                            ...allProfiles.filter((p) => p.id === v.captain_id),
+                            ...captainCandidates,
+                          ]
+                        : captainCandidates;
 
                     return (
                       <div key={v.id} className="van-card p-4 space-y-3">
@@ -623,7 +693,7 @@ export function FleetManager() {
                               </span>
                               {v.captain_id && (
                                 <span className="hidden sm:inline text-[10px] text-muted-foreground truncate min-w-0">
-                                  · {captains.find((c) => c.id === v.captain_id)?.display_name ?? ""}
+                                  · {profileNameById.get(v.captain_id) ?? ""}
                                 </span>
                               )}
                             </div>
@@ -660,7 +730,10 @@ export function FleetManager() {
 
                         <div>
                           <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Captain</label>
-                          {canManage ? (
+                          {/* Owner-only: teams/user_roles RLS rejects captain
+                              changes from anyone else, so don't offer a control
+                              that can't take effect. */}
+                          {isOwnerRole ? (
                             <Select
                               value={v.captain_id ?? "none"}
                               onValueChange={(val) => setCaptain.mutate({ vanId: v.id, captainId: val === "none" ? null : val })}
@@ -668,14 +741,17 @@ export function FleetManager() {
                               <SelectTrigger><SelectValue placeholder="No captain" /></SelectTrigger>
                               <SelectContent>
                                 <SelectItem value="none">— No captain —</SelectItem>
-                                {captains.map((c) => (
-                                  <SelectItem key={c.id} value={c.id}>{c.display_name}</SelectItem>
+                                {captainOptions.map((c) => (
+                                  <SelectItem key={c.id} value={c.id}>
+                                    {c.display_name}
+                                    {(rolesByUser.get(c.id) ?? []).includes("captain") ? " · Captain" : ""}
+                                  </SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
                           ) : (
                             <div className="text-sm px-2 py-1.5 rounded border border-border bg-surface">
-                              {captains.find((c) => c.id === v.captain_id)?.display_name ?? "— No captain —"}
+                              {(v.captain_id ? profileNameById.get(v.captain_id) : null) ?? "— No captain —"}
                             </div>
                           )}
                         </div>

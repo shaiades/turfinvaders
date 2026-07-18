@@ -1,5 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/integrations/supabase/types";
 
 /**
  * Owner-only profile deletion. Removes the auth user (cascades to profile,
@@ -57,6 +59,159 @@ export const deleteVan = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { error } = await supabaseAdmin.from("teams").delete().eq("id", data.id);
     if (error) throw error;
+    return { ok: true };
+  });
+
+/**
+ * If the user holds the 'captain' role but is no longer captain_id of any
+ * van, replace that role with 'canvasser'. Owners and Admins are never
+ * touched, and their profile/team assignment is left alone — an outgoing
+ * captain stays on the van roster as a regular member.
+ */
+async function demoteCaptainIfNoVan(
+  admin: SupabaseClient<Database>,
+  userId: string,
+): Promise<boolean> {
+  const { data: roleRows, error: rolesErr } = await admin
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", userId);
+  if (rolesErr) throw rolesErr;
+  const roles = (roleRows ?? []).map((r) => r.role as string);
+  if (!roles.includes("captain") || roles.includes("owner") || roles.includes("office_staff"))
+    return false;
+
+  const { data: stillLeads, error: teamsErr } = await admin
+    .from("teams")
+    .select("id")
+    .eq("captain_id", userId)
+    .limit(1);
+  if (teamsErr) throw teamsErr;
+  if ((stillLeads ?? []).length > 0) return false;
+
+  const { error: delErr } = await admin
+    .from("user_roles")
+    .delete()
+    .eq("user_id", userId)
+    .eq("role", "captain");
+  if (delErr) throw delErr;
+  if (!roles.includes("canvasser")) {
+    const { error: insErr } = await admin
+      .from("user_roles")
+      .insert({ user_id: userId, role: "canvasser" });
+    if (insErr) throw insErr;
+  }
+  return true;
+}
+
+/**
+ * Owner-only captain assignment with role hygiene. daily_logs/leads RLS only
+ * grants captain access where teams.captain_id matches, so user_roles must
+ * track it: the incoming captain is promoted to 'captain' (and joins the van,
+ * inheriting its office), and the outgoing captain drops back to 'canvasser'
+ * unless they still lead another van or hold a higher role.
+ */
+export const setVanCaptain = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => {
+    const obj = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+    const van_id = typeof obj.van_id === "string" ? obj.van_id : "";
+    const captain_id = typeof obj.captain_id === "string" ? obj.captain_id : null;
+    if (!/^[0-9a-f-]{36}$/i.test(van_id)) throw new Error("Invalid van id");
+    if (captain_id !== null && !/^[0-9a-f-]{36}$/i.test(captain_id))
+      throw new Error("Invalid captain id");
+    return { van_id, captain_id };
+  })
+  .handler(async ({ data, context }) => {
+    const { data: roles, error: rolesErr } = await context.supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId);
+    if (rolesErr) throw rolesErr;
+    if (!(roles ?? []).some((r) => r.role === "owner"))
+      throw new Error("Only owners can assign captains");
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const { data: van, error: vanErr } = await supabaseAdmin
+      .from("teams")
+      .select("id, office_location, captain_id")
+      .eq("id", data.van_id)
+      .maybeSingle();
+    if (vanErr) throw vanErr;
+    if (!van) throw new Error("Van not found");
+    const previousCaptainId = van.captain_id;
+
+    const { error: teamErr } = await supabaseAdmin
+      .from("teams")
+      .update({ captain_id: data.captain_id })
+      .eq("id", data.van_id);
+    if (teamErr) throw teamErr;
+
+    if (data.captain_id) {
+      const { data: newRoleRows, error: newRolesErr } = await supabaseAdmin
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", data.captain_id);
+      if (newRolesErr) throw newRolesErr;
+      const newRoles = (newRoleRows ?? []).map((r) => r.role as string);
+      if (
+        !newRoles.includes("captain") &&
+        !newRoles.includes("owner") &&
+        !newRoles.includes("office_staff")
+      ) {
+        const { error: delErr } = await supabaseAdmin
+          .from("user_roles")
+          .delete()
+          .eq("user_id", data.captain_id)
+          .eq("role", "canvasser");
+        if (delErr) throw delErr;
+        const { error: insErr } = await supabaseAdmin
+          .from("user_roles")
+          .insert({ user_id: data.captain_id, role: "captain" });
+        if (insErr) throw insErr;
+      }
+      const patch: { team_id: string; office_location?: string } = { team_id: data.van_id };
+      if (van.office_location) patch.office_location = van.office_location;
+      const { error: profErr } = await supabaseAdmin
+        .from("profiles")
+        .update(patch)
+        .eq("id", data.captain_id);
+      if (profErr) throw profErr;
+    }
+
+    let demoted_previous = false;
+    if (previousCaptainId && previousCaptainId !== data.captain_id) {
+      demoted_previous = await demoteCaptainIfNoVan(supabaseAdmin, previousCaptainId);
+    }
+    return { ok: true, demoted_previous };
+  });
+
+/**
+ * Owner-only cleanup for captains stranded by pre-fix reassignments: holds
+ * the 'captain' role but is captain_id of no van. Verifies that state
+ * server-side before demoting to canvasser.
+ */
+export const demoteStrandedCaptain = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => {
+    const obj = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+    const id = typeof obj.id === "string" ? obj.id : "";
+    if (!/^[0-9a-f-]{36}$/i.test(id)) throw new Error("Invalid user id");
+    return { id };
+  })
+  .handler(async ({ data, context }) => {
+    const { data: roles, error: rolesErr } = await context.supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId);
+    if (rolesErr) throw rolesErr;
+    if (!(roles ?? []).some((r) => r.role === "owner"))
+      throw new Error("Only owners can demote captains");
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const demoted = await demoteCaptainIfNoVan(supabaseAdmin, data.id);
+    if (!demoted) throw new Error("Not demoted — user still leads a van or holds a protected role");
     return { ok: true };
   });
 
