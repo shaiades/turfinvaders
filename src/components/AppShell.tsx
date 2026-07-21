@@ -13,7 +13,9 @@ type NavItem = {
 };
 
 // Routes a Canvasser is allowed to visit. Anything else → redirect to /field.
-const CANVASSER_ALLOWED = ["/field", "/active-run", "/my-territory", "/leaderboard", "/playbook"];
+// /dashboard (personal stats), /log (daily log + new lead) and /daily-wrap are
+// canvasser-facing screens — owner opened them up 2026-07-20.
+const CANVASSER_ALLOWED = ["/field", "/active-run", "/my-territory", "/leaderboard", "/playbook", "/dashboard", "/log", "/daily-wrap"];
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, role, realRole, displayName } = useAuth();
@@ -32,11 +34,15 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const navItems: NavItem[] = (() => {
     if (role === "canvasser") {
+      // Bottom tab bar shows the first 5; Playbook stays reachable from the
+      // desktop top nav and by URL.
       return [
         { to: "/field", label: "Active Run", icon: Zap },
         { to: "/my-territory", label: "Territory", icon: MapPin },
+        { to: "/log", label: "Log", icon: Inbox },
+        { to: "/dashboard", search: { tab: "executive" }, label: "Stats", icon: LayoutDashboard },
+        { to: "/leaderboard", label: "Leaders", icon: Trophy },
         { to: "/playbook", label: "Playbook", icon: Target },
-        { to: "/leaderboard", label: "Leaderboard", icon: Trophy },
       ];
     }
     // Leadership: owner, captain, office_staff (manager suite)
@@ -57,7 +63,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen w-full max-w-full overflow-x-hidden flex flex-col bg-background">
-      {user && (
+      {/* Manager-only tool: canvassers (the bulk of phone users) never see it. */}
+      {user && realRole && realRole !== "canvasser" && (
         <div className="border-b border-[var(--neon-magenta)]/30 bg-background text-xs">
           <div className="max-w-7xl mx-auto px-3 sm:px-6 py-1 sm:py-2 flex items-center gap-2 overflow-x-auto scrollbar-hide whitespace-nowrap">
             <FlaskConical className="w-3.5 h-3.5 text-[var(--neon-magenta)] shrink-0" />
@@ -71,7 +78,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 const v = e.target.value as AppRole;
                 setDevRoleOverride(v === realRole ? null : v);
               }}
-              className="bg-surface border border-border rounded px-2 py-1 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-[var(--neon-magenta)]"
+              className="bg-surface border border-border rounded px-2 py-1.5 min-h-9 text-base md:text-xs font-medium focus:outline-none focus:ring-1 focus:ring-[var(--neon-magenta)]"
             >
               <option value="owner">Owner</option>
               <option value="captain">Captain</option>
@@ -81,7 +88,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             {isOverridden && (
               <button
                 onClick={() => setDevRoleOverride(null)}
-                className="ml-auto text-[10px] uppercase tracking-widest text-[var(--neon-magenta)] hover:underline"
+                className="ml-auto min-h-9 px-2 rounded border border-[var(--neon-magenta)]/40 text-[10px] uppercase tracking-widest text-[var(--neon-magenta)]"
               >
                 Reset to {realRole}
               </button>
@@ -92,8 +99,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       <header className="border-b border-border bg-background/95 backdrop-blur sticky top-0 z-20">
         {/* Mobile header: centered logo only */}
         <div className="md:hidden flex items-center justify-between px-4 py-2">
-          <div className="w-9" />
-          <Link to="/dashboard" aria-label="Turf Invaders home" className="flex items-center justify-center">
+          <div className="w-10" />
+          <Link to="/dashboard" search={{ tab: "executive" }} aria-label="Turf Invaders home" className="flex items-center justify-center">
             <img
               src={turfInvadersWordmark.url}
               alt="Turf Invaders"
@@ -104,7 +111,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           {user ? (
             <button
               onClick={signOut}
-              className="p-2 rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
+              className="min-w-10 min-h-10 inline-flex items-center justify-center rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
               aria-label="Sign out"
             >
               <LogOut className="w-5 h-5" />
@@ -133,7 +140,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               </Link>
             ))}
           </nav>
-          <Link to="/dashboard" className="flex items-center justify-center shrink-0" aria-label="Turf Invaders home">
+          <Link to="/dashboard" search={{ tab: "executive" }} className="flex items-center justify-center shrink-0" aria-label="Turf Invaders home">
             <img
               src={turfInvadersWordmark.url}
               alt="Turf Invaders"

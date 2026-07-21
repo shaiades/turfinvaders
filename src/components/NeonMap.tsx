@@ -279,24 +279,25 @@ export function NeonMap({
     <div
       className="relative rounded-lg overflow-hidden border border-[color-mix(in_oklab,var(--neon)_35%,var(--border))]"
       style={{
-        height,
+        // Cap at 65vh so short phones keep room for controls below the map
+        height: `min(${height}px, 65vh)`,
         boxShadow: "0 0 24px -8px color-mix(in oklab, var(--neon) 50%, transparent), inset 0 0 80px -20px color-mix(in oklab, var(--neon) 25%, transparent)",
       }}
     >
       <MapContainer
         center={[fallbackCenter.lat, fallbackCenter.lng]}
         zoom={follow ? 17 : 13}
+        zoomControl={false}
         scrollWheelZoom
         style={{ height: "100%", width: "100%", background: "#0b0f1a" }}
         ref={(instance) => { mapRef.current = instance; }}
       >
         <TileLayer
-          attribution='Imagery &copy; Esri, Maxar, Earthstar Geographics'
+          attribution='&copy; Esri'
           url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
           maxZoom={19}
         />
         <TileLayer
-          attribution='Labels &copy; Esri'
           url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
           maxZoom={19}
         />
@@ -382,13 +383,13 @@ export function NeonMap({
             <button
               onClick={finishDraft}
               disabled={draft.length < 3}
-              className="flex-1 rounded bg-victory text-black font-display text-[10px] uppercase tracking-widest px-3 py-2 disabled:opacity-40"
+              className="flex-1 min-h-[40px] rounded bg-victory text-black font-display text-[10px] uppercase tracking-widest px-3 py-2 disabled:opacity-40"
             >
               Save Polygon
             </button>
             <button
               onClick={() => setDraft([])}
-              className="rounded border border-border bg-surface/90 px-3 py-2 font-display text-[10px] uppercase tracking-widest"
+              className="min-h-[40px] rounded border border-border bg-surface/90 px-3 py-2 font-display text-[10px] uppercase tracking-widest"
             >
               Clear
             </button>

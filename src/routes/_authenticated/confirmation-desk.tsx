@@ -20,7 +20,7 @@ export const Route = createFileRoute("/_authenticated/confirmation-desk")({
       .from("user_roles").select("role").eq("user_id", data.user.id);
     const r = (roles ?? []).map((x) => x.role);
     if (!r.includes("owner") && !r.includes("office_staff")) {
-      throw redirect({ to: "/dashboard" });
+      throw redirect({ to: "/dashboard", search: { tab: "dispatch" } });
     }
   },
   component: ConfirmationDesk,
@@ -178,27 +178,27 @@ function PendingRow({
         </div>
         {lead.notes && <div className="text-xs mt-1.5 text-muted-foreground italic">"{lead.notes}"</div>}
         {denying && (
-          <div className="mt-3 flex gap-2 items-start">
+          <div className="mt-3 flex flex-col sm:flex-row gap-2 sm:items-start">
             <Textarea
               rows={2} placeholder="Reason for denial…"
               value={reason} onChange={(e) => setReason(e.target.value)}
             />
-            <div className="flex flex-col gap-1.5">
-              <Button size="sm" variant="destructive" disabled={pending}
+            <div className="flex gap-2 sm:flex-col sm:gap-1.5">
+              <Button size="sm" variant="destructive" disabled={pending} className="flex-1 sm:flex-none"
                 onClick={() => { onDeny(reason); setDenying(false); setReason(""); }}>
                 Confirm Deny
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => { setDenying(false); setReason(""); }}>Cancel</Button>
+              <Button size="sm" variant="ghost" className="flex-1 sm:flex-none" onClick={() => { setDenying(false); setReason(""); }}>Cancel</Button>
             </div>
           </div>
         )}
       </div>
       {!denying && (
         <div className="flex gap-2 md:justify-end">
-          <Button size="sm" variant="outline" onClick={() => setDenying(true)} disabled={pending}>
+          <Button variant="outline" onClick={() => setDenying(true)} disabled={pending}>
             <X className="w-3.5 h-3.5 mr-1.5" /> Deny
           </Button>
-          <Button size="sm" onClick={onConfirm} disabled={pending}
+          <Button onClick={onConfirm} disabled={pending}
             className="bg-[var(--victory)] text-black hover:opacity-90">
             <Check className="w-3.5 h-3.5 mr-1.5" /> Confirm
           </Button>

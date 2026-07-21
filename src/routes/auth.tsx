@@ -195,7 +195,7 @@ function Field({
         placeholder={placeholder}
         autoComplete={autoComplete}
         name={name}
-        className="mt-1 w-full bg-input border border-border rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+        className="mt-1 w-full bg-input border border-border rounded-md px-3 py-2.5 text-base md:text-sm focus:outline-none focus:ring-2 focus:ring-primary"
       />
     </label>
   );

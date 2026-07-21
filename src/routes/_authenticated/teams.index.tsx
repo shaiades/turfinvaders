@@ -53,13 +53,13 @@ function TeamsIndex() {
         ) : (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {teams.map((t) => (
-              <Link key={t.id} to="/teams/$teamId" params={{ teamId: t.id }} className="arcade-card p-5 hover:arcade-card-glow">
+              <Link key={t.id} to="/teams/$teamId" params={{ teamId: t.id }} className="arcade-card p-5 hover:arcade-card-glow active:arcade-card-glow">
                 <TeamBadge name={t.name} color={t.color} />
                 <div className="mt-4 text-xs text-muted-foreground">Captain · <span className="text-foreground">{t.captain}</span></div>
                 <div className="mt-4 grid grid-cols-3 gap-2">
-                  <div><div className="text-[9px] font-display uppercase text-muted-foreground">Leads</div><div className="text-sm">{t.leads.toLocaleString()}</div></div>
-                  <div><div className="text-[9px] font-display uppercase text-muted-foreground">Sales</div><div className="text-sm">{t.sales}</div></div>
-                  <div><div className="text-[9px] font-display uppercase text-muted-foreground">Crew</div><div className="text-sm text-victory">{t.members}</div></div>
+                  <div><div className="text-[10px] font-display uppercase text-muted-foreground">Leads</div><div className="text-sm">{t.leads.toLocaleString()}</div></div>
+                  <div><div className="text-[10px] font-display uppercase text-muted-foreground">Sales</div><div className="text-sm">{t.sales}</div></div>
+                  <div><div className="text-[10px] font-display uppercase text-muted-foreground">Crew</div><div className="text-sm text-victory">{t.members}</div></div>
                 </div>
               </Link>
             ))}

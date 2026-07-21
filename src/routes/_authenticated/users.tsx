@@ -18,7 +18,7 @@ export const Route = createFileRoute("/_authenticated/users")({
       .select("role")
       .eq("user_id", data.user.id)
       .in("role", ["owner", "captain", "office_staff"]);
-    if (!roles || roles.length === 0) throw redirect({ to: "/dashboard" });
+    if (!roles || roles.length === 0) throw redirect({ to: "/dashboard", search: { tab: "dispatch" } });
   },
   component: UsersPage,
   errorComponent: ({ error }) => (
@@ -162,7 +162,7 @@ function UsersPage() {
                         onChange={(e) =>
                           setRole.mutate({ userId: p.id, role: e.target.value as AppRole })
                         }
-                        className="bg-input border border-border rounded-md px-2 py-1.5 text-sm disabled:opacity-50"
+                        className="bg-input border border-border rounded-md px-2 py-2 text-base md:text-sm disabled:opacity-50"
                         title={lastOwner ? "Cannot demote the last Owner" : undefined}
                       >
                         {ROLE_OPTIONS.map((r) => (
@@ -179,7 +179,7 @@ function UsersPage() {
                         onChange={(e) =>
                           setTeam.mutate({ userId: p.id, teamId: e.target.value || null })
                         }
-                        className="bg-input border border-border rounded-md px-2 py-1.5 text-sm"
+                        className="bg-input border border-border rounded-md px-2 py-2 text-base md:text-sm"
                       >
                         <option value="">— unassigned —</option>
                         {data.teams.map((t) => (
@@ -211,7 +211,7 @@ function UsersPage() {
               required
               value={form.display_name}
               onChange={(e) => setForm({ ...form, display_name: e.target.value })}
-              className="bg-input border border-border rounded-md px-2 py-1.5 text-sm"
+              className="bg-input border border-border rounded-md px-2 py-2 text-base md:text-sm"
             />
           </label>
           <label className="flex flex-col gap-1 text-xs">
@@ -221,7 +221,7 @@ function UsersPage() {
               type="email"
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
-              className="bg-input border border-border rounded-md px-2 py-1.5 text-sm"
+              className="bg-input border border-border rounded-md px-2 py-2 text-base md:text-sm"
             />
           </label>
           <label className="flex flex-col gap-1 text-xs">
@@ -232,7 +232,7 @@ function UsersPage() {
               minLength={8}
               value={form.password}
               onChange={(e) => setForm({ ...form, password: e.target.value })}
-              className="bg-input border border-border rounded-md px-2 py-1.5 text-sm"
+              className="bg-input border border-border rounded-md px-2 py-2 text-base md:text-sm"
               placeholder="min 8 characters"
             />
           </label>
@@ -241,7 +241,7 @@ function UsersPage() {
             <select
               value={form.role}
               onChange={(e) => setForm({ ...form, role: e.target.value as AppRole })}
-              className="bg-input border border-border rounded-md px-2 py-1.5 text-sm"
+              className="bg-input border border-border rounded-md px-2 py-2 text-base md:text-sm"
             >
               {ROLE_OPTIONS.map((r) => (
                 <option key={r} value={r}>{r}</option>
@@ -253,7 +253,7 @@ function UsersPage() {
             <select
               value={form.office_location}
               onChange={(e) => setForm({ ...form, office_location: e.target.value as typeof form.office_location })}
-              className="bg-input border border-border rounded-md px-2 py-1.5 text-sm"
+              className="bg-input border border-border rounded-md px-2 py-2 text-base md:text-sm"
             >
               <option value="">— none —</option>
               <option value="San Diego">San Diego</option>
@@ -265,7 +265,7 @@ function UsersPage() {
             <select
               value={form.team_id}
               onChange={(e) => setForm({ ...form, team_id: e.target.value })}
-              className="bg-input border border-border rounded-md px-2 py-1.5 text-sm"
+              className="bg-input border border-border rounded-md px-2 py-2 text-base md:text-sm"
             >
               <option value="">— unassigned —</option>
               {data.teams.map((t) => (

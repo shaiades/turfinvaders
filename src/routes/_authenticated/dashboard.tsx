@@ -3,7 +3,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useAuth } from "@/hooks/useAuth";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { StatCard, ArcadePanel, TeamBadge } from "@/components/arcade";
+import { StatCard, ArcadePanel, TeamBadge, MobileCardList, MobileCard, MobileCardHeader, MobileStatGrid, MobileStat } from "@/components/arcade";
 import { LiveLeadCounter } from "@/components/LiveLeadCounter";
 import { CommandCenter } from "@/components/CommandCenter";
 import { FleetManager } from "@/components/FleetManager";
@@ -501,39 +501,65 @@ type RosterRow = {
 function RosterTable({ members }: { members: RosterRow[] }) {
   const { data: statuses } = useCanvasserStatuses();
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border">
-            <th className="text-left py-2">Rank</th>
-            <th className="text-left py-2">Player</th>
-            <th className="text-right py-2">Lvl</th>
-            <th className="text-right py-2">Doors</th>
-            <th className="text-right py-2">Sales</th>
-            <th className="text-right py-2">Revenue</th>
-          </tr>
-        </thead>
-        <tbody>
-          {members.map((m, i) => {
-            const suspended = isSuspendedStatus(statuses?.[m.id]);
-            return (
-              <tr key={m.id} className="border-b border-border/40 hover:bg-surface-elevated">
-                <td className="py-2.5 font-display text-xs text-muted-foreground">{String(i + 1).padStart(2, "0")}</td>
-                <td className="py-2.5">
-                  <div className="flex items-center gap-2">
-                    <Link to="/canvassers/$canvasserId" params={{ canvasserId: m.id }} className="hover:text-neon font-medium">{m.name}</Link>
+    <>
+      <MobileCardList>
+        {members.map((m, i) => {
+          const suspended = isSuspendedStatus(statuses?.[m.id]);
+          return (
+            <MobileCard key={m.id}>
+              <MobileCardHeader
+                left={
+                  <span className="flex items-center gap-2 min-w-0">
+                    <span className="font-display text-xs text-muted-foreground shrink-0">#{String(i + 1).padStart(2, "0")}</span>
+                    <Link to="/canvassers/$canvasserId" params={{ canvasserId: m.id }} className="hover:text-neon font-medium truncate">{m.name}</Link>
                     {suspended && <SuspendedBadge />}
-                  </div>
-                </td>
-                <td className="py-2.5 text-right text-victory font-display text-xs">{m.level}</td>
-                <td className="py-2.5 text-right">{m.doorsKnocked}</td>
-                <td className="py-2.5 text-right">{m.salesClosed}</td>
-                <td className="py-2.5 text-right text-victory">{formatCurrency(m.revenueGenerated)}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+                  </span>
+                }
+                right={<span className="text-victory">{formatCurrency(m.revenueGenerated)}</span>}
+              />
+              <MobileStatGrid cols={3}>
+                <MobileStat label="Lvl" value={m.level} className="text-victory font-display" />
+                <MobileStat label="Doors" value={m.doorsKnocked} />
+                <MobileStat label="Sales" value={m.salesClosed} />
+              </MobileStatGrid>
+            </MobileCard>
+          );
+        })}
+      </MobileCardList>
+      <div className="hidden md:block overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border">
+              <th className="text-left py-2">Rank</th>
+              <th className="text-left py-2">Player</th>
+              <th className="text-right py-2">Lvl</th>
+              <th className="text-right py-2">Doors</th>
+              <th className="text-right py-2">Sales</th>
+              <th className="text-right py-2">Revenue</th>
+            </tr>
+          </thead>
+          <tbody>
+            {members.map((m, i) => {
+              const suspended = isSuspendedStatus(statuses?.[m.id]);
+              return (
+                <tr key={m.id} className="border-b border-border/40 hover:bg-surface-elevated">
+                  <td className="py-2.5 font-display text-xs text-muted-foreground">{String(i + 1).padStart(2, "0")}</td>
+                  <td className="py-2.5">
+                    <div className="flex items-center gap-2">
+                      <Link to="/canvassers/$canvasserId" params={{ canvasserId: m.id }} className="hover:text-neon font-medium">{m.name}</Link>
+                      {suspended && <SuspendedBadge />}
+                    </div>
+                  </td>
+                  <td className="py-2.5 text-right text-victory font-display text-xs">{m.level}</td>
+                  <td className="py-2.5 text-right">{m.doorsKnocked}</td>
+                  <td className="py-2.5 text-right">{m.salesClosed}</td>
+                  <td className="py-2.5 text-right text-victory">{formatCurrency(m.revenueGenerated)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }

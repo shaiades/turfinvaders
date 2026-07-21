@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
-import { ArcadePanel, TeamBadge } from "@/components/arcade";
+import { ArcadePanel, TeamBadge, MobileCardList, MobileCard, MobileCardHeader, MobileStatGrid, MobileStat } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -138,7 +138,7 @@ function LiveDailyAction() {
             navigator.clipboard.writeText(webhookUrl);
             toast.success("Webhook URL copied");
           }}
-          className="text-[10px] font-display uppercase tracking-widest text-neon hover:underline"
+          className="inline-flex items-center min-h-10 md:min-h-9 px-2 -mx-2 text-[10px] font-display uppercase tracking-widest text-neon hover:underline"
         >
           Copy Webhook URL
         </button>
@@ -237,7 +237,7 @@ function ManualEntryBar() {
             <Label>Week (Monday)</Label>
             <Input type="date" value={weekStart} onChange={(e) => setWeekStart(weekStartOfISO(e.target.value))} />
           </div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="space-y-1.5"><Label>Total Leads</Label><Input type="number" min={0} value={leads} onChange={(e) => setLeads(e.target.value)} /></div>
             <div className="space-y-1.5"><Label>Total Sits</Label><Input type="number" min={0} value={sits} onChange={(e) => setSits(e.target.value)} /></div>
             <div className="space-y-1.5"><Label>Total Sales</Label><Input type="number" min={0} value={sales} onChange={(e) => setSales(e.target.value)} /></div>
@@ -297,7 +297,28 @@ function RawDataTable() {
           ⚠ No rows match the current Office filter.
         </div>
       ) : (
-        <div className="overflow-x-auto -mx-4 sm:mx-0">
+        <>
+          <MobileCardList>
+            {visible.map((r) => (
+              <MobileCard key={r.id}>
+                <MobileCardHeader
+                  left={r.name}
+                  right={<span className="text-muted-foreground font-mono text-xs">{r.log_date}</span>}
+                />
+                <MobileStatGrid cols={4}>
+                  <MobileStat label="Sits" value={r.demos_sits} />
+                  <MobileStat label="Sales" value={r.sales} className="text-victory" />
+                  <MobileStat label="Confirmed" value={r.confirmed_leads} />
+                  <MobileStat label="No Demo" value={r.no_demo} />
+                  <MobileStat label="One Legs" value={r.one_legs} />
+                  <MobileStat label="Future" value={r.future_leads} />
+                  <MobileStat label="Talked" value={r.people_talked_to} />
+                  <MobileStat label="Called In" value={r.leads_called_in} />
+                </MobileStatGrid>
+              </MobileCard>
+            ))}
+          </MobileCardList>
+          <div className="hidden md:block overflow-x-auto -mx-4 sm:mx-0">
           <table className="w-full text-xs">
             <thead>
               <tr className="text-left text-[10px] font-display uppercase tracking-widest text-muted-foreground">
@@ -330,7 +351,8 @@ function RawDataTable() {
               ))}
             </tbody>
           </table>
-        </div>
+          </div>
+        </>
       )}
     </ArcadePanel>
   );
@@ -391,7 +413,7 @@ function LiveFleetStatus() {
           <button
             key={r}
             onClick={() => setRange(r)}
-            className={`px-3 py-1 text-[10px] font-display uppercase tracking-widest rounded-sm transition ${
+            className={`px-3 py-2 text-[10px] font-display uppercase tracking-widest rounded-sm transition ${
               range === r ? "bg-neon text-background" : "text-muted-foreground hover:text-foreground"
             }`}
           >
@@ -565,7 +587,47 @@ function WeeklyResults() {
           {office === "All" ? "No activity recorded last week." : `No ${office} activity recorded last week.`}
         </div>
       ) : (
-        <div className="overflow-x-auto -mx-4 sm:mx-0">
+        <>
+          <MobileCardList>
+            {rows.map((r) => (
+              <MobileCard key={r.canvasserId}>
+                <MobileCardHeader
+                  left={r.name}
+                  right={r.payError ? (
+                    <span className="text-destructive text-xs" title={r.payError}>—</span>
+                  ) : (
+                    <span className="text-victory">${r.totalPay.toFixed(2)}</span>
+                  )}
+                />
+                {r.vanName && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <TeamBadge name={r.vanName} color={r.vanColor ?? "#888"} />
+                  </div>
+                )}
+                <MobileStatGrid cols={3}>
+                  <MobileStat label="Leads" value={r.totalLeads} />
+                  <MobileStat label="Sits" value={r.totalSits} />
+                  <MobileStat label="Resets" value={r.totalResets} className="text-[var(--accent)]" />
+                  <MobileStat label="Sales" value={r.totalSales} className="text-victory" />
+                  <MobileStat label="Points" value={r.totalPoints} className="text-neon" />
+                </MobileStatGrid>
+              </MobileCard>
+            ))}
+            <MobileCard className="border-neon/40">
+              <MobileCardHeader
+                left={<span className="font-display text-xs uppercase tracking-widest text-neon">Grand Total</span>}
+                right={<span className="text-victory">${grand.pay.toFixed(2)}</span>}
+              />
+              <MobileStatGrid cols={3}>
+                <MobileStat label="Leads" value={grand.leads} />
+                <MobileStat label="Sits" value={grand.sits} />
+                <MobileStat label="Resets" value={grand.resets} className="text-[var(--accent)]" />
+                <MobileStat label="Sales" value={grand.sales} className="text-victory" />
+                <MobileStat label="Points" value={grand.points} className="text-neon" />
+              </MobileStatGrid>
+            </MobileCard>
+          </MobileCardList>
+          <div className="hidden md:block overflow-x-auto -mx-4 sm:mx-0">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-[10px] font-display uppercase tracking-widest text-muted-foreground">
@@ -611,7 +673,8 @@ function WeeklyResults() {
               </tr>
             </tbody>
           </table>
-        </div>
+          </div>
+        </>
       )}
     </ArcadePanel>
   );
@@ -693,7 +756,6 @@ function DatabaseCleanup() {
                     <TeamBadge name={v.name} color={v.color} />
                   </div>
                   <Button
-                    size="sm"
                     variant="destructive"
                     disabled={delVan.isPending}
                     onClick={() => {
@@ -732,7 +794,6 @@ function DatabaseCleanup() {
                       )}
                     </div>
                     <Button
-                      size="sm"
                       variant="destructive"
                       disabled={delUser.isPending || isOwner}
                       title={isOwner ? "Cannot delete an Owner here" : "Permanently delete user"}

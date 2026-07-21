@@ -81,13 +81,13 @@ function TeamDetail() {
           <ol className="divide-y divide-border">
             {members.map((m, i) => (
               <li key={m.id} className="flex items-center justify-between py-3">
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 min-w-0">
                   <span className="font-display text-xs text-muted-foreground w-6">{String(i + 1).padStart(2, "0")}</span>
-                  <Link to="/canvassers/$canvasserId" params={{ canvasserId: m.id }} className="font-medium hover:text-neon">{m.name}</Link>
+                  <Link to="/canvassers/$canvasserId" params={{ canvasserId: m.id }} className="font-medium hover:text-neon min-w-0 truncate">{m.name}</Link>
                 </div>
-                <div className="flex items-center gap-5 text-xs text-muted-foreground">
-                  <span>{m.leads} leads</span>
-                  <span>{m.sales} sales</span>
+                <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                  <span>{m.leads}<span className="hidden sm:inline"> leads</span></span>
+                  <span>{m.sales}<span className="hidden sm:inline"> sales</span></span>
                   <span className="text-victory">{m.points} pts</span>
                 </div>
               </li>

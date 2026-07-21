@@ -277,7 +277,8 @@ function WinnersPanel({ winners }: { winners: Row[] }) {
     if (!hostRef.current || winners.length === 0) return;
     const host = hostRef.current;
     const colors = ["#00ff88", "#00f0ff", "#ff8a00", "#ff2e88", "#ffd166"];
-    const N = 60;
+    // Fewer confetti nodes on phones — DOM animation cost, not aesthetics.
+    const N = typeof window !== "undefined" && window.innerWidth < 640 ? 30 : 60;
     const nodes: HTMLDivElement[] = [];
     for (let i = 0; i < N; i++) {
       const el = document.createElement("div");

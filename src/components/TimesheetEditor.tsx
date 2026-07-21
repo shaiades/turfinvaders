@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { ArcadePanel } from "@/components/arcade";
+import { ArcadePanel, MobileCard, MobileCardHeader, MobileCardList } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import { Clock, ChevronLeft, ChevronRight, Save, Trash2, AlertTriangle } from "lucide-react";
 import { weekStartMonday, toISODate } from "@/lib/dates";
 
@@ -158,6 +159,20 @@ export function TimesheetEditor() {
     weekStart.getTime() + 6 * 86400000,
   ).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
 
+  // Shared by the desktop table and mobile card list so both render identical
+  // edit state through the same handlers.
+  const rows = visibleEntries.map((e) => {
+    const edit = edits[e.id] ?? {};
+    return {
+      e,
+      name: profileById.get(e.user_id)?.display_name ?? "Unknown",
+      edit,
+      dirty: edit.clock_in !== undefined || edit.clock_out !== undefined,
+      inVal: edit.clock_in ?? toLocalInput(e.clock_in),
+      outVal: edit.clock_out !== undefined ? (edit.clock_out ?? "") : toLocalInput(e.clock_out),
+    };
+  });
+
   return (
     <div className="space-y-4">
       <ArcadePanel title="Timesheets · Owner Edit Mode">
@@ -202,7 +217,81 @@ export function TimesheetEditor() {
             No time entries for this week.
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <>
+          <MobileCardList>
+            {rows.map(({ e, name, edit, dirty, inVal, outVal }) => (
+              <MobileCard key={e.id}>
+                <MobileCardHeader
+                  left={name}
+                  right={
+                    <span className="text-neon tabular-nums">
+                      {Number(e.billable_hours ?? 0).toFixed(2)}h
+                    </span>
+                  }
+                />
+                <div className="flex items-center justify-between gap-2 text-xs tabular-nums">
+                  <span className="text-muted-foreground">{e.log_date}</span>
+                  <span className="font-display text-victory">
+                    Week {(totalsByUser.get(e.user_id) ?? 0).toFixed(2)}h
+                  </span>
+                </div>
+                <label className="block space-y-1">
+                  <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                    Clock In
+                  </span>
+                  <Input
+                    type="datetime-local"
+                    value={inVal}
+                    onChange={(v) =>
+                      setEdits((s) => ({ ...s, [e.id]: { ...s[e.id], clock_in: v.target.value } }))
+                    }
+                    className="w-full"
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="flex items-center gap-1.5 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                    Clock Out
+                    {!e.clock_out && !edit.clock_out && (
+                      <span className="text-[9px] text-victory animate-pulse">live</span>
+                    )}
+                  </span>
+                  <Input
+                    type="datetime-local"
+                    value={outVal}
+                    onChange={(v) =>
+                      setEdits((s) => ({ ...s, [e.id]: { ...s[e.id], clock_out: v.target.value } }))
+                    }
+                    className="w-full"
+                  />
+                </label>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant={dirty ? "default" : "outline"}
+                    disabled={!dirty || saveMut.isPending}
+                    onClick={() => saveRow(e)}
+                    className={cn("flex-1", dirty && "bg-victory text-background hover:bg-victory/90")}
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    Save
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={deleteMut.isPending}
+                    onClick={() => {
+                      if (confirm(`Delete this time entry for ${name}?`)) deleteMut.mutate(e.id);
+                    }}
+                    className="flex-1"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                    Delete
+                  </Button>
+                </div>
+              </MobileCard>
+            ))}
+          </MobileCardList>
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border">
@@ -216,15 +305,7 @@ export function TimesheetEditor() {
                 </tr>
               </thead>
               <tbody>
-                {visibleEntries.map((e) => {
-                  const name = profileById.get(e.user_id)?.display_name ?? "Unknown";
-                  const edit = edits[e.id] ?? {};
-                  const dirty = edit.clock_in !== undefined || edit.clock_out !== undefined;
-                  const inVal = edit.clock_in ?? toLocalInput(e.clock_in);
-                  const outVal =
-                    edit.clock_out !== undefined
-                      ? (edit.clock_out ?? "")
-                      : toLocalInput(e.clock_out);
+                {rows.map(({ e, name, edit, dirty, inVal, outVal }) => {
                   return (
                     <tr key={e.id} className="border-b border-border/40 hover:bg-surface-elevated">
                       <td className="py-2 pr-3 font-medium">{name}</td>
@@ -236,7 +317,7 @@ export function TimesheetEditor() {
                           onChange={(v) =>
                             setEdits((s) => ({ ...s, [e.id]: { ...s[e.id], clock_in: v.target.value } }))
                           }
-                          className="h-8 text-xs w-[170px]"
+                          className="h-8 text-xs w-full min-w-[150px]"
                         />
                       </td>
                       <td className="py-2 pr-3">
@@ -247,7 +328,7 @@ export function TimesheetEditor() {
                             onChange={(v) =>
                               setEdits((s) => ({ ...s, [e.id]: { ...s[e.id], clock_out: v.target.value } }))
                             }
-                            className="h-8 text-xs w-[170px]"
+                            className="h-8 text-xs w-full min-w-[150px]"
                           />
                           {!e.clock_out && !edit.clock_out && (
                             <span className="text-[9px] font-display uppercase text-victory animate-pulse">live</span>
@@ -289,6 +370,7 @@ export function TimesheetEditor() {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </ArcadePanel>
     </div>

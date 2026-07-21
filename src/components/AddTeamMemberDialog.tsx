@@ -62,7 +62,9 @@ export function AddTeamMemberDialog({ variant = "default" }: { variant?: "defaul
           <Button
             className="gap-2 font-display uppercase tracking-widest text-xs bg-neon text-background hover:bg-neon/90 shadow-[0_0_24px_-4px_color-mix(in_oklab,var(--neon)_70%,transparent)]"
           >
-            <UserPlus className="h-4 w-4" />+ Add New Team Member / Captain
+            <UserPlus className="h-4 w-4" />
+            <span className="sm:hidden">+ Add</span>
+            <span className="hidden sm:inline">+ Add New Team Member / Captain</span>
           </Button>
         ) : (
           <Button variant="outline" className="gap-2">

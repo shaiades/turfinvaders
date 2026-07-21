@@ -376,12 +376,14 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
       <WeeklyPlaybook userId={userId} />
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
-        <TabsList className="grid w-full grid-cols-4 bg-surface border border-border p-1 h-auto">
-          <ArcadeTab value="today">Today</ArcadeTab>
-          <ArcadeTab value="week">This Week</ArcadeTab>
-          <ArcadeTab value="mtd">Month to Date</ArcadeTab>
-          <ArcadeTab value="goals">My Goals</ArcadeTab>
-        </TabsList>
+        <div className="-mx-4 px-4 sm:mx-0 sm:px-0 overflow-x-auto scrollbar-hide">
+          <TabsList className="flex w-max min-w-full flex-nowrap whitespace-nowrap md:grid md:w-full md:grid-cols-4 bg-surface border border-border p-1 h-auto">
+            <ArcadeTab value="today">Today</ArcadeTab>
+            <ArcadeTab value="week">This Week</ArcadeTab>
+            <ArcadeTab value="mtd">Month to Date</ArcadeTab>
+            <ArcadeTab value="goals">My Goals</ArcadeTab>
+          </TabsList>
+        </div>
 
         {/* ============ TODAY ============ */}
         <TabsContent value="today" className="mt-6 space-y-6">
@@ -566,7 +568,7 @@ function ValuePerDoorWidget({
           <div className="flex items-center gap-1.5 text-[10px] font-display uppercase tracking-widest text-victory">
             <Sparkles className="w-3 h-3" /> Value Per Door {showTarget && <span className="text-victory/60">· TARGET</span>}
           </div>
-          <div className="mt-3 font-display text-6xl md:text-7xl text-mega-victory leading-none">
+          <div className="mt-3 font-display text-5xl sm:text-6xl md:text-7xl text-mega-victory leading-none">
             {formatUSD(display)}
           </div>
           <div className="mt-3 text-[10px] font-display uppercase tracking-widest text-victory/80">
@@ -722,7 +724,7 @@ function GoalBar({
         editing ? (
           <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Set your target</span>
         ) : (
-          <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>
+          <Button variant="ghost" onClick={() => setEditing(true)}>
             <Pencil className="w-3.5 h-3.5 mr-1.5" /> Edit Goal
           </Button>
         )
@@ -802,7 +804,7 @@ function GoalInputPanel({
           <Crosshair className="w-3.5 h-3.5" /> Target Monthly Income · Quest Input
         </div>
         <div className="flex items-end gap-3 flex-wrap">
-          <div className="relative flex-1 min-w-[260px]">
+          <div className="relative flex-1 min-w-0">
             <span className="absolute left-4 top-1/2 -translate-y-1/2 font-display text-3xl text-neon/70 pointer-events-none">$</span>
             <Input
               type="number" min={0} step={100} inputMode="numeric"
@@ -990,7 +992,7 @@ function SCCERankBanner({ userId }: { userId: string }) {
           <div className="text-xs text-muted-foreground truncate">{RANK_PERKS[rank] ?? ""}</div>
         </div>
       </div>
-      <div className="flex items-center gap-4 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
         <span>3+ sits wks · <span className="text-neon">{data?.consecutive_weeks_3_plus_sits ?? 0}</span></span>
         <span>7+ sits wks · <span className="text-victory">{data?.consecutive_weeks_7_plus_sits ?? 0}</span></span>
         <span>4-wk avg · <span className="text-accent">{(data?.rolling_4_week_sit_avg ?? 0).toFixed(1)}</span></span>
