@@ -2,5 +2,8 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
   "installCommand": "npm ci",
-  "buildCommand": "npm run build"
+  "buildCommand": "npm run build",
+  "crons": [
+    { "path": "/api/internal/rotate-boards", "schedule": "0 13 * * 1" }
+  ]
 }

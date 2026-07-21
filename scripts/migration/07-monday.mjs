@@ -386,6 +386,12 @@ const run = {
   'deregister-webhook': async () => { await monday(`mutation { delete_webhook(id: ${args.id || die('--id required')}) { id } }`); console.log('deleted') },
   'create-test-item': () => cmdCreateTestItem(args.board || die('--board required'), args.agent || die('--agent required'), args.name || 'ZZ Webhooktest'),
   'delete-item': () => cmdDeleteItem(args.item || die('--item required')),
+  'duplicate-board': async () => {
+    const data = await monday(
+      `mutation ($b: ID!, $n: String!) { duplicate_board(board_id: $b, duplicate_type: duplicate_board_with_structure, board_name: $n) { board { id name } } }`,
+      { b: String(args.board || die('--board required')), n: String(args.name || die('--name required')) })
+    console.log(JSON.stringify(data.duplicate_board.board))
+  },
   'backfill': cmdBackfill,
 }[cmd]
 if (!run) die(`unknown command "${cmd}". See header for usage.`)
