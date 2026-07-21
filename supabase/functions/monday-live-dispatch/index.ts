@@ -351,6 +351,17 @@ serve(async (req) => {
       data: { itemName: item.name, canvasserName, changedTitle, changedValue },
     })
 
+    // Duplicated Monday items ("Endy and Rebecca Kuo (copy)") get fresh
+    // pulseIds, so the triggerUuid/pulseId dedupe can't catch them — they
+    // double-credit sits/points (seen live 2026-07-21). Log and skip.
+    if (/\(copy(\s+\d+)?\)\s*$/i.test(String(item.name ?? ''))) {
+      await supabaseAdmin.from('webhook_logs').insert({
+        step: 'Ignored_Copy_Item',
+        data: { pulseId, itemName: item.name, canvasserName },
+      })
+      return new Response('Copy item ignored', { status: 200, headers: corsHeaders })
+    }
+
     if (!canvasserName) {
       await supabaseAdmin.from('webhook_logs').insert({
         step: 'Error_No_Canvasser_Name',
