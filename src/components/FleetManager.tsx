@@ -62,28 +62,6 @@ function formatRange(start: Date, end: Date): string {
   return `${sM} ${sD}, ${start.getFullYear()} – ${eM} ${eD}, ${end.getFullYear()}`;
 }
 
-function outcomePointValue(outcomeOrStatus: unknown): number {
-  const normalized = String(outcomeOrStatus ?? "").trim().toLowerCase();
-  if (normalized === "pm") return 1;
-  if (normalized === "sale" || normalized === "$$") return 2;
-  return 0;
-}
-
-function addMappedPoints(pointsByUser: Map<string, number>, canvasserId: string | null | undefined, outcomeOrStatus: unknown, count = 1) {
-  if (!canvasserId || count <= 0) return;
-  const pointValue = outcomePointValue(outcomeOrStatus);
-  if (pointValue <= 0) return;
-  pointsByUser.set(canvasserId, (pointsByUser.get(canvasserId) ?? 0) + pointValue * count);
-}
-
-function webhookStatusForPointMapping(raw: unknown): string {
-  const normalized = String(raw ?? "").trim().toLowerCase();
-  if (normalized === "pitch_missed") return "PM";
-  if (normalized === "sales") return "Sale";
-  return String(raw ?? "");
-}
-
-
 const VAN_COLORS = ["#ff007a", "#00f0ff", "#a855f7", "#f59e0b", "#22c55e", "#ef4444", "#3b82f6", "#eab308"];
 export const OFFICE_LOCATIONS = ["San Diego", "Orange County"] as const;
 export type OfficeLocation = (typeof OFFICE_LOCATIONS)[number];
@@ -143,7 +121,7 @@ export function FleetManager() {
     queryKey: ["fleet_manager", weekStartISO, weekEndISO, selectedDateRange.startDate, selectedDateRange.endDate],
     queryFn: async () => {
       const { startDate, endDate } = selectedDateRange;
-      const [vansR, profilesR, rolesR, metricsByCreatedR, metricsByDateR, logsByCreatedR, logsByDateR, webhookOutcomeLogsR] = await Promise.all([
+      const [vansR, profilesR, rolesR, metricsByCreatedR, metricsByDateR, logsByDateR] = await Promise.all([
         supabase.from("teams").select("id, name, color, captain_id, office_location").order("name"),
         supabase.from("profiles").select("id, display_name, team_id, office_location, is_active").order("display_name"),
         supabase.from("user_roles").select("user_id, role"),
@@ -162,28 +140,15 @@ export function FleetManager() {
         supabase
           .from("daily_logs")
           .select("id, canvasser_id, demos_sits, sales, log_date, created_at")
-          .gte("created_at", startDate)
-          .lte("created_at", endDate),
-        supabase
-          .from("daily_logs")
-          .select("id, canvasser_id, demos_sits, sales, log_date, created_at")
           .gte("log_date", weekStartISO)
           .lte("log_date", weekEndISO),
-        supabase
-          .from("webhook_logs")
-          .select("id, data, created_at")
-          .eq("step", "Schedule_Outcome_Processed")
-          .filter("data->>metric_date", "gte", weekStartISO)
-          .filter("data->>metric_date", "lte", weekEndISO),
       ]);
       if (vansR.error) throw vansR.error;
       if (profilesR.error) throw profilesR.error;
       if (rolesR.error) throw rolesR.error;
       if (metricsByCreatedR.error) throw metricsByCreatedR.error;
       if (metricsByDateR.error) throw metricsByDateR.error;
-      if (logsByCreatedR.error) throw logsByCreatedR.error;
       if (logsByDateR.error) throw logsByDateR.error;
-      if (webhookOutcomeLogsR.error) console.warn("[FleetManager] webhook_logs fallback unavailable", webhookOutcomeLogsR.error);
       const rolesByUser = new Map<string, string[]>();
       for (const r of rolesR.data ?? []) {
         const arr = rolesByUser.get(r.user_id) ?? [];
@@ -193,21 +158,11 @@ export function FleetManager() {
       const metricRows = Array.from(
         new Map([...(metricsByCreatedR.data ?? []), ...(metricsByDateR.data ?? [])].map((row) => [row.id, row])).values(),
       );
-      const logRows = Array.from(
-        new Map([...(logsByCreatedR.data ?? []), ...(logsByDateR.data ?? [])].map((row) => [row.id, row])).values(),
-      );
-      const outcomeLogRows = webhookOutcomeLogsR.error ? [] : webhookOutcomeLogsR.data ?? [];
-      // Weekly points: PM/sit = 1 pt, Sale = 2 pts. BO/RS/basic leads = 0.
-      // Merge live daily_metrics (Monday webhook target table) with historical daily_logs (CSV import).
-      const metricPointsByUser = new Map<string, number>();
-      const logPointsByUser = new Map<string, number>();
-      const webhookFallbackPointsByUser = new Map<string, number>();
+      const logRows = logsByDateR.data ?? [];
       const pointsByUser = new Map<string, number>();
       const submitsByUser = new Map<string, number>();
       const confirmedByUser = new Map<string, number>();
       for (const m of metricRows) {
-        addMappedPoints(metricPointsByUser, m.canvasser_id, "PM", m.pitch_missed ?? 0);
-        addMappedPoints(metricPointsByUser, m.canvasser_id, "Sale", m.sales ?? 0);
         if (!m.canvasser_id) continue;
         const conf = m.leads_confirmed ?? 0;
         const kil = (m as { killed?: number | null }).killed ?? 0;
@@ -217,29 +172,14 @@ export function FleetManager() {
         submitsByUser.set(m.canvasser_id, (submitsByUser.get(m.canvasser_id) ?? 0) + sub);
         confirmedByUser.set(m.canvasser_id, (confirmedByUser.get(m.canvasser_id) ?? 0) + conf);
       }
+      // Points must mirror calc_weekly_paycheck (the Payroll pay engine):
+      // SUM(demos_sits + sales) from daily_logs, log_date Mon–Sat. demos_sits
+      // already includes sales, so this is sit = 1 pt, sale = 2 pts.
+      const engineWeekEndISO = toISODate(addDays(weekStart, 5));
       for (const l of logRows) {
-        addMappedPoints(logPointsByUser, l.canvasser_id, "PM", l.demos_sits ?? 0);
-        addMappedPoints(logPointsByUser, l.canvasser_id, "Sale", l.sales ?? 0);
-      }
-      for (const row of outcomeLogRows) {
-        const payload = row.data && typeof row.data === "object" && !Array.isArray(row.data)
-          ? row.data as Record<string, unknown>
-          : {};
-        const canvasserId = typeof payload.canvasser_id === "string" ? payload.canvasser_id : null;
-        const rawOutcome = payload.changedValue ?? payload.status ?? payload.recordedAs;
-        addMappedPoints(webhookFallbackPointsByUser, canvasserId, webhookStatusForPointMapping(rawOutcome), 1);
-      }
-      const allPointUserIds = new Set([
-        ...metricPointsByUser.keys(),
-        ...logPointsByUser.keys(),
-        ...webhookFallbackPointsByUser.keys(),
-      ]);
-      for (const userId of allPointUserIds) {
-        const webhookPoints = Math.max(
-          metricPointsByUser.get(userId) ?? 0,
-          webhookFallbackPointsByUser.get(userId) ?? 0,
-        );
-        pointsByUser.set(userId, webhookPoints + (logPointsByUser.get(userId) ?? 0));
+        if (!l.canvasser_id || l.log_date > engineWeekEndISO) continue;
+        const pts = (l.demos_sits ?? 0) + (l.sales ?? 0);
+        if (pts > 0) pointsByUser.set(l.canvasser_id, (pointsByUser.get(l.canvasser_id) ?? 0) + pts);
       }
       return {
         vans: vansR.data ?? [],
@@ -248,19 +188,25 @@ export function FleetManager() {
         pointsByUser,
         submitsByUser,
         confirmedByUser,
-        debugRecordCount: metricRows.length + logRows.length + outcomeLogRows.length,
+        debugRecordCount: metricRows.length + logRows.length,
       };
 
     },
   });
 
-  // Live updates — refresh weekly points as Monday webhooks arrive.
+  // Live updates — refresh as Monday webhooks arrive: daily_logs feeds the
+  // points badges, daily_metrics feeds submits/confirmed.
   useEffect(() => {
     const ch = supabase
       .channel("fleet-live-metrics")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "daily_metrics" },
+        () => qc.invalidateQueries({ queryKey: ["fleet_manager"] }),
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "daily_logs" },
         () => qc.invalidateQueries({ queryKey: ["fleet_manager"] }),
       )
       .subscribe();
