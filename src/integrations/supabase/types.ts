@@ -538,6 +538,8 @@ export type Database = {
           created_at: string
           id: boolean
           monday_api_token: string | null
+          monday_template_board_id: string | null
+          monday_webhooks: Json
           updated_at: string
         }
         Insert: {
@@ -546,6 +548,8 @@ export type Database = {
           created_at?: string
           id?: boolean
           monday_api_token?: string | null
+          monday_template_board_id?: string | null
+          monday_webhooks?: Json
           updated_at?: string
         }
         Update: {
@@ -554,6 +558,8 @@ export type Database = {
           created_at?: string
           id?: boolean
           monday_api_token?: string | null
+          monday_template_board_id?: string | null
+          monday_webhooks?: Json
           updated_at?: string
         }
         Relationships: []
