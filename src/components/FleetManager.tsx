@@ -375,7 +375,7 @@ export function FleetManager() {
             >
               <ChevronLeft className="w-4 h-4" />
             </Button>
-            <div className="px-3 py-1.5 rounded border border-neon/40 bg-neon/5 flex items-center gap-2 min-w-[240px] justify-center">
+            <div className="px-3 py-1.5 rounded border border-neon/40 bg-neon/5 flex items-center gap-2 min-w-0 flex-1 text-center sm:min-w-[240px] justify-center">
               <CalendarRange className="w-4 h-4 text-neon" />
               <div className="flex flex-col leading-tight">
                 <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
@@ -456,12 +456,12 @@ export function FleetManager() {
             </div>
             <div>
               <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Color</label>
-              <div className="flex gap-1 mt-1">
+              <div className="flex gap-1.5 md:gap-1 mt-1">
                 {VAN_COLORS.map((c) => (
                   <button
                     key={c}
                     onClick={() => setNewVanColor(c)}
-                    className={`w-6 h-6 rounded ${newVanColor === c ? "ring-2 ring-offset-1 ring-offset-background ring-foreground" : ""}`}
+                    className={`w-9 h-9 md:w-6 md:h-6 rounded ${newVanColor === c ? "ring-2 ring-offset-1 ring-offset-background ring-foreground" : ""}`}
                     style={{ background: c }}
                     aria-label={`color ${c}`}
                   />
@@ -525,12 +525,12 @@ export function FleetManager() {
                             </div>
                             <div>
                               <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Color</label>
-                              <div className="flex gap-1 mt-1">
+                              <div className="flex gap-1.5 md:gap-1 mt-1">
                                 {VAN_COLORS.map((c) => (
                                   <button
                                     key={c}
                                     onClick={() => setEditVanColor(c)}
-                                    className={`w-6 h-6 rounded ${editVanColor === c ? "ring-2 ring-offset-1 ring-offset-background ring-foreground" : ""}`}
+                                    className={`w-9 h-9 md:w-6 md:h-6 rounded ${editVanColor === c ? "ring-2 ring-offset-1 ring-offset-background ring-foreground" : ""}`}
                                     style={{ background: c }}
                                     aria-label={`color ${c}`}
                                   />
@@ -555,7 +555,9 @@ export function FleetManager() {
                           <div className="flex items-center justify-between gap-2 flex-wrap">
                             <div className="flex items-center gap-2 min-w-0 flex-1">
                               <Truck className="w-4 h-4 shrink-0" style={{ color: v.color }} />
-                              <TeamBadge name={v.name} color={v.color} />
+                              <span className="min-w-0 truncate">
+                                <TeamBadge name={v.name} color={v.color} />
+                              </span>
                               <span
                                 className="shrink-0 text-[10px] font-display uppercase tracking-widest px-1.5 py-0.5 rounded border border-neon/50 text-neon bg-neon/10"
                                 title="Total van points this week"
@@ -576,13 +578,13 @@ export function FleetManager() {
                             </div>
 
                             <div className="flex items-center gap-1">
-                              <span className="text-[10px] font-display uppercase tracking-widest flex items-center gap-1 mr-1 text-muted-foreground">
+                              <span className="text-[10px] font-display uppercase tracking-widest hidden sm:flex items-center gap-1 mr-1 text-muted-foreground">
                                 <Building2 className="w-3 h-3" /> {v.office_location ?? "San Diego"}
                               </span>
                               {canManage && (
                                 <button
                                   onClick={() => startEditVan(v)}
-                                  className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                                  className="p-2 md:p-1 min-h-9 min-w-9 md:min-h-0 md:min-w-0 inline-flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground"
                                   title="Edit van"
                                 >
                                   <Pencil className="w-3.5 h-3.5" />
@@ -595,7 +597,7 @@ export function FleetManager() {
                                       removeVan.mutate(v.id);
                                     }
                                   }}
-                                  className="p-1 rounded hover:bg-destructive/20 text-destructive"
+                                  className="p-2 md:p-1 min-h-9 min-w-9 md:min-h-0 md:min-w-0 inline-flex items-center justify-center rounded hover:bg-destructive/20 text-destructive"
                                   title="Delete van (Owner only)"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
@@ -855,7 +857,7 @@ function RosterRow({
   return (
     <div
       data-profile-id={id}
-      className="flex items-center gap-2 px-2 py-1.5 rounded border border-border bg-surface hover:border-neon/60"
+      className="flex flex-wrap sm:flex-nowrap items-center gap-2 px-2 py-1.5 rounded border border-border bg-surface hover:border-neon/60"
     >
       <span className="text-sm truncate flex-1 flex items-center gap-2 min-w-0">
         <span className="truncate">{name}</span>
@@ -881,7 +883,7 @@ function RosterRow({
           onValueChange={(val) => { if (val && val !== "none") onAssign(val); }}
         >
           <SelectTrigger
-            className="h-7 min-w-[120px] text-[11px] font-display uppercase tracking-wider bg-background border-[color:var(--neon-blue)]/50 hover:border-[color:var(--neon-blue)]"
+            className="h-9 md:h-7 w-full sm:w-auto sm:min-w-[120px] text-[11px] font-display uppercase tracking-wider bg-background border-[color:var(--neon-blue)]/50 hover:border-[color:var(--neon-blue)]"
           >
             <SelectValue placeholder="Assign Van…" />
           </SelectTrigger>
@@ -901,7 +903,7 @@ function RosterRow({
       {onUnassign && (
         <button
           onClick={onUnassign}
-          className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+          className="p-2 md:p-1 min-h-9 min-w-9 md:min-h-0 md:min-w-0 inline-flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground"
           title="Move to Free Agents"
         >
           <UserMinus className="w-3.5 h-3.5" />
@@ -910,7 +912,7 @@ function RosterRow({
       {onDelete && (
         <button
           onClick={onDelete}
-          className="p-1 rounded hover:bg-destructive/20 text-destructive"
+          className="p-2 md:p-1 min-h-9 min-w-9 md:min-h-0 md:min-w-0 inline-flex items-center justify-center rounded hover:bg-destructive/20 text-destructive"
           title={isGhost ? "Delete ghost profile" : "Delete profile (has data)"}
         >
           <Trash2 className="w-3.5 h-3.5" />

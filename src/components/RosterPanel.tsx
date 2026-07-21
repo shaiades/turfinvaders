@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { listRoster, type RosterRow } from "@/lib/users.functions";
-import { ArcadePanel } from "@/components/arcade";
+import { ArcadePanel, MobileCardList, MobileCard, MobileCardHeader } from "@/components/arcade";
 import { AddTeamMemberDialog } from "@/components/AddTeamMemberDialog";
 import { Users } from "lucide-react";
 
@@ -47,7 +47,42 @@ function RosterTable({ rows }: { rows: RosterRow[] }) {
     return <div className="text-sm text-muted-foreground py-6">No players on the roster yet.</div>;
   }
   return (
-    <div className="overflow-x-auto">
+    <>
+      <MobileCardList>
+        {rows.map((r) => {
+          const isManager = r.role === "owner" || r.role === "office_staff" || r.role === "captain";
+          return (
+            <MobileCard key={r.id}>
+              <MobileCardHeader
+                left={
+                  <span className="flex items-center gap-2 min-w-0">
+                    <span className="truncate">{r.display_name}</span>
+                    {r.is_placeholder && (
+                      <span className="shrink-0 text-[9px] font-display uppercase tracking-widest px-1.5 py-0.5 rounded border border-border text-muted-foreground">
+                        Placeholder
+                      </span>
+                    )}
+                  </span>
+                }
+                right={
+                  <span className={`text-[10px] font-display uppercase tracking-widest px-2 py-1 rounded border ${ROLE_TONE[r.role] ?? ROLE_TONE.canvasser}`}>
+                    {ROLE_LABEL[r.role] ?? r.role}
+                  </span>
+                }
+              />
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <span>{r.office_location}</span>
+                {isManager && (
+                  <span className="inline-flex items-center gap-1 text-victory">
+                    <Users className="h-3.5 w-3.5" /> Captain / Manager
+                  </span>
+                )}
+              </div>
+            </MobileCard>
+          );
+        })}
+      </MobileCardList>
+      <div className="hidden md:block overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border">
@@ -92,6 +127,7 @@ function RosterTable({ rows }: { rows: RosterRow[] }) {
           })}
         </tbody>
       </table>
-    </div>
+      </div>
+    </>
   );
 }

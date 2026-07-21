@@ -12,7 +12,7 @@ export const Route = createFileRoute("/_authenticated/settings")({
     const { data } = await supabase.auth.getUser();
     if (!data.user) throw redirect({ to: "/auth" });
     const { data: roles } = await supabase.from("user_roles").select("role").eq("user_id", data.user.id).eq("role", "owner");
-    if (!roles || roles.length === 0) throw redirect({ to: "/dashboard" });
+    if (!roles || roles.length === 0) throw redirect({ to: "/dashboard", search: { tab: "dispatch" } });
   },
   component: SettingsPage,
 });
@@ -47,7 +47,7 @@ function SettingsPage() {
       </div>
 
       <ArcadePanel title="Global Visibility">
-        <div className="flex items-start justify-between gap-6">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <div>
             <p className="text-sm">
               When ON, Captains can view other teams' dashboards and Canvassers can view peer profiles & stats.
@@ -77,7 +77,7 @@ function SettingsPage() {
           <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Company name</span>
           <input
             value={name} onChange={(e) => setName(e.target.value)}
-            className="mt-1 w-full bg-input border border-border rounded-md px-3 py-2.5 text-sm"
+            className="mt-1 w-full bg-input border border-border rounded-md px-3 py-2.5 text-base md:text-sm"
           />
         </label>
         <button

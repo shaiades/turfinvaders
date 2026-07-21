@@ -45,7 +45,7 @@ export function MondayEmbed({ canEdit }: { canEdit: boolean }) {
               href={url}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-[10px] font-display uppercase tracking-widest text-muted-foreground hover:text-neon inline-flex items-center gap-1"
+              className="text-[10px] font-display uppercase tracking-widest text-muted-foreground hover:text-neon inline-flex min-h-9 items-center gap-1"
             >
               <ExternalLink className="w-3 h-3" /> Open
             </a>
@@ -95,8 +95,8 @@ export function MondayEmbed({ canEdit }: { canEdit: boolean }) {
           <iframe
             title="Monday.com Lead Form"
             src={url}
-            className="block w-full bg-white"
-            style={{ height: "min(85vh, 900px)", border: 0 }}
+            className="block w-full bg-white h-[min(70vh,640px)] md:h-[min(85vh,900px)]"
+            style={{ border: 0 }}
             allow="clipboard-write; fullscreen"
             referrerPolicy="no-referrer-when-downgrade"
           />

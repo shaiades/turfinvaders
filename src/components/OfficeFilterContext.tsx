@@ -44,7 +44,7 @@ export function OfficeFilterToggle({ className = "", compact = false }: { classN
         <button
           key={o}
           onClick={() => setOffice(o)}
-          className={`${compact ? "px-2 py-1" : "px-3 py-1.5"} text-[10px] font-display uppercase tracking-widest rounded-sm transition ${
+          className={`min-h-9 ${compact ? "px-2 py-1" : "px-3 py-1.5"} text-[10px] font-display uppercase tracking-widest rounded-sm transition ${
             office === o ? "bg-neon text-background" : "text-muted-foreground hover:text-foreground"
           }`}
         >

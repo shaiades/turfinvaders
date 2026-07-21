@@ -175,7 +175,7 @@ function CanvasserProfile() {
             <Link
               to="/canvassers/$canvasserId/field"
               params={{ canvasserId }}
-              className="ml-auto inline-flex items-center gap-2 rounded border border-neon/50 bg-neon/10 px-3 py-1.5 text-[10px] font-display uppercase tracking-widest text-neon hover:bg-neon/20 transition"
+              className="ml-auto inline-flex items-center gap-2 rounded border border-neon/50 bg-neon/10 px-3 py-2 min-h-10 text-xs font-display uppercase tracking-widest text-neon hover:bg-neon/20 transition"
             >
               👁 View Field Activity
             </Link>

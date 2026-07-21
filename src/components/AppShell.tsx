@@ -100,7 +100,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         {/* Mobile header: centered logo only */}
         <div className="md:hidden flex items-center justify-between px-4 py-2">
           <div className="w-10" />
-          <Link to="/dashboard" aria-label="Turf Invaders home" className="flex items-center justify-center">
+          <Link to="/dashboard" search={{ tab: "executive" }} aria-label="Turf Invaders home" className="flex items-center justify-center">
             <img
               src={turfInvadersWordmark.url}
               alt="Turf Invaders"
@@ -140,7 +140,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               </Link>
             ))}
           </nav>
-          <Link to="/dashboard" className="flex items-center justify-center shrink-0" aria-label="Turf Invaders home">
+          <Link to="/dashboard" search={{ tab: "executive" }} className="flex items-center justify-center shrink-0" aria-label="Turf Invaders home">
             <img
               src={turfInvadersWordmark.url}
               alt="Turf Invaders"

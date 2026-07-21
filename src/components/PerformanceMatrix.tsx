@@ -2,7 +2,16 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { laWeekStartISO, addDaysISO } from "@/lib/dates";
-import { ArcadePanel, StatCard, TeamBadge } from "@/components/arcade";
+import {
+  ArcadePanel,
+  StatCard,
+  TeamBadge,
+  MobileCardList,
+  MobileCard,
+  MobileCardHeader,
+  MobileStatGrid,
+  MobileStat,
+} from "@/components/arcade";
 import { RankPill } from "@/components/RankPill";
 import { payRateForPoints } from "@/lib/pay";
 
@@ -160,7 +169,39 @@ export function PerformanceMatrix() {
       </ArcadePanel>
 
       <ArcadePanel title="Individual Roster">
-        <div className="overflow-x-auto">
+        <MobileCardList>
+          {view.canvassers.map((c) => (
+            <MobileCard key={c.id}>
+              <MobileCardHeader
+                left={c.name}
+                right={<span className="text-neon">{c.totals.points} PTS</span>}
+              />
+              <div className="flex flex-wrap items-center gap-1.5">
+                <RankPill rank={c.rank} />
+                {c.team && <TeamBadge name={c.team.name} color={c.team.color} />}
+              </div>
+              <MobileStatGrid cols={4}>
+                <MobileStat label="Leads" value={c.totals.total} className="text-victory" />
+                <MobileStat label="BO" value={c.totals.bo} />
+                <MobileStat label="OL" value={c.totals.ol} />
+                <MobileStat label="RS" value={c.totals.rs} />
+                <MobileStat label="PM" value={c.totals.pm} />
+                <MobileStat label="Sales" value={c.totals.sales} className="text-victory" />
+                <MobileStat
+                  label="Pay Rate"
+                  value={`$${c.rate}/hr`}
+                  className={c.rate === 35 ? "text-victory" : c.rate === 30 ? "text-neon" : "text-muted-foreground"}
+                />
+              </MobileStatGrid>
+            </MobileCard>
+          ))}
+          {view.canvassers.length === 0 && (
+            <div className="py-6 text-center text-sm text-muted-foreground">
+              No canvasser activity this week.
+            </div>
+          )}
+        </MobileCardList>
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border">

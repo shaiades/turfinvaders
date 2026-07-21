@@ -124,7 +124,7 @@ function LogPage() {
       <ArcadePanel
         title="Today's Counts"
         action={
-          <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>
+          <Button onClick={() => save.mutate()} disabled={save.isPending}>
             <Save className="w-3.5 h-3.5 mr-1.5" /> {save.isPending ? "Saving…" : "Save"}
           </Button>
         }
@@ -204,7 +204,7 @@ function NewLeadCard({ userId, teamId }: { userId?: string; teamId: string | nul
     <ArcadePanel
       title="Submit a New Lead"
       action={
-        <Button size="sm" variant={open ? "ghost" : "default"} onClick={() => setOpen((o) => !o)}>
+        <Button variant={open ? "ghost" : "default"} onClick={() => setOpen((o) => !o)}>
           <Plus className="w-3.5 h-3.5 mr-1.5" /> {open ? "Close" : "New Lead"}
         </Button>
       }
@@ -229,7 +229,7 @@ function NewLeadCard({ userId, teamId }: { userId?: string; teamId: string | nul
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
               <Label className="flex items-center gap-2">
-                <input type="checkbox" checked={isSale} onChange={(e) => setIsSale(e.target.checked)} />
+                <input type="checkbox" className="w-5 h-5" checked={isSale} onChange={(e) => setIsSale(e.target.checked)} />
                 Closed a sale on this lead
               </Label>
               {isSale && (

@@ -10,7 +10,15 @@ import {
   type MonthlyPaycheckResult,
 } from "@/lib/fleet.functions";
 import { sitBonusPerForRank } from "@/lib/pay";
-import { ArcadePanel, TeamBadge } from "@/components/arcade";
+import {
+  ArcadePanel,
+  TeamBadge,
+  MobileCardList,
+  MobileCard,
+  MobileCardHeader,
+  MobileStatGrid,
+  MobileStat,
+} from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -302,7 +310,7 @@ export function PayrollLedger() {
               <Button
                 variant="outline"
                 className={cn(
-                  "w-[240px] justify-start text-left font-normal border-neon/40",
+                  "w-full sm:w-[240px] justify-start text-left font-normal border-neon/40",
                 )}
               >
                 <CalendarIcon className="mr-2 h-4 w-4 text-neon" />
@@ -357,7 +365,78 @@ export function PayrollLedger() {
               The grand total and CSV export exclude them — retry or investigate before paying out.
             </div>
           )}
-          <div className="overflow-x-auto">
+          <MobileCardList>
+            {rows.map((r) => (
+              <MobileCard key={r.id}>
+                <MobileCardHeader
+                  left={r.name}
+                  right={
+                    r.payError ? (
+                      <span className="text-destructive text-xs" title={r.payError}>ERROR</span>
+                    ) : (
+                      <span className="text-victory">${r.totalPay.toFixed(2)}</span>
+                    )
+                  }
+                />
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <RankPill rank={r.rank} />
+                  {r.team && <TeamBadge name={r.team.name} color={r.team.color} />}
+                </div>
+                {r.payLock !== "active" && (
+                  <div
+                    className={`text-[9px] font-display uppercase tracking-widest ${r.payLock === "reverted" ? "text-destructive" : "text-warning"}`}
+                    title={r.payLock === "reverted"
+                      ? "Starting Pay Lock reverted — paid on weekly point tiers until 3 consecutive 7+ sit weeks"
+                      : "Pay Lock warning — 4-week sit average below 5"}
+                  >
+                    {r.payLock === "reverted" ? "Lock reverted" : "Lock warning"}
+                  </div>
+                )}
+                <MobileStatGrid cols={3}>
+                  <MobileStat label="Leads" value={r.total} className="text-victory" />
+                  <MobileStat label="Sits" value={r.sits} />
+                  <MobileStat label="Pts" value={r.points} className="font-display text-neon" />
+                  <MobileStat
+                    label="Rate"
+                    value={`$${r.rate}`}
+                    className={cn(
+                      "font-display",
+                      r.rate === 35 ? "text-victory" : r.rate === 30 ? "text-neon" : "text-muted-foreground",
+                    )}
+                  />
+                  <MobileStat
+                    label="Hours"
+                    value={
+                      <>
+                        {r.hours.toFixed(2)}h
+                        <div className="text-[9px] text-muted-foreground">
+                          {r.hoursSource === "clocked" ? "clocked" : "no time clocked"}
+                        </div>
+                      </>
+                    }
+                    className="font-display text-neon"
+                  />
+                  <MobileStat label="Sales Vol" value={`$${r.sale_amount.toFixed(2)}`} className="font-display text-victory" />
+                  <MobileStat label="Commission" value={`$${r.commission.toFixed(2)}`} />
+                  <MobileStat label="Bonuses" value={`$${r.bonuses.toFixed(2)}`} />
+                </MobileStatGrid>
+                <div className="text-xs text-muted-foreground">
+                  {r.bo} BO, {r.ol} OL, {r.rs} RS, <span className="text-neon">{r.pm} Sit</span>, <span className="text-victory">{r.sales} Sale</span>
+                </div>
+              </MobileCard>
+            ))}
+            <MobileCard className="border-neon/40">
+              <MobileCardHeader
+                left={
+                  <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                    Grand Total · Estimated Pay
+                  </span>
+                }
+                right={<span className="text-victory text-base">${grandTotal.toFixed(2)}</span>}
+              />
+            </MobileCard>
+          </MobileCardList>
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border">

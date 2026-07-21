@@ -279,11 +279,11 @@ function MyTerritoryPage() {
           <div className="flex flex-wrap items-center gap-3 rounded-lg border border-neon/40 bg-surface/60 p-3">
             <div className="font-display text-[10px] uppercase tracking-widest text-neon">Turf Tools</div>
             {!drawing ? (
-              <Button size="sm" onClick={() => setDrawing(true)} className="gap-2">
+              <Button onClick={() => setDrawing(true)} className="gap-2">
                 <Pencil className="w-3.5 h-3.5" /> Draw New Turf
               </Button>
             ) : (
-              <Button size="sm" variant="outline" onClick={() => { setDrawing(false); setPendingPolygon(null); }}>
+              <Button variant="outline" onClick={() => { setDrawing(false); setPendingPolygon(null); }}>
                 Cancel Drawing
               </Button>
             )}
@@ -295,7 +295,7 @@ function MyTerritoryPage() {
 
         {/* Canvasser pin picker */}
         {!isManager && (
-          <div className="grid sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-3 gap-2 sm:gap-3">
             <PinPicker
               label="Not Home" count={counts.not_home} color="#ff2d55" icon={<Home className="w-4 h-4" />}
               active={active === "not_home"} onClick={() => setActive("not_home")}
@@ -326,17 +326,15 @@ function MyTerritoryPage() {
 
           {/* Floating fallback: always visible when a polygon is pending */}
           {isManager && pendingPolygon && pendingPolygon.length >= 3 && (
-            <div className="absolute left-1/2 -translate-x-1/2 bottom-4 z-[1000] flex gap-2">
+            <div className="absolute left-1/2 -translate-x-1/2 bottom-4 z-[1000] flex flex-col items-stretch gap-2 w-[calc(100%-1.5rem)] max-w-sm">
               <Button
-                size="lg"
                 onClick={() => setIsModalOpen(true)}
                 className="font-display uppercase tracking-widest bg-victory text-black hover:bg-victory/90 shadow-[0_0_24px_rgba(57,255,20,0.6)] animate-pulse"
               >
                 <MapPin className="w-4 h-4 mr-2" />
-                Assign This Territory ({pendingPolygon.length} pts)
+                Assign Turf ({pendingPolygon.length} pts)
               </Button>
               <Button
-                size="lg"
                 variant="outline"
                 onClick={() => { setPendingPolygon(null); setIsModalOpen(false); }}
               >
@@ -369,7 +367,7 @@ function MyTerritoryPage() {
                         </div>
                       </div>
                       <Button
-                        size="sm" variant="ghost"
+                        size="icon" variant="ghost"
                         onClick={() => { if (confirm(`Delete turf "${t.name}"?`)) deleteTurf.mutate(t.id); }}
                         className="text-destructive"
                       >
@@ -510,7 +508,7 @@ function AssignTurfDialog({
                 {TURF_COLORS.map((c) => (
                   <button
                     key={c} type="button" onClick={() => setColor(c)}
-                    className="w-8 h-8 rounded-full border-2 transition-transform"
+                    className="w-10 h-10 rounded-full border-2 transition-transform"
                     style={{
                       background: c,
                       borderColor: color === c ? "#fff" : "transparent",

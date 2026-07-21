@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { OfficeFilterProvider, OfficeFilterToggle, useOfficeFilter } from "@/components/OfficeFilterContext";
+import { MobileCard, MobileCardHeader, MobileCardList, MobileStat, MobileStatGrid } from "@/components/arcade";
 import { Radio, Users, FileSearch, X, Link2, Copy, Check, KeyRound, Eye, EyeOff, AlertTriangle, Lock } from "lucide-react";
 import confetti from "canvas-confetti";
 
@@ -321,7 +322,7 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
               key={p.id}
               type="button"
               onClick={() => setPreset(p.id)}
-              className={`px-3 py-1.5 rounded-full text-[10px] font-display uppercase tracking-widest whitespace-nowrap border transition-colors ${
+              className={`px-3 py-2 rounded-full text-[10px] font-display uppercase tracking-widest whitespace-nowrap border transition-colors ${
                 active
                   ? "bg-neon text-background border-neon"
                   : "border-border text-muted-foreground hover:text-foreground hover:border-neon/40"
@@ -357,7 +358,44 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
             No canvassers in this office yet.
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <>
+            <MobileCardList className="p-3">
+              {rows.map((r, i) => {
+                const emoji = r.sub > 0 ? "🔥" : "🍩";
+                return (
+                  <MobileCard key={r.g.key}>
+                    <MobileCardHeader
+                      left={
+                        <>
+                          <span className="mr-1.5 font-display text-xs text-muted-foreground">{i + 1}</span>
+                          <span className="mr-1.5" aria-hidden>{emoji}</span>
+                          {r.g.display_name ?? "—"}
+                        </>
+                      }
+                      right={<span className={metricClass(r.conf, "victory")}>{r.conf}</span>}
+                    />
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-xs text-muted-foreground">
+                        {r.g.office_location ?? r.g.team_office ?? "—"}
+                      </span>
+                      {r.g.role === "captain" && (
+                        <span className="text-[9px] font-display uppercase tracking-widest text-accent">
+                          Captain
+                        </span>
+                      )}
+                    </div>
+                    <MobileStatGrid cols={3} className="font-display">
+                      <MobileStat label="Submitted" value={r.sub} className={metricClass(r.sub, "neon")} />
+                      <MobileStat label="Pending" value={r.pen} className={metricClass(r.pen, "warning")} />
+                      <MobileStat label="N/A" value={r.na} className={metricClass(r.na, "muted-foreground")} />
+                      <MobileStat label="Killed" value={r.kil} className={metricClass(r.kil, "destructive")} />
+                      <MobileStat label="Conv%" value={`${r.conv}%`} className={metricClass(r.conv, "accent")} />
+                    </MobileStatGrid>
+                  </MobileCard>
+                );
+              })}
+            </MobileCardList>
+            <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border bg-surface">
@@ -404,7 +442,8 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
                 })}
               </tbody>
             </table>
-          </div>
+            </div>
+          </>
         )}
       </div>
     </div>
@@ -460,6 +499,11 @@ const metricColorClass = {
   destructive: "text-destructive",
   accent: "text-accent",
 };
+
+/** Same dim-at-zero coloring as MetricCell, for the mobile card stats. */
+function metricClass(value: number, color: keyof typeof metricColorClass) {
+  return value > 0 ? metricColorClass[color] : "text-muted-foreground/40";
+}
 
 function MetricCell({
   value,

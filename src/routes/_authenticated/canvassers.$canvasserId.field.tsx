@@ -200,7 +200,7 @@ function FieldActivityPage() {
                         {e.sale?.customer_name ?? "—"} · {e.sale?.address ?? ""}
                       </div>
                     </div>
-                    <div className="text-right">
+                    <div className="text-right shrink-0">
                       <div className="text-[10px] uppercase tracking-widest text-muted-foreground">{timeLabel(new Date(e.t).toISOString())}</div>
                       <div className="font-display text-victory">+{fmt(amt * commissionRate)}</div>
                     </div>
@@ -229,7 +229,7 @@ function FieldActivityPage() {
                       {p.distance_m != null ? ` · ${Math.round(p.distance_m * 1.0936)} yds from device` : ""}
                     </div>
                   </div>
-                  <div className="text-right">
+                  <div className="text-right shrink-0">
                     <div className="text-[10px] uppercase tracking-widest text-muted-foreground">{timeLabel(new Date(e.t).toISOString())}</div>
                     <div className="font-display text-neon text-sm">
                       {s.knocks} knocks · {fmt(s.vpd)}<span className="text-muted-foreground text-[10px]">/door</span>
