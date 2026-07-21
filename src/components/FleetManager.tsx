@@ -412,7 +412,8 @@ export function FleetManager() {
       </ArcadePanel>
 
       {/* Tier 1 — Global Fleet Scoreboard (sticky on scroll) */}
-      <div className="sticky top-0 z-20 -mx-2 md:mx-0 px-2 md:px-0 py-2 bg-background/85 backdrop-blur border-b border-neon/20">
+      {/* top-14 clears AppShell's 56px sticky mobile header; z-10 keeps it under it. */}
+      <div className="sticky top-14 md:top-16 z-10 -mx-2 md:mx-0 px-2 md:px-0 py-2 bg-background/85 backdrop-blur border-b border-neon/20">
         <div className="grid grid-cols-3 gap-2 md:gap-3">
           <ScoreTile label="Submits" value={totalSubmits} color="neon" />
           <ScoreTile label="Confirmed" value={totalConfirmed} color="victory" />
