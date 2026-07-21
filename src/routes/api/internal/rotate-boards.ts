@@ -36,7 +36,11 @@ function edgeUrl(): string {
   const secret = process.env.MONDAY_WEBHOOK_SECRET;
   const base =
     "https://xogitpqeuwalerxygvjw.supabase.co/functions/v1/monday-live-dispatch?apikey=sb_publishable_ivjX0mrVvSLM1DHfDTDVuw_qHUtGeS2";
-  return secret ? `${base}&secret=${secret}` : base;
+  const url = secret ? `${base}&secret=${secret}` : base;
+  if (url.length > 255) {
+    throw new Error(`webhook URL is ${url.length} chars — Monday caps webhook URLs at 255`);
+  }
+  return url;
 }
 const WEBHOOK_EVENTS = ["create_item", "change_column_value"] as const;
 // Schedule of the daily check cron — keep in sync with vercel.json. Used as a

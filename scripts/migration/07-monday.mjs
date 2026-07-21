@@ -356,8 +356,17 @@ async function cmdListWebhooks(boardId) {
   console.log(JSON.stringify(data.webhooks ?? [], null, 2));
 }
 
+// Shared secret enforced by the edge function. Never committed: read from env
+// or ~/.turf-monday-webhook-secret (same pattern as DEST_DB_URL above).
+const WEBHOOK_SECRET = (
+  process.env.MONDAY_WEBHOOK_SECRET ||
+  readFileSync(join(homedir(), ".turf-monday-webhook-secret"), "utf8")
+).trim();
 const EDGE_URL =
-  "https://xogitpqeuwalerxygvjw.supabase.co/functions/v1/monday-live-dispatch?apikey=sb_publishable_ivjX0mrVvSLM1DHfDTDVuw_qHUtGeS2";
+  "https://xogitpqeuwalerxygvjw.supabase.co/functions/v1/monday-live-dispatch" +
+  `?apikey=sb_publishable_ivjX0mrVvSLM1DHfDTDVuw_qHUtGeS2&secret=${WEBHOOK_SECRET}`;
+if (EDGE_URL.length > 255)
+  die(`EDGE_URL is ${EDGE_URL.length} chars — Monday caps webhook URLs at 255`);
 
 async function registerOn(boardId) {
   const out = [];
