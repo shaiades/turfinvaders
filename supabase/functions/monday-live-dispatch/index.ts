@@ -139,6 +139,23 @@ const DAILY_LOG_KEYS = [
   'confirmed_leads', 'leads_called_in',
 ] as const
 
+/** For item-creation events there is no "changed column" — derive the item's
+ *  outcome from its full column set, highest-priority first (same precedence
+ *  the CSV importer uses: Sale > PM > RS > BO > OL > the legacy statuses). */
+function deriveBucketFromCols(cols: MondayCol[]): ScheduleBucket {
+  const priority: ScheduleBucket[] = [
+    'sales', 'pitch_missed', 'resets', 'blowouts', 'killed',
+    'outside_leads', 'leads_confirmed', 'no_answers', 'pending',
+  ]
+  const found = new Set<ScheduleBucket>()
+  for (const c of cols) {
+    const b = mapScheduleOutcome(c.column?.title || '', c.text || '')
+    if (b) found.add(b)
+  }
+  for (const p of priority) if (found.has(p)) return p
+  return null
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
@@ -187,6 +204,28 @@ serve(async (req) => {
     const pulseId = event?.pulseId || event?.itemId || event?.pulse_id
     const boardId = String(event?.boardId || event?.board_id || '')
     const changedColumnId: string | undefined = event?.columnId || event?.column_id
+    const isCreateEvent = event?.type === 'create_pulse'
+
+    // ── Retry guard ── Monday redelivers failed webhooks once per minute for
+    // 30 minutes, and every delivery of the same firing carries the same
+    // triggerUuid. The counter writes below are transition deltas, so a
+    // re-applied delivery would double-count. First delivery wins.
+    const triggerUuid: string | undefined = event?.triggerUuid || body?.triggerUuid
+    if (triggerUuid) {
+      const { data: seen } = await supabaseAdmin
+        .from('webhook_logs')
+        .select('id')
+        .eq('step', 'Event_Processed')
+        .contains('data', { triggerUuid })
+        .limit(1)
+      if ((seen?.length ?? 0) > 0) {
+        await supabaseAdmin.from('webhook_logs').insert({
+          step: 'Event_Retry_Skipped',
+          data: { triggerUuid, pulseId: pulseId ? String(pulseId) : null },
+        })
+        return new Response('Duplicate delivery', { status: 200, headers: corsHeaders })
+      }
+    }
     const statusFromEvent: string | undefined =
       event?.value?.label?.text ||
       event?.value?.label ||
@@ -202,7 +241,7 @@ serve(async (req) => {
 
     await supabaseAdmin.from('webhook_logs').insert({
       step: '2_Payload_Parsed',
-      data: { pulseId, boardId, changedColumnId, statusFromEvent, previousStatusFromEvent },
+      data: { pulseId, boardId, changedColumnId, statusFromEvent, previousStatusFromEvent, isCreateEvent, triggerUuid: triggerUuid ?? null },
     })
 
     if (!pulseId) {
@@ -370,13 +409,41 @@ serve(async (req) => {
       data: { canvasserName, matchedId: match.id, matchedName: match.display_name, autoCreated },
     })
 
-    // Step 5: Map new + previous outcomes
-    const bucket = mapScheduleOutcome(changedTitle, changedValue)
-    const prevBucket = previousStatusFromEvent
+    // Step 5: Map new + previous outcomes. Creation events have no changed
+    // column — derive the outcome (if any) from the item's full column set.
+    let bucket = mapScheduleOutcome(changedTitle, changedValue)
+    let prevBucket = previousStatusFromEvent
       ? mapScheduleOutcome(changedTitle, previousStatusFromEvent)
       : null
+    if (isCreateEvent) {
+      bucket = deriveBucketFromCols(cols)
+      prevBucket = null
+    }
     const metric_date = todayLA()
     const office_location = boardOffice ?? match.office_location ?? 'San Diego'
+
+    // ── New-lead credit ── exactly once per Monday item, whether the first
+    // signal is the item's creation or its first mapped outcome change.
+    // Claim-first via a webhook_logs marker; the legacy v2 marker
+    // (Schedule_Outcome_Processed) still counts so pre-v3 items are not
+    // re-credited. Credits: daily_metrics.leads_submitted +1 and
+    // daily_logs.leads_called_in +1, applied in the counter writes below.
+    const applyLeadCredit = async (): Promise<boolean> => {
+      const pid = String(pulseId)
+      const [creditSeen, legacySeen] = await Promise.all([
+        supabaseAdmin.from('webhook_logs').select('id')
+          .eq('step', 'Lead_Credit_Applied').contains('data', { pulseId: pid }).limit(1),
+        supabaseAdmin.from('webhook_logs').select('id')
+          .eq('step', 'Schedule_Outcome_Processed').contains('data', { pulseId: pid }).limit(1),
+      ])
+      if ((creditSeen.data?.length ?? 0) > 0 || (legacySeen.data?.length ?? 0) > 0) return false
+      await supabaseAdmin.from('webhook_logs').insert({
+        step: 'Lead_Credit_Applied',
+        data: { pulseId: pid, canvasser_id: match.id, source: isCreateEvent ? 'create_item' : 'first_outcome' },
+      })
+      return true
+    }
+    const creditNew = (isCreateEvent || bucket) ? await applyLeadCredit() : false
 
     // ── Sale Price → leads sync ─────────────────────────────────────────────
     // Payroll commission reads confirmed leads.sale_amount, so every sold item
@@ -524,11 +591,11 @@ serve(async (req) => {
     }
 
     // Traffic cop: if we can't map this outcome AND there's no prev bucket to
-    // decrement, there's nothing to do — ignore safely.
-    if (!bucket && !prevBucket) {
+    // decrement AND no new-lead credit to record, there's nothing to do.
+    if (!bucket && !prevBucket && !creditNew) {
       await supabaseAdmin.from('webhook_logs').insert({
         step: 'Ignored_Unmapped_Outcome',
-        data: { boardId, boardOffice, changedTitle, changedValue },
+        data: { boardId, boardOffice, changedTitle, changedValue, isCreateEvent },
       })
       return new Response('Ignored', { status: 200, headers: corsHeaders })
     }
@@ -562,29 +629,6 @@ serve(async (req) => {
       blowouts: 0, outside_leads: 0, resets: 0, pitch_missed: 0, sales: 0,
     }
 
-    // Duplicate-generation guard: if we've already processed this pulseId
-    // (same physical lead/house), do NOT credit leads_submitted again. Still
-    // credit outcome metrics (sales, resets, blowouts, etc.).
-    const { data: priorHits } = await supabaseAdmin
-      .from('webhook_logs')
-      .select('id, data')
-      .eq('step', 'Schedule_Outcome_Processed')
-      .contains('data', { pulseId: String(pulseId) })
-      .limit(1)
-    const isDuplicateLead = (priorHits?.length ?? 0) > 0
-
-    if (isDuplicateLead) {
-      await supabaseAdmin.from('webhook_logs').insert({
-        step: 'Duplicate_Lead_Credit_Blocked',
-        data: {
-          note: `[Lead ${pulseId}] updated outcome to ${bucket ?? changedValue}, blocked duplicate lead generation credit`,
-          pulseId,
-          agentName: match.display_name,
-          newOutcome: bucket ?? changedValue,
-        },
-      })
-    }
-
     const bucketKeys = [
       'leads_confirmed', 'no_answers', 'killed', 'pending',
       'blowouts', 'outside_leads', 'resets', 'pitch_missed', 'sales',
@@ -604,7 +648,7 @@ serve(async (req) => {
       canvasser_id: match.id,
       metric_date,
       office_location,
-      leads_submitted: cur.leads_submitted ?? 0,
+      leads_submitted: (cur.leads_submitted ?? 0) + (creditNew ? 1 : 0),
       leads_confirmed: next.leads_confirmed ?? 0,
       no_answers: next.no_answers ?? 0,
       killed: next.killed ?? 0,
@@ -641,9 +685,9 @@ serve(async (req) => {
       for (const [k, v] of Object.entries((bucket && DAILY_LOG_VECS[bucket]) || {})) {
         delta[k] = (delta[k] ?? 0) + v
       }
-      // Credit "leads called in" once per Monday item, and only on events
-      // that carry a positive outcome (never on pure reverts/decrements).
-      if (bucket && !isDuplicateLead) delta.leads_called_in = (delta.leads_called_in ?? 0) + 1
+      // Credit "leads called in" once per Monday item — claimed above by
+      // applyLeadCredit at creation or first mapped outcome, whichever first.
+      if (creditNew) delta.leads_called_in = (delta.leads_called_in ?? 0) + 1
 
       if (Object.values(delta).some((v) => v !== 0)) {
         // Ensure the row exists without clobbering fields on existing rows,
@@ -686,6 +730,16 @@ serve(async (req) => {
       await supabaseAdmin.from('webhook_logs').insert({
         step: 'Daily_Log_Feed_Error',
         data: { pulseId: String(pulseId), error: feedErr instanceof Error ? feedErr.message : String(feedErr) },
+      })
+    }
+
+    // Mark this delivery processed BEFORE best-effort tail work: the counter
+    // writes above are the retry-sensitive part, so the marker must cover
+    // them even if rank refresh or the final log were to fail.
+    if (triggerUuid) {
+      await supabaseAdmin.from('webhook_logs').insert({
+        step: 'Event_Processed',
+        data: { triggerUuid, pulseId: String(pulseId), isCreateEvent },
       })
     }
 
