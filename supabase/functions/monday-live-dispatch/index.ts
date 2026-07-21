@@ -1,16 +1,11 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { fetchItemBatched } from './monday.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
-
-// Pin the Current API version deliberately. Monday silently reroutes retired
-// versions to its rolling Maintenance version (2024-01 has been rerouted for
-// years), so an outdated pin means unpinned. Bump quarterly with the release
-// notes; never pin the RC.
-const MONDAY_API_VERSION = '2026-07'
 
 function normalizeName(s: string): string {
   return s.trim().toLowerCase().replace(/\s+/g, ' ')
@@ -299,35 +294,29 @@ serve(async (req) => {
 
     // Step 3b: Query Monday GraphQL for the item. FormulaValue.display_value
     // covers formula-typed columns (e.g. a computed Sale Price), whose plain
-    // text/value fields are always empty.
-    const query = `query { items(ids: [${pulseId}]) { id name board { id } column_values { id text column { title id } ... on FormulaValue { display_value } } } }`
-    let mondayJson: any = null
-    let mondayError: string | null = null
-    try {
-      const mondayResp = await fetch('https://api.monday.com/v2', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': mondayToken,
-          'API-Version': MONDAY_API_VERSION,
-        },
-        body: JSON.stringify({ query }),
+    // text/value fields are always empty. The fetch is coalesced with other
+    // concurrent deliveries into one items(ids: [...]) query and retried on
+    // rate/complexity errors — see monday.ts. Ids are interpolated into the
+    // GraphQL document, so reject non-numeric pulseIds outright.
+    const pulseIdStr = String(pulseId)
+    if (!/^\d+$/.test(pulseIdStr)) {
+      await supabaseAdmin.from('webhook_logs').insert({
+        step: 'Error_Bad_PulseId',
+        data: { pulseId: pulseIdStr },
       })
-      mondayJson = await mondayResp.json()
-      if (mondayJson?.errors) mondayError = JSON.stringify(mondayJson.errors).slice(0, 300)
-    } catch (e) {
-      mondayError = e instanceof Error ? e.message : String(e)
+      return new Response('Bad pulseId', { status: 200, headers: corsHeaders })
     }
+    const { item: mondayItem, error: mondayError } = await fetchItemBatched(mondayToken, pulseIdStr)
 
     await supabaseAdmin.from('webhook_logs').insert({
       step: '3_Monday_API_Response',
-      data: { pulseId, mondayError, hasItem: !!mondayJson?.data?.items?.[0] },
+      data: { pulseId, mondayError, hasItem: !!mondayItem },
     })
 
-    if (!mondayJson?.data?.items?.[0]) {
+    if (!mondayItem) {
       await supabaseAdmin.from('webhook_logs').insert({
         step: 'Error_Monday_No_Item',
-        data: { pulseId, mondayJson },
+        data: { pulseId, mondayError },
       })
       // Transient failure (network / API error / rate limit): return 5xx so
       // Monday's once-a-minute retry loop redelivers — the Event_Processed
@@ -339,7 +328,7 @@ serve(async (req) => {
       return new Response('No Monday item', { status: 200, headers: corsHeaders })
     }
 
-    const item = mondayJson.data.items[0]
+    const item = mondayItem as any
     const cols: Array<{ id: string; text: string | null; column: { title: string; id: string } }> =
       item.column_values || []
 
