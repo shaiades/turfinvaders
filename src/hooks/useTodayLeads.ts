@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { laTodayISO, laMidnightUtcISO } from "@/lib/dates";
 
 export type TodayLeads = {
   total: number;
@@ -8,10 +9,9 @@ export type TodayLeads = {
   byOffice: Record<string, number>;
 };
 
+// "Today" starts at midnight America/Los_Angeles, not viewer-local midnight.
 function startOfTodayISO() {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString();
+  return laMidnightUtcISO(laTodayISO());
 }
 
 /**

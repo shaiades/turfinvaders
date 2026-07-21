@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Clock, Play, Square } from "lucide-react";
+import { laDateISO, laTodayISO } from "@/lib/dates";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -15,12 +16,8 @@ function fmtDuration(ms: number) {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
 }
 
-function isoDateLocal(d: Date) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
+// Shift log_date is the LA calendar day of the instant (never viewer-local).
+const isoDateLocal = (d: Date) => laDateISO(d);
 
 export function TimeClock({ userId }: { userId: string }) {
   const qc = useQueryClient();
@@ -136,7 +133,7 @@ export function TimeClock({ userId }: { userId: string }) {
         <div className="text-xs text-muted-foreground text-center">
           Today billable: <span className="text-victory">{todayHours.toFixed(2)}h</span>
           <span className="mx-2">·</span>
-          {new Date().getDay() === 0 ? (
+          {new Date(`${laTodayISO()}T12:00:00Z`).getUTCDay() === 0 ? (
             <span className="text-warning">Sundays are unpaid — today's time bills 0h</span>
           ) : (
             <>30-min lunch auto-deducted per shift</>

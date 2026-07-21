@@ -14,19 +14,16 @@ import { PayrollLedger } from "@/components/PayrollLedger";
 import { toast } from "sonner";
 import { Plus, Trash2, Truck, User } from "lucide-react";
 import { OfficeFilterProvider, OfficeFilterToggle, useOfficeFilter } from "@/components/OfficeFilterContext";
+import { weekStartMonday, toISODate, addDays, dateFromISO, laDateISO, laTodayISO, laWeekStartISO, weekStartOfISO } from "@/lib/dates";
 
 
 /* ============ Helpers ============ */
+/* All day/week/month buckets are America/Los_Angeles (midnight PT resets). */
 
-function toISODate(d: Date) { return d.toISOString().slice(0, 10); }
-function startOfWeekMon(ref = new Date()) {
-  const d = new Date(ref); d.setHours(0, 0, 0, 0);
-  const day = d.getDay() === 0 ? 7 : d.getDay();
-  d.setDate(d.getDate() - (day - 1));
-  return d;
+const startOfWeekMon = weekStartMonday;
+function startOfMonth(ref = new Date()) {
+  return dateFromISO(`${laDateISO(ref).slice(0, 7)}-01`);
 }
-function addDays(d: Date, n: number) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
-function startOfMonth(ref = new Date()) { const d = new Date(ref); d.setHours(0,0,0,0); d.setDate(1); return d; }
 
 function leadsSum(r: { demos_sits?: number | null; sales?: number | null; no_demo?: number | null; one_legs?: number | null; future_leads?: number | null; unmarked?: number | null }) {
   return (r.demos_sits ?? 0) + (r.sales ?? 0) + (r.no_demo ?? 0) + (r.one_legs ?? 0) + (r.future_leads ?? 0) + (r.unmarked ?? 0);
@@ -60,7 +57,7 @@ export function ExecutiveDashboard() {
 /* ============ Live Daily Action (Today) ============ */
 
 function LiveDailyAction() {
-  const today = useMemo(() => toISODate(new Date()), []);
+  const today = useMemo(() => laTodayISO(), []);
   const qc = useQueryClient();
 
   const q = useQuery({
@@ -174,18 +171,12 @@ function LiveDailyAction() {
 
 /* ============ Manual Entry ============ */
 
-function startOfWeekMonISO(d: Date) {
-  const x = new Date(d); x.setHours(0,0,0,0);
-  const day = x.getDay() === 0 ? 7 : x.getDay();
-  x.setDate(x.getDate() - (day - 1));
-  return x.toISOString().slice(0, 10);
-}
 
 function ManualEntryBar() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [canvasserId, setCanvasserId] = useState<string>("");
-  const [weekStart, setWeekStart] = useState<string>(startOfWeekMonISO(new Date()));
+  const [weekStart, setWeekStart] = useState<string>(laWeekStartISO());
   const [leads, setLeads] = useState<string>("0");
   const [sits, setSits] = useState<string>("0");
   const [sales, setSales] = useState<string>("0");
@@ -244,7 +235,7 @@ function ManualEntryBar() {
           </div>
           <div className="space-y-1.5">
             <Label>Week (Monday)</Label>
-            <Input type="date" value={weekStart} onChange={(e) => setWeekStart(startOfWeekMonISO(new Date(e.target.value)))} />
+            <Input type="date" value={weekStart} onChange={(e) => setWeekStart(weekStartOfISO(e.target.value))} />
           </div>
           <div className="grid grid-cols-3 gap-3">
             <div className="space-y-1.5"><Label>Total Leads</Label><Input type="number" min={0} value={leads} onChange={(e) => setLeads(e.target.value)} /></div>

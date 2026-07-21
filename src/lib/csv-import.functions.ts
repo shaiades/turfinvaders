@@ -104,18 +104,22 @@ function parseMoney(v: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+// Log dates are America/Los_Angeles calendar days. Bare dates pass through;
+// timestamps resolve to their LA calendar day (never UTC).
 function parseDate(raw: string | null | undefined): string | null {
   if (!raw) return null;
   const s = String(raw).trim();
   if (!s) return null;
-  const d = new Date(s);
-  if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
-  // Try mm/dd/yyyy
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  // Try mm/dd/yyyy — already a calendar date, no timezone involved.
   const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
   if (m) {
     const yr = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
-    const d2 = new Date(yr, Number(m[1]) - 1, Number(m[2]));
-    if (!isNaN(d2.getTime())) return d2.toISOString().slice(0, 10);
+    return `${yr}-${String(Number(m[1])).padStart(2, "0")}-${String(Number(m[2])).padStart(2, "0")}`;
+  }
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(d);
   }
   return null;
 }

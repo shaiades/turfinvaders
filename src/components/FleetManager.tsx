@@ -17,38 +17,12 @@ import { deleteProfile, deleteVan } from "@/lib/fleet.functions";
 import { addTeamMember } from "@/lib/users.functions";
 import { useAuth } from "@/hooks/useAuth";
 import { isManagerRole } from "@/lib/roles";
+import { formatCurrency } from "@/lib/utils";
+import { weekStartMonday, toISODate, addDays, addDaysISO, laMidnightUtcISO } from "@/lib/dates";
 
-// Week helpers — ISO week, Monday..Sunday.
-function startOfWeekMonday(d: Date): Date {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  const day = x.getDay(); // 0=Sun..6=Sat
-  const diff = day === 0 ? -6 : 1 - day; // shift to Monday
-  x.setDate(x.getDate() + diff);
-  return x;
-}
-function addDays(d: Date, n: number): Date {
-  const x = new Date(d);
-  x.setDate(x.getDate() + n);
-  return x;
-}
-function toISODate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-function toStrictIsoDayBoundary(d: Date, endOfDay = false): string {
-  return new Date(Date.UTC(
-    d.getFullYear(),
-    d.getMonth(),
-    d.getDate(),
-    endOfDay ? 23 : 0,
-    endOfDay ? 59 : 0,
-    endOfDay ? 59 : 0,
-    endOfDay ? 999 : 0,
-  )).toISOString();
-}
+// Week helpers — ISO week, Monday..Sunday. The fleet week is anchored to
+// America/Los_Angeles via the shared helpers in @/lib/dates: all stats reset
+// at midnight PT on Monday morning, regardless of the viewer's device timezone.
 function formatRange(start: Date, end: Date): string {
   const sameMonth = start.getMonth() === end.getMonth();
   const sameYear = start.getFullYear() === end.getFullYear();
@@ -100,20 +74,21 @@ export function FleetManager() {
     onError: (e: Error) => toast.error(e.message ?? "Failed to reactivate"),
   });
 
-  // Week selector — default to current Monday-anchored week.
-  const [weekStart, setWeekStart] = useState<Date>(() => startOfWeekMonday(new Date()));
+  // Week selector — default to current Monday-anchored week (Pacific time).
+  const [weekStart, setWeekStart] = useState<Date>(() => weekStartMonday());
   const weekEnd = useMemo(() => addDays(weekStart, 6), [weekStart]);
   const weekStartISO = useMemo(() => toISODate(weekStart), [weekStart]);
   const weekEndISO = useMemo(() => toISODate(weekEnd), [weekEnd]);
+  // created_at window: LA-midnight Monday → LA-midnight next Monday (exclusive).
   const selectedDateRange = useMemo(
     () => ({
-      startDate: toStrictIsoDayBoundary(weekStart),
-      endDate: toStrictIsoDayBoundary(weekEnd, true),
+      startDate: laMidnightUtcISO(weekStartISO),
+      endDate: laMidnightUtcISO(addDaysISO(weekStartISO, 7)),
     }),
-    [weekStart, weekEnd],
+    [weekStartISO],
   );
   const isCurrentWeek = useMemo(
-    () => toISODate(startOfWeekMonday(new Date())) === weekStartISO,
+    () => toISODate(weekStartMonday()) === weekStartISO,
     [weekStartISO],
   );
 
@@ -121,7 +96,10 @@ export function FleetManager() {
     queryKey: ["fleet_manager", weekStartISO, weekEndISO, selectedDateRange.startDate, selectedDateRange.endDate],
     queryFn: async () => {
       const { startDate, endDate } = selectedDateRange;
-      const [vansR, profilesR, rolesR, metricsByCreatedR, metricsByDateR, logsByDateR] = await Promise.all([
+      // Van Volume window: Monday 00:00 → next Monday 00:00, Pacific time.
+      const volStartISO = startDate;
+      const volEndISO = endDate;
+      const [vansR, profilesR, rolesR, metricsByCreatedR, metricsByDateR, logsByDateR, leadsR] = await Promise.all([
         supabase.from("teams").select("id, name, color, captain_id, office_location").order("name"),
         supabase.from("profiles").select("id, display_name, team_id, office_location, is_active").order("display_name"),
         supabase.from("user_roles").select("user_id, role"),
@@ -130,7 +108,7 @@ export function FleetManager() {
           .from("daily_metrics")
           .select("id, canvasser_id, pitch_missed, sales, leads_submitted, leads_confirmed, no_answers, killed, pending, metric_date, created_at")
           .gte("created_at", startDate)
-          .lte("created_at", endDate),
+          .lt("created_at", endDate),
         supabase
           .from("daily_metrics")
           .select("id, canvasser_id, pitch_missed, sales, leads_submitted, leads_confirmed, no_answers, killed, pending, metric_date, created_at")
@@ -142,6 +120,15 @@ export function FleetManager() {
           .select("id, canvasser_id, demos_sits, sales, log_date, created_at")
           .gte("log_date", weekStartISO)
           .lte("log_date", weekEndISO),
+        // Confirmed sale dollars for Van Volume — same attribution as the pay
+        // engine (COALESCE(reviewed_at, created_at)), windowed to the PT week.
+        supabase
+          .from("leads")
+          .select("canvasser_id, sale_amount, created_at, reviewed_at")
+          .eq("status", "confirmed")
+          .or(
+            `and(created_at.gte.${volStartISO},created_at.lt.${volEndISO}),and(reviewed_at.gte.${volStartISO},reviewed_at.lt.${volEndISO})`,
+          ),
       ]);
       if (vansR.error) throw vansR.error;
       if (profilesR.error) throw profilesR.error;
@@ -149,6 +136,7 @@ export function FleetManager() {
       if (metricsByCreatedR.error) throw metricsByCreatedR.error;
       if (metricsByDateR.error) throw metricsByDateR.error;
       if (logsByDateR.error) throw logsByDateR.error;
+      if (leadsR.error) throw leadsR.error;
       const rolesByUser = new Map<string, string[]>();
       for (const r of rolesR.data ?? []) {
         const arr = rolesByUser.get(r.user_id) ?? [];
@@ -181,6 +169,17 @@ export function FleetManager() {
         const pts = (l.demos_sits ?? 0) + (l.sales ?? 0);
         if (pts > 0) pointsByUser.set(l.canvasser_id, (pointsByUser.get(l.canvasser_id) ?? 0) + pts);
       }
+      // Van Volume: confirmed sale dollars per canvasser, attributed to the
+      // week containing COALESCE(reviewed_at, created_at) in Pacific time.
+      const volumeByUser = new Map<string, number>();
+      const volStartMs = Date.parse(volStartISO);
+      const volEndMs = Date.parse(volEndISO);
+      for (const l of leadsR.data ?? []) {
+        if (!l.canvasser_id) continue;
+        const at = Date.parse(l.reviewed_at ?? l.created_at ?? "");
+        if (Number.isNaN(at) || at < volStartMs || at >= volEndMs) continue;
+        volumeByUser.set(l.canvasser_id, (volumeByUser.get(l.canvasser_id) ?? 0) + Number(l.sale_amount ?? 0));
+      }
       return {
         vans: vansR.data ?? [],
         profiles: profilesR.data ?? [],
@@ -188,6 +187,7 @@ export function FleetManager() {
         pointsByUser,
         submitsByUser,
         confirmedByUser,
+        volumeByUser,
         debugRecordCount: metricRows.length + logRows.length,
       };
 
@@ -207,6 +207,11 @@ export function FleetManager() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "daily_logs" },
+        () => qc.invalidateQueries({ queryKey: ["fleet_manager"] }),
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "leads" },
         () => qc.invalidateQueries({ queryKey: ["fleet_manager"] }),
       )
       .subscribe();
@@ -321,7 +326,7 @@ export function FleetManager() {
     return <div className="text-sm text-muted-foreground">Loading fleet…</div>;
   }
 
-  const { vans, profiles: allProfiles, rolesByUser, pointsByUser, submitsByUser, confirmedByUser, debugRecordCount } = fleet.data;
+  const { vans, profiles: allProfiles, rolesByUser, pointsByUser, submitsByUser, confirmedByUser, volumeByUser, debugRecordCount } = fleet.data;
   const profiles = allProfiles.filter((p) => p.is_active !== false);
   const archivedProfiles = allProfiles.filter((p) => p.is_active === false);
   const captains = profiles.filter((p) => (rolesByUser.get(p.id) ?? []).includes("captain"));
@@ -347,6 +352,11 @@ export function FleetManager() {
     profiles
       .filter((p) => p.team_id === vanId)
       .reduce((sum, p) => sum + (pointsByUser.get(p.id) ?? 0), 0);
+
+  const vanVolume = (vanId: string) =>
+    profiles
+      .filter((p) => p.team_id === vanId)
+      .reduce((sum, p) => sum + (volumeByUser.get(p.id) ?? 0), 0);
 
 
 
@@ -387,14 +397,14 @@ export function FleetManager() {
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => setWeekStart(startOfWeekMonday(new Date()))}
+              onClick={() => setWeekStart(weekStartMonday())}
             >
               Jump to current week
             </Button>
           )}
         </div>
         <p className="mt-2 text-[10px] text-muted-foreground">
-          Points below reflect Mon–Sun of the selected week (PM = 1 pt, Sale = 2 pts; BO/RS = 0).
+          Points below reflect Mon–Sat of the selected week, Pacific time (PM = 1 pt, Sale = 2 pts; BO/RS = 0).
         </p>
         <p className="mt-1 text-[10px] text-muted-foreground/60">
           Records found: {debugRecordCount}
@@ -551,6 +561,12 @@ export function FleetManager() {
                               >
                                 {vanTotalPoints(v.id)}p
                               </span>
+                              <span
+                                className="shrink-0 text-[10px] font-display uppercase tracking-widest px-1.5 py-0.5 rounded border border-victory/50 text-victory bg-victory/10"
+                                title="Van Volume — confirmed sale dollars this week (resets Monday 12:01 AM PT)"
+                              >
+                                {formatCurrency(vanVolume(v.id))}
+                              </span>
                               {v.captain_id && (
                                 <span className="hidden sm:inline text-[10px] text-muted-foreground truncate min-w-0">
                                   · {captains.find((c) => c.id === v.captain_id)?.display_name ?? ""}
@@ -596,11 +612,13 @@ export function FleetManager() {
                             {roster.map((r) => {
                               const targetIsOwner = (rolesByUser.get(r.id) ?? []).includes("owner");
                               const canModify = canManage && (isOwnerRole || !targetIsOwner);
-                              // Sum points across every profile with the same display name in this van.
+                              // Sum points and sale volume across every profile with the same display name in this van.
                               const nameKey = (r.display_name ?? "").trim().toLowerCase().replace(/\s+/g, " ");
-                              const aggregatedPoints = rosterRaw
-                                .filter((p) => ((p.display_name ?? "").trim().toLowerCase().replace(/\s+/g, " ")) === nameKey)
-                                .reduce((sum, p) => sum + (pointsByUser.get(p.id) ?? 0), 0);
+                              const sameNameProfiles = rosterRaw.filter(
+                                (p) => ((p.display_name ?? "").trim().toLowerCase().replace(/\s+/g, " ")) === nameKey,
+                              );
+                              const aggregatedPoints = sameNameProfiles.reduce((sum, p) => sum + (pointsByUser.get(p.id) ?? 0), 0);
+                              const aggregatedVolume = sameNameProfiles.reduce((sum, p) => sum + (volumeByUser.get(p.id) ?? 0), 0);
                               const rIsCaptain =
                                 v.captain_id === r.id ||
                                 (rolesByUser.get(r.id) ?? []).includes("captain");
@@ -610,6 +628,7 @@ export function FleetManager() {
                                   id={r.id}
                                   name={r.display_name ?? "Unknown"}
                                   points={aggregatedPoints}
+                                  volume={aggregatedVolume}
                                   isCaptain={rIsCaptain}
                                   canManage={canModify}
                                   onUnassign={canModify ? () => assignCanvasser.mutate({ canvasserId: r.id, vanId: null }) : undefined}
@@ -686,6 +705,7 @@ export function FleetManager() {
                     id={p.id}
                     name={p.display_name ?? "Unknown"}
                     points={pointsByUser.get(p.id) ?? 0}
+                    volume={volumeByUser.get(p.id) ?? 0}
                     canManage={canModify}
                     vans={canModify ? vans.map((v) => ({ id: v.id, name: v.name, color: v.color })) : undefined}
                     currentVanId={p.team_id}
@@ -816,11 +836,12 @@ export function FleetManager() {
 type VanOption = { id: string; name: string; color: string };
 
 function RosterRow({
-  id, name, points, vans, currentVanId, onAssign, onUnassign, onDelete, canManage = true, isCaptain = false,
+  id, name, points, volume = 0, vans, currentVanId, onAssign, onUnassign, onDelete, canManage = true, isCaptain = false,
 }: {
   id: string;
   name: string;
   points: number;
+  volume?: number;
   vans?: VanOption[];
   currentVanId?: string | null;
   onAssign?: (vanId: string) => void;
@@ -829,7 +850,7 @@ function RosterRow({
   canManage?: boolean;
   isCaptain?: boolean;
 }) {
-  const isGhost = points === 0;
+  const isGhost = points === 0 && volume === 0;
   return (
     <div
       data-profile-id={id}
@@ -845,6 +866,12 @@ function RosterRow({
       </span>
       <span className={`text-[10px] font-display ${isGhost ? "text-muted-foreground px-1.5" : "points-badge-glow"}`}>
         {points}p
+      </span>
+      <span
+        className={`shrink-0 text-[10px] font-display ${volume > 0 ? "text-victory" : "text-muted-foreground"} px-1.5`}
+        title="Weekly sale volume (resets Monday 12:01 AM PT)"
+      >
+        {formatCurrency(volume)}
       </span>
 
       {vans && onAssign && (

@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { laTodayISO } from "@/lib/dates";
 import { useAuth } from "@/hooks/useAuth";
 import { ArcadePanel } from "@/components/arcade";
 import { Input } from "@/components/ui/input";
@@ -45,10 +46,7 @@ const EMPTY: LogState = {
   one_legs: 0, no_shows: 0, no_demo: 0, notes: "",
 };
 
-function todayISO() {
-  const d = new Date(); d.setHours(0,0,0,0);
-  return d.toISOString().slice(0, 10);
-}
+const todayISO = () => laTodayISO();
 
 function LogPage() {
   const { user, teamId, role, loading } = useAuth();

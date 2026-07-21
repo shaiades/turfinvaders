@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel } from "@/components/arcade";
 import { LiveFeed } from "@/components/LiveFeed";
+import { laWeekStartISO } from "@/lib/dates";
 const turfInvadersHero = { url: "/turf-invaders-hero.png" };
 
 type Props = {
@@ -18,12 +19,9 @@ type WeekTotals = {
   daysWorked: number;
 };
 
+// Week anchor is the LA Monday (midnight PT reset), not viewer-local.
 function startOfISOWeek(): string {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  const day = d.getDay() === 0 ? 7 : d.getDay();
-  d.setDate(d.getDate() - (day - 1));
-  return d.toISOString().slice(0, 10);
+  return laWeekStartISO();
 }
 
 export function CommandCenter({ teamId }: Props) {

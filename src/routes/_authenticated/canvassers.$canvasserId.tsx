@@ -4,7 +4,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { formatCurrency } from "@/lib/utils";
-import { weekStartMonday, toISODate } from "@/lib/dates";
+import { weekStartMonday, toISODate, laTodayISO, laMidnightUtcISO } from "@/lib/dates";
 import { Lock, EyeOff } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/canvassers/$canvasserId")({
@@ -14,11 +14,9 @@ export const Route = createFileRoute("/_authenticated/canvassers/$canvasserId")(
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// Month starts at midnight America/Los_Angeles on the 1st (LA calendar).
 function startOfMonthISO() {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  d.setDate(1);
-  return d.toISOString();
+  return laMidnightUtcISO(`${laTodayISO().slice(0, 7)}-01`);
 }
 
 function CanvasserProfile() {
@@ -65,7 +63,7 @@ function CanvasserProfile() {
     enabled: isRealUser,
     queryKey: ["canvasser_revenue", canvasserId],
     queryFn: async () => {
-      const monday = weekStartMonday().toISOString();
+      const monday = laMidnightUtcISO(toISODate(weekStartMonday()));
       const [weekRes, monthRes] = await Promise.all([
         supabase
           .from("leads")

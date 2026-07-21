@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
+import { laTodayISO } from "@/lib/dates";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { DoorOpen, MessagesSquare, Ban, Zap, X, Loader2 } from "lucide-react";
@@ -17,13 +18,8 @@ const TALLY_TO_PIN: Record<TallyKey, PinType> = {
   not_interested: "not_interested",
 };
 
-function todayIso() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
+// Field-pin log_date is the LA calendar day (never viewer-local).
+const todayIso = () => laTodayISO();
 
 function getFix(): Promise<GeolocationPosition | null> {
   return new Promise((resolve) => {

@@ -7,13 +7,15 @@ import { ArcadePanel, StatCard } from "@/components/arcade";
 import { NeonMap, type FieldPin, type Territory, type LatLng } from "@/components/NeonMap";
 import { Home, MessageSquare, Sparkles, DollarSign, AlertTriangle, ArrowLeft } from "lucide-react";
 import { commissionRateForPoints } from "@/lib/pay";
+import { laDateISO, laMidnightUtcISO, addDaysISO, weekStartOfISO } from "@/lib/dates";
 
 export const Route = createFileRoute("/_authenticated/canvassers/$canvasserId/field")({
   head: () => ({ meta: [{ title: "Field Activity — Knockout" }] }),
   component: FieldActivityPage,
 });
 
-function isoDay(d: Date) { const x = new Date(d); x.setHours(0,0,0,0); return x.toISOString().slice(0,10); }
+// Field days are LA calendar days (never viewer-local or UTC).
+function isoDay(d: Date) { return laDateISO(d); }
 function fmt(n: number) { return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }); }
 function timeLabel(iso: string) {
   return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -56,8 +58,8 @@ function FieldActivityPage() {
     enabled: allowed,
     queryKey: ["field_sales_day", canvasserId, day],
     queryFn: async () => {
-      const start = new Date(day + "T00:00:00").toISOString();
-      const end = new Date(new Date(day + "T00:00:00").getTime() + 86400000).toISOString();
+      const start = laMidnightUtcISO(day);
+      const end = laMidnightUtcISO(addDaysISO(day, 1));
       const { data, error } = await supabase
         .from("leads").select("id, sale_amount, customer_name, address, reviewed_at, created_at")
         .eq("canvasser_id", canvasserId).eq("status", "confirmed").eq("is_sale", true)
@@ -69,9 +71,7 @@ function FieldActivityPage() {
   });
 
   // Weekly points → commission tier (1% vs 2%)
-  const weekStart = useMemo(() => {
-    const d = new Date(day); d.setHours(0,0,0,0); d.setDate(d.getDate() - d.getDay()); return d.toISOString().slice(0,10);
-  }, [day]);
+  const weekStart = useMemo(() => weekStartOfISO(day), [day]);
   const pointsQuery = useQuery({
     enabled: allowed,
     queryKey: ["week_points", canvasserId, weekStart],

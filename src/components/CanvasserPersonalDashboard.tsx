@@ -23,6 +23,7 @@ import {
   PAY_LOCK_MIN_ROLLING_AVG,
 } from "@/lib/pay";
 import { getMonthlyPaychecks } from "@/lib/fleet.functions";
+import { laTodayISO, laWeekStartISO, addDaysISO, laMidnightUtcISO } from "@/lib/dates";
 
 /**
  * Paycheck engine — automated.
@@ -53,20 +54,10 @@ const RANKS = [
   { key: "diamond",  label: "Diamond",     minSales: 120 },
 ] as const;
 
-function todayISO() {
-  const d = new Date(); d.setHours(0,0,0,0);
-  return d.toISOString().slice(0, 10);
-}
-function startOfWeekISO() {
-  const d = new Date(); d.setHours(0,0,0,0);
-  const day = d.getDay() === 0 ? 7 : d.getDay();
-  d.setDate(d.getDate() - (day - 1));
-  return d.toISOString().slice(0, 10);
-}
-function startOfMonthISO() {
-  const d = new Date(); d.setHours(0,0,0,0); d.setDate(1);
-  return d.toISOString().slice(0, 10);
-}
+// All day/week/month buckets are America/Los_Angeles (midnight PT resets).
+const todayISO = () => laTodayISO();
+const startOfWeekISO = () => laWeekStartISO();
+const startOfMonthISO = () => `${laTodayISO().slice(0, 7)}-01`;
 function formatUSD(n: number) {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 }
@@ -127,12 +118,12 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
   const logsQuery = useQuery({
     queryKey: ["my_logs", "60d", userId],
     queryFn: async () => {
-      const since = new Date(); since.setHours(0,0,0,0); since.setDate(since.getDate() - 60);
+      const since = addDaysISO(laTodayISO(), -60);
       const { data, error } = await supabase
         .from("daily_logs")
         .select("log_date, doors_knocked, people_talked_to, leads_called_in, confirmed_leads, next_days, future_leads, demos_sits, sales, no_shows")
         .eq("canvasser_id", userId)
-        .gte("log_date", since.toISOString().slice(0, 10));
+        .gte("log_date", since);
       if (error) throw error;
       return data ?? [];
     },
@@ -142,16 +133,16 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
   const companyAvgQuery = useQuery({
     queryKey: ["company_funnel_avg", "30d"],
     queryFn: async () => {
-      const since = new Date(); since.setHours(0,0,0,0); since.setDate(since.getDate() - 30);
+      const sinceISO = addDaysISO(laTodayISO(), -30);
       const [logsRes, salesRes] = await Promise.all([
         supabase.from("daily_logs")
           .select("doors_knocked, confirmed_leads, demos_sits, sales")
-          .gte("log_date", since.toISOString().slice(0, 10)),
+          .gte("log_date", sinceISO),
         supabase.from("leads")
           .select("sale_amount")
           .eq("status", "confirmed")
           .eq("is_sale", true)
-          .gte("created_at", since.toISOString()),
+          .gte("created_at", laMidnightUtcISO(sinceISO)),
       ]);
       if (logsRes.error) throw logsRes.error;
       if (salesRes.error) throw salesRes.error;
@@ -174,14 +165,13 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
   const salesQuery = useQuery({
     queryKey: ["my_confirmed_sales", "mtd", userId],
     queryFn: async () => {
-      const since = new Date(); since.setHours(0,0,0,0); since.setDate(1);
       const { data, error } = await supabase
         .from("leads")
         .select("sale_amount, created_at")
         .eq("canvasser_id", userId)
         .eq("status", "confirmed")
         .eq("is_sale", true)
-        .gte("created_at", since.toISOString());
+        .gte("created_at", laMidnightUtcISO(startOfMonthISO()));
       if (error) throw error;
       return data ?? [];
     },
@@ -194,14 +184,12 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
     queryFn: async () => {
       // Mon–Sat window, matching calc_weekly_paycheck exactly.
       const weekStart = startOfWeekISO();
-      const saturday = new Date(`${weekStart}T00:00:00Z`);
-      saturday.setUTCDate(saturday.getUTCDate() + 5);
       const { data, error } = await supabase
         .from("time_entries")
         .select("billable_hours")
         .eq("user_id", userId)
         .gte("log_date", weekStart)
-        .lte("log_date", saturday.toISOString().slice(0, 10))
+        .lte("log_date", addDaysISO(weekStart, 5))
         .not("clock_out", "is", null);
       if (error) throw error;
       return (data ?? []).reduce((a, r) => a + Number(r.billable_hours ?? 0), 0);
@@ -219,11 +207,9 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
 
     const sales = salesQuery.data ?? [];
     const monthRevenue = sales.reduce((a, r) => a + Number(r.sale_amount ?? 0), 0);
-    const wStart = new Date(); wStart.setHours(0,0,0,0);
-    const day = wStart.getDay() === 0 ? 7 : wStart.getDay();
-    wStart.setDate(wStart.getDate() - (day - 1));
+    const wStartMs = Date.parse(laMidnightUtcISO(w));
     const weekRevenue = sales
-      .filter((r) => new Date(r.created_at) >= wStart)
+      .filter((r) => Date.parse(r.created_at) >= wStartMs)
       .reduce((a, r) => a + Number(r.sale_amount ?? 0), 0);
 
     const weekPoints = week.demos_sits + week.sales;
@@ -340,12 +326,13 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
     const requiredDoors     = requiredConfirmed / leadDoorRate;
     const requiredPeopleTalkedTo = requiredDoors * talkDoorRate;
 
-    // Remaining working days this month (Mon–Sat), today inclusive.
-    const now = new Date(); now.setHours(0,0,0,0);
-    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    // Remaining working days this month (Mon–Sat, LA calendar), today inclusive.
+    const todayLA = laTodayISO();
+    const monthPrefix = todayLA.slice(0, 7);
     let workdaysLeft = 0;
-    for (let d = new Date(now); d <= end; d.setDate(d.getDate() + 1)) {
-      const dow = d.getDay();
+    for (let d = todayLA; d.startsWith(monthPrefix); d = addDaysISO(d, 1)) {
+      const [y, m, dd] = d.split("-").map(Number);
+      const dow = new Date(Date.UTC(y, m - 1, dd, 12)).getUTCDay();
       if (dow !== 0) workdaysLeft++; // exclude Sunday only
     }
 
@@ -1038,8 +1025,7 @@ function TakeHomeWidget({ userId, weeklyPay, hourlyRate, weekPoints }: {
   // Authoritative MTD volume bonus from the pay engine (calc_monthly_paycheck)
   // — the same source the owner's payroll screen pays from. Hidden on error
   // rather than showing a possibly-wrong dollar figure.
-  const now = new Date();
-  const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+  const monthStart = `${laTodayISO().slice(0, 7)}-01`;
   const { data: monthly } = useQuery({
     queryKey: ["takehome_volume_bonus", userId, monthStart],
     queryFn: async () => {

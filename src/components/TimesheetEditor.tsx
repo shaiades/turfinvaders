@@ -6,18 +6,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { Clock, ChevronLeft, ChevronRight, Save, Trash2, AlertTriangle } from "lucide-react";
+import { weekStartMonday, toISODate } from "@/lib/dates";
 
-function weekStartOf(d: Date) {
-  const x = new Date(d);
-  const day = x.getDay(); // 0 Sun..6 Sat
-  const mondayOffset = day === 0 ? -6 : 1 - day;
-  x.setDate(x.getDate() + mondayOffset);
-  x.setHours(0, 0, 0, 0);
-  return x;
-}
-function ymd(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
+// Weeks anchor to the LA Monday (midnight PT reset); ymd pairs with the
+// local-midnight Dates those helpers hand back.
+const weekStartOf = weekStartMonday;
+const ymd = toISODate;
 function toLocalInput(iso: string | null) {
   if (!iso) return "";
   const d = new Date(iso);
