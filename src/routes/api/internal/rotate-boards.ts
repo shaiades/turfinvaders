@@ -61,7 +61,7 @@ async function monday(token: string, query: string, variables?: Record<string, u
     headers: {
       "Content-Type": "application/json",
       Authorization: token,
-      "API-Version": "2024-01",
+      "API-Version": "2026-07",
     },
     body: JSON.stringify(variables ? { query, variables } : { query }),
   });

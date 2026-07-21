@@ -6,6 +6,12 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+// Pin the Current API version deliberately. Monday silently reroutes retired
+// versions to its rolling Maintenance version (2024-01 has been rerouted for
+// years), so an outdated pin means unpinned. Bump quarterly with the release
+// notes; never pin the RC.
+const MONDAY_API_VERSION = '2026-07'
+
 function normalizeName(s: string): string {
   return s.trim().toLowerCase().replace(/\s+/g, ' ')
 }
@@ -76,7 +82,7 @@ function mapScheduleOutcome(columnTitle: string, value: string): ScheduleBucket 
   return null
 }
 
-type MondayCol = { id: string; text: string | null; column: { title: string; id: string } }
+type MondayCol = { id: string; text: string | null; display_value?: string | null; column: { title: string; id: string } }
 
 /** Sale-column values that mean the item is sold (mirrors mapScheduleOutcome). */
 const SOLD_VALUES = ['sold', 'reload', 'upsell', 'sale']
@@ -207,10 +213,13 @@ serve(async (req) => {
     const isCreateEvent = event?.type === 'create_pulse'
 
     // ── Retry guard ── Monday redelivers failed webhooks once per minute for
-    // 30 minutes, and every delivery of the same firing carries the same
-    // triggerUuid. The counter writes below are transition deltas, so a
-    // re-applied delivery would double-count. First delivery wins.
-    const triggerUuid: string | undefined = event?.triggerUuid || body?.triggerUuid
+    // 30 minutes. Redeliveries carry the first delivery's uuid in
+    // originalTriggerUuid (null on the first delivery) under a fresh
+    // triggerUuid, so the stable dedupe key is originalTriggerUuid first.
+    // The counter writes below are transition deltas, so a re-applied
+    // delivery would double-count. First successful delivery wins.
+    const triggerUuid: string | undefined =
+      event?.originalTriggerUuid || event?.triggerUuid || body?.triggerUuid
     if (triggerUuid) {
       const { data: seen } = await supabaseAdmin
         .from('webhook_logs')
@@ -288,8 +297,10 @@ serve(async (req) => {
     }
     mondayToken = String(mondayToken)
 
-    // Step 3b: Query Monday GraphQL for the item
-    const query = `query { items(ids: [${pulseId}]) { id name board { id } column_values { id text column { title id } } } }`
+    // Step 3b: Query Monday GraphQL for the item. FormulaValue.display_value
+    // covers formula-typed columns (e.g. a computed Sale Price), whose plain
+    // text/value fields are always empty.
+    const query = `query { items(ids: [${pulseId}]) { id name board { id } column_values { id text column { title id } ... on FormulaValue { display_value } } } }`
     let mondayJson: any = null
     let mondayError: string | null = null
     try {
@@ -298,11 +309,12 @@ serve(async (req) => {
         headers: {
           'Content-Type': 'application/json',
           'Authorization': mondayToken,
-          'API-Version': '2024-01',
+          'API-Version': MONDAY_API_VERSION,
         },
         body: JSON.stringify({ query }),
       })
       mondayJson = await mondayResp.json()
+      if (mondayJson?.errors) mondayError = JSON.stringify(mondayJson.errors).slice(0, 300)
     } catch (e) {
       mondayError = e instanceof Error ? e.message : String(e)
     }
@@ -317,6 +329,13 @@ serve(async (req) => {
         step: 'Error_Monday_No_Item',
         data: { pulseId, mondayJson },
       })
+      // Transient failure (network / API error / rate limit): return 5xx so
+      // Monday's once-a-minute retry loop redelivers — the Event_Processed
+      // marker is only written after success, so retries are not swallowed.
+      // A clean response with no item = the item is gone; that's permanent.
+      if (mondayError) {
+        return new Response('Monday API error', { status: 502, headers: corsHeaders })
+      }
       return new Response('No Monday item', { status: 200, headers: corsHeaders })
     }
 
@@ -454,7 +473,7 @@ serve(async (req) => {
     let isPriceEvent = false
     try {
       const salePriceCol = findSalePriceCol(cols)
-      const salePriceRaw = salePriceCol?.text ?? ''
+      const salePriceRaw = salePriceCol?.text || salePriceCol?.display_value || ''
       const salePrice = parseMoney(salePriceRaw)
       const saleCol = findSaleOutcomeCol(cols)
       const itemIsSold = SOLD_VALUES.includes((saleCol?.text ?? '').trim().toLowerCase())

@@ -69,7 +69,7 @@ async function monday(query, variables) {
     headers: {
       'Content-Type': 'application/json',
       'Authorization': mondayToken(),
-      'API-Version': '2024-01',
+      'API-Version': '2026-07',
     },
     body: JSON.stringify(variables ? { query, variables } : { query }),
   })
