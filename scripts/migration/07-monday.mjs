@@ -25,6 +25,9 @@
  *
  * DB access via psql using DEST_DB_URL (or ~/.turf-dest-db-url).
  * The Monday token is read from system_settings in-process and never printed.
+ * Webhook registration requires the shared secret from MONDAY_WEBHOOK_SECRET
+ * (or ~/.turf-monday-webhook-secret) — the edge function enforces it, so
+ * registering without it is refused rather than creating dead webhooks.
  *
  * Outcome mapping and column detection are ports of
  * supabase/functions/monday-live-dispatch/index.ts (keep in sync).
@@ -356,24 +359,43 @@ async function cmdListWebhooks(boardId) {
   console.log(JSON.stringify(data.webhooks ?? [], null, 2));
 }
 
-// Shared secret enforced by the edge function. Never committed: read from env
-// or ~/.turf-monday-webhook-secret (same pattern as DEST_DB_URL above).
-const WEBHOOK_SECRET = (
-  process.env.MONDAY_WEBHOOK_SECRET ||
-  readFileSync(join(homedir(), ".turf-monday-webhook-secret"), "utf8")
-).trim();
-const EDGE_URL =
-  "https://xogitpqeuwalerxygvjw.supabase.co/functions/v1/monday-live-dispatch" +
-  `?apikey=sb_publishable_ivjX0mrVvSLM1DHfDTDVuw_qHUtGeS2&secret=${WEBHOOK_SECRET}`;
-if (EDGE_URL.length > 255)
-  die(`EDGE_URL is ${EDGE_URL.length} chars — Monday caps webhook URLs at 255`);
+const EDGE_URL_BASE =
+  "https://xogitpqeuwalerxygvjw.supabase.co/functions/v1/monday-live-dispatch?apikey=sb_publishable_ivjX0mrVvSLM1DHfDTDVuw_qHUtGeS2";
+
+// The edge function enforces MONDAY_WEBHOOK_SECRET (same value on both sides;
+// see rotate-boards.ts edgeUrl): a webhook registered without &secret= is
+// rejected on every delivery, so refuse to register rather than create a dead
+// webhook. Never committed: secret from env, falling back to
+// ~/.turf-monday-webhook-secret (same pattern as DEST_DB_URL above). Resolved
+// lazily so commands that never register (list, backfill, reconcile) still
+// run without the secret.
+function edgeUrl() {
+  let secret = process.env.MONDAY_WEBHOOK_SECRET;
+  if (!secret) {
+    try {
+      secret = readFileSync(join(homedir(), ".turf-monday-webhook-secret"), "utf8").trim();
+    } catch {
+      // fall through to the die() below
+    }
+  }
+  if (!secret)
+    die(
+      "MONDAY_WEBHOOK_SECRET is not set and ~/.turf-monday-webhook-secret is missing. " +
+        "The monday-live-dispatch edge function enforces the webhook secret, so a webhook " +
+        "registered without it would be rejected on every delivery. Refusing to register.",
+    );
+  const url = `${EDGE_URL_BASE}&secret=${secret}`;
+  if (url.length > 255) die(`webhook URL is ${url.length} chars — Monday caps webhook URLs at 255`);
+  return url;
+}
 
 async function registerOn(boardId) {
+  const url = edgeUrl();
   const out = [];
   for (const event of ["create_item", "change_column_value"]) {
     const data = await monday(
       `mutation ($b: ID!, $u: String!, $e: WebhookEventType!) { create_webhook(board_id: $b, url: $u, event: $e) { id board_id } }`,
-      { b: String(boardId), u: EDGE_URL, e: event },
+      { b: String(boardId), u: url, e: event },
       { idempotencyKey: `wh-${boardId}-${event}` },
     );
     const wh = data.create_webhook;
