@@ -47,7 +47,7 @@ UNCONFIRMED=$("${DEST[@]}" -Atc "SELECT count(*) FROM auth.users
   WHERE deleted_at IS NULL AND email_confirmed_at IS NULL")
 gate "unconfirmed live users" "0" "$UNCONFIRMED"
 
-TRIGGER=$("${DEST[@]}" -Atc "SELECT COALESCE(string_agg(tgname || ':' || tgenabled, ','), 'MISSING')
+TRIGGER=$("${DEST[@]}" -Atc "SELECT COALESCE(string_agg(tgname || ':' || tgenabled::text, ','), 'MISSING')
   FROM pg_trigger WHERE tgrelid = 'auth.users'::regclass AND NOT tgisinternal")
 gate "auth.users trigger" "on_auth_user_created:O" "$TRIGGER"
 
@@ -61,14 +61,14 @@ SECDEF=$("${DEST[@]}" -Atc "SELECT count(*) FROM pg_proc p
   WHERE n.nspname='public' AND p.prosecdef")
 gate "SECURITY DEFINER functions" "18" "$SECDEF"
 
-CRON=$("${DEST[@]}" -Atc "SELECT COALESCE(string_agg(jobname || '[' || schedule || ':' || active || ']', ',' ORDER BY jobname), 'MISSING') FROM cron.job")
+CRON=$("${DEST[@]}" -Atc "SELECT COALESCE(string_agg(jobname || '[' || schedule || ':' || (CASE WHEN active THEN 't' ELSE 'f' END) || ']', ',' ORDER BY jobname), 'MISSING') FROM cron.job")
 gate "cron jobs" "auto-archive-agents-daily[0 8 * * *:t],time-entries-auto-clock-out[*/15 * * * *:t],weekly-pay-lock-refresh[0 15 * * 1:t]" "$CRON"
 
 PUBTABLES=$("${DEST[@]}" -Atc "SELECT COALESCE(string_agg(tablename, ',' ORDER BY tablename), 'MISSING')
   FROM pg_publication_tables WHERE pubname='supabase_realtime'")
 gate "realtime publication" "daily_logs,daily_metrics,field_pins,hype_events,lead_events,leads,offices,teams,territories,webhook_logs" "$PUBTABLES"
 
-REPLIDENT=$("${DEST[@]}" -Atc "SELECT string_agg(relname || ':' || relreplident, ',' ORDER BY relname)
+REPLIDENT=$("${DEST[@]}" -Atc "SELECT string_agg(relname || ':' || relreplident::text, ',' ORDER BY relname)
   FROM pg_class WHERE relname IN ('daily_metrics','webhook_logs') AND relkind='r'")
 gate "replica identity FULL" "daily_metrics:f,webhook_logs:f" "$REPLIDENT"
 

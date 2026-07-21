@@ -13,6 +13,15 @@
  *   delete-item --item <id>
  *   backfill --boards a,b --since YYYY-MM-DD --until YYYY-MM-DD
  *            [--apply] [--create-agents]        (dry-run is the default)
+ *   reconcile [--apply] [--create-agents]       Backfill scoped to the CURRENT
+ *                                    week (Mon..Sat, LA time) on the two active
+ *                                    boards from system_settings. Covers events
+ *                                    lost to webhook outages >30min (Monday
+ *                                    retries once/min for 30min, then drops).
+ *                                    Run after any suspected outage or weekly
+ *                                    before payroll; dry-run default, no-op
+ *                                    when nothing was missed. Past weeks: use
+ *                                    backfill with explicit --boards/--since/--until.
  *
  * DB access via psql using DEST_DB_URL (or ~/.turf-dest-db-url).
  * The Monday token is read from system_settings in-process and never printed.
@@ -606,6 +615,61 @@ async function cmdBackfill() {
   );
 }
 
+// ── reconcile ───────────────────────────────────────────────────────────────
+// Current week's Monday..Saturday in LA time, plus the board-name date token
+// (M/DD/YY, same format the rotation cron uses when naming Block boards).
+function laWeek() {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Los_Angeles",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const today = new Date(`${fmt.format(new Date())}T00:00:00Z`);
+  const monday = new Date(today);
+  monday.setUTCDate(today.getUTCDate() - ((today.getUTCDay() + 6) % 7));
+  const saturday = new Date(monday);
+  saturday.setUTCDate(monday.getUTCDate() + 5);
+  const iso = (d) => d.toISOString().slice(0, 10);
+  const token = `${monday.getUTCMonth() + 1}/${String(monday.getUTCDate()).padStart(2, "0")}/${String(monday.getUTCFullYear()).slice(2)}`;
+  return {
+    since: iso(monday),
+    until: iso(saturday),
+    token,
+    tokenLoose: token.replace("/0", "/"),
+  };
+}
+
+async function cmdReconcile() {
+  const s = sqlRows(
+    "SELECT active_monday_board_sd, active_monday_board_oc FROM public.system_settings LIMIT 1",
+  )[0];
+  const boards = [s?.active_monday_board_sd, s?.active_monday_board_oc].filter(Boolean);
+  if (boards.length < 2)
+    die("active_monday_board_sd/oc missing in system_settings — run the board rotation first");
+  const { since, until, token, tokenLoose } = laWeek();
+
+  // Guard: the active boards must actually be THIS week's boards. If rotation
+  // hasn't run yet, replace-semantics would wipe the current week's logs and
+  // rebuild them from last week's board (whose items all fall outside the span).
+  const data = await monday(`query { boards(ids: [${boards.join(",")}]) { id name } }`);
+  for (const b of data.boards || []) {
+    if (!b.name.includes(token) && !b.name.includes(tokenLoose))
+      die(
+        `active board ${b.id} "${b.name}" does not look like the current week (${token}). ` +
+          `Has the Monday rotation run this week? For a past week use: backfill --boards ... --since ... --until ...`,
+      );
+  }
+
+  args.boards = boards.join(",");
+  args.since = since;
+  args.until = until;
+  console.error(
+    `# reconcile: boards ${args.boards}, week ${since}..${until} (${args.apply ? "APPLY" : "dry run"})`,
+  );
+  await cmdBackfill();
+}
+
 // ── dispatch ────────────────────────────────────────────────────────────────
 const run = {
   "list-boards": cmdListBoards,
@@ -640,6 +704,7 @@ const run = {
     console.log(JSON.stringify(data.duplicate_board.board));
   },
   backfill: cmdBackfill,
+  reconcile: cmdReconcile,
 }[cmd];
 if (!run) die(`unknown command "${cmd}". See header for usage.`);
 await run();
