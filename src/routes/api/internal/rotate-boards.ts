@@ -265,11 +265,12 @@ async function rotate(): Promise<Response> {
     const { data: settings } = await supabaseAdmin
       .from("system_settings")
       .select(
-        "monday_api_token, monday_template_board_id, monday_webhooks, active_monday_board_sd, active_monday_board_oc",
+        "monday_api_token, monday_template_board_id, monday_webhooks, active_monday_board_sd, active_monday_board_oc, incoming_leads_board_id",
       )
       .maybeSingle();
     const token = settings?.monday_api_token as string | undefined;
     const templateId = settings?.monday_template_board_id as string | undefined;
+    const incomingLeadsBoardId = String(settings?.incoming_leads_board_id ?? "");
     if (!token) return json({ error: "no monday_api_token" }, 500);
     if (!templateId) return json({ error: "no monday_template_board_id" }, 500);
     const registry: RegistryEntry[] = Array.isArray(settings?.monday_webhooks)
@@ -330,11 +331,16 @@ async function rotate(): Promise<Response> {
       }
     }
 
-    // Deregister webhooks for boards that are no longer active.
+    // Deregister webhooks for boards that are no longer active. The static
+    // Incoming Leads board never rotates — its hook must survive Mondays.
     const keep: RegistryEntry[] = [];
     const removed: string[] = [];
     for (const entry of registry) {
-      if (entry.board_id === newIds.SD || entry.board_id === newIds.OC) {
+      if (
+        entry.board_id === newIds.SD ||
+        entry.board_id === newIds.OC ||
+        (incomingLeadsBoardId && entry.board_id === incomingLeadsBoardId)
+      ) {
         keep.push(entry);
         continue;
       }
@@ -383,16 +389,24 @@ async function check(): Promise<Response> {
   try {
     const { data: settings } = await supabaseAdmin
       .from("system_settings")
-      .select("monday_api_token, monday_webhooks, active_monday_board_sd, active_monday_board_oc")
+      .select(
+        "monday_api_token, monday_webhooks, active_monday_board_sd, active_monday_board_oc, incoming_leads_board_id",
+      )
       .maybeSingle();
     const token = settings?.monday_api_token as string | undefined;
     if (!token) return json({ error: "no monday_api_token" }, 500);
-    const active: Array<[string, string]> = [];
+    // [label, boardId, expected events]. The static Incoming Leads board gets
+    // create_item ONLY — a change_column_value hook on a 5,000+-item CRM board
+    // would flood the edge function (and the liveness healer must never
+    // "replace" a column-change hook into existence there).
+    const active: Array<[string, string, ReadonlyArray<(typeof WEBHOOK_EVENTS)[number]>]> = [];
     if (settings?.active_monday_board_sd)
-      active.push(["SD", String(settings.active_monday_board_sd)]);
+      active.push(["SD", String(settings.active_monday_board_sd), WEBHOOK_EVENTS]);
     if (settings?.active_monday_board_oc)
-      active.push(["OC", String(settings.active_monday_board_oc)]);
+      active.push(["OC", String(settings.active_monday_board_oc), WEBHOOK_EVENTS]);
     if (!active.length) return json({ error: "no active_monday_board_* in system_settings" }, 500);
+    if (settings?.incoming_leads_board_id)
+      active.push(["Leads", String(settings.incoming_leads_board_id), ["create_item"]]);
     const activeIds = new Set(active.map(([, id]) => id));
 
     let registry: RegistryEntry[] = Array.isArray(settings?.monday_webhooks)
@@ -424,10 +438,10 @@ async function check(): Promise<Response> {
     // toggled off in the Integrations Center disappears from this list, so
     // "missing" covers both deleted and disabled.
     const liveByBoard = new Map<string, Array<{ id: string; event: string }>>();
-    for (const [office, boardId] of active) {
+    for (const [office, boardId, events] of active) {
       const live = await liveWebhooks(boardId);
       liveByBoard.set(boardId, live);
-      for (const event of WEBHOOK_EVENTS) {
+      for (const event of events) {
         const found = live.find((w) => w.event === event);
         let entry: RegistryEntry;
         if (found) {
@@ -469,7 +483,7 @@ async function check(): Promise<Response> {
     // shrinks the judgeable window below the minimum until the next run.
     const liveness: Record<string, string> = {};
     const nowMs = Date.now();
-    for (const [office, boardId] of active) {
+    for (const [office, boardId, events] of active) {
       const newestReg = Math.max(
         0,
         ...registry
@@ -495,7 +509,7 @@ async function check(): Promise<Response> {
       const activity =
         ((actData.boards as Array<{ activity_logs: Array<{ event: string }> | null }>) ?? [])[0]
           ?.activity_logs ?? [];
-      for (const event of WEBHOOK_EVENTS) {
+      for (const event of events) {
         const { activityEvent, isCreate } = LIVENESS_MAP[event];
         const activityCount = activity.filter((a) => a.event === activityEvent).length;
         if (!activityCount) {

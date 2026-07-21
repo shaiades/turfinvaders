@@ -22,10 +22,13 @@ type Metric = {
   canvasser_id: string;
   metric_date: string;
   leads_submitted: number;
+  leads_generated: number;
   leads_confirmed: number;
   no_answers: number;
   killed: number;
   pending: number;
+  pitch_missed: number;
+  sales: number;
   office_location: string;
 };
 
@@ -150,7 +153,7 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
       const { data } = await supabase
         .from("daily_metrics")
         .select(
-          "id, canvasser_id, metric_date, leads_submitted, leads_confirmed, no_answers, killed, pending, office_location",
+          "id, canvasser_id, metric_date, leads_submitted, leads_generated, leads_confirmed, no_answers, killed, pending, pitch_missed, sales, office_location",
         )
         .gte("metric_date", range.start)
         .lte("metric_date", range.end);
@@ -163,9 +166,9 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
     queryFn: async () => {
       const { data } = await supabase
         .from("daily_metrics")
-        .select("canvasser_id, leads_confirmed, no_answers, killed, pending")
+        .select("canvasser_id, leads_generated, leads_confirmed, no_answers, killed, pending")
         .eq("metric_date", yday);
-      return (data ?? []) as Array<Pick<Metric, "canvasser_id" | "leads_confirmed" | "no_answers" | "killed" | "pending">>;
+      return (data ?? []) as Array<Pick<Metric, "canvasser_id" | "leads_generated" | "leads_confirmed" | "no_answers" | "killed" | "pending">>;
     },
   });
 
@@ -186,13 +189,16 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
 
   // Sum all metric rows per canvasser_id across the selected range.
   const metricByCanvasser = useMemo(() => {
-    const acc = new Map<string, { conf: number; na: number; kil: number; pen: number }>();
+    const acc = new Map<string, { gen: number; conf: number; na: number; kil: number; pen: number; pm: number; sal: number }>();
     for (const m of metrics) {
-      const prev = acc.get(m.canvasser_id) ?? { conf: 0, na: 0, kil: 0, pen: 0 };
+      const prev = acc.get(m.canvasser_id) ?? { gen: 0, conf: 0, na: 0, kil: 0, pen: 0, pm: 0, sal: 0 };
+      prev.gen += m.leads_generated ?? 0;
       prev.conf += m.leads_confirmed ?? 0;
       prev.na += m.no_answers ?? 0;
       prev.kil += m.killed ?? 0;
       prev.pen += m.pending ?? 0;
+      prev.pm += m.pitch_missed ?? 0;
+      prev.sal += m.sales ?? 0;
       acc.set(m.canvasser_id, prev);
     }
     return acc;
@@ -241,15 +247,17 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
       }
     }
     const enriched = Array.from(groups.values()).map((g) => {
-      let conf = 0, na = 0, kil = 0, pen = 0;
+      let gen = 0, conf = 0, na = 0, kil = 0, pen = 0, pm = 0, sal = 0;
       for (const id of g.ids) {
         const m = metricByCanvasser.get(id);
         if (!m) continue;
-        conf += m.conf; na += m.na; kil += m.kil; pen += m.pen;
+        gen += m.gen; conf += m.conf; na += m.na; kil += m.kil; pen += m.pen; pm += m.pm; sal += m.sal;
       }
-      const sub = conf + kil + pen + na;
-      const conv = sub > 0 ? Math.round((conf / sub) * 100) : 0;
-      return { g, conf, na, kil, pen, sub, conv };
+      // Submitted = leads GENERATED (new items on the Incoming Leads board),
+      // not outcome counts — production shows the moment a lead is entered.
+      const sub = gen;
+      const conv = sub > 0 ? Math.min(100, Math.round((conf / sub) * 100)) : 0;
+      return { g, conf, na, kil, pen, pm, sal, sub, conv };
     });
     return enriched.sort((a, b) => {
       if (b.sub !== a.sub) return b.sub - a.sub;
@@ -259,11 +267,10 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
   }, [visible, metricByCanvasser]);
 
   const totals = useMemo(() => {
-    let conf = 0, na = 0, kil = 0, pen = 0;
-    rows.forEach((r) => { conf += r.conf; na += r.na; kil += r.kil; pen += r.pen; });
-    const sub = conf + kil + pen + na;
-    const conv = sub > 0 ? Math.round((conf / sub) * 100) : 0;
-    return { sub, conf, na, kil, pen, conv };
+    let sub = 0, conf = 0, na = 0, kil = 0, pen = 0, pm = 0, sal = 0;
+    rows.forEach((r) => { sub += r.sub; conf += r.conf; na += r.na; kil += r.kil; pen += r.pen; pm += r.pm; sal += r.sal; });
+    const conv = sub > 0 ? Math.min(100, Math.round((conf / sub) * 100)) : 0;
+    return { sub, conf, na, kil, pen, pm, sal, conv };
   }, [rows]);
 
   // Suspension warning — 0 today AND 0 yesterday. Only meaningful for "today" preset.
@@ -271,12 +278,12 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
     if (preset !== "today") return [];
     return rows.filter((r) => {
       if (r.sub !== 0) return false;
-      // yesterday sum across all IDs in the group.
+      // yesterday's generated leads across all IDs in the group.
       let ySub = 0;
       for (const id of r.g.ids) {
         const y = ydayMap[id];
         if (!y) continue;
-        ySub += (y.leads_confirmed ?? 0) + (y.no_answers ?? 0) + (y.killed ?? 0) + (y.pending ?? 0);
+        ySub += y.leads_generated ?? 0;
       }
       return ySub === 0;
     });
@@ -340,12 +347,14 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
       {!readOnly && <WebhookUrlBanner />}
       {!readOnly && <MondayTokenCard />}
 
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
         <TotalTile label="Submitted" value={totals.sub} accent="neon" />
         <TotalTile label="Pending" value={totals.pen} accent="warning" />
         <TotalTile label="N/A" value={totals.na} accent="muted" />
         <TotalTile label="Confirmed" value={totals.conf} accent="victory" />
         <TotalTile label="Killed" value={totals.kil} accent="danger" />
+        <TotalTile label="PM" value={totals.pm} accent="neon" />
+        <TotalTile label="Sales" value={totals.sal} accent="victory" />
         <TotalTile label="Conversion" value={`${totals.conv}%`} accent="accent" />
       </div>
 
@@ -384,11 +393,13 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
                         </span>
                       )}
                     </div>
-                    <MobileStatGrid cols={3} className="font-display">
+                    <MobileStatGrid cols={4} className="font-display">
                       <MobileStat label="Submitted" value={r.sub} className={metricClass(r.sub, "neon")} />
                       <MobileStat label="Pending" value={r.pen} className={metricClass(r.pen, "warning")} />
                       <MobileStat label="N/A" value={r.na} className={metricClass(r.na, "muted-foreground")} />
                       <MobileStat label="Killed" value={r.kil} className={metricClass(r.kil, "destructive")} />
+                      <MobileStat label="PM" value={r.pm} className={metricClass(r.pm, "neon")} />
+                      <MobileStat label="Sales" value={r.sal} className={metricClass(r.sal, "victory")} />
                       <MobileStat label="Conv%" value={`${r.conv}%`} className={metricClass(r.conv, "accent")} />
                     </MobileStatGrid>
                   </MobileCard>
@@ -407,6 +418,8 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
                   <th className="text-right py-2.5 px-3">N/A</th>
                   <th className="text-right py-2.5 px-3">Confirmed</th>
                   <th className="text-right py-2.5 px-3">Killed</th>
+                  <th className="text-right py-2.5 px-3">PM</th>
+                  <th className="text-right py-2.5 px-3">Sales</th>
                   <th className="text-right py-2.5 px-3">Conversion %</th>
                 </tr>
               </thead>
@@ -436,6 +449,8 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
                       <MetricCell value={r.na} color="muted-foreground" />
                       <MetricCell value={r.conf} color="victory" />
                       <MetricCell value={r.kil} color="destructive" />
+                      <MetricCell value={r.pm} color="neon" />
+                      <MetricCell value={r.sal} color="victory" />
                       <MetricCell value={r.conv} color="accent" suffix="%" />
                     </tr>
                   );
