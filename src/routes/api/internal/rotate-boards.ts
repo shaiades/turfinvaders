@@ -17,6 +17,13 @@ import { createFileRoute } from "@tanstack/react-router";
  * the live webhooks(board_id:) list on both active boards against the expected
  * events, re-creates anything missing, syncs the monday_webhooks registry, and
  * audits retired Block boards to confirm rotation really removed their hooks.
+ * Monday can also hand back a webhook id from create_webhook that the list
+ * query returns but that NEVER delivers — no challenge POST, no events
+ * (2026-07-21: 3 of 4 hooks in one registration batch were dead this way) —
+ * so the check additionally cross-references each active board's recent
+ * activity_logs against the edge function's 2_Payload_Parsed rows in
+ * webhook_logs and replaces any hook whose event type shows board activity
+ * but zero deliveries.
  *
  * Auth: `Authorization: Bearer <CRON_SECRET>` — Vercel Cron sends this
  * automatically when the CRON_SECRET env var is set on the project.
@@ -46,6 +53,25 @@ const WEBHOOK_EVENTS = ["create_item", "change_column_value"] as const;
 // Schedule of the daily check cron — keep in sync with vercel.json. Used as a
 // fallback to route the request when the query string is absent.
 const CHECK_SCHEDULE = "30 13 * * *";
+
+// Delivery-based liveness (check() only). Activity is judged over at most
+// LIVENESS_WINDOW_MS, never earlier than the board's newest webhook
+// registration (a fresh hook can't have delivered older events), and never
+// later than LIVENESS_LAG_MS ago (deliveries trail activity by a few
+// seconds). Boards whose judgeable window comes out shorter than
+// LIVENESS_MIN_WINDOW_MS wait for the next daily run.
+const LIVENESS_WINDOW_MS = 24 * 60 * 60 * 1000;
+const LIVENESS_LAG_MS = 5 * 60 * 1000;
+const LIVENESS_MIN_WINDOW_MS = 60 * 60 * 1000;
+// Per webhook event: the activity_logs event it should mirror, and the
+// data->>isCreateEvent value its 2_Payload_Parsed rows carry.
+const LIVENESS_MAP: Record<
+  (typeof WEBHOOK_EVENTS)[number],
+  { activityEvent: string; isCreate: "true" | "false" }
+> = {
+  create_item: { activityEvent: "create_pulse", isCreate: "true" },
+  change_column_value: { activityEvent: "update_column_value", isCreate: "false" },
+};
 
 type RegistryEntry = {
   board_id: string;
@@ -397,8 +423,10 @@ async function check(): Promise<Response> {
     // Every active board must have a live webhook per expected event. A hook
     // toggled off in the Integrations Center disappears from this list, so
     // "missing" covers both deleted and disabled.
+    const liveByBoard = new Map<string, Array<{ id: string; event: string }>>();
     for (const [office, boardId] of active) {
       const live = await liveWebhooks(boardId);
+      liveByBoard.set(boardId, live);
       for (const event of WEBHOOK_EVENTS) {
         const found = live.find((w) => w.event === event);
         let entry: RegistryEntry;
@@ -429,6 +457,95 @@ async function check(): Promise<Response> {
         }
         registry = registry.filter((r) => !(r.board_id === boardId && r.event === event));
         registry.push(entry);
+      }
+    }
+
+    // Delivery-based liveness: the list comparison above cannot see a hook
+    // that Monday lists but never fires (the 2026-07-21 failure mode), so
+    // cross-check what actually happened on each board against what actually
+    // arrived at the edge function. Relevant activity with zero deliveries
+    // for that event type means the listed hook is dead — replace it. A board
+    // healed by the loop above self-excludes here: its fresh registered_at
+    // shrinks the judgeable window below the minimum until the next run.
+    const liveness: Record<string, string> = {};
+    const nowMs = Date.now();
+    for (const [office, boardId] of active) {
+      const newestReg = Math.max(
+        0,
+        ...registry
+          .filter((r) => r.board_id === boardId)
+          .map((r) => Date.parse(r.registered_at) || 0),
+      );
+      const since = Math.max(nowMs - LIVENESS_WINDOW_MS, newestReg);
+      const judgeTo = nowMs - LIVENESS_LAG_MS;
+      if (judgeTo - since < LIVENESS_MIN_WINDOW_MS) {
+        liveness[office] = "skipped — webhooks registered too recently to judge deliveries";
+        continue;
+      }
+      const sinceIso = new Date(since).toISOString();
+      // One page of activity is enough — the check needs "did anything
+      // relevant happen", not an exact total. activity_logs has no event
+      // filter, so on a board busy enough to push all create/column events
+      // past 100 rows this can under-count and defer detection to tomorrow.
+      const actData = await monday(
+        token,
+        `query ($b: ID!, $from: ISO8601DateTime!, $to: ISO8601DateTime!) { boards(ids: [$b]) { activity_logs(from: $from, to: $to, limit: 100) { event } } }`,
+        { b: boardId, from: sinceIso, to: new Date(judgeTo).toISOString() },
+      );
+      const activity =
+        ((actData.boards as Array<{ activity_logs: Array<{ event: string }> | null }>) ?? [])[0]
+          ?.activity_logs ?? [];
+      for (const event of WEBHOOK_EVENTS) {
+        const { activityEvent, isCreate } = LIVENESS_MAP[event];
+        const activityCount = activity.filter((a) => a.event === activityEvent).length;
+        if (!activityCount) {
+          liveness[`${office}_${event}`] = "no recent board activity to judge";
+          continue;
+        }
+        const { count, error } = await supabaseAdmin
+          .from("webhook_logs")
+          .select("id", { count: "exact", head: true })
+          .eq("step", "2_Payload_Parsed")
+          .eq("data->>boardId", boardId)
+          .eq("data->>isCreateEvent", isCreate)
+          .gte("created_at", sinceIso);
+        if (error) {
+          liveness[`${office}_${event}`] = `delivery count failed: ${error.message}`;
+          continue;
+        }
+        if ((count ?? 0) > 0) {
+          liveness[`${office}_${event}`] = `ok — ${activityCount} events, ${count} deliveries`;
+          continue;
+        }
+        // Listed but dead. delete_webhook may fail if the hook evaporated on
+        // Monday's side — the replacement below is what matters either way.
+        const stale = (liveByBoard.get(boardId) ?? []).filter((w) => w.event === event);
+        for (const w of stale) {
+          try {
+            await monday(token, `mutation { delete_webhook(id: ${w.id}) { id } }`, undefined, {
+              idempotencyKey: `unwh-${w.id}`,
+            });
+          } catch {
+            /* already gone */
+          }
+        }
+        const created = await monday(
+          token,
+          `mutation ($b: ID!, $u: String!, $e: WebhookEventType!) { create_webhook(board_id: $b, url: $u, event: $e) { id } }`,
+          { b: boardId, u: edgeUrl(), e: event },
+          { idempotencyKey: `heal-dead-${boardId}-${event}-${runNonce}` },
+        );
+        const newId = String((created.create_webhook as { id: string }).id);
+        registry = registry.filter((r) => !(r.board_id === boardId && r.event === event));
+        registry.push({
+          board_id: boardId,
+          webhook_id: newId,
+          event,
+          registered_at: new Date().toISOString(),
+        });
+        issues[`${office}_${event}_dead`] =
+          `${activityCount} ${activityEvent} event(s) since ${sinceIso} but 0 deliveries — ` +
+          `replaced webhook(s) [${stale.map((w) => w.id).join(", ") || "none listed"}] with ${newId}`;
       }
     }
 
@@ -472,7 +589,7 @@ async function check(): Promise<Response> {
     }
 
     const healthy = Object.keys(issues).length === 0;
-    const summary = { healthy, checked: Object.fromEntries(active), ...issues };
+    const summary = { healthy, checked: Object.fromEntries(active), liveness, ...issues };
     await log(summary);
     return json({ ok: true, ...summary });
   } catch (err) {
