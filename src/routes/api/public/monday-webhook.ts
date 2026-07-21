@@ -211,6 +211,11 @@ export const Route = createFileRoute("/api/public/monday-webhook")({
         );
 
         if (!canvasserName.trim()) return json({ error: "Missing canvasser name" }, 422);
+        // Duplicated Monday items ("… (copy)") carry fresh item ids, so id-based
+        // dedupe can't catch them — skip crediting to avoid double points.
+        if (leadName && /\(copy(\s+\d+)?\)\s*$/i.test(leadName)) {
+          return json({ ok: true, ignored: "copy item", lead_name: leadName });
+        }
         const outcome = normalizeOutcome(outcomeRaw ?? null);
         if (!outcome) return json({ error: `Unrecognized outcome: ${outcomeRaw}` }, 422);
 
