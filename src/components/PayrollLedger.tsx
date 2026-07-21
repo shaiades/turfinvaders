@@ -17,6 +17,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { RankPill } from "@/components/RankPill";
 import { useOfficeFilter } from "@/components/OfficeFilterContext";
 import { cn } from "@/lib/utils";
+import { weekStartMonday, toISODate, addDaysISO, laMidnightUtcISO } from "@/lib/dates";
 
 type LogRow = {
   canvasser_id: string;
@@ -28,18 +29,9 @@ type LogRow = {
   sales: number;
 };
 
-function weekStartOf(d: Date) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  const day = x.getDay(); // 0 Sun..6 Sat
-  const diffToMon = (day + 6) % 7;
-  x.setDate(x.getDate() - diffToMon);
-  return x;
-}
-
-function iso(d: Date) {
-  return d.toISOString().slice(0, 10);
-}
+// Weeks are anchored to America/Los_Angeles (midnight PT Monday reset).
+const weekStartOf = weekStartMonday;
+const iso = toISODate;
 
 type Agg = {
   bo: number;
@@ -79,12 +71,10 @@ export function PayrollLedger() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["payroll-ledger", startStr, endStr],
     queryFn: async () => {
-      const windowStart = `${startStr}T00:00:00Z`;
-      // Exclusive upper bound (start of the next day) so timestamps in the
-      // final second of the window are not missed.
-      const dayAfterEnd = new Date(`${endStr}T00:00:00Z`);
-      dayAfterEnd.setUTCDate(dayAfterEnd.getUTCDate() + 1);
-      const windowEnd = `${dayAfterEnd.toISOString().slice(0, 10)}T00:00:00Z`;
+      // LA-midnight boundaries; exclusive upper bound (start of the next LA
+      // day) so timestamps in the final second of the window are not missed.
+      const windowStart = laMidnightUtcISO(startStr);
+      const windowEnd = laMidnightUtcISO(addDaysISO(endStr, 1));
       const [logsRes, leadsRes, profilesRes, teamsRes, timeRes] = await Promise.all([
         supabase
           .from("daily_logs")
@@ -477,11 +467,12 @@ function MonthlyVolumeBonusPanel({ monthStart }: { monthStart: string }) {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["monthly-volume-bonus", monthStart],
     queryFn: async () => {
-      const windowStart = `${monthStart}T00:00:00Z`;
-      // Exclusive upper bound (start of next month) so timestamps in the
-      // final second of the month are not missed.
+      // LA-midnight boundaries; exclusive upper bound (start of next month in
+      // LA) so timestamps in the final second of the month are not missed.
+      const windowStart = laMidnightUtcISO(monthStart);
       const [y, m] = monthStart.split("-").map(Number);
-      const windowEnd = `${new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10)}T00:00:00Z`;
+      const nextMonth = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, "0")}-01`;
+      const windowEnd = laMidnightUtcISO(nextMonth);
       const [leadsRes, profilesRes] = await Promise.all([
         supabase
           .from("leads")

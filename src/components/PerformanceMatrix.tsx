@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { laWeekStartISO, addDaysISO } from "@/lib/dates";
 import { ArcadePanel, StatCard, TeamBadge } from "@/components/arcade";
 import { RankPill } from "@/components/RankPill";
 import { payRateForPoints } from "@/lib/pay";
@@ -15,17 +16,10 @@ type Row = {
   sales: number;
 };
 
+// Mon–Sat of the current LA week (midnight PT reset).
 function weekRange() {
-  const now = new Date();
-  const day = now.getDay(); // 0=Sun..6=Sat
-  const diffToMon = (day + 6) % 7; // Mon=0
-  const monday = new Date(now);
-  monday.setHours(0, 0, 0, 0);
-  monday.setDate(monday.getDate() - diffToMon);
-  const saturday = new Date(monday);
-  saturday.setDate(monday.getDate() + 5);
-  const iso = (d: Date) => d.toISOString().slice(0, 10);
-  return { start: iso(monday), end: iso(saturday) };
+  const start = laWeekStartISO();
+  return { start, end: addDaysISO(start, 5) };
 }
 
 type Totals = { bo: number; ol: number; rs: number; pm: number; sales: number; total: number; points: number };

@@ -3,6 +3,7 @@ import Papa from "papaparse";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { importHistoricalCsv } from "@/lib/csv-import.functions";
+import { laDateISO } from "@/lib/dates";
 import { ArcadePanel } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -230,16 +231,17 @@ export function HistoricalImporter({
       // can nuclear-wipe every row in that window before batch 1 begins.
       const isoDates = rows
         .map((r) => {
+          // Mirrors csv-import.functions parseDate: LA calendar days, never UTC.
           const s = (r.date ?? "").trim();
           if (!s) return null;
-          const d = new Date(s);
-          if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+          if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
           const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
           if (m) {
             const yr = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
-            const d2 = new Date(yr, Number(m[1]) - 1, Number(m[2]));
-            if (!isNaN(d2.getTime())) return d2.toISOString().slice(0, 10);
+            return `${yr}-${String(Number(m[1])).padStart(2, "0")}-${String(Number(m[2])).padStart(2, "0")}`;
           }
+          const d = new Date(s);
+          if (!isNaN(d.getTime())) return laDateISO(d);
           return null;
         })
         .filter((x): x is string => !!x)

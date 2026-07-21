@@ -129,11 +129,19 @@ function pickFromMondayEvent(ev: any) {
   };
 }
 
+// All log dates are America/Los_Angeles calendar days — never UTC. A bare
+// YYYY-MM-DD passes through untouched; timestamps are converted to their LA
+// calendar day; anything else falls back to "today" in LA.
+function laDateOf(d: Date): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(d);
+}
 function parseDate(s: string | undefined): string {
-  if (!s) return new Date().toISOString().slice(0, 10);
-  const d = new Date(s);
-  if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
-  return new Date().toISOString().slice(0, 10);
+  if (s && /^\d{4}-\d{2}-\d{2}$/.test(s.trim())) return s.trim();
+  if (s) {
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) return laDateOf(d);
+  }
+  return laDateOf(new Date());
 }
 
 function parseMoney(v: unknown): number | null {

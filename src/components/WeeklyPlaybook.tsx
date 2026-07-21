@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { laTodayISO, addDaysISO } from "@/lib/dates";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -53,15 +54,15 @@ export function WeeklyPlaybook({ userId }: { userId: string }) {
   const ratesQuery = useQuery({
     queryKey: ["playbook_rates", userId],
     queryFn: async () => {
-      const since = new Date(); since.setHours(0,0,0,0); since.setDate(since.getDate() - 60);
+      const since = addDaysISO(laTodayISO(), -60);
       const [logsRes, companyLogsRes] = await Promise.all([
         supabase.from("daily_logs")
           .select("doors_knocked, confirmed_leads, demos_sits, sales")
           .eq("canvasser_id", userId)
-          .gte("log_date", since.toISOString().slice(0, 10)),
+          .gte("log_date", since),
         supabase.from("daily_logs")
           .select("doors_knocked, confirmed_leads, demos_sits, sales")
-          .gte("log_date", since.toISOString().slice(0, 10)),
+          .gte("log_date", since),
       ]);
       const agg = (rows: Array<Record<string, number | null>> | null) => {
         const t = { doors: 0, leads: 0, sits: 0, sales: 0 };

@@ -26,7 +26,7 @@ import {
 } from "@/components/SuspendedBadge";
 import { useTodayLeads } from "@/hooks/useTodayLeads";
 import { formatCurrency } from "@/lib/utils";
-import { weekStartMonday, toISODate } from "@/lib/dates";
+import { weekStartMonday, toISODate, laMidnightUtcISO } from "@/lib/dates";
 import { Zap, DoorOpen, Truck, FileSpreadsheet } from "lucide-react";
 
 type OwnerTab = "dispatch" | "executive" | "fleet" | "timesheets" | "payroll" | "settings";
@@ -206,7 +206,7 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
           .eq("team_id", teamId!)
           .eq("status", "confirmed")
           .eq("is_sale", true)
-          .gte("created_at", monday.toISOString()),
+          .gte("created_at", laMidnightUtcISO(since)),
       ]);
       if (profilesRes.error) throw profilesRes.error;
       if (logsRes.error) throw logsRes.error;

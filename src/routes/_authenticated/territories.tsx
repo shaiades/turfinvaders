@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { laTodayISO } from "@/lib/dates";
 import { useAuth } from "@/hooks/useAuth";
 import { isManagerRole } from "@/lib/roles";
 import { ArcadePanel } from "@/components/arcade";
@@ -75,8 +76,7 @@ function TerritoriesPage() {
   const pinsQuery = useQuery({
     queryKey: ["territory_pins_today"],
     queryFn: async () => {
-      const today = new Date(); today.setHours(0, 0, 0, 0);
-      const iso = today.toISOString().slice(0, 10);
+      const iso = laTodayISO();
       const { data, error } = await supabase
         .from("field_pins")
         .select("id, pin_type, lat, lng, is_remote_drop, distance_m")

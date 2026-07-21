@@ -2,11 +2,9 @@ import { useEffect, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Heart, Lock } from "lucide-react";
+import { laTodayISO } from "@/lib/dates";
 
-function todayISO() {
-  const d = new Date(); d.setHours(0, 0, 0, 0);
-  return d.toISOString().slice(0, 10);
-}
+const todayISO = () => laTodayISO();
 
 function storageKey(userId: string) {
   return `gratitude:${userId}:${todayISO()}`;
