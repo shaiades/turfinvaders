@@ -232,22 +232,6 @@ export function FleetManager() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const setCaptain = useMutation({
-    mutationFn: async ({ vanId, captainId }: { vanId: string; captainId: string | null }) => {
-      const { error } = await supabase.from("teams").update({ captain_id: captainId }).eq("id", vanId);
-      if (error) throw error;
-      if (captainId) {
-        // Captain inherits van's office.
-        const van = fleet.data?.vans.find((v) => v.id === vanId);
-        const patch: { team_id: string; office_location?: string } = { team_id: vanId };
-        if (van?.office_location) patch.office_location = van.office_location;
-        await supabase.from("profiles").update(patch).eq("id", captainId);
-      }
-    },
-    onSuccess: () => { toast.success("Captain assigned"); qc.invalidateQueries({ queryKey: ["fleet_manager"] }); },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
   const assignCanvasser = useMutation({
     mutationFn: async ({ canvasserId, vanId }: { canvasserId: string; vanId: string | null }) => {
       const patch: { team_id: string | null; office_location?: string } = { team_id: vanId };
@@ -603,28 +587,6 @@ export function FleetManager() {
                             </div>
                           </div>
                         )}
-
-                        <div>
-                          <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Captain</label>
-                          {canManage ? (
-                            <Select
-                              value={v.captain_id ?? "none"}
-                              onValueChange={(val) => setCaptain.mutate({ vanId: v.id, captainId: val === "none" ? null : val })}
-                            >
-                              <SelectTrigger><SelectValue placeholder="No captain" /></SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="none">— No captain —</SelectItem>
-                                {captains.map((c) => (
-                                  <SelectItem key={c.id} value={c.id}>{c.display_name}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          ) : (
-                            <div className="text-sm px-2 py-1.5 rounded border border-border bg-surface">
-                              {captains.find((c) => c.id === v.captain_id)?.display_name ?? "— No captain —"}
-                            </div>
-                          )}
-                        </div>
 
                         <div>
                           <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground mb-1">
