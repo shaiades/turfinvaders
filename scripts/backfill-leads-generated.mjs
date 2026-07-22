@@ -1,15 +1,18 @@
 #!/usr/bin/env node
 /**
  * Backfill daily_metrics.leads_generated from the Monday "Incoming Leads"
- * board (created_at of each item = when the lead was generated).
+ * board. A lead counts only if its card was BORN in the Inbound group
+ * (group id "topics") — confirmers recycle old leads into other groups by
+ * creating new cards, which must not credit.
  *
- * READ-ONLY against Monday; emits SQL on stdout for the owner to paste in the
- * Supabase SQL editor. Name→profile matching happens in SQL at paste time
- * (normalized exact match); a trailing SELECT lists unmatched agent names.
+ * Cards get moved out of Inbound quickly, so the CURRENT group is useless
+ * for history — this reads the board's activity log (create_pulse events
+ * carry the birth group), then resolves each surviving card's Agent column.
  *
- * Emits ABSOLUTE sets (DO UPDATE SET leads_generated = EXCLUDED.leads_generated)
- * so re-pastes are idempotent — run it only for LA-dates STRICTLY BEFORE the
- * webhook activation date, or live credits would be overwritten.
+ * READ-ONLY against Monday; emits SQL on stdout for the owner to paste.
+ * The SQL starts with a clean-slate reset for the window, then absolute
+ * sets — safe to re-paste, and a re-run wholesale corrects prior numbers.
+ * Run only for LA-dates STRICTLY BEFORE webhook activation.
  *
  * Usage:
  *   MONDAY_API_TOKEN=... node scripts/backfill-leads-generated.mjs \
@@ -26,6 +29,7 @@ if (!TOKEN) {
 }
 const BOARD = args.board || "4155518549";
 const DAYS = Number(args.days || 7);
+const INBOUND_GROUP = "topics";
 
 const laDate = (d) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(d);
 const addDaysISO = (iso, n) => {
@@ -50,41 +54,87 @@ const gql = async (query, variables) => {
 
 const normalize = (s) => (s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 
-let cursor = null;
-const counts = new Map(); // `${agentNorm}\t${laDate}` -> n
-let scanned = 0, skippedCopies = 0, skippedNonInbound = 0, blankAgents = 0, inWindow = 0;
+// Monday activity_logs created_at is a 17-digit timestamp (unix * 1e7).
+const activityMs = (raw) => {
+  const n = Number(raw);
+  return String(raw).length >= 16 ? n / 1e4 : n * 1000;
+};
 
-for (;;) {
-  const q = cursor
-    ? `query ($c: String!) { next_items_page(cursor: $c, limit: 500) { cursor items { id name created_at group { id title } column_values(ids: ["text5"]) { text } } } }`
-    : `query ($b: [ID!]) { boards(ids: $b) { items_page(limit: 500) { cursor items { id name created_at group { id title } column_values(ids: ["text5"]) { text } } } } }`;
-  const data = await gql(q, cursor ? { c: cursor } : { b: [BOARD] });
-  const page = cursor ? data.next_items_page : data.boards?.[0]?.items_page;
-  const items = page?.items ?? [];
-  for (const it of items) {
-    scanned++;
-    if (/\(copy(\s+\d+)?\)\s*$/i.test(String(it.name ?? ""))) { skippedCopies++; continue; }
-    // Only cards born in Inbound are canvasser production; other groups are
-    // confirmer recycling (Futures / Never Confirmed / Reschedules / ...).
-    const gid = String(it.group?.id ?? "");
-    const gtitle = String(it.group?.title ?? "").trim().toLowerCase();
-    if (gid !== "topics" && gtitle !== "inbound") { skippedNonInbound++; continue; }
-    const d = laDate(new Date(it.created_at));
-    if (d < SINCE || d >= BEFORE) continue;
-    const agent = normalize(it.column_values?.[0]?.text);
-    if (!agent) { blankAgents++; continue; }
-    inWindow++;
-    const key = `${agent}\t${d}`;
-    counts.set(key, (counts.get(key) ?? 0) + 1);
+// ── 1) Activity log: create_pulse events with their birth group ─────────────
+const fromIso = new Date(Date.parse(`${SINCE}T00:00:00-08:00`) - 24 * 3600_000).toISOString();
+const toIso = new Date().toISOString();
+const born = new Map(); // pulseId -> laDate of creation (Inbound-born, in window)
+const agentFromActivity = new Map(); // pulseId -> agent text seen in activity
+let activityRows = 0, createEvents = 0, nonInbound = 0;
+for (let page = 1; page <= 500; page++) {
+  const data = await gql(
+    `query ($b: ID!, $from: ISO8601DateTime!, $to: ISO8601DateTime!, $p: Int!) {
+       boards(ids: [$b]) { activity_logs(from: $from, to: $to, limit: 100, page: $p) { event data created_at } }
+     }`,
+    { b: BOARD, from: fromIso, to: toIso, p: page },
+  );
+  const logs = data.boards?.[0]?.activity_logs ?? [];
+  if (logs.length === 0) break;
+  activityRows += logs.length;
+  for (const l of logs) {
+    let d;
+    try { d = JSON.parse(l.data); } catch { continue; }
+    const pulseId = String(d.pulse_id ?? d.pulseId ?? "");
+    if (!pulseId) continue;
+    if (l.event === "update_column_value" && String(d.column_id ?? "") === "text5") {
+      // Cards that later get moved/deleted lose their item record — remember
+      // the Agent text from the activity stream so they still credit.
+      const txt = String(d.value?.value ?? d.textual_value ?? "").trim();
+      if (txt && !agentFromActivity.has(pulseId)) agentFromActivity.set(pulseId, txt);
+      continue;
+    }
+    if (l.event !== "create_pulse") continue;
+    createEvents++;
+    const groupId = String(d.group_id ?? d.groupId ?? "");
+    if (groupId !== INBOUND_GROUP) { nonInbound++; continue; }
+    const day = laDate(new Date(activityMs(l.created_at)));
+    if (day < SINCE || day >= BEFORE) continue;
+    if (!born.has(pulseId)) born.set(pulseId, day);
   }
-  cursor = page?.cursor;
-  if (!cursor || items.length === 0) break;
 }
 
-console.error(`scanned=${scanned} inWindow=${inWindow} skippedCopies=${skippedCopies} skippedNonInbound=${skippedNonInbound} blankAgents=${blankAgents} window=[${SINCE}, ${BEFORE})`);
+// ── 2) Resolve Agent for the surviving cards ────────────────────────────────
+const counts = new Map(); // agentNorm + tab + laDate -> n
+let credited = 0, deleted = 0, blankAgents = 0, skippedCopies = 0, recoveredFromActivity = 0;
+const ids = [...born.keys()];
+for (let i = 0; i < ids.length; i += 100) {
+  const chunk = ids.slice(i, i + 100);
+  const data = await gql(
+    `query ($ids: [ID!]) { items(ids: $ids, exclude_nonactive: false) { id name column_values(ids: ["text5"]) { text } } }`,
+    { ids: chunk },
+  );
+  const byId = new Map((data.items ?? []).map((it) => [String(it.id), it]));
+  for (const id of chunk) {
+    const it = byId.get(id);
+    if (it && /\(copy(\s+\d+)?\)\s*$/i.test(String(it.name ?? ""))) { skippedCopies++; continue; }
+    const agent = normalize(it?.column_values?.[0]?.text) || normalize(agentFromActivity.get(id));
+    if (!it && !agent) { deleted++; continue; }
+    if (!agent) { blankAgents++; continue; }
+    if (!it) recoveredFromActivity++;
+    credited++;
+    const key = agent + "\t" + born.get(id);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+}
+
+console.error(
+  `activityRows=${activityRows} createEvents=${createEvents} nonInboundBirths=${nonInbound} ` +
+  `inboundInWindow=${born.size} credited=${credited} deleted=${deleted} blankAgents=${blankAgents} ` +
+  `skippedCopies=${skippedCopies} recoveredFromActivity=${recoveredFromActivity} window=[${SINCE}, ${BEFORE})`,
+);
+
+const reset = `UPDATE public.daily_metrics SET leads_generated = 0
+WHERE metric_date >= '${SINCE}' AND metric_date < '${BEFORE}';`;
 
 if (counts.size === 0) {
-  console.log(`-- No Incoming Leads items found in LA window [${SINCE}, ${BEFORE}) — nothing to backfill.`);
+  console.log(`-- No Inbound-born leads found in LA window [${SINCE}, ${BEFORE}).
+-- Clean-slate reset only:
+${reset}`);
   process.exit(0);
 }
 
@@ -96,11 +146,10 @@ const values = [...counts.entries()]
   .join(",\n");
 
 console.log(`-- Backfill leads_generated from Incoming Leads board ${BOARD}
--- Inbound-group cards only. LA-date window [${SINCE}, ${BEFORE}) — strictly
--- before webhook activation. Starts with a clean slate for the window, then
--- absolute sets: safe to re-paste; DO NOT run for dates on/after activation.
-UPDATE public.daily_metrics SET leads_generated = 0
-WHERE metric_date >= '${SINCE}' AND metric_date < '${BEFORE}';
+-- Inbound-BORN cards only (from the board activity log). LA-date window
+-- [${SINCE}, ${BEFORE}) — strictly before webhook activation. Starts with a
+-- clean-slate reset, then absolute sets: safe to re-paste.
+${reset}
 
 WITH gen(agent_norm, d, n) AS (
   VALUES
