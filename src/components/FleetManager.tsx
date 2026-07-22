@@ -106,12 +106,12 @@ export function FleetManager() {
         // Monday.com webhooks save schedule outcomes into daily_metrics.
         supabase
           .from("daily_metrics")
-          .select("id, canvasser_id, pitch_missed, sales, leads_submitted, leads_confirmed, no_answers, killed, pending, metric_date, created_at")
+          .select("id, canvasser_id, pitch_missed, sales, leads_submitted, leads_generated, leads_confirmed, no_answers, killed, pending, metric_date, created_at")
           .gte("created_at", startDate)
           .lt("created_at", endDate),
         supabase
           .from("daily_metrics")
-          .select("id, canvasser_id, pitch_missed, sales, leads_submitted, leads_confirmed, no_answers, killed, pending, metric_date, created_at")
+          .select("id, canvasser_id, pitch_missed, sales, leads_submitted, leads_generated, leads_confirmed, no_answers, killed, pending, metric_date, created_at")
           .gte("metric_date", weekStartISO)
           .lte("metric_date", weekEndISO),
 
@@ -153,10 +153,9 @@ export function FleetManager() {
       for (const m of metricRows) {
         if (!m.canvasser_id) continue;
         const conf = m.leads_confirmed ?? 0;
-        const kil = (m as { killed?: number | null }).killed ?? 0;
-        const pen = (m as { pending?: number | null }).pending ?? 0;
-        const na = (m as { no_answers?: number | null }).no_answers ?? 0;
-        const sub = conf + kil + pen + na;
+        // Submits = leads GENERATED (new items on the Incoming Leads board),
+        // not outcome counts — production shows the moment a lead is entered.
+        const sub = (m as { leads_generated?: number | null }).leads_generated ?? 0;
         submitsByUser.set(m.canvasser_id, (submitsByUser.get(m.canvasser_id) ?? 0) + sub);
         confirmedByUser.set(m.canvasser_id, (confirmedByUser.get(m.canvasser_id) ?? 0) + conf);
       }

@@ -160,6 +160,7 @@ export type Database = {
           killed: number
           leads_called_in: number
           leads_confirmed: number
+          leads_generated: number
           leads_submitted: number
           metric_date: string
           no_answers: number
@@ -180,6 +181,7 @@ export type Database = {
           killed?: number
           leads_called_in?: number
           leads_confirmed?: number
+          leads_generated?: number
           leads_submitted?: number
           metric_date?: string
           no_answers?: number
@@ -200,6 +202,7 @@ export type Database = {
           killed?: number
           leads_called_in?: number
           leads_confirmed?: number
+          leads_generated?: number
           leads_submitted?: number
           metric_date?: string
           no_answers?: number
@@ -534,6 +537,7 @@ export type Database = {
       system_settings: {
         Row: {
           active_monday_board_oc: string | null
+          incoming_leads_board_id: string | null
           active_monday_board_sd: string | null
           created_at: string
           id: boolean
@@ -544,6 +548,7 @@ export type Database = {
         }
         Insert: {
           active_monday_board_oc?: string | null
+          incoming_leads_board_id?: string | null
           active_monday_board_sd?: string | null
           created_at?: string
           id?: boolean
@@ -554,6 +559,7 @@ export type Database = {
         }
         Update: {
           active_monday_board_oc?: string | null
+          incoming_leads_board_id?: string | null
           active_monday_board_sd?: string | null
           created_at?: string
           id?: boolean
@@ -843,6 +849,10 @@ export type Database = {
         Returns: boolean
       }
       my_team_id: { Args: { _user_id: string }; Returns: string }
+      increment_leads_generated: {
+        Args: { _canvasser_id: string; _metric_date: string; _office: string }
+        Returns: undefined
+      }
       reactivate_agent: { Args: { _user_id: string }; Returns: undefined }
       refresh_canvasser_rank: {
         Args: { _canvasser_id: string }

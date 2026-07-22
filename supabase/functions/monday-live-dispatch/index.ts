@@ -265,10 +265,32 @@ serve(async (req) => {
     if (boardId && activeBoardOC && boardId === activeBoardOC) boardOffice = 'Orange County'
     else if (boardId && activeBoardSD && boardId === activeBoardSD) boardOffice = 'San Diego'
 
+    // Leads-generated stream: new items on the static Incoming Leads board
+    // count as production ("Submitted"); results keep coming from the Block
+    // boards. Column changes on the leads board are deliberately ignored.
+    const incomingLeadsBoardId = String((settingsRow as any)?.incoming_leads_board_id || '')
+    let isIncomingLeadsBoard = !!incomingLeadsBoardId && boardId === incomingLeadsBoardId
+    if (isIncomingLeadsBoard && (incomingLeadsBoardId === activeBoardOC || incomingLeadsBoardId === activeBoardSD)) {
+      // Misconfiguration would silently swallow every Block outcome event.
+      await supabaseAdmin.from('webhook_logs').insert({
+        step: 'Config_Error',
+        data: { message: 'incoming_leads_board_id equals an active Block board — treating as Block', incomingLeadsBoardId },
+      })
+      isIncomingLeadsBoard = false
+    }
+
     await supabaseAdmin.from('webhook_logs').insert({
       step: '2b_Board_Resolved',
-      data: { boardId, activeBoardOC, activeBoardSD, boardOffice },
+      data: { boardId, activeBoardOC, activeBoardSD, boardOffice, isIncomingLeadsBoard },
     })
+
+    if (isIncomingLeadsBoard && !isCreateEvent) {
+      await supabaseAdmin.from('webhook_logs').insert({
+        step: 'Ignored_Leads_Board_Non_Create',
+        data: { pulseId: String(pulseId), boardId },
+      })
+      return new Response('Leads board non-create ignored', { status: 200, headers: corsHeaders })
+    }
 
     // Step 3: Fetch Monday token
     let mondayToken = (settingsRow as any)?.monday_api_token
@@ -332,12 +354,26 @@ serve(async (req) => {
     const cols: Array<{ id: string; text: string | null; column: { title: string; id: string } }> =
       item.column_values || []
 
-    // Agent name column
-    const nameCol = cols.find((c) => {
-      const t = (c.column?.title || '').toLowerCase()
-      return t === 'agent' || t.includes('agent') || t.includes('canvasser')
-    })
+    // Agent name column. The Incoming Leads board's Agent column id is stable
+    // (text5); prefer it by id there so a stray "…agent…" title can't win.
+    const nameCol =
+      (isIncomingLeadsBoard ? cols.find((c) => c.id === 'text5' || c.column?.id === 'text5') : undefined) ??
+      cols.find((c) => {
+        const t = (c.column?.title || '').toLowerCase()
+        return t === 'agent' || t.includes('agent') || t.includes('canvasser')
+      })
     const canvasserName = (nameCol?.text || '').trim()
+
+    // Incoming Leads items carry their own Office status column — use it so
+    // credits and Bouncer-provisioned profiles land in the right office.
+    if (isIncomingLeadsBoard) {
+      const officeCol =
+        cols.find((c) => c.id === 'color_mm2yzxqs' || c.column?.id === 'color_mm2yzxqs') ??
+        cols.find((c) => (c.column?.title || '').trim().toLowerCase() === 'office')
+      const officeText = (officeCol?.text || '').toLowerCase()
+      if (/orange|\boc\b/.test(officeText)) boardOffice = 'Orange County'
+      else if (/san diego|\bsd\b/.test(officeText)) boardOffice = 'San Diego'
+    }
 
     // Locate the changed column
     const changedCol = changedColumnId
@@ -427,6 +463,57 @@ serve(async (req) => {
       step: '4_Canvasser_Matched',
       data: { canvasserName, matchedId: match.id, matchedName: match.display_name, autoCreated },
     })
+
+    // ── Leads-generated branch ── a new item on the Incoming Leads board is
+    // one unit of production for its Agent. Exactly once per item (claim-first
+    // marker), atomic counter RPC (bursts of entries race read-modify-write).
+    // Never touches the outcome path, daily_logs, or the sale sync.
+    if (isIncomingLeadsBoard) {
+      const pid = String(pulseId)
+      const { data: genSeen } = await supabaseAdmin
+        .from('webhook_logs').select('id')
+        .eq('step', 'Lead_Generated_Credited').contains('data', { pulseId: pid }).limit(1)
+      if ((genSeen?.length ?? 0) > 0) {
+        await supabaseAdmin.from('webhook_logs').insert({
+          step: 'Lead_Generated_Already_Credited',
+          data: { pulseId: pid, canvasser_id: match.id },
+        })
+        return new Response('Already credited', { status: 200, headers: corsHeaders })
+      }
+      const { data: claim } = await supabaseAdmin.from('webhook_logs').insert({
+        step: 'Lead_Generated_Credited',
+        data: { pulseId: pid, canvasser_id: match.id, itemName: item.name },
+      }).select('id').single()
+
+      const genDate = todayLA()
+      const genOffice = boardOffice ?? match.office_location ?? 'San Diego'
+      const { error: genErr } = await supabaseAdmin.rpc('increment_leads_generated', {
+        _canvasser_id: match.id,
+        _metric_date: genDate,
+        _office: genOffice,
+      })
+      if (genErr) {
+        // Release the claim so Monday's redelivery can credit successfully.
+        if (claim?.id) await supabaseAdmin.from('webhook_logs').delete().eq('id', claim.id)
+        await supabaseAdmin.from('webhook_logs').insert({
+          step: 'Lead_Generated_Upsert_Error',
+          data: { pulseId: pid, canvasser_id: match.id, error: genErr.message },
+        })
+        return new Response('Increment failed', { status: 502, headers: corsHeaders })
+      }
+
+      if (triggerUuid) {
+        await supabaseAdmin.from('webhook_logs').insert({
+          step: 'Event_Processed',
+          data: { triggerUuid, pulseId: pid },
+        })
+      }
+      await supabaseAdmin.from('webhook_logs').insert({
+        step: 'Lead_Generated_Processed',
+        data: { pulseId: pid, canvasser_id: match.id, metric_date: genDate, office: genOffice },
+      })
+      return new Response('Lead generated credited', { status: 200, headers: corsHeaders })
+    }
 
     // Step 5: Map new + previous outcomes. Creation events have no changed
     // column — derive the outcome (if any) from the item's full column set.
