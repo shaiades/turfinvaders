@@ -52,18 +52,23 @@ const normalize = (s) => (s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 
 let cursor = null;
 const counts = new Map(); // `${agentNorm}\t${laDate}` -> n
-let scanned = 0, skippedCopies = 0, blankAgents = 0, inWindow = 0;
+let scanned = 0, skippedCopies = 0, skippedNonInbound = 0, blankAgents = 0, inWindow = 0;
 
 for (;;) {
   const q = cursor
-    ? `query ($c: String!) { next_items_page(cursor: $c, limit: 500) { cursor items { id name created_at column_values(ids: ["text5"]) { text } } } }`
-    : `query ($b: [ID!]) { boards(ids: $b) { items_page(limit: 500) { cursor items { id name created_at column_values(ids: ["text5"]) { text } } } } }`;
+    ? `query ($c: String!) { next_items_page(cursor: $c, limit: 500) { cursor items { id name created_at group { id title } column_values(ids: ["text5"]) { text } } } }`
+    : `query ($b: [ID!]) { boards(ids: $b) { items_page(limit: 500) { cursor items { id name created_at group { id title } column_values(ids: ["text5"]) { text } } } } }`;
   const data = await gql(q, cursor ? { c: cursor } : { b: [BOARD] });
   const page = cursor ? data.next_items_page : data.boards?.[0]?.items_page;
   const items = page?.items ?? [];
   for (const it of items) {
     scanned++;
     if (/\(copy(\s+\d+)?\)\s*$/i.test(String(it.name ?? ""))) { skippedCopies++; continue; }
+    // Only cards born in Inbound are canvasser production; other groups are
+    // confirmer recycling (Futures / Never Confirmed / Reschedules / ...).
+    const gid = String(it.group?.id ?? "");
+    const gtitle = String(it.group?.title ?? "").trim().toLowerCase();
+    if (gid !== "topics" && gtitle !== "inbound") { skippedNonInbound++; continue; }
     const d = laDate(new Date(it.created_at));
     if (d < SINCE || d >= BEFORE) continue;
     const agent = normalize(it.column_values?.[0]?.text);
@@ -76,7 +81,7 @@ for (;;) {
   if (!cursor || items.length === 0) break;
 }
 
-console.error(`scanned=${scanned} inWindow=${inWindow} skippedCopies=${skippedCopies} blankAgents=${blankAgents} window=[${SINCE}, ${BEFORE})`);
+console.error(`scanned=${scanned} inWindow=${inWindow} skippedCopies=${skippedCopies} skippedNonInbound=${skippedNonInbound} blankAgents=${blankAgents} window=[${SINCE}, ${BEFORE})`);
 
 if (counts.size === 0) {
   console.log(`-- No Incoming Leads items found in LA window [${SINCE}, ${BEFORE}) — nothing to backfill.`);
@@ -91,8 +96,12 @@ const values = [...counts.entries()]
   .join(",\n");
 
 console.log(`-- Backfill leads_generated from Incoming Leads board ${BOARD}
--- LA-date window [${SINCE}, ${BEFORE}) — strictly before webhook activation.
--- Absolute sets: safe to re-paste; DO NOT run for dates on/after activation.
+-- Inbound-group cards only. LA-date window [${SINCE}, ${BEFORE}) — strictly
+-- before webhook activation. Starts with a clean slate for the window, then
+-- absolute sets: safe to re-paste; DO NOT run for dates on/after activation.
+UPDATE public.daily_metrics SET leads_generated = 0
+WHERE metric_date >= '${SINCE}' AND metric_date < '${BEFORE}';
+
 WITH gen(agent_norm, d, n) AS (
   VALUES
 ${values}

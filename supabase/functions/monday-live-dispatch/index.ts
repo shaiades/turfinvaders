@@ -354,6 +354,24 @@ serve(async (req) => {
     const cols: Array<{ id: string; text: string | null; column: { title: string; id: string } }> =
       item.column_values || []
 
+    // Only cards BORN in the Inbound group are canvasser production. The
+    // confirmers create new cards on this board when recycling old leads
+    // (Futures / Never Confirmed / Reschedules / QR / Internet …) — those must
+    // never credit, and must never mint Bouncer placeholder profiles either,
+    // so this gate sits before any name matching.
+    if (isIncomingLeadsBoard) {
+      const groupId = String(item.group?.id ?? '')
+      const groupTitle = String(item.group?.title ?? '')
+      const isInbound = groupId === 'topics' || groupTitle.trim().toLowerCase() === 'inbound'
+      if (!isInbound) {
+        await supabaseAdmin.from('webhook_logs').insert({
+          step: 'Ignored_Leads_Board_Non_Inbound',
+          data: { pulseId: String(pulseId), itemName: item.name, group: groupTitle || groupId },
+        })
+        return new Response('Non-Inbound leads-board card ignored', { status: 200, headers: corsHeaders })
+      }
+    }
+
     // Agent name column. The Incoming Leads board's Agent column id is stable
     // (text5); prefer it by id there so a stray "…agent…" title can't win.
     const nameCol =
@@ -416,12 +434,18 @@ serve(async (req) => {
       .filter((p) => p.display_name)
       .map((p) => ({ ...p, _norm: normalizeName(p.display_name as string) }))
 
+    // Incoming Leads board: EXACT normalized match only. Distinct people share
+    // name fragments ("Ryan" in OC vs "Ian Ryan" in SD), and the substring
+    // tiers below would credit one person's leads to another. No exact match
+    // → the Bouncer provisions a separate profile, which is correct.
     let match = candidates.find((p) => p._norm === wanted)
-    if (!match) match = candidates.find((p) => p._norm.includes(wanted))
-    if (!match) match = candidates.find((p) => wanted.includes(p._norm))
-    if (!match) {
-      const firstToken = wanted.split(' ')[0]
-      if (firstToken) match = candidates.find((p) => p._norm.split(' ')[0] === firstToken)
+    if (!match && !isIncomingLeadsBoard) {
+      match = candidates.find((p) => p._norm.includes(wanted))
+      if (!match) match = candidates.find((p) => wanted.includes(p._norm))
+      if (!match) {
+        const firstToken = wanted.split(' ')[0]
+        if (firstToken) match = candidates.find((p) => p._norm.split(' ')[0] === firstToken)
+      }
     }
 
     let autoCreated = false

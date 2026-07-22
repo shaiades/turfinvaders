@@ -144,7 +144,7 @@ export async function mondayQuery(token: string, query: string): Promise<MondayR
 export type ItemFetchResult = { item: Record<string, unknown> | null; error: string | null };
 
 const ITEM_FIELDS =
-  "id name board { id } column_values { id text column { title id } ... on FormulaValue { display_value } }";
+  "id name board { id } group { id title } column_values { id text column { title id } ... on FormulaValue { display_value } }";
 
 type Waiter = (r: ItemFetchResult) => void;
 let batch: { token: string; waiters: Map<string, Waiter[]> } | null = null;
