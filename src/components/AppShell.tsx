@@ -2,7 +2,7 @@ import { Link, useRouter, useRouterState } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth, setDevRoleOverride, type AppRole } from "@/hooks/useAuth";
-import { LogOut, Users, LayoutDashboard, Inbox, MapPin, FlaskConical, DollarSign, Zap, Trophy, Target } from "lucide-react";
+import { LogOut, Users, LayoutDashboard, Inbox, MapPin, FlaskConical, DollarSign, Zap, Trophy, Target, PhoneCall, Sparkles } from "lucide-react";
 const turfInvadersWordmark = { url: "/turf-invaders-wordmark.png" };
 
 type NavItem = {
@@ -15,7 +15,7 @@ type NavItem = {
 // Routes a Canvasser is allowed to visit. Anything else → redirect to /field.
 // /dashboard (personal stats), /log (daily log + new lead) and /daily-wrap are
 // canvasser-facing screens — owner opened them up 2026-07-20.
-const CANVASSER_ALLOWED = ["/field", "/active-run", "/my-territory", "/leaderboard", "/playbook", "/dashboard", "/log", "/daily-wrap"];
+const CANVASSER_ALLOWED = ["/field", "/my-territory", "/leaderboard", "/playbook", "/dashboard", "/log", "/daily-wrap"];
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, role, realRole, displayName } = useAuth();
@@ -43,6 +43,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         { to: "/dashboard", search: { tab: "executive" }, label: "Stats", icon: LayoutDashboard },
         { to: "/leaderboard", label: "Leaders", icon: Trophy },
         { to: "/playbook", label: "Playbook", icon: Target },
+        { to: "/daily-wrap", label: "Wrap", icon: Sparkles },
       ];
     }
     // Leadership: owner, captain, office_staff (manager suite)
@@ -52,6 +53,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       { to: "/dashboard", search: { tab: "dispatch" }, label: "Dispatch", icon: Inbox },
       { to: "/dashboard", search: { tab: "fleet" }, label: "Fleet", icon: Users },
       { to: "/dashboard", search: { tab: "payroll" }, label: "Payroll", icon: DollarSign },
+      { to: "/confirmation-desk", label: "Desk", icon: PhoneCall },
+      { to: "/daily-wrap", label: "Wrap", icon: Sparkles },
     ];
   })();
 

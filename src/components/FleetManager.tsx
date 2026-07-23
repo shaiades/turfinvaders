@@ -249,7 +249,6 @@ export function FleetManager() {
     onSuccess: (_d, vars) => {
       toast.success(vars.vanId ? "Assigned to van" : "Moved to Unassigned");
       qc.invalidateQueries({ queryKey: ["fleet_manager"] });
-      qc.invalidateQueries({ queryKey: ["performance-matrix"] });
       qc.invalidateQueries({ queryKey: ["weekly_results"] });
       qc.invalidateQueries({ queryKey: ["payroll-ledger"] });
     },
@@ -261,7 +260,6 @@ export function FleetManager() {
     onSuccess: () => {
       toast.success("Ghost profile deleted");
       qc.invalidateQueries({ queryKey: ["fleet_manager"] });
-      qc.invalidateQueries({ queryKey: ["performance-matrix"] });
     },
     onError: (e: Error) => toast.error(e.message ?? "Failed to delete"),
   });
@@ -291,7 +289,6 @@ export function FleetManager() {
     onSuccess: () => {
       toast.success("Van deleted — members moved to Unassigned");
       qc.invalidateQueries({ queryKey: ["fleet_manager"] });
-      qc.invalidateQueries({ queryKey: ["performance-matrix"] });
     },
     onError: (e: Error) => toast.error(e.message ?? "Failed to delete van"),
   });

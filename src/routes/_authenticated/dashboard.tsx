@@ -13,6 +13,7 @@ import { ExecutiveDashboard } from "@/components/ExecutiveDashboard";
 import { TimesheetEditor } from "@/components/TimesheetEditor";
 import { LiveDispatch } from "@/components/LiveDispatch";
 import { WeeklyScheduleSettings } from "@/components/WeeklyScheduleSettings";
+import { CompanySettingsPanel } from "@/components/CompanySettingsPanel";
 import { AddTeamMemberDialog } from "@/components/AddTeamMemberDialog";
 import { RosterPanel } from "@/components/RosterPanel";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -37,9 +38,9 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
     const t = s.tab;
     return {
       tab:
-        t === "fleet" || t === "payroll" || t === "timesheets" || t === "executive" || t === "settings"
+        t === "fleet" || t === "payroll" || t === "timesheets" || t === "dispatch" || t === "settings"
           ? t
-          : "dispatch",
+          : "executive",
     };
   },
   component: Dashboard,
@@ -153,6 +154,18 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
         <TabsContent value="settings" className="mt-0 space-y-6">
           <WeeklyScheduleSettings />
           <RosterPanel />
+          <CompanySettingsPanel />
+          <div className="arcade-card p-4 flex items-center justify-between gap-3 flex-wrap">
+            <div className="text-sm text-muted-foreground">
+              Roles, teams, and account cleanup live on the Manage Players screen.
+            </div>
+            <Link
+              to="/users"
+              className="inline-flex items-center min-h-10 md:min-h-9 px-4 rounded-md border border-neon/50 text-neon font-display text-[10px] uppercase tracking-widest hover:bg-neon/10"
+            >
+              Manage Players
+            </Link>
+          </div>
         </TabsContent>
       </Tabs>
     </div>

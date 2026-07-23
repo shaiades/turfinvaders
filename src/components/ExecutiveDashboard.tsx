@@ -8,11 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { deleteProfile, deleteVan, upsertManualWeekly, getWeeklyPaychecks } from "@/lib/fleet.functions";
-import { HistoricalImporter } from "@/components/HistoricalImporter";
-import { PayrollLedger } from "@/components/PayrollLedger";
+import { upsertManualWeekly, getWeeklyPaychecks } from "@/lib/fleet.functions";
 import { toast } from "sonner";
-import { Plus, Trash2, Truck, User } from "lucide-react";
+import { Plus } from "lucide-react";
 import { OfficeFilterProvider, OfficeFilterToggle, useOfficeFilter } from "@/components/OfficeFilterContext";
 import { weekStartMonday, toISODate, addDays, dateFromISO, laDateISO, laTodayISO, laWeekStartISO, weekStartOfISO } from "@/lib/dates";
 
@@ -31,6 +29,9 @@ function leadsSum(r: { demos_sits?: number | null; sales?: number | null; no_dem
 
 /* ============ Main ============ */
 
+// Slimmed 2026-07-22: Payroll lives only in the Payroll tab, fleet status in
+// the Fleet tab, CSV import in the header dialog, and DatabaseCleanup on the
+// Manage Players screen — the Executive tab no longer restates them.
 export function ExecutiveDashboard() {
   return (
     <OfficeFilterProvider>
@@ -39,15 +40,9 @@ export function ExecutiveDashboard() {
           <OfficeFilterToggle compact className="w-full max-w-md" />
         </div>
         <ManualEntryBar />
-        <div className="hidden md:block">
-          <HistoricalImporter />
-        </div>
         <WeeklyResults />
-        <PayrollLedger />
         <LiveDailyAction />
-        <DatabaseCleanup />
         <RawDataTable />
-        <LiveFleetStatus />
       </div>
     </OfficeFilterProvider>
   );
@@ -362,99 +357,6 @@ function RawDataTable() {
 
 type Range = "today" | "week" | "month";
 
-function LiveFleetStatus() {
-  const [range, setRange] = useState<Range>("today");
-  const { matches } = useOfficeFilter();
-
-  const since = useMemo(() => {
-    const today = new Date(); today.setHours(0,0,0,0);
-    if (range === "today") return today;
-    if (range === "week") return startOfWeekMon(today);
-    return startOfMonth(today);
-  }, [range]);
-
-  const q = useQuery({
-    queryKey: ["fleet_status", range],
-    queryFn: async () => {
-      const [vansR, logsR] = await Promise.all([
-        supabase.from("teams").select("id, name, color, office_location").order("name"),
-        supabase.from("daily_logs")
-          .select("team_id, demos_sits, sales, no_demo, one_legs, future_leads, unmarked, log_date")
-          .gte("log_date", toISODate(since)),
-      ]);
-      if (vansR.error) throw vansR.error;
-      if (logsR.error) throw logsR.error;
-      const byVan = new Map<string, { leads: number; sits: number }>();
-      for (const l of logsR.data ?? []) {
-        if (!l.team_id) continue;
-        const cur = byVan.get(l.team_id) ?? { leads: 0, sits: 0 };
-        cur.leads += leadsSum(l);
-        cur.sits += l.sales ?? 0; // closed sales count as sits too, but spec asks "sits"
-        cur.sits = cur.sits; // no-op to make ts happy
-        byVan.set(l.team_id, cur);
-      }
-      // Re-compute sits properly: demos_sits + sales (a sale is also a sit/demo)
-      const fresh = new Map<string, { leads: number; sits: number }>();
-      for (const l of logsR.data ?? []) {
-        if (!l.team_id) continue;
-        const cur = fresh.get(l.team_id) ?? { leads: 0, sits: 0 };
-        cur.leads += leadsSum(l);
-        cur.sits += (l.demos_sits ?? 0) + (l.sales ?? 0);
-        fresh.set(l.team_id, cur);
-      }
-      return { vans: vansR.data ?? [], byVan: fresh };
-    },
-  });
-
-  return (
-    <ArcadePanel title="Live Fleet Status" action={
-      <div className="inline-flex rounded-md border border-border bg-surface p-0.5">
-        {(["today","week","month"] as Range[]).map((r) => (
-          <button
-            key={r}
-            onClick={() => setRange(r)}
-            className={`px-3 py-2 text-[10px] font-display uppercase tracking-widest rounded-sm transition ${
-              range === r ? "bg-neon text-background" : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {r === "today" ? "Today" : r === "week" ? "This Week" : "This Month"}
-          </button>
-        ))}
-      </div>
-    }>
-      {q.isLoading ? (
-        <div className="text-sm text-muted-foreground">Loading…</div>
-      ) : (q.data?.vans.length ?? 0) === 0 ? (
-        <div className="text-sm text-muted-foreground">No vans yet.</div>
-      ) : (
-        <div className="space-y-2">
-          {q.data!.vans.filter((v) => matches((v as { office_location?: string | null }).office_location)).map((v) => {
-            const totals = q.data!.byVan.get(v.id) ?? { leads: 0, sits: 0 };
-            return (
-              <div key={v.id} className="flex items-center justify-between gap-4 px-4 py-3 rounded-lg border border-border bg-surface">
-                <div className="flex items-center gap-3 min-w-0">
-                  <Truck className="w-4 h-4 shrink-0" style={{ color: v.color }} />
-                  <TeamBadge name={v.name} color={v.color} />
-                </div>
-                <div className="flex items-center gap-6">
-                  <div className="text-right">
-                    <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Leads</div>
-                    <div className="font-display text-xl text-neon">{totals.leads}</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Sits</div>
-                    <div className="font-display text-xl text-victory">{totals.sits}</div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </ArcadePanel>
-  );
-}
-
 /* ============ 2. Last Week's Results ============ */
 
 type WeeklyRow = {
@@ -675,142 +577,6 @@ function WeeklyResults() {
           </table>
           </div>
         </>
-      )}
-    </ArcadePanel>
-  );
-}
-
-
-/* ============ 3. Database Cleanup ============ */
-
-function DatabaseCleanup() {
-  const qc = useQueryClient();
-  const deleteProfileFn = useServerFn(deleteProfile);
-  const deleteVanFn = useServerFn(deleteVan);
-
-  const q = useQuery({
-    queryKey: ["cleanup_inventory"],
-    queryFn: async () => {
-      const [vansR, profilesR, rolesR] = await Promise.all([
-        supabase.from("teams").select("id, name, color").order("name"),
-        supabase.from("profiles").select("id, display_name, team_id").order("display_name"),
-        supabase.from("user_roles").select("user_id, role"),
-      ]);
-      if (vansR.error) throw vansR.error;
-      if (profilesR.error) throw profilesR.error;
-      if (rolesR.error) throw rolesR.error;
-      const rolesByUser = new Map<string, string[]>();
-      for (const r of rolesR.data ?? []) {
-        const arr = rolesByUser.get(r.user_id) ?? [];
-        arr.push(r.role);
-        rolesByUser.set(r.user_id, arr);
-      }
-      return { vans: vansR.data ?? [], profiles: profilesR.data ?? [], rolesByUser };
-    },
-  });
-
-  const delVan = useMutation({
-    mutationFn: async (id: string) => { await deleteVanFn({ data: { id } }); },
-    onSuccess: () => {
-      toast.success("Van deleted");
-      qc.invalidateQueries({ queryKey: ["cleanup_inventory"] });
-      qc.invalidateQueries({ queryKey: ["fleet_manager"] });
-      qc.invalidateQueries({ queryKey: ["fleet_status"] });
-      qc.invalidateQueries({ queryKey: ["offices"] });
-    },
-    onError: (e: Error) => toast.error(e.message ?? "Failed to delete"),
-  });
-
-  const delUser = useMutation({
-    mutationFn: async (id: string) => { await deleteProfileFn({ data: { id } }); },
-    onSuccess: () => {
-      toast.success("User deleted");
-      qc.invalidateQueries({ queryKey: ["cleanup_inventory"] });
-      qc.invalidateQueries({ queryKey: ["fleet_manager"] });
-      qc.invalidateQueries({ queryKey: ["weekly_results"] });
-    },
-    onError: (e: Error) => toast.error(e.message ?? "Failed to delete"),
-  });
-
-  return (
-    <ArcadePanel
-      title="Database Cleanup · Purge Mode"
-      action={<span className="text-[10px] font-display uppercase tracking-widest text-destructive">Destructive · Owner Only</span>}
-    >
-      {q.isLoading || !q.data ? (
-        <div className="text-sm text-muted-foreground">Loading…</div>
-      ) : (
-        <div className="grid gap-6 lg:grid-cols-2">
-          {/* Vans */}
-          <div>
-            <h3 className="text-[10px] font-display uppercase tracking-widest text-muted-foreground mb-2">
-              All Vans ({q.data.vans.length})
-            </h3>
-            <div className="space-y-1.5">
-              {q.data.vans.length === 0 ? (
-                <div className="text-xs text-muted-foreground italic">No vans.</div>
-              ) : q.data.vans.map((v) => (
-                <div key={v.id} className="flex items-center justify-between gap-3 px-3 py-2 rounded border border-border bg-surface">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <Truck className="w-4 h-4 shrink-0" style={{ color: v.color }} />
-                    <TeamBadge name={v.name} color={v.color} />
-                  </div>
-                  <Button
-                    variant="destructive"
-                    disabled={delVan.isPending}
-                    onClick={() => {
-                      if (confirm(`Permanently delete Van "${v.name}"? Members will become Unassigned.`)) {
-                        delVan.mutate(v.id);
-                      }
-                    }}
-                  >
-                    <Trash2 className="w-3.5 h-3.5 mr-1" /> Delete
-                  </Button>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Users */}
-          <div>
-            <h3 className="text-[10px] font-display uppercase tracking-widest text-muted-foreground mb-2">
-              All Users ({q.data.profiles.length})
-            </h3>
-            <div className="space-y-1.5 max-h-[480px] overflow-y-auto pr-1">
-              {q.data.profiles.length === 0 ? (
-                <div className="text-xs text-muted-foreground italic">No users.</div>
-              ) : q.data.profiles.map((p) => {
-                const roles = q.data.rolesByUser.get(p.id) ?? [];
-                const isOwner = roles.includes("owner");
-                return (
-                  <div key={p.id} className="flex items-center justify-between gap-3 px-3 py-2 rounded border border-border bg-surface">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <User className="w-4 h-4 shrink-0 text-muted-foreground" />
-                      <span className="text-sm truncate">{p.display_name ?? "Unknown"}</span>
-                      {roles.length > 0 && (
-                        <span className="text-[9px] font-display uppercase tracking-widest text-muted-foreground">
-                          · {roles.join(", ")}
-                        </span>
-                      )}
-                    </div>
-                    <Button
-                      variant="destructive"
-                      disabled={delUser.isPending || isOwner}
-                      title={isOwner ? "Cannot delete an Owner here" : "Permanently delete user"}
-                      onClick={() => {
-                        if (confirm(`Permanently delete user "${p.display_name}"? This removes their account and data.`)) {
-                          delUser.mutate(p.id);
-                        }
-                      }}
-                    >
-                      <Trash2 className="w-3.5 h-3.5 mr-1" /> Delete
-                    </Button>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
       )}
     </ArcadePanel>
   );

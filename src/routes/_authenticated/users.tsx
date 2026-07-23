@@ -4,6 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel } from "@/components/arcade";
+import { DatabaseCleanup } from "@/components/DatabaseCleanup";
 import { createCanvasser } from "@/lib/users.functions";
 import { toast } from "sonner";
 import type { AppRole } from "@/hooks/useAuth";
@@ -287,6 +288,8 @@ function UsersPage() {
           The player can sign in immediately with the email + temp password. Ask them to change it after first login.
         </p>
       </ArcadePanel>
+
+      <DatabaseCleanup />
     </div>
   );
 }
