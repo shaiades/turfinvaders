@@ -1,4 +1,3 @@
-import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel } from "@/components/arcade";
@@ -6,18 +5,9 @@ import { toast } from "sonner";
 import { useState, useEffect } from "react";
 import { Eye, EyeOff } from "lucide-react";
 
-export const Route = createFileRoute("/_authenticated/settings")({
-  head: () => ({ meta: [{ title: "Company Settings — Knockout" }] }),
-  beforeLoad: async () => {
-    const { data } = await supabase.auth.getUser();
-    if (!data.user) throw redirect({ to: "/auth" });
-    const { data: roles } = await supabase.from("user_roles").select("role").eq("user_id", data.user.id).eq("role", "owner");
-    if (!roles || roles.length === 0) throw redirect({ to: "/dashboard", search: { tab: "dispatch" } });
-  },
-  component: SettingsPage,
-});
-
-function SettingsPage() {
+/** Global Visibility toggle + company name — owner-only company settings.
+ *  Lives in the Command → Settings tab (was the orphaned /settings route). */
+export function CompanySettingsPanel() {
   const qc = useQueryClient();
   const { data: settings, isLoading } = useQuery({
     queryKey: ["company_settings"],
@@ -40,12 +30,7 @@ function SettingsPage() {
   const visibility = !!settings?.global_visibility;
 
   return (
-    <div className="space-y-8 max-w-3xl">
-      <div>
-        <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Owner Only</div>
-        <h1 className="font-display text-2xl text-neon mt-1">COMPANY SETTINGS</h1>
-      </div>
-
+    <>
       <ArcadePanel title="Global Visibility">
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <div>
@@ -88,6 +73,6 @@ function SettingsPage() {
           Save
         </button>
       </ArcadePanel>
-    </div>
+    </>
   );
 }

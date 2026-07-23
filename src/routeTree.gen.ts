@@ -14,21 +14,14 @@ import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthCallbackRouteImport } from './routes/auth_.callback'
 import { Route as AuthenticatedUsersRouteImport } from './routes/_authenticated/users'
-import { Route as AuthenticatedTerritoriesRouteImport } from './routes/_authenticated/territories'
-import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedPlaybookRouteImport } from './routes/_authenticated/playbook'
-import { Route as AuthenticatedPayrollRouteImport } from './routes/_authenticated/payroll'
 import { Route as AuthenticatedMyTerritoryRouteImport } from './routes/_authenticated/my-territory'
 import { Route as AuthenticatedLogRouteImport } from './routes/_authenticated/log'
 import { Route as AuthenticatedLeaderboardRouteImport } from './routes/_authenticated/leaderboard'
-import { Route as AuthenticatedFleetRouteImport } from './routes/_authenticated/fleet'
 import { Route as AuthenticatedFieldRouteImport } from './routes/_authenticated/field'
-import { Route as AuthenticatedDispatchRouteImport } from './routes/_authenticated/dispatch'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedDailyWrapRouteImport } from './routes/_authenticated/daily-wrap'
 import { Route as AuthenticatedConfirmationDeskRouteImport } from './routes/_authenticated/confirmation-desk'
-import { Route as AuthenticatedCommandRouteImport } from './routes/_authenticated/command'
-import { Route as AuthenticatedActiveRunRouteImport } from './routes/_authenticated/active-run'
 import { Route as AuthenticatedTeamsIndexRouteImport } from './routes/_authenticated/teams.index'
 import { Route as ApiPublicMondayWebhookRouteImport } from './routes/api/public/monday-webhook'
 import { Route as ApiPublicMondayLiveDispatchRouteImport } from './routes/api/public/monday-live-dispatch'
@@ -61,25 +54,9 @@ const AuthenticatedUsersRoute = AuthenticatedUsersRouteImport.update({
   path: '/users',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const AuthenticatedTerritoriesRoute =
-  AuthenticatedTerritoriesRouteImport.update({
-    id: '/territories',
-    path: '/territories',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
-const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
 const AuthenticatedPlaybookRoute = AuthenticatedPlaybookRouteImport.update({
   id: '/playbook',
   path: '/playbook',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
-const AuthenticatedPayrollRoute = AuthenticatedPayrollRouteImport.update({
-  id: '/payroll',
-  path: '/payroll',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedMyTerritoryRoute =
@@ -99,19 +76,9 @@ const AuthenticatedLeaderboardRoute =
     path: '/leaderboard',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
-const AuthenticatedFleetRoute = AuthenticatedFleetRouteImport.update({
-  id: '/fleet',
-  path: '/fleet',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
 const AuthenticatedFieldRoute = AuthenticatedFieldRouteImport.update({
   id: '/field',
   path: '/field',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
-const AuthenticatedDispatchRoute = AuthenticatedDispatchRouteImport.update({
-  id: '/dispatch',
-  path: '/dispatch',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
@@ -130,16 +97,6 @@ const AuthenticatedConfirmationDeskRoute =
     path: '/confirmation-desk',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
-const AuthenticatedCommandRoute = AuthenticatedCommandRouteImport.update({
-  id: '/command',
-  path: '/command',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
-const AuthenticatedActiveRunRoute = AuthenticatedActiveRunRouteImport.update({
-  id: '/active-run',
-  path: '/active-run',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
 const AuthenticatedTeamsIndexRoute = AuthenticatedTeamsIndexRouteImport.update({
   id: '/teams/',
   path: '/teams/',
@@ -183,21 +140,14 @@ const AuthenticatedCanvassersCanvasserIdFieldRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
-  '/active-run': typeof AuthenticatedActiveRunRoute
-  '/command': typeof AuthenticatedCommandRoute
   '/confirmation-desk': typeof AuthenticatedConfirmationDeskRoute
   '/daily-wrap': typeof AuthenticatedDailyWrapRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
-  '/dispatch': typeof AuthenticatedDispatchRoute
   '/field': typeof AuthenticatedFieldRoute
-  '/fleet': typeof AuthenticatedFleetRoute
   '/leaderboard': typeof AuthenticatedLeaderboardRoute
   '/log': typeof AuthenticatedLogRoute
   '/my-territory': typeof AuthenticatedMyTerritoryRoute
-  '/payroll': typeof AuthenticatedPayrollRoute
   '/playbook': typeof AuthenticatedPlaybookRoute
-  '/settings': typeof AuthenticatedSettingsRoute
-  '/territories': typeof AuthenticatedTerritoriesRoute
   '/users': typeof AuthenticatedUsersRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRouteWithChildren
@@ -211,21 +161,14 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
-  '/active-run': typeof AuthenticatedActiveRunRoute
-  '/command': typeof AuthenticatedCommandRoute
   '/confirmation-desk': typeof AuthenticatedConfirmationDeskRoute
   '/daily-wrap': typeof AuthenticatedDailyWrapRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
-  '/dispatch': typeof AuthenticatedDispatchRoute
   '/field': typeof AuthenticatedFieldRoute
-  '/fleet': typeof AuthenticatedFleetRoute
   '/leaderboard': typeof AuthenticatedLeaderboardRoute
   '/log': typeof AuthenticatedLogRoute
   '/my-territory': typeof AuthenticatedMyTerritoryRoute
-  '/payroll': typeof AuthenticatedPayrollRoute
   '/playbook': typeof AuthenticatedPlaybookRoute
-  '/settings': typeof AuthenticatedSettingsRoute
-  '/territories': typeof AuthenticatedTerritoriesRoute
   '/users': typeof AuthenticatedUsersRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRouteWithChildren
@@ -241,21 +184,14 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
-  '/_authenticated/active-run': typeof AuthenticatedActiveRunRoute
-  '/_authenticated/command': typeof AuthenticatedCommandRoute
   '/_authenticated/confirmation-desk': typeof AuthenticatedConfirmationDeskRoute
   '/_authenticated/daily-wrap': typeof AuthenticatedDailyWrapRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
-  '/_authenticated/dispatch': typeof AuthenticatedDispatchRoute
   '/_authenticated/field': typeof AuthenticatedFieldRoute
-  '/_authenticated/fleet': typeof AuthenticatedFleetRoute
   '/_authenticated/leaderboard': typeof AuthenticatedLeaderboardRoute
   '/_authenticated/log': typeof AuthenticatedLogRoute
   '/_authenticated/my-territory': typeof AuthenticatedMyTerritoryRoute
-  '/_authenticated/payroll': typeof AuthenticatedPayrollRoute
   '/_authenticated/playbook': typeof AuthenticatedPlaybookRoute
-  '/_authenticated/settings': typeof AuthenticatedSettingsRoute
-  '/_authenticated/territories': typeof AuthenticatedTerritoriesRoute
   '/_authenticated/users': typeof AuthenticatedUsersRoute
   '/auth_/callback': typeof AuthCallbackRoute
   '/_authenticated/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRouteWithChildren
@@ -271,21 +207,14 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/auth'
-    | '/active-run'
-    | '/command'
     | '/confirmation-desk'
     | '/daily-wrap'
     | '/dashboard'
-    | '/dispatch'
     | '/field'
-    | '/fleet'
     | '/leaderboard'
     | '/log'
     | '/my-territory'
-    | '/payroll'
     | '/playbook'
-    | '/settings'
-    | '/territories'
     | '/users'
     | '/auth/callback'
     | '/canvassers/$canvasserId'
@@ -299,21 +228,14 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/auth'
-    | '/active-run'
-    | '/command'
     | '/confirmation-desk'
     | '/daily-wrap'
     | '/dashboard'
-    | '/dispatch'
     | '/field'
-    | '/fleet'
     | '/leaderboard'
     | '/log'
     | '/my-territory'
-    | '/payroll'
     | '/playbook'
-    | '/settings'
-    | '/territories'
     | '/users'
     | '/auth/callback'
     | '/canvassers/$canvasserId'
@@ -328,21 +250,14 @@ export interface FileRouteTypes {
     | '/'
     | '/_authenticated'
     | '/auth'
-    | '/_authenticated/active-run'
-    | '/_authenticated/command'
     | '/_authenticated/confirmation-desk'
     | '/_authenticated/daily-wrap'
     | '/_authenticated/dashboard'
-    | '/_authenticated/dispatch'
     | '/_authenticated/field'
-    | '/_authenticated/fleet'
     | '/_authenticated/leaderboard'
     | '/_authenticated/log'
     | '/_authenticated/my-territory'
-    | '/_authenticated/payroll'
     | '/_authenticated/playbook'
-    | '/_authenticated/settings'
-    | '/_authenticated/territories'
     | '/_authenticated/users'
     | '/auth_/callback'
     | '/_authenticated/canvassers/$canvasserId'
@@ -401,32 +316,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedUsersRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/territories': {
-      id: '/_authenticated/territories'
-      path: '/territories'
-      fullPath: '/territories'
-      preLoaderRoute: typeof AuthenticatedTerritoriesRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/settings': {
-      id: '/_authenticated/settings'
-      path: '/settings'
-      fullPath: '/settings'
-      preLoaderRoute: typeof AuthenticatedSettingsRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
     '/_authenticated/playbook': {
       id: '/_authenticated/playbook'
       path: '/playbook'
       fullPath: '/playbook'
       preLoaderRoute: typeof AuthenticatedPlaybookRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/payroll': {
-      id: '/_authenticated/payroll'
-      path: '/payroll'
-      fullPath: '/payroll'
-      preLoaderRoute: typeof AuthenticatedPayrollRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/my-territory': {
@@ -450,25 +344,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedLeaderboardRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/fleet': {
-      id: '/_authenticated/fleet'
-      path: '/fleet'
-      fullPath: '/fleet'
-      preLoaderRoute: typeof AuthenticatedFleetRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
     '/_authenticated/field': {
       id: '/_authenticated/field'
       path: '/field'
       fullPath: '/field'
       preLoaderRoute: typeof AuthenticatedFieldRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/dispatch': {
-      id: '/_authenticated/dispatch'
-      path: '/dispatch'
-      fullPath: '/dispatch'
-      preLoaderRoute: typeof AuthenticatedDispatchRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/dashboard': {
@@ -490,20 +370,6 @@ declare module '@tanstack/react-router' {
       path: '/confirmation-desk'
       fullPath: '/confirmation-desk'
       preLoaderRoute: typeof AuthenticatedConfirmationDeskRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/command': {
-      id: '/_authenticated/command'
-      path: '/command'
-      fullPath: '/command'
-      preLoaderRoute: typeof AuthenticatedCommandRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/active-run': {
-      id: '/_authenticated/active-run'
-      path: '/active-run'
-      fullPath: '/active-run'
-      preLoaderRoute: typeof AuthenticatedActiveRunRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/teams/': {
@@ -574,21 +440,14 @@ const AuthenticatedCanvassersCanvasserIdRouteWithChildren =
   )
 
 interface AuthenticatedRouteRouteChildren {
-  AuthenticatedActiveRunRoute: typeof AuthenticatedActiveRunRoute
-  AuthenticatedCommandRoute: typeof AuthenticatedCommandRoute
   AuthenticatedConfirmationDeskRoute: typeof AuthenticatedConfirmationDeskRoute
   AuthenticatedDailyWrapRoute: typeof AuthenticatedDailyWrapRoute
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
-  AuthenticatedDispatchRoute: typeof AuthenticatedDispatchRoute
   AuthenticatedFieldRoute: typeof AuthenticatedFieldRoute
-  AuthenticatedFleetRoute: typeof AuthenticatedFleetRoute
   AuthenticatedLeaderboardRoute: typeof AuthenticatedLeaderboardRoute
   AuthenticatedLogRoute: typeof AuthenticatedLogRoute
   AuthenticatedMyTerritoryRoute: typeof AuthenticatedMyTerritoryRoute
-  AuthenticatedPayrollRoute: typeof AuthenticatedPayrollRoute
   AuthenticatedPlaybookRoute: typeof AuthenticatedPlaybookRoute
-  AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
-  AuthenticatedTerritoriesRoute: typeof AuthenticatedTerritoriesRoute
   AuthenticatedUsersRoute: typeof AuthenticatedUsersRoute
   AuthenticatedCanvassersCanvasserIdRoute: typeof AuthenticatedCanvassersCanvasserIdRouteWithChildren
   AuthenticatedTeamsTeamIdRoute: typeof AuthenticatedTeamsTeamIdRoute
@@ -596,21 +455,14 @@ interface AuthenticatedRouteRouteChildren {
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
-  AuthenticatedActiveRunRoute: AuthenticatedActiveRunRoute,
-  AuthenticatedCommandRoute: AuthenticatedCommandRoute,
   AuthenticatedConfirmationDeskRoute: AuthenticatedConfirmationDeskRoute,
   AuthenticatedDailyWrapRoute: AuthenticatedDailyWrapRoute,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
-  AuthenticatedDispatchRoute: AuthenticatedDispatchRoute,
   AuthenticatedFieldRoute: AuthenticatedFieldRoute,
-  AuthenticatedFleetRoute: AuthenticatedFleetRoute,
   AuthenticatedLeaderboardRoute: AuthenticatedLeaderboardRoute,
   AuthenticatedLogRoute: AuthenticatedLogRoute,
   AuthenticatedMyTerritoryRoute: AuthenticatedMyTerritoryRoute,
-  AuthenticatedPayrollRoute: AuthenticatedPayrollRoute,
   AuthenticatedPlaybookRoute: AuthenticatedPlaybookRoute,
-  AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
-  AuthenticatedTerritoriesRoute: AuthenticatedTerritoriesRoute,
   AuthenticatedUsersRoute: AuthenticatedUsersRoute,
   AuthenticatedCanvassersCanvasserIdRoute:
     AuthenticatedCanvassersCanvasserIdRouteWithChildren,
