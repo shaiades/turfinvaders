@@ -419,6 +419,7 @@ type WeeklyRow = {
   totalLeads: number;
   totalSits: number;
   totalResets: number;
+  totalOL: number;
   totalSales: number;
   totalPoints: number;
   totalPay: number;
@@ -446,15 +447,17 @@ function WeeklyResults({ weekStart }: { weekStart: Date }) {
       if (logsR.error) throw logsR.error;
 
       const vanById = new Map((vansR.data ?? []).map((v) => [v.id, v]));
-      const agg = new Map<string, { leads: number; sits: number; resets: number; sales: number }>();
+      const agg = new Map<string, { leads: number; sits: number; resets: number; ol: number; sales: number }>();
       for (const l of logsR.data ?? []) {
-        const cur = agg.get(l.canvasser_id) ?? { leads: 0, sits: 0, resets: 0, sales: 0 };
+        const cur = agg.get(l.canvasser_id) ?? { leads: 0, sits: 0, resets: 0, ol: 0, sales: 0 };
         cur.leads += leadsSum(l);
         // demos_sits in DB includes sale rows. Sits (PM only) = demos_sits - sales.
         const pmOnly = Math.max(0, (l.demos_sits ?? 0) - (l.sales ?? 0));
         cur.sits += pmOnly;
         // RS outcomes are persisted in future_leads (see csv-import.functions.ts).
         cur.resets += l.future_leads ?? 0;
+        // OL outcomes are persisted in one_legs (webhook DAILY_LOG_VECS).
+        cur.ol += l.one_legs ?? 0;
         cur.sales += l.sales ?? 0;
         agg.set(l.canvasser_id, cur);
       }
@@ -497,6 +500,7 @@ function WeeklyResults({ weekStart }: { weekStart: Date }) {
           totalLeads: a.leads,
           totalSits: a.sits,
           totalResets: a.resets,
+          totalOL: a.ol,
           totalSales: a.sales,
           totalPoints,
           totalPay: payById.get(id)?.pay ?? 0,
@@ -518,11 +522,12 @@ function WeeklyResults({ weekStart }: { weekStart: Date }) {
       leads: acc.leads + r.totalLeads,
       sits: acc.sits + r.totalSits,
       resets: acc.resets + r.totalResets,
+      ol: acc.ol + r.totalOL,
       sales: acc.sales + r.totalSales,
       points: acc.points + r.totalPoints,
       pay: acc.pay + r.totalPay,
     }),
-    { leads: 0, sits: 0, resets: 0, sales: 0, points: 0, pay: 0 }
+    { leads: 0, sits: 0, resets: 0, ol: 0, sales: 0, points: 0, pay: 0 }
   );
 
   return (
@@ -562,6 +567,7 @@ function WeeklyResults({ weekStart }: { weekStart: Date }) {
                   <MobileStat label="Leads" value={r.totalLeads} />
                   <MobileStat label="Sits" value={r.totalSits} />
                   <MobileStat label="Resets" value={r.totalResets} className="text-[var(--accent)]" />
+                  <MobileStat label="OL" value={r.totalOL} className="text-warning" />
                   <MobileStat label="Sales" value={r.totalSales} className="text-victory" />
                   <MobileStat label="Points" value={r.totalPoints} className="text-neon" />
                 </MobileStatGrid>
@@ -576,6 +582,7 @@ function WeeklyResults({ weekStart }: { weekStart: Date }) {
                 <MobileStat label="Leads" value={grand.leads} />
                 <MobileStat label="Sits" value={grand.sits} />
                 <MobileStat label="Resets" value={grand.resets} className="text-[var(--accent)]" />
+                <MobileStat label="OL" value={grand.ol} className="text-warning" />
                 <MobileStat label="Sales" value={grand.sales} className="text-victory" />
                 <MobileStat label="Points" value={grand.points} className="text-neon" />
               </MobileStatGrid>
@@ -590,6 +597,7 @@ function WeeklyResults({ weekStart }: { weekStart: Date }) {
                 <th className="px-4 py-2 text-right">Total Leads</th>
                 <th className="px-4 py-2 text-right">Total Sits</th>
                 <th className="px-4 py-2 text-right">Total Resets</th>
+                <th className="px-4 py-2 text-right">Total OL</th>
                 <th className="px-4 py-2 text-right">Total Sales</th>
                 <th className="px-4 py-2 text-right">Total Points</th>
                 <th className="px-4 py-2 text-right">Total Pay</th>
@@ -605,6 +613,7 @@ function WeeklyResults({ weekStart }: { weekStart: Date }) {
                   <td className="px-4 py-2.5 text-right font-display">{r.totalLeads}</td>
                   <td className="px-4 py-2.5 text-right font-display">{r.totalSits}</td>
                   <td className="px-4 py-2.5 text-right font-display text-[var(--accent)]">{r.totalResets}</td>
+                  <td className="px-4 py-2.5 text-right font-display text-warning">{r.totalOL}</td>
                   <td className="px-4 py-2.5 text-right font-display text-victory">{r.totalSales}</td>
                   <td className="px-4 py-2.5 text-right font-display text-neon">{r.totalPoints}</td>
                   <td className="px-4 py-2.5 text-right font-display text-victory">
@@ -621,6 +630,7 @@ function WeeklyResults({ weekStart }: { weekStart: Date }) {
                 <td className="px-4 py-2.5 text-right font-display">{grand.leads}</td>
                 <td className="px-4 py-2.5 text-right font-display">{grand.sits}</td>
                 <td className="px-4 py-2.5 text-right font-display text-[var(--accent)]">{grand.resets}</td>
+                <td className="px-4 py-2.5 text-right font-display text-warning">{grand.ol}</td>
                 <td className="px-4 py-2.5 text-right font-display text-victory">{grand.sales}</td>
                 <td className="px-4 py-2.5 text-right font-display text-neon">{grand.points}</td>
                 <td className="px-4 py-2.5 text-right font-display text-victory">${grand.pay.toFixed(2)}</td>
