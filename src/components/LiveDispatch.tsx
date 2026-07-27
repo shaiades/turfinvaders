@@ -17,19 +17,18 @@ type Profile = {
 };
 
 
+// The dispatch funnel: Submitted (Inbound births) plus the confirmation
+// team's Lead Status flips — Pending / Confirmed / Future / Blow-Out (the
+// killed column, relabeled per owner).
 type Metric = {
   id: string;
   canvasser_id: string;
   metric_date: string;
-  leads_submitted: number;
   leads_generated: number;
   leads_confirmed: number;
-  no_answers: number;
-  killed: number;
   pending: number;
-  pitch_missed: number;
-  outside_leads: number;
-  sales: number;
+  killed: number;
+  future: number;
   office_location: string;
 };
 
@@ -154,7 +153,7 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
       const { data } = await supabase
         .from("daily_metrics")
         .select(
-          "id, canvasser_id, metric_date, leads_submitted, leads_generated, leads_confirmed, no_answers, killed, pending, pitch_missed, outside_leads, sales, office_location",
+          "id, canvasser_id, metric_date, leads_generated, leads_confirmed, pending, killed, future, office_location",
         )
         .gte("metric_date", range.start)
         .lte("metric_date", range.end);
@@ -167,9 +166,9 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
     queryFn: async () => {
       const { data } = await supabase
         .from("daily_metrics")
-        .select("canvasser_id, leads_generated, leads_confirmed, no_answers, killed, pending")
+        .select("canvasser_id, leads_generated")
         .eq("metric_date", yday);
-      return (data ?? []) as Array<Pick<Metric, "canvasser_id" | "leads_generated" | "leads_confirmed" | "no_answers" | "killed" | "pending">>;
+      return (data ?? []) as Array<Pick<Metric, "canvasser_id" | "leads_generated">>;
     },
   });
 
@@ -190,17 +189,14 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
 
   // Sum all metric rows per canvasser_id across the selected range.
   const metricByCanvasser = useMemo(() => {
-    const acc = new Map<string, { gen: number; conf: number; na: number; kil: number; pen: number; pm: number; ol: number; sal: number }>();
+    const acc = new Map<string, { gen: number; conf: number; pen: number; kil: number; fut: number }>();
     for (const m of metrics) {
-      const prev = acc.get(m.canvasser_id) ?? { gen: 0, conf: 0, na: 0, kil: 0, pen: 0, pm: 0, ol: 0, sal: 0 };
+      const prev = acc.get(m.canvasser_id) ?? { gen: 0, conf: 0, pen: 0, kil: 0, fut: 0 };
       prev.gen += m.leads_generated ?? 0;
       prev.conf += m.leads_confirmed ?? 0;
-      prev.na += m.no_answers ?? 0;
-      prev.kil += m.killed ?? 0;
       prev.pen += m.pending ?? 0;
-      prev.pm += m.pitch_missed ?? 0;
-      prev.ol += m.outside_leads ?? 0;
-      prev.sal += m.sales ?? 0;
+      prev.kil += m.killed ?? 0;
+      prev.fut += m.future ?? 0;
       acc.set(m.canvasser_id, prev);
     }
     return acc;
@@ -249,17 +245,16 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
       }
     }
     const enriched = Array.from(groups.values()).map((g) => {
-      let gen = 0, conf = 0, na = 0, kil = 0, pen = 0, pm = 0, ol = 0, sal = 0;
+      let gen = 0, conf = 0, pen = 0, kil = 0, fut = 0;
       for (const id of g.ids) {
         const m = metricByCanvasser.get(id);
         if (!m) continue;
-        gen += m.gen; conf += m.conf; na += m.na; kil += m.kil; pen += m.pen; pm += m.pm; ol += m.ol; sal += m.sal;
+        gen += m.gen; conf += m.conf; pen += m.pen; kil += m.kil; fut += m.fut;
       }
       // Submitted = leads GENERATED (new items on the Incoming Leads board),
       // not outcome counts — production shows the moment a lead is entered.
       const sub = gen;
-      const conv = sub > 0 ? Math.min(100, Math.round((conf / sub) * 100)) : 0;
-      return { g, conf, na, kil, pen, pm, ol, sal, sub, conv };
+      return { g, conf, pen, kil, fut, sub };
     });
     return enriched.sort((a, b) => {
       if (b.sub !== a.sub) return b.sub - a.sub;
@@ -269,10 +264,9 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
   }, [visible, metricByCanvasser]);
 
   const totals = useMemo(() => {
-    let sub = 0, conf = 0, na = 0, kil = 0, pen = 0, pm = 0, ol = 0, sal = 0;
-    rows.forEach((r) => { sub += r.sub; conf += r.conf; na += r.na; kil += r.kil; pen += r.pen; pm += r.pm; ol += r.ol; sal += r.sal; });
-    const conv = sub > 0 ? Math.min(100, Math.round((conf / sub) * 100)) : 0;
-    return { sub, conf, na, kil, pen, pm, ol, sal, conv };
+    let sub = 0, pen = 0, conf = 0, fut = 0, kil = 0;
+    rows.forEach((r) => { sub += r.sub; pen += r.pen; conf += r.conf; fut += r.fut; kil += r.kil; });
+    return { sub, pen, conf, fut, kil };
   }, [rows]);
 
   // Suspension warning — 0 today AND 0 yesterday. Only meaningful for "today" preset.
@@ -349,16 +343,12 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
       {!readOnly && <WebhookUrlBanner />}
       {!readOnly && <MondayTokenCard />}
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-9 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
         <TotalTile label="Submitted" value={totals.sub} accent="neon" />
         <TotalTile label="Pending" value={totals.pen} accent="warning" />
-        <TotalTile label="N/A" value={totals.na} accent="muted" />
         <TotalTile label="Confirmed" value={totals.conf} accent="victory" />
-        <TotalTile label="Killed" value={totals.kil} accent="danger" />
-        <TotalTile label="OL" value={totals.ol} accent="warning" />
-        <TotalTile label="PM" value={totals.pm} accent="neon" />
-        <TotalTile label="Sales" value={totals.sal} accent="victory" />
-        <TotalTile label="Conversion" value={`${totals.conv}%`} accent="accent" />
+        <TotalTile label="Future" value={totals.fut} accent="accent" />
+        <TotalTile label="Blow-Out" value={totals.kil} accent="danger" />
       </div>
 
       <SuspensionBanner rows={suspensionRows} />
@@ -399,12 +389,8 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
                     <MobileStatGrid cols={4} className="font-display">
                       <MobileStat label="Submitted" value={r.sub} className={metricClass(r.sub, "neon")} />
                       <MobileStat label="Pending" value={r.pen} className={metricClass(r.pen, "warning")} />
-                      <MobileStat label="N/A" value={r.na} className={metricClass(r.na, "muted-foreground")} />
-                      <MobileStat label="Killed" value={r.kil} className={metricClass(r.kil, "destructive")} />
-                      <MobileStat label="OL" value={r.ol} className={metricClass(r.ol, "warning")} />
-                      <MobileStat label="PM" value={r.pm} className={metricClass(r.pm, "neon")} />
-                      <MobileStat label="Sales" value={r.sal} className={metricClass(r.sal, "victory")} />
-                      <MobileStat label="Conv%" value={`${r.conv}%`} className={metricClass(r.conv, "accent")} />
+                      <MobileStat label="Future" value={r.fut} className={metricClass(r.fut, "accent")} />
+                      <MobileStat label="Blow-Out" value={r.kil} className={metricClass(r.kil, "destructive")} />
                     </MobileStatGrid>
                   </MobileCard>
                 );
@@ -419,13 +405,9 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
                   <th className="text-left py-2.5 px-3">Office</th>
                   <th className="text-right py-2.5 px-3">Submitted</th>
                   <th className="text-right py-2.5 px-3">Pending</th>
-                  <th className="text-right py-2.5 px-3">N/A</th>
                   <th className="text-right py-2.5 px-3">Confirmed</th>
-                  <th className="text-right py-2.5 px-3">Killed</th>
-                  <th className="text-right py-2.5 px-3">OL</th>
-                  <th className="text-right py-2.5 px-3">PM</th>
-                  <th className="text-right py-2.5 px-3">Sales</th>
-                  <th className="text-right py-2.5 px-3">Conversion %</th>
+                  <th className="text-right py-2.5 px-3">Future</th>
+                  <th className="text-right py-2.5 px-3">Blow-Out</th>
                 </tr>
               </thead>
               <tbody>
@@ -451,13 +433,9 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
                       </td>
                       <MetricCell value={r.sub} color="neon" />
                       <MetricCell value={r.pen} color="warning" />
-                      <MetricCell value={r.na} color="muted-foreground" />
                       <MetricCell value={r.conf} color="victory" />
+                      <MetricCell value={r.fut} color="accent" />
                       <MetricCell value={r.kil} color="destructive" />
-                      <MetricCell value={r.ol} color="warning" />
-                      <MetricCell value={r.pm} color="neon" />
-                      <MetricCell value={r.sal} color="victory" />
-                      <MetricCell value={r.conv} color="accent" suffix="%" />
                     </tr>
                   );
                 })}

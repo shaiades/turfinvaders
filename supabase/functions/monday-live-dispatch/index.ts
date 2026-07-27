@@ -284,12 +284,18 @@ serve(async (req) => {
       data: { boardId, activeBoardOC, activeBoardSD, boardOffice, isIncomingLeadsBoard },
     })
 
-    if (isIncomingLeadsBoard && !isCreateEvent) {
+    // Leads-board column changes: only the confirmation team's "Lead Status"
+    // column feeds the dispatch funnel. Every other column change on the
+    // 5,000+-item CRM board is dropped here, before any Monday API spend.
+    const LEAD_STATUS_COL_ID = 'dup__of_sd_lead'
+    const isLeadStatusEvent =
+      isIncomingLeadsBoard && !isCreateEvent && changedColumnId === LEAD_STATUS_COL_ID
+    if (isIncomingLeadsBoard && !isCreateEvent && !isLeadStatusEvent) {
       await supabaseAdmin.from('webhook_logs').insert({
-        step: 'Ignored_Leads_Board_Non_Create',
-        data: { pulseId: String(pulseId), boardId },
+        step: 'Ignored_Leads_Board_Other_Column',
+        data: { pulseId: String(pulseId), boardId, changedColumnId: changedColumnId ?? null },
       })
-      return new Response('Leads board non-create ignored', { status: 200, headers: corsHeaders })
+      return new Response('Leads board non-Lead-Status ignored', { status: 200, headers: corsHeaders })
     }
 
     // Step 3: Fetch Monday token
@@ -358,8 +364,10 @@ serve(async (req) => {
     // confirmers create new cards on this board when recycling old leads
     // (Futures / Never Confirmed / Reschedules / QR / Internet …) — those must
     // never credit, and must never mint Bouncer placeholder profiles either,
-    // so this gate sits before any name matching.
-    if (isIncomingLeadsBoard) {
+    // so this gate sits before any name matching. Creates only: Lead Status
+    // flips credit any card with a matching Agent (owner decision 2026-07-24;
+    // cards leave Inbound long before confirmation).
+    if (isIncomingLeadsBoard && isCreateEvent) {
       const groupId = String(item.group?.id ?? '')
       const groupTitle = String(item.group?.title ?? '')
       const isInbound = groupId === 'topics' || groupTitle.trim().toLowerCase() === 'inbound'
@@ -487,6 +495,106 @@ serve(async (req) => {
       step: '4_Canvasser_Matched',
       data: { canvasserName, matchedId: match.id, matchedName: match.display_name, autoCreated },
     })
+
+    // ── Lead Status funnel branch ── the confirmation team's flips of the
+    // "Lead Status" column on the Incoming Leads board drive the Live Dispatch
+    // funnel: Pending / Confirmed / Future / Blow-Out / N/A. Any card with an
+    // exact-matching Agent credits, wherever it now sits on the board, and
+    // Rep Reset cards count (owner decisions 2026-07-24). "Future Reconf" is
+    // deliberately unmapped. Transition semantics mirror the Block path:
+    // undo the previous bucket (floor 0), apply the new one. Never touches
+    // daily_logs, leads_submitted, or the sale sync.
+    if (isLeadStatusEvent) {
+      const mapLeadStatus = (value: string | undefined): string | null => {
+        const v = (value || '').trim().toLowerCase()
+        if (!v) return null
+        if (v === 'confirmed') return 'leads_confirmed'
+        if (v === 'future') return 'future'
+        if (v === 'blowout' || v === 'disconnected') return 'killed'
+        if (v === 'unconfirmed' || v === 'room lead') return 'pending'
+        if (v.startsWith('n/a')) return 'no_answers'
+        return null
+      }
+      const statusBucket = mapLeadStatus(changedValue)
+      const statusPrevBucket = mapLeadStatus(previousStatusFromEvent)
+      if (statusBucket === statusPrevBucket) {
+        await supabaseAdmin.from('webhook_logs').insert({
+          step: 'Lead_Status_Noop',
+          data: {
+            pulseId: String(pulseId),
+            from: previousStatusFromEvent ?? null,
+            to: changedValue,
+            note: statusBucket ? 'Same funnel bucket' : 'Neither value maps to a funnel bucket',
+          },
+        })
+        return new Response('No-op (lead status)', { status: 200, headers: corsHeaders })
+      }
+
+      const statusDate = todayLA()
+      const statusOffice = boardOffice ?? match.office_location ?? 'San Diego'
+      const FUNNEL_KEYS = ['leads_confirmed', 'no_answers', 'killed', 'pending', 'future']
+
+      const { data: statusRow } = await supabaseAdmin
+        .from('daily_metrics')
+        .select('id, leads_confirmed, no_answers, killed, pending, future')
+        .eq('canvasser_id', match.id)
+        .eq('metric_date', statusDate)
+        .maybeSingle()
+      const statusCur: Record<string, number> = statusRow ?? {
+        leads_confirmed: 0, no_answers: 0, killed: 0, pending: 0, future: 0,
+      }
+      const statusNext: Record<string, number> = { ...statusCur }
+      if (statusPrevBucket && FUNNEL_KEYS.includes(statusPrevBucket)) {
+        statusNext[statusPrevBucket] = Math.max(0, (statusCur[statusPrevBucket] ?? 0) - 1)
+      }
+      if (statusBucket && FUNNEL_KEYS.includes(statusBucket)) {
+        statusNext[statusBucket] = (statusNext[statusBucket] ?? 0) + 1
+      }
+
+      const { error: statusErr } = await supabaseAdmin
+        .from('daily_metrics')
+        .upsert({
+          canvasser_id: match.id,
+          metric_date: statusDate,
+          office_location: statusOffice,
+          leads_confirmed: statusNext.leads_confirmed ?? 0,
+          no_answers: statusNext.no_answers ?? 0,
+          killed: statusNext.killed ?? 0,
+          pending: statusNext.pending ?? 0,
+          future: statusNext.future ?? 0,
+        }, { onConflict: 'canvasser_id,metric_date' })
+      if (statusErr) {
+        await supabaseAdmin.from('webhook_logs').insert({
+          step: 'Lead_Status_Upsert_Error',
+          data: { pulseId: String(pulseId), error: statusErr.message },
+        })
+        // 5xx so Monday's retry loop redelivers — Event_Processed is only
+        // written after a successful counter write.
+        return new Response('Lead status upsert failed', { status: 502, headers: corsHeaders })
+      }
+
+      if (triggerUuid) {
+        await supabaseAdmin.from('webhook_logs').insert({
+          step: 'Event_Processed',
+          data: { triggerUuid, pulseId: String(pulseId) },
+        })
+      }
+      await supabaseAdmin.from('webhook_logs').insert({
+        step: 'Lead_Status_Processed',
+        data: {
+          pulseId: String(pulseId),
+          agentName: match.display_name,
+          canvasser_id: match.id,
+          metric_date: statusDate,
+          office: statusOffice,
+          from: previousStatusFromEvent ?? null,
+          to: changedValue,
+          recordedAs: statusBucket,
+          undid: statusPrevBucket,
+        },
+      })
+      return new Response('Lead status recorded', { status: 200, headers: corsHeaders })
+    }
 
     // ── Leads-generated branch ── a new item on the Incoming Leads board is
     // one unit of production for its Agent. Exactly once per item (claim-first
@@ -748,19 +856,22 @@ serve(async (req) => {
 
     const { data: existing } = await supabaseAdmin
       .from('daily_metrics')
-      .select('id, leads_submitted, leads_confirmed, no_answers, killed, pending, blowouts, outside_leads, resets, pitch_missed, sales')
+      .select('id, leads_submitted, blowouts, outside_leads, resets, pitch_missed, sales')
       .eq('canvasser_id', match.id)
       .eq('metric_date', metric_date)
       .maybeSingle()
 
 
     const cur: Record<string, number> = existing ?? {
-      leads_submitted: 0, leads_confirmed: 0, no_answers: 0, killed: 0, pending: 0,
-      blowouts: 0, outside_leads: 0, resets: 0, pitch_missed: 0, sales: 0,
+      leads_submitted: 0, blowouts: 0, outside_leads: 0, resets: 0, pitch_missed: 0, sales: 0,
     }
 
+    // Funnel buckets (leads_confirmed / no_answers / killed / pending / future)
+    // belong exclusively to the Incoming Leads board's Lead Status column now —
+    // Block events only move the outcome counters here. Their daily_logs
+    // payroll vectors below are unaffected: a mapped killed/leads_confirmed
+    // bucket still ticks no_demo/confirmed_leads for the pay engine.
     const bucketKeys = [
-      'leads_confirmed', 'no_answers', 'killed', 'pending',
       'blowouts', 'outside_leads', 'resets', 'pitch_missed', 'sales',
     ] as const
 
@@ -779,10 +890,6 @@ serve(async (req) => {
       metric_date,
       office_location,
       leads_submitted: (cur.leads_submitted ?? 0) + (creditNew ? 1 : 0),
-      leads_confirmed: next.leads_confirmed ?? 0,
-      no_answers: next.no_answers ?? 0,
-      killed: next.killed ?? 0,
-      pending: next.pending ?? 0,
       blowouts: next.blowouts ?? 0,
       outside_leads: next.outside_leads ?? 0,
       resets: next.resets ?? 0,

@@ -156,6 +156,7 @@ export type Database = {
           blowouts: number
           canvasser_id: string
           created_at: string
+          future: number
           id: string
           killed: number
           leads_called_in: number
@@ -177,6 +178,7 @@ export type Database = {
           blowouts?: number
           canvasser_id: string
           created_at?: string
+          future?: number
           id?: string
           killed?: number
           leads_called_in?: number
@@ -198,6 +200,7 @@ export type Database = {
           blowouts?: number
           canvasser_id?: string
           created_at?: string
+          future?: number
           id?: string
           killed?: number
           leads_called_in?: number

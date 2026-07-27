@@ -50,6 +50,13 @@ function edgeUrl(): string {
   return url;
 }
 const WEBHOOK_EVENTS = ["create_item", "change_column_value"] as const;
+// The static Incoming Leads board also carries a column-scoped status hook:
+// only the confirmation team's "Lead Status" column may fire (an unscoped
+// change_column_value hook on the 5,000+-item CRM board would flood the edge
+// function). The edge function drops any other column defensively too.
+const LEAD_STATUS_EVENT = "change_status_column_value" as const;
+const LEAD_STATUS_COLUMN_ID = "dup__of_sd_lead";
+type WebhookEvent = (typeof WEBHOOK_EVENTS)[number] | typeof LEAD_STATUS_EVENT;
 // Schedule of the daily check cron — keep in sync with vercel.json. Used as a
 // fallback to route the request when the query string is absent.
 const CHECK_SCHEDULE = "30 13 * * *";
@@ -396,17 +403,18 @@ async function check(): Promise<Response> {
     const token = settings?.monday_api_token as string | undefined;
     if (!token) return json({ error: "no monday_api_token" }, 500);
     // [label, boardId, expected events]. The static Incoming Leads board gets
-    // create_item ONLY — a change_column_value hook on a 5,000+-item CRM board
-    // would flood the edge function (and the liveness healer must never
-    // "replace" a column-change hook into existence there).
-    const active: Array<[string, string, ReadonlyArray<(typeof WEBHOOK_EVENTS)[number]>]> = [];
+    // create_item plus the column-scoped Lead Status hook — never a blanket
+    // change_column_value (it would flood the edge function on a 5,000+-item
+    // CRM board, and the liveness healer must never "replace" one into
+    // existence there).
+    const active: Array<[string, string, ReadonlyArray<WebhookEvent>]> = [];
     if (settings?.active_monday_board_sd)
       active.push(["SD", String(settings.active_monday_board_sd), WEBHOOK_EVENTS]);
     if (settings?.active_monday_board_oc)
       active.push(["OC", String(settings.active_monday_board_oc), WEBHOOK_EVENTS]);
     if (!active.length) return json({ error: "no active_monday_board_* in system_settings" }, 500);
     if (settings?.incoming_leads_board_id)
-      active.push(["Leads", String(settings.incoming_leads_board_id), ["create_item"]]);
+      active.push(["Leads", String(settings.incoming_leads_board_id), ["create_item", LEAD_STATUS_EVENT]]);
     const activeIds = new Set(active.map(([, id]) => id));
 
     let registry: RegistryEntry[] = Array.isArray(settings?.monday_webhooks)
@@ -434,6 +442,19 @@ async function check(): Promise<Response> {
       }));
     };
 
+    // The Lead Status hook must be created column-scoped, or Monday would fire
+    // it for every status column on the board (Office, Blowout Text, …).
+    const createWebhook = async (boardId: string, event: WebhookEvent, idempotencyKey: string) => {
+      const args: Record<string, unknown> = { b: boardId, u: edgeUrl(), e: event };
+      let mutation = `mutation ($b: ID!, $u: String!, $e: WebhookEventType!) { create_webhook(board_id: $b, url: $u, event: $e) { id } }`;
+      if (event === LEAD_STATUS_EVENT) {
+        mutation = `mutation ($b: ID!, $u: String!, $e: WebhookEventType!, $c: JSON!) { create_webhook(board_id: $b, url: $u, event: $e, config: $c) { id } }`;
+        args.c = JSON.stringify({ columnId: LEAD_STATUS_COLUMN_ID });
+      }
+      const created = await monday(token, mutation, args, { idempotencyKey });
+      return String((created.create_webhook as { id: string }).id);
+    };
+
     // Every active board must have a live webhook per expected event. A hook
     // toggled off in the Integrations Center disappears from this list, so
     // "missing" covers both deleted and disabled.
@@ -455,15 +476,10 @@ async function check(): Promise<Response> {
           };
           issues[`${office}_${event}`] = `adopted live webhook ${found.id}`;
         } else {
-          const created = await monday(
-            token,
-            `mutation ($b: ID!, $u: String!, $e: WebhookEventType!) { create_webhook(board_id: $b, url: $u, event: $e) { id } }`,
-            { b: boardId, u: edgeUrl(), e: event },
-            { idempotencyKey: `heal-${boardId}-${event}-${runNonce}` },
-          );
+          const createdId = await createWebhook(boardId, event, `heal-${boardId}-${event}-${runNonce}`);
           entry = {
             board_id: boardId,
-            webhook_id: String((created.create_webhook as { id: string }).id),
+            webhook_id: createdId,
             event,
             registered_at: new Date().toISOString(),
           };
@@ -510,7 +526,17 @@ async function check(): Promise<Response> {
         ((actData.boards as Array<{ activity_logs: Array<{ event: string }> | null }>) ?? [])[0]
           ?.activity_logs ?? [];
       for (const event of events) {
-        const { activityEvent, isCreate } = LIVENESS_MAP[event];
+        const mapping = LIVENESS_MAP[event as (typeof WEBHOOK_EVENTS)[number]] as
+          | { activityEvent: string; isCreate: "true" | "false" }
+          | undefined;
+        if (!mapping) {
+          // Column-scoped Lead Status hook: activity_logs can't isolate one
+          // column's changes, so delivery-based liveness doesn't apply — the
+          // list-based heal above already re-creates it if missing.
+          liveness[`${office}_${event}`] = "skipped — column-scoped hook has no liveness mapping";
+          continue;
+        }
+        const { activityEvent, isCreate } = mapping;
         const activityCount = activity.filter((a) => a.event === activityEvent).length;
         if (!activityCount) {
           liveness[`${office}_${event}`] = "no recent board activity to judge";
