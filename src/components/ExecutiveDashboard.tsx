@@ -23,8 +23,11 @@ function startOfMonth(ref = new Date()) {
   return dateFromISO(`${laDateISO(ref).slice(0, 7)}-01`);
 }
 
-function leadsSum(r: { demos_sits?: number | null; sales?: number | null; no_demo?: number | null; one_legs?: number | null; future_leads?: number | null; unmarked?: number | null }) {
-  return (r.demos_sits ?? 0) + (r.sales ?? 0) + (r.no_demo ?? 0) + (r.one_legs ?? 0) + (r.future_leads ?? 0) + (r.unmarked ?? 0);
+// One board card = one lead. demos_sits already includes sold sits (a sale
+// ticks demos_sits AND sales), so sales must NOT be added again here — that
+// double-counted every sold lead in "Total Leads".
+function leadsSum(r: { demos_sits?: number | null; no_demo?: number | null; one_legs?: number | null; future_leads?: number | null; unmarked?: number | null }) {
+  return (r.demos_sits ?? 0) + (r.no_demo ?? 0) + (r.one_legs ?? 0) + (r.future_leads ?? 0) + (r.unmarked ?? 0);
 }
 
 /* ============ Main ============ */
