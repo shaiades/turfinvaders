@@ -41,39 +41,28 @@ function mapScheduleOutcome(columnTitle: string, value: string): ScheduleBucket 
   const v = (value || '').trim().toLowerCase()
   if (!v) return null
 
-  // BO column
+  // DEDICATED outcome columns ONLY. The board mirrors each result into
+  // rollup columns ("Rep Stats", "Canvass Stats") — the old value-based
+  // fallbacks counted those again, tripling no_demo per blowout and
+  // inflating resets (seen live: Ernie Ruiz week of 7/20 showed 37 leads
+  // for ~22 real cards). Rollup titles must never match here. The funnel
+  // buckets (confirmed/pending/killed/no_answers) come exclusively from the
+  // Incoming Leads board's Lead Status branch, never from Block boards.
   if (col === 'bo' || col.includes('blowout')) {
-    if (v === 'no show' || v === 'no demo' || v === 'bo') return 'blowouts'
+    if (v === 'no show' || v === 'no show text' || v === 'no demo' || v === 'bo') return 'blowouts'
   }
-  // OL column
   if (col === 'ol' || col.includes('outside lead')) {
     if (v === 'ol' || v === 'outside lead') return 'outside_leads'
   }
-  // RS column
   if (col === 'rs' || col.includes('reset')) {
     if (v === 'reset' || v === 'rs') return 'resets'
   }
-  // PM column
   if (col === 'pm' || col.includes('pitch missed')) {
     if (v === 'pm' || v === 'pm w/ reset' || v === 'pm w reset' || v.startsWith('pm')) return 'pitch_missed'
   }
-  // Sale column
   if (col === 'sale' || col.includes('sale')) {
     if (v === 'sold' || v === 'reload' || v === 'upsell' || v === 'sale') return 'sales'
   }
-
-  // Fallback: value-based mapping (works even if column titles don't match).
-  if (v === 'no show' || v === 'no demo') return 'blowouts'
-  if (v === 'ol') return 'outside_leads'
-  if (v === 'reset') return 'resets'
-  if (v === 'pm' || v === 'pm w/ reset' || v === 'pm w reset') return 'pitch_missed'
-  if (v === 'sold' || v === 'reload' || v === 'upsell') return 'sales'
-
-  // Live-dispatch status column legacy mapping
-  if (v === 'confirmed' || v === 'future reconf') return 'leads_confirmed'
-  if (v.startsWith('n/a')) return 'no_answers'
-  if (v === 'blowout' || v === 'disconnected') return 'killed'
-  if (v === 'unconfirmed' || v === 'future' || v === 'room lead') return 'pending'
   return null
 }
 
@@ -145,8 +134,7 @@ const DAILY_LOG_KEYS = [
  *  the CSV importer uses: Sale > PM > RS > BO > OL > the legacy statuses). */
 function deriveBucketFromCols(cols: MondayCol[]): ScheduleBucket {
   const priority: ScheduleBucket[] = [
-    'sales', 'pitch_missed', 'resets', 'blowouts', 'killed',
-    'outside_leads', 'leads_confirmed', 'no_answers', 'pending',
+    'sales', 'pitch_missed', 'resets', 'blowouts', 'outside_leads',
   ]
   const found = new Set<ScheduleBucket>()
   for (const c of cols) {
@@ -647,16 +635,23 @@ serve(async (req) => {
       return new Response('Lead generated credited', { status: 200, headers: corsHeaders })
     }
 
-    // Step 5: Map new + previous outcomes. Creation events have no changed
-    // column — derive the outcome (if any) from the item's full column set.
-    let bucket = mapScheduleOutcome(changedTitle, changedValue)
-    let prevBucket = previousStatusFromEvent
-      ? mapScheduleOutcome(changedTitle, previousStatusFromEvent)
-      : null
-    if (isCreateEvent) {
-      bucket = deriveBucketFromCols(cols)
-      prevBucket = null
-    }
+    // Step 5: One card = one outcome. Derive the card's CURRENT outcome from
+    // its full (re-fetched) column set — dedicated columns only, Sale > PM >
+    // RS > BO > OL, the CSV importer's precedence — and diff it against the
+    // last outcome recorded for this card (Card_Outcome_Recorded marker).
+    // Mirror marks in the rollup columns re-derive the same outcome and
+    // no-op instead of counting again; unsetting a column re-derives to the
+    // next-priority outcome (or none) and the transition self-corrects.
+    const bucket = deriveBucketFromCols(cols)
+    const { data: lastOutcome } = await supabaseAdmin
+      .from('webhook_logs')
+      .select('data')
+      .eq('step', 'Card_Outcome_Recorded')
+      .contains('data', { pulseId: String(pulseId) })
+      .order('created_at', { ascending: false })
+      .limit(1)
+    const prevBucket: ScheduleBucket =
+      ((lastOutcome?.[0]?.data as { bucket?: string } | null)?.bucket as ScheduleBucket) ?? null
     const metric_date = todayLA()
     const office_location = boardOffice ?? match.office_location ?? 'San Diego'
 
@@ -838,7 +833,9 @@ serve(async (req) => {
       return new Response('Ignored', { status: 200, headers: corsHeaders })
     }
 
-    // Same-bucket transition (e.g. "N/A" -> "N/A x2"): log + no-op.
+    // Card outcome unchanged — this is where the rollup-column mirror marks
+    // ("Rep Stats", "Canvass Stats") and unrelated column edits land: the
+    // card re-derives to the outcome already recorded, so nothing counts.
     if (bucket && prevBucket && bucket === prevBucket) {
       await supabaseAdmin.from('webhook_logs').insert({
         step: 'Same_Bucket_NoOp',
@@ -846,13 +843,21 @@ serve(async (req) => {
           pulseId,
           agentName: match.display_name,
           bucket,
-          previousValue: previousStatusFromEvent,
+          changedColumn: changedTitle,
           newValue: changedValue,
-          note: 'Status changed within the same mapped bucket; no counter mutation.',
+          note: 'Card outcome unchanged; no counter mutation.',
         },
       })
       return new Response('No-op (same bucket)', { status: 200, headers: corsHeaders })
     }
+
+    // Claim this card-outcome transition BEFORE writing counters so a burst
+    // of near-simultaneous mirror marks can't double-apply (same claim-first
+    // pattern as lead credits). Released below if the counter write fails.
+    const { data: outcomeClaim } = await supabaseAdmin.from('webhook_logs').insert({
+      step: 'Card_Outcome_Recorded',
+      data: { pulseId: String(pulseId), bucket, prev: prevBucket, canvasser_id: match.id },
+    }).select('id').single()
 
     const { data: existing } = await supabaseAdmin
       .from('daily_metrics')
@@ -902,6 +907,10 @@ serve(async (req) => {
       .upsert(payload, { onConflict: 'canvasser_id,metric_date' })
 
     if (upErr) {
+      // Release the outcome claim so a Monday redelivery can re-apply.
+      if (outcomeClaim?.id) {
+        await supabaseAdmin.from('webhook_logs').delete().eq('id', outcomeClaim.id)
+      }
       await supabaseAdmin.from('webhook_logs').insert({
         step: '5_Upsert_Error',
         data: { error: upErr.message },
