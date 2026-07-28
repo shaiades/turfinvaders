@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { User } from "@supabase/supabase-js";
+import { isAppRole, primaryRole, type AppRole } from "@/lib/roles";
 
-export type AppRole = "owner" | "office_staff" | "captain" | "canvasser";
+export type { AppRole };
 
 export interface AuthState {
   loading: boolean;
@@ -18,8 +19,7 @@ export const DEV_ROLE_STORAGE_KEY = "dev_role_override";
 function readDevRole(): AppRole | null {
   if (typeof window === "undefined") return null;
   const v = window.localStorage.getItem(DEV_ROLE_STORAGE_KEY);
-  if (v === "owner" || v === "office_staff" || v === "captain" || v === "canvasser") return v;
-  return null;
+  return isAppRole(v) ? v : null;
 }
 
 export function useAuth(): AuthState {
@@ -39,13 +39,8 @@ export function useAuth(): AuthState {
         supabase.from("user_roles").select("role").eq("user_id", user.id),
         supabase.from("profiles").select("team_id, display_name").eq("id", user.id).maybeSingle(),
       ]);
-      // priority owner > captain > canvasser
       const r = roles?.map((x) => x.role as AppRole) ?? [];
-      const realRole: AppRole | null =
-        r.includes("owner") ? "owner"
-        : r.includes("office_staff") ? "office_staff"
-        : r.includes("captain") ? "captain"
-        : r.includes("canvasser") ? "canvasser" : null;
+      const realRole = primaryRole(r);
       const override = readDevRole();
       if (active) {
         setState({

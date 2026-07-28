@@ -1,6 +1,7 @@
-import { useMemo, useState, useEffect, useRef } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { formatCurrency } from "@/lib/utils";
 import { ArcadePanel } from "@/components/arcade";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { LiveLeadCounter } from "@/components/LiveLeadCounter";
@@ -21,9 +22,10 @@ import {
   HOURLY_TOP,
   VOLUME_BONUS_STEP,
   PAY_LOCK_MIN_ROLLING_AVG,
+  weeklyPoints,
 } from "@/lib/pay";
 import { getMonthlyPaychecks } from "@/lib/fleet.functions";
-import { laTodayISO, laWeekStartISO, addDaysISO, laMidnightUtcISO } from "@/lib/dates";
+import { laTodayISO, laWeekStartISO, addDaysISO, laMidnightUtcISO, laMonthStartISO } from "@/lib/dates";
 
 /**
  * Paycheck engine — automated.
@@ -55,12 +57,6 @@ const RANKS = [
 ] as const;
 
 // All day/week/month buckets are America/Los_Angeles (midnight PT resets).
-const todayISO = () => laTodayISO();
-const startOfWeekISO = () => laWeekStartISO();
-const startOfMonthISO = () => `${laTodayISO().slice(0, 7)}-01`;
-function formatUSD(n: number) {
-  return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
-}
 
 type Totals = {
   doors_knocked: number;
@@ -171,7 +167,7 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
         .eq("canvasser_id", userId)
         .eq("status", "confirmed")
         .eq("is_sale", true)
-        .gte("created_at", laMidnightUtcISO(startOfMonthISO()));
+        .gte("created_at", laMidnightUtcISO(laMonthStartISO()));
       if (error) throw error;
       return data ?? [];
     },
@@ -183,7 +179,7 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
     queryKey: ["my_clocked_hours", "week", userId],
     queryFn: async () => {
       // Mon–Sat window, matching calc_weekly_paycheck exactly.
-      const weekStart = startOfWeekISO();
+      const weekStart = laWeekStartISO();
       const { data, error } = await supabase
         .from("time_entries")
         .select("billable_hours")
@@ -199,7 +195,7 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
   const { today, week, month, monthRevenue, weekRevenue, weekPoints,
           weekHours, hourlyRate, weekBase, weekCommission, monthCommission, funnel } = useMemo(() => {
     const allRows = (logsQuery.data ?? []) as unknown as Array<Record<string, number | null> & { log_date: string }>;
-    const t = todayISO(), w = startOfWeekISO(), m = startOfMonthISO();
+    const t = laTodayISO(), w = laWeekStartISO(), m = laMonthStartISO();
     const mtdRows = allRows.filter((r) => r.log_date >= m);
     const today = aggregate(allRows.filter((r) => r.log_date === t));
     const week  = aggregate(allRows.filter((r) => r.log_date >= w));
@@ -212,7 +208,7 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
       .filter((r) => Date.parse(r.created_at) >= wStartMs)
       .reduce((a, r) => a + Number(r.sale_amount ?? 0), 0);
 
-    const weekPoints = week.demos_sits + week.sales;
+    const weekPoints = weeklyPoints(week.demos_sits, week.sales);
     const weekHours = clockedQuery.data ?? 0;
     const hourlyRate = payRateForPoints(weekPoints);
     const weekBase = weekHours * hourlyRate;
@@ -409,8 +405,8 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
           <div className="grid sm:grid-cols-2 gap-4">
             <BigStat
               label="Weekly Pay"
-              value={formatUSD(weeklyPay)}
-              sub={`${weekHours.toFixed(1)} hrs × $${hourlyRate}/hr + ${formatUSD(weekCommission)} commission`}
+              value={formatCurrency(weeklyPay)}
+              sub={`${weekHours.toFixed(1)} hrs × $${hourlyRate}/hr + ${formatCurrency(weekCommission)} commission`}
               icon={<DollarSign className="w-4 h-4" />}
               accent="var(--victory)"
             />
@@ -448,7 +444,7 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
           <div className="grid sm:grid-cols-2 gap-4">
             <BigStat
               label="Monthly Revenue Generated"
-              value={formatUSD(monthRevenue)}
+              value={formatCurrency(monthRevenue)}
               sub="Confirmed sales · MTD"
               icon={<DollarSign className="w-4 h-4" />}
               accent="var(--victory)"
@@ -569,7 +565,7 @@ function ValuePerDoorWidget({
             <Sparkles className="w-3 h-3" /> Value Per Door {showTarget && <span className="text-victory/60">· TARGET</span>}
           </div>
           <div className="mt-3 font-display text-5xl sm:text-6xl md:text-7xl text-mega-victory leading-none">
-            {formatUSD(display)}
+            {formatCurrency(display)}
           </div>
           <div className="mt-3 text-[10px] font-display uppercase tracking-widest text-victory/80">
             {showTarget ? "EACH REQUIRED KNOCK IS WORTH THIS" : "EVERY KNOCK PAYS"}
@@ -578,13 +574,13 @@ function ValuePerDoorWidget({
         <div className="text-xs text-muted-foreground space-y-1 md:text-right">
           {showTarget ? (
             <>
-              <div>Target Income · <span className="text-victory font-display">{formatUSD(monthlyGoal)}</span></div>
-              <div>Historical pace · <span className="text-neon font-display">{formatUSD(value)}/door</span></div>
+              <div>Target Income · <span className="text-victory font-display">{formatCurrency(monthlyGoal)}</span></div>
+              <div>Historical pace · <span className="text-neon font-display">{formatCurrency(value)}/door</span></div>
               <div className="text-[10px] uppercase tracking-widest mt-2">goal commission / required doors</div>
             </>
           ) : (
             <>
-              <div>Commission MTD · <span className="text-victory font-display">{formatUSD(commission)}</span></div>
+              <div>Commission MTD · <span className="text-victory font-display">{formatCurrency(commission)}</span></div>
               <div>Doors knocked MTD · <span className="text-neon font-display">{doors.toLocaleString()}</span></div>
               <div className="text-[10px] uppercase tracking-widest mt-2">commission / doors</div>
             </>
@@ -694,12 +690,12 @@ function PaycheckEngineWidget({
       </div>
       <NeonBar pct={pct} accent={accent} />
       <div className="mt-3 grid sm:grid-cols-3 gap-2 text-[11px] text-muted-foreground border-t border-border pt-3">
-        <div>Base · <span className="text-foreground">{formatUSD(base)}</span></div>
+        <div>Base · <span className="text-foreground">{formatCurrency(base)}</span></div>
         <div>
-          Commission ({commissionPct}% of {formatUSD(revenue)}) ·{" "}
-          <span className="text-victory">{formatUSD(commission)}</span>
+          Commission ({commissionPct}% of {formatCurrency(revenue)}) ·{" "}
+          <span className="text-victory">{formatCurrency(commission)}</span>
         </div>
-        <div className="sm:text-right">Total · <span className="font-display text-victory">{formatUSD(base + commission)}</span></div>
+        <div className="sm:text-right">Total · <span className="font-display text-victory">{formatCurrency(base + commission)}</span></div>
       </div>
     </ArcadePanel>
   );
@@ -733,7 +729,7 @@ function GoalBar({
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
           <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Revenue MTD</div>
-          <div className="font-display text-4xl md:text-5xl text-mega-victory leading-none mt-1">{formatUSD(revenue)}</div>
+          <div className="font-display text-4xl md:text-5xl text-mega-victory leading-none mt-1">{formatCurrency(revenue)}</div>
         </div>
         <div className="text-right">
           <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Goal</div>
@@ -754,14 +750,14 @@ function GoalBar({
               </Button>
             </div>
           ) : (
-            <div className="font-display text-2xl text-neon">{formatUSD(goal)}</div>
+            <div className="font-display text-2xl text-neon">{formatCurrency(goal)}</div>
           )}
         </div>
       </div>
       <NeonBar pct={pct} accent="var(--victory)" tall />
       <div className="mt-2 flex justify-between text-[10px] font-display uppercase tracking-widest text-muted-foreground">
         <span>{(pct * 100).toFixed(0)}% complete</span>
-        <span>{pct >= 1 ? "🏆 Goal smashed" : `${formatUSD(Math.max(0, goal - revenue))} to go`}</span>
+        <span>{pct >= 1 ? "🏆 Goal smashed" : `${formatCurrency(Math.max(0, goal - revenue))} to go`}</span>
       </div>
     </ArcadePanel>
   );
@@ -868,7 +864,7 @@ function DailyMissionWidget({
         </div>
 
         <div className="mt-4 font-display text-lg md:text-xl text-foreground/90 leading-relaxed">
-          To hit <span className="text-victory text-mega-victory">{formatUSD(goal)}</span>, your mission today is to knock{" "}
+          To hit <span className="text-victory text-mega-victory">{formatCurrency(goal)}</span>, your mission today is to knock{" "}
           <span className="text-neon" style={{ textShadow: "0 0 18px var(--neon)" }}>{doors.toLocaleString()} doors</span>{" "}
           and talk to{" "}
           <span className="text-accent" style={{ textShadow: "0 0 18px var(--accent)" }}>{talks.toLocaleString()} people</span>.
@@ -877,7 +873,7 @@ function DailyMissionWidget({
         <div className="mt-6 grid sm:grid-cols-3 gap-4">
           <MissionStat icon={<DoorOpen className="w-4 h-4" />} label="Doors / Day" value={doors.toLocaleString()} accent="var(--neon)" />
           <MissionStat icon={<Users   className="w-4 h-4" />} label="Talk To / Day" value={talks.toLocaleString()} accent="var(--accent)" />
-          <MissionStat icon={<DollarSign className="w-4 h-4" />} label="Per-Door Value" value={formatUSD(targetValuePerDoor)} accent="var(--victory)" />
+          <MissionStat icon={<DollarSign className="w-4 h-4" />} label="Per-Door Value" value={formatCurrency(targetValuePerDoor)} accent="var(--victory)" />
         </div>
       </div>
     </div>
@@ -914,7 +910,7 @@ function FunnelBreakdown({
 }) {
   if (!ready) return null;
   const rows = [
-    { label: "Required Sales",          value: Math.ceil(requiredSales),     formula: `${formatUSD(goal)} ÷ ${formatUSD(avgSale)} avg sale`, accent: "var(--victory)" },
+    { label: "Required Sales",          value: Math.ceil(requiredSales),     formula: `${formatCurrency(goal)} ÷ ${formatCurrency(avgSale)} avg sale`, accent: "var(--victory)" },
     { label: "Required Sits / Demos",   value: Math.ceil(requiredSits),      formula: `Sales ÷ ${(closeRate*100).toFixed(0)}% close rate`,    accent: "var(--accent)" },
     { label: "Required Confirmed Leads",value: Math.ceil(requiredConfirmed), formula: `Sits ÷ ${(sitRate*100).toFixed(0)}% sit rate`,         accent: "var(--neon)" },
     { label: "Total Doors to Knock",    value: Math.ceil(requiredDoors),     formula: `Leads ÷ ${(leadDoorRate*100).toFixed(2)}% lead-per-door`, accent: "var(--neon)" },
@@ -941,7 +937,7 @@ function FunnelBreakdown({
           </div>
         ))}
         <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-t border-border pt-3 flex justify-between flex-wrap gap-2">
-          <span>Avg commission / sale · {formatUSD(avgCommissionPerSale)}</span>
+          <span>Avg commission / sale · {formatCurrency(avgCommissionPerSale)}</span>
           <span>MTD progress · {mtdDoors.toLocaleString()} / {Math.ceil(requiredDoors).toLocaleString()} doors</span>
         </div>
       </div>
@@ -1027,7 +1023,7 @@ function TakeHomeWidget({ userId, weeklyPay, hourlyRate, weekPoints }: {
   // Authoritative MTD volume bonus from the pay engine (calc_monthly_paycheck)
   // — the same source the owner's payroll screen pays from. Hidden on error
   // rather than showing a possibly-wrong dollar figure.
-  const monthStart = `${laTodayISO().slice(0, 7)}-01`;
+  const monthStart = laMonthStartISO();
   const { data: monthly } = useQuery({
     queryKey: ["takehome_volume_bonus", userId, monthStart],
     queryFn: async () => {
@@ -1046,15 +1042,15 @@ function TakeHomeWidget({ userId, weeklyPay, hourlyRate, weekPoints }: {
             Est. Weekly Pay
           </div>
           <div className="mt-2 font-display text-4xl sm:text-5xl text-victory leading-none">
-            {formatUSD(weeklyPay)}
+            {formatCurrency(weeklyPay)}
           </div>
           <div className="mt-2 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
             ${hourlyRate}/hr · {weekPoints} pts this week
           </div>
           {monthly && (
             <div className="mt-1 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-              Volume bonus earned this month · <span className={Number(monthly.volume_bonus) > 0 ? "text-victory" : ""}>{formatUSD(Number(monthly.volume_bonus))}</span>
-              {" (paid next month) · "}{formatUSD(VOLUME_BONUS_STEP - (Number(monthly.sale_price_total) % VOLUME_BONUS_STEP))} to next $1,500
+              Volume bonus earned this month · <span className={Number(monthly.volume_bonus) > 0 ? "text-victory" : ""}>{formatCurrency(Number(monthly.volume_bonus))}</span>
+              {" (paid next month) · "}{formatCurrency(VOLUME_BONUS_STEP - (Number(monthly.sale_price_total) % VOLUME_BONUS_STEP))} to next $1,500
             </div>
           )}
         </div>

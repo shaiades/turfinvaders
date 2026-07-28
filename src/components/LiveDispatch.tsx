@@ -6,6 +6,10 @@ import { ArcadePanel, TeamBadge } from "@/components/arcade";
 import { Radio, Users, FileSearch, X, Link2, Copy, Check, KeyRound, Eye, EyeOff, AlertTriangle, Lock, Truck } from "lucide-react";
 import { toast } from "sonner";
 import confetti from "canvas-confetti";
+import { addDaysISO, fmtWorkedDay, lastWorkedDaysBefore, reportDates, weekStartOfISO } from "@/lib/dates";
+import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
+import { normalizeName } from "@/lib/utils";
+import { DEFAULT_OFFICE, OFFICE_LOCATIONS } from "@/lib/offices";
 
 
 type Profile = {
@@ -36,59 +40,6 @@ type Metric = {
   office_location: string;
 };
 
-const PT_TZ = "America/Los_Angeles";
-const PT_PARTS = new Intl.DateTimeFormat("en-US", {
-  timeZone: PT_TZ,
-  year: "numeric", month: "2-digit", day: "2-digit",
-  hour: "2-digit", minute: "2-digit", hour12: false,
-});
-
-function ptNow() {
-  const parts = Object.fromEntries(
-    PT_PARTS.formatToParts(new Date()).map((p) => [p.type, p.value]),
-  );
-  return {
-    year: Number(parts.year), month: Number(parts.month), day: Number(parts.day),
-    hour: Number(parts.hour === "24" ? "0" : parts.hour), minute: Number(parts.minute),
-  };
-}
-function addDaysISO(iso: string, delta: number) {
-  const [y, m, d] = iso.split("-").map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  dt.setUTCDate(dt.getUTCDate() + delta);
-  return dt.toISOString().slice(0, 10);
-}
-/** The last `n` completed worked days (Mon–Sat; Sundays never count),
- *  walking back from — and excluding — the given report date. Newest first.
- *  On a Tuesday this yields [Mon, Sat, Fri, …]: Saturday and Monday are
- *  consecutive worked days for the suspension rule. */
-function lastWorkedDaysBefore(todayISO: string, n: number): string[] {
-  const out: string[] = [];
-  let d = todayISO;
-  while (out.length < n) {
-    d = addDaysISO(d, -1);
-    if (new Date(`${d}T00:00:00Z`).getUTCDay() !== 0) out.push(d);
-  }
-  return out;
-}
-
-/** "Mon 7/28" for a chip label. */
-function fmtWorkedDay(iso: string): string {
-  return new Date(`${iso}T00:00:00Z`)
-    .toLocaleDateString("en-US", { weekday: "short", month: "numeric", day: "numeric", timeZone: "UTC" })
-    .replace(",", "");
-}
-
-/** Report date: before 7 PM PT → current PT date; at/after 7 PM PT → next PT date. */
-function reportDates() {
-  const { year, month, day, hour } = ptNow();
-  const currentPT = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-  const locked = hour >= 19;
-  const today = locked ? addDaysISO(currentPT, 1) : currentPT;
-  const yday = addDaysISO(today, -1);
-  return { today, yday, locked };
-}
-
 export function LiveDispatch({ readOnly = false }: { readOnly?: boolean }) {
   return (
     <OfficeFilterProvider>
@@ -99,9 +50,6 @@ export function LiveDispatch({ readOnly = false }: { readOnly?: boolean }) {
 
 type Preset = "today" | "yesterday" | "week";
 
-function normalizeName(s: string | null | undefined): string {
-  return (s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
-}
 
 function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
   const qc = useQueryClient();
@@ -134,9 +82,7 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
     if (preset === "yesterday") return { start: yday, end: yday, label: "Yesterday" };
     if (preset === "week") {
       // Calendar Block week (Mon–Sat), same as the Monday boards.
-      const [y, m, d] = today.split("-").map(Number);
-      const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0 = Sun
-      const monday = addDaysISO(today, -((dow + 6) % 7));
+      const monday = weekStartOfISO(today);
       return { start: monday, end: addDaysISO(monday, 5), label: "This Week" };
     }
     return { start: today, end: today, label: "Today" };
@@ -226,19 +172,11 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
   });
 
   // Realtime — instant updates when Monday webhook upserts.
-  useEffect(() => {
-    const channel = supabase
-      .channel("dispatch-daily-metrics")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "daily_metrics" },
-        () => {
-          qc.invalidateQueries({ queryKey: ["daily-metrics"] });
-        },
-      )
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [qc]);
+  useRealtimeInvalidate({
+    channel: "dispatch-daily-metrics",
+    tables: ["daily_metrics"],
+    invalidateKeys: [["daily-metrics"]],
+  });
 
   // Sum all metric rows per canvasser_id across the selected range.
   const metricByCanvasser = useMemo(() => {
@@ -583,13 +521,13 @@ function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
   const captainName = (v: Van) =>
     v.captain_id ? rows.find((r) => r.g.ids.includes(v.captain_id!))?.g.display_name ?? null : null;
 
-  const offices = ["San Diego", "Orange County"].filter((o) => matches(o));
+  const offices = OFFICE_LOCATIONS.filter((o) => matches(o));
 
   return (
     <div className="space-y-4">
       {offices.map((office) => {
         const list = vans
-          .filter((v) => (v.office_location ?? "San Diego") === office)
+          .filter((v) => (v.office_location ?? DEFAULT_OFFICE) === office)
           .sort((a, b) => vanSub(b.id) - vanSub(a.id) || a.name.localeCompare(b.name));
         if (list.length === 0) return null;
         return (
@@ -951,7 +889,6 @@ type WebhookLog = {
 };
 
 function WebhookLogsButton() {
-  const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const { data: logs = [], refetch, isFetching } = useQuery({
     queryKey: ["webhook-logs"],
@@ -965,22 +902,6 @@ function WebhookLogsButton() {
       return (data ?? []) as WebhookLog[];
     },
   });
-
-  // Realtime — new webhook_logs rows pop in instantly.
-  useEffect(() => {
-    if (!open) return;
-    const channel = supabase
-      .channel("webhook-logs-live")
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "webhook_logs" },
-        () => qc.invalidateQueries({ queryKey: ["webhook-logs"] }),
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [open, qc]);
 
   return (
     <>

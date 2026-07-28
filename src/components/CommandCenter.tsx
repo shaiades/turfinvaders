@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { weeklyPoints } from "@/lib/pay";
 import { ArcadePanel } from "@/components/arcade";
 import { LiveFeed } from "@/components/LiveFeed";
 import { laWeekStartISO } from "@/lib/dates";
@@ -19,16 +20,13 @@ type WeekTotals = {
   daysWorked: number;
 };
 
-// Week anchor is the LA Monday (midnight PT reset), not viewer-local.
-function startOfISOWeek(): string {
-  return laWeekStartISO();
-}
 
 export function CommandCenter({ teamId }: Props) {
   const totals = useQuery({
     queryKey: ["command_center", teamId ?? "all"],
     queryFn: async (): Promise<WeekTotals> => {
-      const since = startOfISOWeek();
+      // Week anchor is the LA Monday (midnight PT reset), not viewer-local.
+      const since = laWeekStartISO();
       let q = supabase
         .from("daily_logs")
         .select("canvasser_id, log_date, leads_called_in, confirmed_leads, demos_sits, sales, no_shows")
@@ -55,7 +53,7 @@ export function CommandCenter({ teamId }: Props) {
   });
 
   const t = totals.data ?? { confirmedLeads: 0, leadsCalledIn: 0, demosSits: 0, sales: 0, noShows: 0, daysWorked: 0 };
-  const points = t.demosSits + t.sales;
+  const points = weeklyPoints(t.demosSits, t.sales);
   const pace = t.daysWorked > 0 ? t.confirmedLeads / t.daysWorked : 0;
   const sitRate = t.confirmedLeads > 0 ? (t.demosSits / t.confirmedLeads) * 100 : 0;
   const closeRate = t.demosSits > 0 ? (t.sales / t.demosSits) * 100 : 0;

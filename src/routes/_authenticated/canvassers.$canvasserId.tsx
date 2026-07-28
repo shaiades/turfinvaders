@@ -1,10 +1,11 @@
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { StatCard, ArcadePanel, TeamBadge } from "@/components/arcade";
 import { useAuth } from "@/hooks/useAuth";
+import { isAdminRole, isManagerRole } from "@/lib/roles";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { formatCurrency } from "@/lib/utils";
-import { weekStartMonday, toISODate, laTodayISO, laMidnightUtcISO } from "@/lib/dates";
+import { weekStartMonday, toISODate, laMidnightUtcISO, laMonthStartISO } from "@/lib/dates";
 import { Lock, EyeOff } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/canvassers/$canvasserId")({
@@ -15,9 +16,6 @@ export const Route = createFileRoute("/_authenticated/canvassers/$canvasserId")(
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Month starts at midnight America/Los_Angeles on the 1st (LA calendar).
-function startOfMonthISO() {
-  return laMidnightUtcISO(`${laTodayISO().slice(0, 7)}-01`);
-}
 
 function CanvasserProfile() {
   const { canvasserId } = Route.useParams();
@@ -78,7 +76,7 @@ function CanvasserProfile() {
           .eq("canvasser_id", canvasserId)
           .eq("status", "confirmed")
           .eq("is_sale", true)
-          .gte("created_at", startOfMonthISO()),
+          .gte("created_at", laMidnightUtcISO(laMonthStartISO())),
       ]);
       if (weekRes.error) throw weekRes.error;
       if (monthRes.error) throw monthRes.error;
@@ -93,13 +91,7 @@ function CanvasserProfile() {
   const visibility = !!settings?.global_visibility;
 
   // VISIBILITY of the profile itself
-  const canViewFull =
-    role === "owner" ||
-    role === "office_staff" ||
-    role === "captain" ||
-    isSelf ||
-    sameTeam ||
-    visibility;
+  const canViewFull = isManagerRole(role) || isSelf || sameTeam || visibility;
 
   // Who may read this player's daily_logs (mirrors the "daily_logs read scoped" RLS
   // policy — peers get zero rows back, so don't render fake zeros for them).
@@ -116,11 +108,7 @@ function CanvasserProfile() {
     },
   });
   const isDirectCaptain = !!directCaptainQuery.data;
-  const canReadLogs =
-    isSelf ||
-    role === "owner" ||
-    role === "office_staff" ||
-    (role === "captain" && isDirectCaptain);
+  const canReadLogs = isSelf || isAdminRole(role) || (role === "captain" && isDirectCaptain);
   const canViewRevenue = canReadLogs;
 
   // Week-to-date production stats from real daily_logs
@@ -171,7 +159,7 @@ function CanvasserProfile() {
           </h1>
           {team && <TeamBadge name={team.name} color={team.color ?? "#10b981"} />}
           {level > 0 && <span className="text-[10px] font-display text-victory">LVL {level}</span>}
-          {(role === "owner" || role === "office_staff" || role === "captain" || isSelf) && (
+          {(isManagerRole(role) || isSelf) && (
             <Link
               to="/canvassers/$canvasserId/field"
               params={{ canvasserId }}

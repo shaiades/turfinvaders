@@ -10,6 +10,13 @@
 export const POINTS_TIER_MID = 3;
 export const POINTS_TIER_TOP = 7;
 
+/** Weekly points from daily_logs vectors. demos_sits already includes sale
+ *  rows, so demosSits + sales ≡ pitch-miss sits × 1 + sales × 2 — the same
+ *  SUM(demos_sits + sales) calc_weekly_paycheck uses. Must not change values. */
+export function weeklyPoints(demosSits: number, sales: number): number {
+  return demosSits + sales;
+}
+
 export const HOURLY_BASE = 18;
 export const HOURLY_MID = 30;
 export const HOURLY_TOP = 35;

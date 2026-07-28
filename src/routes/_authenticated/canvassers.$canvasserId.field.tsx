@@ -6,7 +6,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { ArcadePanel, StatCard } from "@/components/arcade";
 import { NeonMap, type FieldPin, type Territory, type LatLng } from "@/components/NeonMap";
 import { Home, MessageSquare, Sparkles, DollarSign, AlertTriangle, ArrowLeft } from "lucide-react";
-import { commissionRateForPoints } from "@/lib/pay";
+import { commissionRateForPoints, weeklyPoints } from "@/lib/pay";
+import { isManagerRole } from "@/lib/roles";
 import { laDateISO, laMidnightUtcISO, addDaysISO, weekStartOfISO } from "@/lib/dates";
 
 export const Route = createFileRoute("/_authenticated/canvassers/$canvasserId/field")({
@@ -15,7 +16,6 @@ export const Route = createFileRoute("/_authenticated/canvassers/$canvasserId/fi
 });
 
 // Field days are LA calendar days (never viewer-local or UTC).
-function isoDay(d: Date) { return laDateISO(d); }
 function fmt(n: number) { return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }); }
 function timeLabel(iso: string) {
   return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -30,9 +30,9 @@ type SaleRow = { id: string; sale_amount: number | null; customer_name: string |
 function FieldActivityPage() {
   const { canvasserId } = Route.useParams();
   const { role, user } = useAuth();
-  const [day, setDay] = useState(isoDay(new Date()));
+  const [day, setDay] = useState(laDateISO(new Date()));
 
-  const allowed = role === "owner" || role === "office_staff" || role === "captain" || user?.id === canvasserId;
+  const allowed = isManagerRole(role) || user?.id === canvasserId;
 
   const profileQuery = useQuery({
     enabled: allowed,
@@ -80,7 +80,7 @@ function FieldActivityPage() {
         .select("demos_sits, sales").eq("canvasser_id", canvasserId).gte("log_date", weekStart);
       const rows = data ?? [];
       // Sit=1pt, Sale=2pt. demos_sits already includes sale rows, so points = demos_sits + sales.
-      return rows.reduce((a, r) => a + (r.demos_sits ?? 0) + (r.sales ?? 0), 0);
+      return rows.reduce((a, r) => a + weeklyPoints(r.demos_sits ?? 0, r.sales ?? 0), 0);
     },
   });
   const commissionRate = commissionRateForPoints(pointsQuery.data ?? 0);
@@ -159,7 +159,7 @@ function FieldActivityPage() {
         <input
           type="date"
           value={day}
-          max={isoDay(new Date())}
+          max={laDateISO(new Date())}
           onChange={(e) => setDay(e.target.value)}
           className="bg-surface border border-border rounded px-3 py-2 text-sm font-display"
         />

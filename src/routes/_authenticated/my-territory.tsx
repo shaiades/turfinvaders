@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { getPositionOrNull } from "@/lib/utils";
 import { laTodayISO } from "@/lib/dates";
 import { useAuth } from "@/hooks/useAuth";
 import { isManagerRole } from "@/lib/roles";
@@ -26,7 +27,6 @@ export const Route = createFileRoute("/_authenticated/my-territory")({
   component: MyTerritoryPage,
 });
 
-const todayISO = () => laTodayISO();
 
 function haversineMeters(a: LatLng, b: LatLng) {
   const R = 6371000;
@@ -124,7 +124,7 @@ function MyTerritoryPage() {
         .from("field_pins")
         .select("id, pin_type, lat, lng, is_remote_drop, distance_m")
         .eq("canvasser_id", user!.id)
-        .eq("log_date", todayISO());
+        .eq("log_date", laTodayISO());
       if (error) throw error;
       return (data ?? []) as FieldPin[];
     },
@@ -210,14 +210,7 @@ function MyTerritoryPage() {
 
   const dropPin = useMutation({
     mutationFn: async (ll: LatLng) => {
-      const fix = await new Promise<GeolocationPosition | null>((resolve) => {
-        if (!navigator.geolocation) return resolve(null);
-        navigator.geolocation.getCurrentPosition(
-          (p) => resolve(p),
-          () => resolve(null),
-          { enableHighAccuracy: true, maximumAge: 10000, timeout: 8000 },
-        );
-      });
+      const fix = await getPositionOrNull({ enableHighAccuracy: true, maximumAge: 10000, timeout: 8000 });
       const device = fix ? { lat: fix.coords.latitude, lng: fix.coords.longitude } : me;
       const distance_m = device ? haversineMeters(device, ll) : null;
       const is_remote_drop = distance_m == null ? true : distance_m > 18;
@@ -226,7 +219,7 @@ function MyTerritoryPage() {
         pin_type: active,
         lat: ll.lat,
         lng: ll.lng,
-        log_date: todayISO(),
+        log_date: laTodayISO(),
         device_lat: device?.lat ?? null,
         device_lng: device?.lng ?? null,
         distance_m,

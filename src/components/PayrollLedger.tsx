@@ -3,12 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { CalendarIcon, Download } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import {
-  getWeeklyPaychecks,
-  getMonthlyPaychecks,
-  type PaycheckResult,
-  type MonthlyPaycheckResult,
-} from "@/lib/fleet.functions";
+import { fetchWeeklyPaychecksChunked, fetchMonthlyPaychecksChunked } from "@/lib/paychecks";
 import { sitBonusPerForRank } from "@/lib/pay";
 import {
   ArcadePanel,
@@ -25,7 +20,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { RankPill } from "@/components/RankPill";
 import { useOfficeFilter } from "@/components/OfficeFilterContext";
 import { cn } from "@/lib/utils";
-import { weekStartMonday, toISODate, addDaysISO, laMidnightUtcISO } from "@/lib/dates";
+import { addDaysISO, laMidnightUtcISO, monthStartISO, nextMonthStartISO } from "@/lib/dates";
+import { useWeekSelector } from "@/hooks/useWeekSelector";
 
 type LogRow = {
   canvasser_id: string;
@@ -38,8 +34,6 @@ type LogRow = {
 };
 
 // Weeks are anchored to America/Los_Angeles (midnight PT Monday reset).
-const weekStartOf = weekStartMonday;
-const iso = toISODate;
 
 type Agg = {
   bo: number;
@@ -59,22 +53,16 @@ function emptyAgg(): Agg {
 
 export function PayrollLedger() {
   const { matches, office } = useOfficeFilter();
-  const [weekStart, setWeekStart] = useState<Date>(() => {
-    // Default to last week
-    const lastWk = new Date();
-    lastWk.setDate(lastWk.getDate() - 7);
-    return weekStartOf(lastWk);
-  });
+  // Default to last week; Mon..Sat pay week.
+  const {
+    weekStart,
+    weekEnd,
+    weekStartISO: startStr,
+    weekEndISO: endStr,
+    shiftWeek,
+    goToWeek,
+  } = useWeekSelector({ initialOffsetWeeks: -1 });
   const [pickerOpen, setPickerOpen] = useState(false);
-
-  const weekEnd = useMemo(() => {
-    const e = new Date(weekStart);
-    e.setDate(e.getDate() + 5); // Mon..Sat
-    return e;
-  }, [weekStart]);
-
-  const startStr = iso(weekStart);
-  const endStr = iso(weekEnd);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["payroll-ledger", startStr, endStr],
@@ -124,16 +112,8 @@ export function PayrollLedger() {
         ]),
       );
 
-      // The authoritative pay engine — batched calls, chunked under the
-      // server fn's 300-id input cap so a large roster can never fail whole.
-      const paychecks: PaycheckResult[] = [];
-      for (let i = 0; i < canvasserIds.length; i += 300) {
-        const chunk = canvasserIds.slice(i, i + 300);
-        const { results } = await getWeeklyPaychecks({
-          data: { week_start: startStr, canvasser_ids: chunk },
-        });
-        paychecks.push(...results);
-      }
+      // The authoritative pay engine — batched, chunked under the 300-id cap.
+      const paychecks = await fetchWeeklyPaychecksChunked(startStr, canvasserIds);
 
       return {
         logs,
@@ -217,12 +197,6 @@ export function PayrollLedger() {
 
   const grandTotal = rows.reduce((s, r) => s + r.totalPay, 0);
   const payErrorCount = rows.filter((r) => r.payError).length;
-
-  function shiftWeek(delta: number) {
-    const next = new Date(weekStart);
-    next.setDate(next.getDate() + delta * 7);
-    setWeekStart(weekStartOf(next));
-  }
 
   function exportCsv() {
     const headers = [
@@ -323,7 +297,7 @@ export function PayrollLedger() {
                 selected={weekStart}
                 onSelect={(d) => {
                   if (d) {
-                    setWeekStart(weekStartOf(d));
+                    goToWeek(d);
                     setPickerOpen(false);
                   }
                 }}
@@ -533,7 +507,7 @@ export function PayrollLedger() {
         )}
       </ArcadePanel>
 
-      <MonthlyVolumeBonusPanel monthStart={`${startStr.slice(0, 7)}-01`} />
+      <MonthlyVolumeBonusPanel monthStart={monthStartISO(startStr)} />
     </div>
   );
 }
@@ -549,9 +523,7 @@ function MonthlyVolumeBonusPanel({ monthStart }: { monthStart: string }) {
       // LA-midnight boundaries; exclusive upper bound (start of next month in
       // LA) so timestamps in the final second of the month are not missed.
       const windowStart = laMidnightUtcISO(monthStart);
-      const [y, m] = monthStart.split("-").map(Number);
-      const nextMonth = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, "0")}-01`;
-      const windowEnd = laMidnightUtcISO(nextMonth);
+      const windowEnd = laMidnightUtcISO(nextMonthStartISO(monthStart));
       const [leadsRes, profilesRes] = await Promise.all([
         supabase
           .from("leads")
@@ -566,13 +538,7 @@ function MonthlyVolumeBonusPanel({ monthStart }: { monthStart: string }) {
       if (profilesRes.error) throw profilesRes.error;
 
       const ids = Array.from(new Set((leadsRes.data ?? []).map((l) => l.canvasser_id)));
-      const results: MonthlyPaycheckResult[] = [];
-      for (let i = 0; i < ids.length; i += 300) {
-        const { results: chunk } = await getMonthlyPaychecks({
-          data: { month_start: monthStart, canvasser_ids: ids.slice(i, i + 300) },
-        });
-        results.push(...chunk);
-      }
+      const results = await fetchMonthlyPaychecksChunked(monthStart, ids);
       return { results, profiles: profilesRes.data ?? [] };
     },
   });

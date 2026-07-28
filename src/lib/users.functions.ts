@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { OFFICE_LOCATIONS } from "@/lib/offices";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 
@@ -9,7 +10,7 @@ const createCanvasserSchema = z.object({
   password: z.string().min(8).max(72),
   display_name: z.string().trim().min(1).max(100),
   role: z.enum(ROLES).default("canvasser"),
-  office_location: z.enum(["San Diego", "Orange County"]).optional(),
+  office_location: z.enum(OFFICE_LOCATIONS).optional(),
   team_id: z.string().uuid().nullable().optional(),
 });
 
@@ -77,7 +78,7 @@ export const createCanvasser = createServerFn({ method: "POST" })
 
 const addTeamMemberSchema = z.object({
   full_name: z.string().trim().min(1).max(100),
-  office_location: z.enum(["San Diego", "Orange County"]),
+  office_location: z.enum(OFFICE_LOCATIONS),
   role: z.enum(["owner", "office_staff", "captain", "canvasser"]),
 });
 

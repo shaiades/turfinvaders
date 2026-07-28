@@ -71,7 +71,94 @@ export function addDays(d: Date, n: number): Date {
 export function laMidnightUtcISO(isoDate: string): string {
   const guess = new Date(`${isoDate}T08:00:00Z`); // 00:00 LA if PST (UTC-8)
   const laHour = Number(
-    new Intl.DateTimeFormat("en-US", { timeZone: LA_TZ, hour12: false, hour: "2-digit" }).format(guess),
+    new Intl.DateTimeFormat("en-US", { timeZone: LA_TZ, hour12: false, hour: "2-digit" }).format(
+      guess,
+    ),
   );
   return new Date(guess.getTime() - laHour * 3_600_000).toISOString(); // 01:00 during PDT → back 1h
+}
+
+/** First of the month (YYYY-MM-01) containing a YYYY-MM-DD calendar date. */
+export function monthStartISO(iso: string): string {
+  return `${iso.slice(0, 7)}-01`;
+}
+
+/** First of the current LA month, YYYY-MM-01. */
+export function laMonthStartISO(): string {
+  return monthStartISO(laTodayISO());
+}
+
+/** First of the month after the one containing `iso` (Dec → Jan 1 next year). */
+export function nextMonthStartISO(iso: string): string {
+  const [y, m] = iso.split("-").map(Number);
+  return m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, "0")}-01`;
+}
+
+/** "Jul 6 – 12, 2026" | "Jul 28 – Aug 2, 2026" | "Dec 28, 2026 – Jan 2, 2027".
+ *  Viewer-locale month names, matching the existing week-selector labels. */
+export function formatWeekRange(start: Date, end: Date): string {
+  const sameMonth = start.getMonth() === end.getMonth();
+  const sameYear = start.getFullYear() === end.getFullYear();
+  const monthFmt = (d: Date) => d.toLocaleDateString(undefined, { month: "short" });
+  const sM = monthFmt(start);
+  const eM = monthFmt(end);
+  const sD = start.getDate();
+  const eD = end.getDate();
+  if (sameMonth && sameYear) return `${sM} ${sD} – ${eD}, ${end.getFullYear()}`;
+  if (sameYear) return `${sM} ${sD} – ${eM} ${eD}, ${end.getFullYear()}`;
+  return `${sM} ${sD}, ${start.getFullYear()} – ${eM} ${eD}, ${end.getFullYear()}`;
+}
+
+// --- Report-date clock (7 PM PT lock) ---
+
+const LA_DATE_HOUR_PARTS = new Intl.DateTimeFormat("en-US", {
+  timeZone: LA_TZ,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  hour12: false,
+});
+
+/**
+ * The report-date is the PT calendar date whose 7:00 PM boundary is the "lock".
+ * Before 7 PM PT → report-date = current PT date (live preview of today's totals).
+ * At/after 7 PM PT → report-date rolls forward: today's totals seed the NEXT PT date.
+ * `wkStart` is the LA Monday of the report-date's week.
+ */
+export function reportDates(): { today: string; yday: string; wkStart: string; locked: boolean } {
+  const parts = Object.fromEntries(
+    LA_DATE_HOUR_PARTS.formatToParts(new Date()).map((p) => [p.type, p.value]),
+  );
+  const hour = Number(parts.hour === "24" ? "0" : parts.hour);
+  const currentPT = `${parts.year}-${parts.month}-${parts.day}`;
+  const locked = hour >= 19;
+  const today = locked ? addDaysISO(currentPT, 1) : currentPT;
+  return { today, yday: addDaysISO(today, -1), wkStart: weekStartOfISO(today), locked };
+}
+
+/** The last `n` completed worked days (Mon–Sat; Sundays never count),
+ *  walking back from — and excluding — the given report date. Newest first.
+ *  On a Tuesday this yields [Mon, Sat, Fri, …]: Saturday and Monday are
+ *  consecutive worked days for the suspension rule. */
+export function lastWorkedDaysBefore(todayISO: string, n: number): string[] {
+  const out: string[] = [];
+  let d = todayISO;
+  while (out.length < n) {
+    d = addDaysISO(d, -1);
+    if (new Date(`${d}T00:00:00Z`).getUTCDay() !== 0) out.push(d);
+  }
+  return out;
+}
+
+/** "Mon 7/28" for a chip label. */
+export function fmtWorkedDay(iso: string): string {
+  return new Date(`${iso}T00:00:00Z`)
+    .toLocaleDateString("en-US", {
+      weekday: "short",
+      month: "numeric",
+      day: "numeric",
+      timeZone: "UTC",
+    })
+    .replace(",", "");
 }

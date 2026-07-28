@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { addTeamMember } from "@/lib/users.functions";
+import { DEFAULT_OFFICE, OFFICE_LOCATIONS, type OfficeLocation } from "@/lib/offices";
+import type { AppRole } from "@/lib/roles";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,18 +19,16 @@ import {
 import { toast } from "sonner";
 import { UserPlus } from "lucide-react";
 
-type Office = "San Diego" | "Orange County";
 
 
-type Role = "owner" | "office_staff" | "captain" | "canvasser";
 
 export function AddTeamMemberDialog({ variant = "default" }: { variant?: "default" | "neon" } = {}) {
   const qc = useQueryClient();
   const addFn = useServerFn(addTeamMember);
   const [open, setOpen] = useState(false);
   const [fullName, setFullName] = useState("");
-  const [office, setOffice] = useState<Office>("San Diego");
-  const [role, setRole] = useState<Role>("canvasser");
+  const [office, setOffice] = useState<OfficeLocation>(DEFAULT_OFFICE);
+  const [role, setRole] = useState<AppRole>("canvasser");
 
   const create = useMutation({
     mutationFn: async () =>
@@ -48,7 +48,7 @@ export function AddTeamMemberDialog({ variant = "default" }: { variant?: "defaul
       // Broad safety net for any query keyed on profile lists.
       qc.invalidateQueries();
       setFullName("");
-      setOffice("San Diego");
+      setOffice(DEFAULT_OFFICE);
       setRole("canvasser");
       setOpen(false);
     },
@@ -109,11 +109,12 @@ export function AddTeamMemberDialog({ variant = "default" }: { variant?: "defaul
             <select
               id="tm-office"
               value={office}
-              onChange={(e) => setOffice(e.target.value as Office)}
+              onChange={(e) => setOffice(e.target.value as OfficeLocation)}
               className="w-full bg-input border border-border rounded-md px-3 py-2 text-sm"
             >
-              <option value="San Diego">San Diego</option>
-              <option value="Orange County">Orange County</option>
+              {OFFICE_LOCATIONS.map((o) => (
+                <option key={o} value={o}>{o}</option>
+              ))}
             </select>
           </div>
 
@@ -122,7 +123,7 @@ export function AddTeamMemberDialog({ variant = "default" }: { variant?: "defaul
             <select
               id="tm-role"
               value={role}
-              onChange={(e) => setRole(e.target.value as Role)}
+              onChange={(e) => setRole(e.target.value as AppRole)}
               className="w-full bg-input border border-border rounded-md px-3 py-2 text-sm"
             >
               <option value="canvasser">Canvasser</option>

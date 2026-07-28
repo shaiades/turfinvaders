@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { formatCurrency } from "@/lib/utils";
 import { laTodayISO, addDaysISO } from "@/lib/dates";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -23,9 +24,6 @@ const FALLBACK_CLOSE_RATE = 0.35;     // sales / sits
 const FALLBACK_SIT_RATE = 0.5;        // sits / leads (show rate)
 const FALLBACK_LEAD_DOOR_RATE = 0.05; // leads / knocks (contact-to-lead)
 
-function fmtUSD(n: number) {
-  return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
-}
 function fmtInt(n: number) {
   if (!isFinite(n)) return "—";
   return Math.ceil(n).toLocaleString();
@@ -140,14 +138,14 @@ export function WeeklyPlaybook({ userId }: { userId: string }) {
           <Operator>×</Operator>
           <EquationTile
             label="Value / Knock"
-            value={fmtUSD(math.valuePerKnock)}
+            value={formatCurrency(math.valuePerKnock)}
             accent="var(--accent)"
             icon={<Sparkles className="w-3.5 h-3.5" />}
           />
           <Operator>=</Operator>
           <EquationTile
             label="Income Goal"
-            value={fmtUSD(weeklyGoal)}
+            value={formatCurrency(weeklyGoal)}
             accent="var(--victory)"
             icon={<Target className="w-3.5 h-3.5" />}
             mega
@@ -192,7 +190,7 @@ export function WeeklyPlaybook({ userId }: { userId: string }) {
             <FunnelTile
               label="Sales"
               value={fmtInt(math.requiredSales)}
-              sub={`${fmtUSD(avgCommission)} avg commission`}
+              sub={`${formatCurrency(avgCommission)} avg commission`}
               accent="var(--victory)"
               icon={<Trophy className="w-4 h-4" />}
             />

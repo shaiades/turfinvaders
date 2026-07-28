@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
@@ -17,28 +18,17 @@ import { deleteProfile, deleteVan } from "@/lib/fleet.functions";
 import { addTeamMember } from "@/lib/users.functions";
 import { useAuth } from "@/hooks/useAuth";
 import { isManagerRole } from "@/lib/roles";
-import { formatCurrency } from "@/lib/utils";
-import { weekStartMonday, toISODate, addDays, addDaysISO, laMidnightUtcISO } from "@/lib/dates";
+import { formatCurrency, normalizeName } from "@/lib/utils";
+import { weeklyPoints } from "@/lib/pay";
+import { DEFAULT_OFFICE, OFFICE_LOCATIONS, type OfficeLocation } from "@/lib/offices";
+import { addDays, addDaysISO, formatWeekRange, laMidnightUtcISO, toISODate } from "@/lib/dates";
+import { useWeekSelector } from "@/hooks/useWeekSelector";
 
 // Week helpers — ISO week, Monday..Sunday. The fleet week is anchored to
 // America/Los_Angeles via the shared helpers in @/lib/dates: all stats reset
 // at midnight PT on Monday morning, regardless of the viewer's device timezone.
-function formatRange(start: Date, end: Date): string {
-  const sameMonth = start.getMonth() === end.getMonth();
-  const sameYear = start.getFullYear() === end.getFullYear();
-  const monthFmt = (d: Date) => d.toLocaleDateString(undefined, { month: "short" });
-  const sM = monthFmt(start);
-  const eM = monthFmt(end);
-  const sD = start.getDate();
-  const eD = end.getDate();
-  if (sameMonth && sameYear) return `${sM} ${sD} – ${eD}, ${end.getFullYear()}`;
-  if (sameYear) return `${sM} ${sD} – ${eM} ${eD}, ${end.getFullYear()}`;
-  return `${sM} ${sD}, ${start.getFullYear()} – ${eM} ${eD}, ${end.getFullYear()}`;
-}
 
 const VAN_COLORS = ["#ff007a", "#00f0ff", "#a855f7", "#f59e0b", "#22c55e", "#ef4444", "#3b82f6", "#eab308"];
-export const OFFICE_LOCATIONS = ["San Diego", "Orange County"] as const;
-export type OfficeLocation = (typeof OFFICE_LOCATIONS)[number];
 
 
 
@@ -48,7 +38,7 @@ export function FleetManager() {
   const canManage = isManagerRole(realRole);
   const isOwnerRole = realRole === "owner";
   const [newVanName, setNewVanName] = useState("");
-  const [newVanLoc, setNewVanLoc] = useState<OfficeLocation>("San Diego");
+  const [newVanLoc, setNewVanLoc] = useState<OfficeLocation>(DEFAULT_OFFICE);
   const [newVanColor, setNewVanColor] = useState(VAN_COLORS[0]);
   const deleteProfileFn = useServerFn(deleteProfile);
   const deleteVanFn = useServerFn(deleteVan);
@@ -56,10 +46,10 @@ export function FleetManager() {
   const [editingVanId, setEditingVanId] = useState<string | null>(null);
   const [editVanName, setEditVanName] = useState("");
   const [editVanColor, setEditVanColor] = useState(VAN_COLORS[0]);
-  const [editVanLoc, setEditVanLoc] = useState<OfficeLocation>("San Diego");
+  const [editVanLoc, setEditVanLoc] = useState<OfficeLocation>(DEFAULT_OFFICE);
   const [addAgentOpen, setAddAgentOpen] = useState(false);
   const [newAgentName, setNewAgentName] = useState("");
-  const [newAgentOffice, setNewAgentOffice] = useState<OfficeLocation>("San Diego");
+  const [newAgentOffice, setNewAgentOffice] = useState<OfficeLocation>(DEFAULT_OFFICE);
   const [archivedOpen, setArchivedOpen] = useState(false);
 
   const reactivateAgent = useMutation({
@@ -75,20 +65,14 @@ export function FleetManager() {
   });
 
   // Week selector — default to current Monday-anchored week (Pacific time).
-  const [weekStart, setWeekStart] = useState<Date>(() => weekStartMonday());
-  const weekEnd = useMemo(() => addDays(weekStart, 6), [weekStart]);
-  const weekStartISO = useMemo(() => toISODate(weekStart), [weekStart]);
-  const weekEndISO = useMemo(() => toISODate(weekEnd), [weekEnd]);
+  const { weekStart, weekEnd, weekStartISO, weekEndISO, isCurrentWeek, shiftWeek, goToWeek } =
+    useWeekSelector({ endOffsetDays: 6 });
   // created_at window: LA-midnight Monday → LA-midnight next Monday (exclusive).
   const selectedDateRange = useMemo(
     () => ({
       startDate: laMidnightUtcISO(weekStartISO),
       endDate: laMidnightUtcISO(addDaysISO(weekStartISO, 7)),
     }),
-    [weekStartISO],
-  );
-  const isCurrentWeek = useMemo(
-    () => toISODate(weekStartMonday()) === weekStartISO,
     [weekStartISO],
   );
 
@@ -165,7 +149,7 @@ export function FleetManager() {
       const engineWeekEndISO = toISODate(addDays(weekStart, 5));
       for (const l of logRows) {
         if (!l.canvasser_id || l.log_date > engineWeekEndISO) continue;
-        const pts = (l.demos_sits ?? 0) + (l.sales ?? 0);
+        const pts = weeklyPoints(l.demos_sits ?? 0, l.sales ?? 0);
         if (pts > 0) pointsByUser.set(l.canvasser_id, (pointsByUser.get(l.canvasser_id) ?? 0) + pts);
       }
       // Van Volume: confirmed sale dollars per canvasser, attributed to the
@@ -195,27 +179,11 @@ export function FleetManager() {
 
   // Live updates — refresh as Monday webhooks arrive: daily_logs feeds the
   // points badges, daily_metrics feeds submits/confirmed.
-  useEffect(() => {
-    const ch = supabase
-      .channel("fleet-live-metrics")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "daily_metrics" },
-        () => qc.invalidateQueries({ queryKey: ["fleet_manager"] }),
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "daily_logs" },
-        () => qc.invalidateQueries({ queryKey: ["fleet_manager"] }),
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "leads" },
-        () => qc.invalidateQueries({ queryKey: ["fleet_manager"] }),
-      )
-      .subscribe();
-    return () => { supabase.removeChannel(ch); };
-  }, [qc]);
+  useRealtimeInvalidate({
+    channel: "fleet-live-metrics",
+    tables: ["daily_metrics", "daily_logs", "leads"],
+    invalidateKeys: [["fleet_manager"]],
+  });
 
 
 
@@ -315,7 +283,7 @@ export function FleetManager() {
     setEditingVanId(v.id);
     setEditVanName(v.name);
     setEditVanColor(v.color);
-    setEditVanLoc((v.office_location as OfficeLocation) ?? "San Diego");
+    setEditVanLoc((v.office_location as OfficeLocation) ?? DEFAULT_OFFICE);
   }
 
   if (fleet.isLoading || !fleet.data) {
@@ -332,7 +300,7 @@ export function FleetManager() {
   const vansByOffice = new Map<string, typeof vans>();
   for (const loc of OFFICE_LOCATIONS) vansByOffice.set(loc, []);
   for (const v of vans) {
-    const loc = (v.office_location as string) || "San Diego";
+    const loc = (v.office_location as string) || DEFAULT_OFFICE;
     if (!vansByOffice.has(loc)) vansByOffice.set(loc, []);
     vansByOffice.get(loc)!.push(v);
   }
@@ -366,7 +334,7 @@ export function FleetManager() {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => setWeekStart((w) => addDays(w, -7))}
+              onClick={() => shiftWeek(-1)}
               title="Previous week"
             >
               <ChevronLeft className="w-4 h-4" />
@@ -377,13 +345,13 @@ export function FleetManager() {
                 <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
                   {isCurrentWeek ? "Current Week" : "Selected Week"}
                 </span>
-                <span className="text-sm font-display">{formatRange(weekStart, weekEnd)}</span>
+                <span className="text-sm font-display">{formatWeekRange(weekStart, weekEnd)}</span>
               </div>
             </div>
             <Button
               size="sm"
               variant="outline"
-              onClick={() => setWeekStart((w) => addDays(w, 7))}
+              onClick={() => shiftWeek(1)}
               title="Next week"
             >
               <ChevronRight className="w-4 h-4" />
@@ -393,7 +361,7 @@ export function FleetManager() {
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => setWeekStart(weekStartMonday())}
+              onClick={() => goToWeek()}
             >
               Jump to current week
             </Button>
@@ -416,7 +384,7 @@ export function FleetManager() {
           <ScoreTile label="Fleet Points" value={totalFleetPoints} color="accent" />
         </div>
         <div className="mt-1.5 text-[9px] text-muted-foreground text-center uppercase tracking-widest font-display">
-          {isCurrentWeek ? "Live · this week" : formatRange(weekStart, weekEnd)}
+          {isCurrentWeek ? "Live · this week" : formatWeekRange(weekStart, weekEnd)}
           <span className="mx-1.5 opacity-40">·</span>
           {activeAgentCount} active · {vans.length} vans
         </div>
@@ -489,7 +457,7 @@ export function FleetManager() {
                     const rosterRaw = profiles.filter((p) => p.team_id === v.id);
                     const rosterMap = new Map<string, typeof rosterRaw[number]>();
                     for (const p of rosterRaw) {
-                      const key = (p.display_name ?? "").trim().toLowerCase().replace(/\s+/g, " ") || `id:${p.id}`;
+                      const key = normalizeName(p.display_name) || `id:${p.id}`;
                       const prev = rosterMap.get(key);
                       if (!prev) rosterMap.set(key, p);
                       else if ((rolesByUser.get(p.id) ?? []).includes("captain") && !(rolesByUser.get(prev.id) ?? []).includes("captain")) {
@@ -575,7 +543,7 @@ export function FleetManager() {
 
                             <div className="flex items-center gap-1">
                               <span className="text-[10px] font-display uppercase tracking-widest hidden sm:flex items-center gap-1 mr-1 text-muted-foreground">
-                                <Building2 className="w-3 h-3" /> {v.office_location ?? "San Diego"}
+                                <Building2 className="w-3 h-3" /> {v.office_location ?? DEFAULT_OFFICE}
                               </span>
                               {canManage && (
                                 <button
@@ -612,9 +580,9 @@ export function FleetManager() {
                               const targetIsOwner = (rolesByUser.get(r.id) ?? []).includes("owner");
                               const canModify = canManage && (isOwnerRole || !targetIsOwner);
                               // Sum points and sale volume across every profile with the same display name in this van.
-                              const nameKey = (r.display_name ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+                              const nameKey = normalizeName(r.display_name);
                               const sameNameProfiles = rosterRaw.filter(
-                                (p) => ((p.display_name ?? "").trim().toLowerCase().replace(/\s+/g, " ")) === nameKey,
+                                (p) => normalizeName(p.display_name) === nameKey,
                               );
                               const aggregatedPoints = sameNameProfiles.reduce((sum, p) => sum + (pointsByUser.get(p.id) ?? 0), 0);
                               const aggregatedVolume = sameNameProfiles.reduce((sum, p) => sum + (volumeByUser.get(p.id) ?? 0), 0);

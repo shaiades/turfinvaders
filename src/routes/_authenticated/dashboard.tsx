@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useAuth } from "@/hooks/useAuth";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { isAdminRole } from "@/lib/roles";
+import { useQuery } from "@tanstack/react-query";
+import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { supabase } from "@/integrations/supabase/client";
 import { StatCard, ArcadePanel, TeamBadge, MobileCardList, MobileCard, MobileCardHeader, MobileStatGrid, MobileStat } from "@/components/arcade";
 import { LiveLeadCounter } from "@/components/LiveLeadCounter";
@@ -62,7 +64,7 @@ function Dashboard() {
   if (!role) return <NoRole />;
 
   // Owners and Office Staff (Admins) both get the full Command view.
-  if (role === "owner" || role === "office_staff") return <OwnerDashboard visibility={!!settings?.global_visibility} />;
+  if (isAdminRole(role)) return <OwnerDashboard visibility={!!settings?.global_visibility} />;
   if (role === "captain") return <CaptainDashboard teamId={teamId} visibility={!!settings?.global_visibility} />;
   return <CanvasserDashboard displayName={displayName} teamId={teamId} userId={user?.id} visibility={!!settings?.global_visibility} />;
 }
@@ -173,7 +175,6 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
 }
 /* ============ CAPTAIN ============ */
 function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visibility: boolean }) {
-  const qc = useQueryClient();
   const { user } = useAuth();
   const { data: leads } = useTodayLeads();
 
@@ -296,20 +297,13 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
     },
   });
 
-  // Live: refresh the roster/totals as team logs land (same pattern as
-  // ExecutiveDashboard's 'live-daily-action' channel).
-  useEffect(() => {
-    if (!teamId) return;
-    const ch = supabase
-      .channel("captain-dashboard-live")
-      .on("postgres_changes", { event: "*", schema: "public", table: "daily_logs" }, () => {
-        qc.invalidateQueries({ queryKey: ["captain_roster", teamId] });
-      })
-      .subscribe();
-    return () => {
-      supabase.removeChannel(ch);
-    };
-  }, [teamId, qc]);
+  // Live: refresh the roster/totals as team logs land.
+  useRealtimeInvalidate({
+    channel: "captain-dashboard-live",
+    tables: ["daily_logs"],
+    invalidateKeys: [["captain_roster", teamId]],
+    enabled: !!teamId,
+  });
 
   const myTeam = teamQuery.data ?? { id: teamId ?? "", name: "Unassigned", color: "#10b981" };
   const members = rosterQuery.data?.members ?? [];

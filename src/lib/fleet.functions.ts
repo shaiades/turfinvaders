@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { DEFAULT_OFFICE } from "@/lib/offices";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 /**
@@ -99,7 +100,7 @@ export const upsertManualWeekly = createServerFn({ method: "POST" })
       canvasser_id: data.canvasser_id,
       team_id: prof?.team_id ?? null,
       log_date: data.week_start,
-      office_location: prof?.office_location ?? "San Diego",
+      office_location: prof?.office_location ?? DEFAULT_OFFICE,
       demos_sits,
       sales: data.total_sales,
       no_demo,

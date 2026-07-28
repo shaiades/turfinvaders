@@ -4,10 +4,9 @@ import { Button } from "@/components/ui/button";
 import { Heart, Lock } from "lucide-react";
 import { laTodayISO } from "@/lib/dates";
 
-const todayISO = () => laTodayISO();
 
 function storageKey(userId: string) {
-  return `gratitude:${userId}:${todayISO()}`;
+  return `gratitude:${userId}:${laTodayISO()}`;
 }
 
 export function hasPassedGratitudeGate(userId: string | undefined): boolean {

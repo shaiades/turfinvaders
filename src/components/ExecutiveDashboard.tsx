@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel, TeamBadge, MobileCardList, MobileCard, MobileCardHeader, MobileStatGrid, MobileStat } from "@/components/arcade";
@@ -8,20 +9,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { upsertManualWeekly, getWeeklyPaychecks } from "@/lib/fleet.functions";
+import { upsertManualWeekly } from "@/lib/fleet.functions";
+import { fetchWeeklyPaychecksChunked } from "@/lib/paychecks";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 import { OfficeFilterProvider, OfficeFilterToggle, useOfficeFilter } from "@/components/OfficeFilterContext";
-import { weekStartMonday, toISODate, addDays, dateFromISO, laDateISO, laTodayISO, laWeekStartISO, weekStartOfISO } from "@/lib/dates";
+import { weekStartMonday, toISODate, addDays, laTodayISO, laWeekStartISO, weekStartOfISO, formatWeekRange } from "@/lib/dates";
+import { useWeekSelector } from "@/hooks/useWeekSelector";
+import { DEFAULT_OFFICE } from "@/lib/offices";
 
 
 /* ============ Helpers ============ */
 /* All day/week/month buckets are America/Los_Angeles (midnight PT resets). */
 
-const startOfWeekMon = weekStartMonday;
-function startOfMonth(ref = new Date()) {
-  return dateFromISO(`${laDateISO(ref).slice(0, 7)}-01`);
-}
 
 // One board card = one lead (Setter Report parity). demos_sits already
 // includes sold sits, so sales is not added again. OL is intentionally NOT
@@ -33,23 +33,15 @@ function leadsSum(r: { demos_sits?: number | null; no_demo?: number | null; ctc?
 
 /* ============ Main ============ */
 
-function formatWeekRange(start: Date, end: Date): string {
-  const monthFmt = (d: Date) => d.toLocaleDateString(undefined, { month: "short" });
-  if (start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear())
-    return `${monthFmt(start)} ${start.getDate()} – ${end.getDate()}, ${end.getFullYear()}`;
-  return `${monthFmt(start)} ${start.getDate()} – ${monthFmt(end)} ${end.getDate()}, ${end.getFullYear()}`;
-}
-
 // Slimmed 2026-07-22: Payroll lives only in the Payroll tab, fleet status in
 // the Fleet tab, CSV import in the header dialog, and DatabaseCleanup on the
 // Manage Players screen — the Executive tab no longer restates them.
 export function ExecutiveDashboard() {
   // Week selector drives Weekly Results. Defaults to last completed week
   // (the historical behavior); Mon–Sat pay week, Pacific time.
-  const [weekStart, setWeekStart] = useState<Date>(() => addDays(weekStartMonday(), -7));
-  const weekEnd = useMemo(() => addDays(weekStart, 5), [weekStart]);
-  const thisWeekISO = toISODate(weekStartMonday());
-  const isCurrentWeek = toISODate(weekStart) === thisWeekISO;
+  const { weekStart, weekEnd, isCurrentWeek, shiftWeek, setWeekStart } = useWeekSelector({
+    initialOffsetWeeks: -1,
+  });
   const isLastWeek = toISODate(weekStart) === toISODate(addDays(weekStartMonday(), -7));
 
   return (
@@ -70,7 +62,7 @@ export function ExecutiveDashboard() {
         >
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-2 min-w-0 flex-1">
-              <Button size="sm" variant="outline" onClick={() => setWeekStart((w) => addDays(w, -7))} aria-label="Previous week">
+              <Button size="sm" variant="outline" onClick={() => shiftWeek(-1)} aria-label="Previous week">
                 ‹
               </Button>
               <div className="min-w-0 flex-1 text-center font-display text-xs sm:text-sm text-neon truncate">
@@ -79,7 +71,7 @@ export function ExecutiveDashboard() {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => setWeekStart((w) => addDays(w, 7))}
+                onClick={() => shiftWeek(1)}
                 disabled={isCurrentWeek}
                 aria-label="Next week"
               >
@@ -108,7 +100,6 @@ export function ExecutiveDashboard() {
 
 function LiveDailyAction() {
   const today = useMemo(() => laTodayISO(), []);
-  const qc = useQueryClient();
 
   const q = useQuery({
     queryKey: ["live_daily_action", today],
@@ -159,22 +150,14 @@ function LiveDailyAction() {
   });
 
   // Refresh when a new ping lands.
-  useEffect(() => {
-    const ch = supabase
-      .channel("live-daily-action")
-      .on("postgres_changes", { event: "*", schema: "public", table: "daily_logs" }, () => {
-        qc.invalidateQueries({ queryKey: ["live_daily_action", today] });
-      })
-      .subscribe();
-    return () => { supabase.removeChannel(ch); };
-  }, [qc, today]);
+  useRealtimeInvalidate({
+    channel: "live-daily-action",
+    tables: ["daily_logs"],
+    invalidateKeys: [["live_daily_action", today]],
+  });
 
   const t = q.data?.totals ?? { called: 0, nextDay: 0, future: 0, blowout: 0 };
   const donut = q.data?.donut ?? [];
-
-  const webhookUrl = typeof window !== "undefined"
-    ? `${window.location.origin}/api/public/monday-webhook`
-    : "/api/public/monday-webhook";
 
   return (
     <section className="space-y-4">
@@ -183,15 +166,6 @@ function LiveDailyAction() {
           <h2 className="font-display text-sm uppercase tracking-widest text-foreground">Live Daily Action</h2>
           <p className="text-xs text-muted-foreground mt-0.5">{today}</p>
         </div>
-        <button
-          onClick={() => {
-            navigator.clipboard.writeText(webhookUrl);
-            toast.success("Webhook URL copied");
-          }}
-          className="inline-flex items-center min-h-10 md:min-h-9 px-2 -mx-2 text-[10px] font-display uppercase tracking-widest text-neon hover:underline"
-        >
-          Copy Webhook URL
-        </button>
       </div>
 
       <div className="space-y-1 text-sm text-foreground">
@@ -410,7 +384,6 @@ function RawDataTable() {
 
 /* ============ 1. Live Fleet Status (Day/Week/Month) ============ */
 
-type Range = "today" | "week" | "month";
 
 /* ============ 2. Last Week's Results ============ */
 
@@ -436,7 +409,7 @@ type WeeklyRow = {
 function WeeklyResults({ weekStart }: { weekStart: Date }) {
   const lastWeekStart = weekStart;
   const lastWeekEnd = useMemo(() => addDays(lastWeekStart, 5), [lastWeekStart]);
-  const isCurrentWeek = toISODate(weekStart) === toISODate(startOfWeekMon());
+  const isCurrentWeek = toISODate(weekStart) === toISODate(weekStartMonday());
 
   const q = useQuery({
     queryKey: ["weekly_results", toISODate(lastWeekStart)],
@@ -460,7 +433,7 @@ function WeeklyResults({ weekStart }: { weekStart: Date }) {
       // numbers (mirrors the per-office Setter Reports).
       const agg = new Map<string, { leads: number; sits: number; resets: number; bo: number; ctc: number; nonCore: number; ol: number; sales: number }>();
       for (const l of logsR.data ?? []) {
-        const key = `${l.canvasser_id}|${(l as { office_location?: string | null }).office_location ?? "San Diego"}`;
+        const key = `${l.canvasser_id}|${(l as { office_location?: string | null }).office_location ?? DEFAULT_OFFICE}`;
         const cur = agg.get(key) ?? { leads: 0, sits: 0, resets: 0, bo: 0, ctc: 0, nonCore: 0, ol: 0, sales: 0 };
         cur.leads += leadsSum(l);
         // demos_sits in DB includes sale rows. Sits = demos_sits - sales.
@@ -478,25 +451,17 @@ function WeeklyResults({ weekStart }: { weekStart: Date }) {
       }
 
       const activeIds = Array.from(new Set(Array.from(agg.keys()).map((k) => k.split("|")[0])));
-      // Batched calls to the pay engine (chunked under the server fn's 300-id
-      // cap) — same code path as the Payroll tab.
+      // Batched calls to the pay engine — same code path as the Payroll tab;
+      // a failed chunk is absorbed as per-id errors instead of failing whole.
       const payById = new Map<string, { pay: number; error: string | null }>();
-      for (let i = 0; i < activeIds.length; i += 300) {
-        const chunk = activeIds.slice(i, i + 300);
-        try {
-          const { results } = await getWeeklyPaychecks({
-            data: { week_start: toISODate(lastWeekStart), canvasser_ids: chunk },
-          });
-          for (const r of results) {
-            payById.set(r.canvasser_id, {
-              pay: Number(r.paycheck?.total_pay ?? 0),
-              error: r.error,
-            });
-          }
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          for (const id of chunk) payById.set(id, { pay: 0, error: msg });
-        }
+      const paychecks = await fetchWeeklyPaychecksChunked(toISODate(lastWeekStart), activeIds, {
+        onChunkError: "absorb",
+      });
+      for (const r of paychecks) {
+        payById.set(r.canvasser_id, {
+          pay: Number(r.paycheck?.total_pay ?? 0),
+          error: r.error,
+        });
       }
 
       const rows: WeeklyRow[] = [];

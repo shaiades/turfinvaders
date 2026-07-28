@@ -120,8 +120,8 @@ function isoWeek(d: Date): string {
   return `${t.getUTCFullYear()}W${String(week).padStart(2, "0")}`;
 }
 
-// Retry policy (keep in sync with the edge fn's monday.ts and
-// scripts/migration/07-monday.mjs): HTTP 429/5xx, network failures, and
+// Retry policy (keep in sync with the edge fn's monday.ts — the Deno
+// function cannot import from src/): HTTP 429/5xx, network failures, and
 // GraphQL rate-limit/complexity/concurrency errors are retried up to
 // MAX_ATTEMPTS, waiting the API's own hint (retry_in_seconds, Retry-After, or
 // the RateLimit header's t=<reset-seconds>), exponential fallback, waits

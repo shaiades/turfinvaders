@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { DEFAULT_OFFICE } from "@/lib/offices";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 /**
@@ -260,7 +261,7 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
         .ilike("display_name", name)
         .maybeSingle();
       if (existing) {
-        const v = { id: existing.id, team_id: existing.team_id, office_location: existing.office_location ?? "San Diego" };
+        const v = { id: existing.id, team_id: existing.team_id, office_location: existing.office_location ?? DEFAULT_OFFICE };
         profileCache.set(k, v);
         return v;
       }
@@ -281,7 +282,7 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
         await supabaseAdmin.from("profiles").update({ team_id: data.team_id }).eq("id", created.user.id);
       }
       created_profiles += 1;
-      const v = { id: created.user.id, team_id: data.team_id ?? null, office_location: "San Diego" };
+      const v = { id: created.user.id, team_id: data.team_id ?? null, office_location: DEFAULT_OFFICE };
       profileCache.set(k, v);
       return v;
     }
