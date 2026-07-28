@@ -71,7 +71,9 @@ export function addDays(d: Date, n: number): Date {
 export function laMidnightUtcISO(isoDate: string): string {
   const guess = new Date(`${isoDate}T08:00:00Z`); // 00:00 LA if PST (UTC-8)
   const laHour = Number(
-    new Intl.DateTimeFormat("en-US", { timeZone: LA_TZ, hour12: false, hour: "2-digit" }).format(guess),
+    new Intl.DateTimeFormat("en-US", { timeZone: LA_TZ, hour12: false, hour: "2-digit" }).format(
+      guess,
+    ),
   );
   return new Date(guess.getTime() - laHour * 3_600_000).toISOString(); // 01:00 during PDT → back 1h
 }
@@ -136,6 +138,11 @@ export function lastWorkedDaysBefore(todayISO: string, n: number): string[] {
 /** "Mon 7/28" for a chip label. */
 export function fmtWorkedDay(iso: string): string {
   return new Date(`${iso}T00:00:00Z`)
-    .toLocaleDateString("en-US", { weekday: "short", month: "numeric", day: "numeric", timeZone: "UTC" })
+    .toLocaleDateString("en-US", {
+      weekday: "short",
+      month: "numeric",
+      day: "numeric",
+      timeZone: "UTC",
+    })
     .replace(",", "");
 }

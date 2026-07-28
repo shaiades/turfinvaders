@@ -29,7 +29,9 @@ export function useRealtimeInvalidate({
   keysRef.current = invalidateKeys;
 
   const tablesKey = JSON.stringify(
-    tables.map((t) => (typeof t === "string" ? { table: t, event: "*" } : { table: t.table, event: t.event ?? "*" })),
+    tables.map((t) =>
+      typeof t === "string" ? { table: t, event: "*" } : { table: t.table, event: t.event ?? "*" },
+    ),
   );
 
   useEffect(() => {
