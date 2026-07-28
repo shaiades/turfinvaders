@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { OfficeFilterProvider, OfficeFilterToggle, useOfficeFilter } from "@/components/OfficeFilterContext";
-import { MobileCard, MobileCardHeader, MobileCardList, MobileStat, MobileStatGrid } from "@/components/arcade";
-import { Radio, Users, FileSearch, X, Link2, Copy, Check, KeyRound, Eye, EyeOff, AlertTriangle, Lock } from "lucide-react";
+import { ArcadePanel, TeamBadge } from "@/components/arcade";
+import { Radio, Users, FileSearch, X, Link2, Copy, Check, KeyRound, Eye, EyeOff, AlertTriangle, Lock, Truck } from "lucide-react";
 import { toast } from "sonner";
 import confetti from "canvas-confetti";
 
@@ -199,6 +199,18 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
     },
   });
 
+  // Vans — same source Fleet Manager renders, so the dispatch board can
+  // group the funnel action by van in the same visual language.
+  const { data: vans = [] } = useQuery({
+    queryKey: ["dispatch-vans"],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("teams")
+        .select("id, name, color, captain_id, office_location");
+      return (data ?? []) as Van[];
+    },
+  });
+
   // Suspension window: the last 14 completed worked days (Sundays excluded).
   // Feeds the donut check (first two days) and the zero-streak display.
   const workedDays = useMemo(() => lastWorkedDaysBefore(today, 14), [today]);
@@ -272,6 +284,7 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
       role: "canvasser" | "captain";
       tracked: boolean;
       oldestCreated: string;
+      team_id: string | null;
     };
     const groups = new Map<string, Group>();
     for (const c of visible) {
@@ -288,6 +301,7 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
           role: c.role,
           tracked: c.suspension_tracked,
           oldestCreated: created,
+          team_id: c.team_id,
         });
       } else {
         g.ids.push(c.id);
@@ -296,6 +310,7 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
         if (!g.team_office && c.team_office) g.team_office = c.team_office;
         if (!c.suspension_tracked) g.tracked = false;
         if (created < g.oldestCreated) g.oldestCreated = created;
+        if (!g.team_id && c.team_id) g.team_id = c.team_id;
       }
     }
     const enriched = Array.from(groups.values()).map((g) => {
@@ -461,99 +476,195 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
         }
       />
 
-      <div className="arcade-card overflow-hidden">
-        {rows.length === 0 ? (
-          <div className="p-8 text-center text-sm text-muted-foreground flex flex-col items-center gap-2">
-            <Users className="w-5 h-5" />
-            No canvassers in this office yet.
-          </div>
-        ) : (
-          <>
-            <MobileCardList className="p-3">
-              {rows.map((r, i) => {
-                const emoji = r.sub > 0 ? "🔥" : "🍩";
+      {rows.length === 0 ? (
+        <div className="arcade-card p-8 text-center text-sm text-muted-foreground flex flex-col items-center gap-2">
+          <Users className="w-5 h-5" />
+          No canvassers in this office yet.
+        </div>
+      ) : (
+        <DispatchFleet rows={rows} vans={vans} />
+      )}
+    </div>
+  );
+}
+
+type Van = {
+  id: string;
+  name: string;
+  color: string | null;
+  captain_id: string | null;
+  office_location: string | null;
+};
+
+type FunnelRow = {
+  g: {
+    key: string;
+    ids: string[];
+    display_name: string | null;
+    role: "canvasser" | "captain";
+    team_id: string | null;
+  };
+  sub: number;
+  pen: number;
+  conf: number;
+  fut: number;
+  kil: number;
+};
+
+const FUNNEL_COLS: Array<{ short: string; full: string; key: "sub" | "pen" | "conf" | "fut" | "kil"; color: keyof typeof metricColorClass }> = [
+  { short: "Sub", full: "Submitted", key: "sub", color: "neon" },
+  { short: "Unc", full: "Unconfirmed", key: "pen", color: "warning" },
+  { short: "Con", full: "Confirmed", key: "conf", color: "victory" },
+  { short: "Fut", full: "Future", key: "fut", color: "accent" },
+  { short: "BO", full: "Blowout", key: "kil", color: "destructive" },
+];
+
+/** One rep's funnel line — Fleet Manager roster-row styling. */
+function DispatchRow({ r }: { r: FunnelRow }) {
+  return (
+    <div className="grid grid-cols-[minmax(0,1fr)_repeat(5,2.4rem)] items-center gap-1 px-2 py-1.5 rounded border border-border bg-surface hover:border-neon/60">
+      <span className="text-sm truncate flex items-center gap-1.5 min-w-0">
+        <span aria-hidden>{r.sub > 0 ? "🔥" : "🍩"}</span>
+        <span className="truncate">{r.g.display_name ?? "—"}</span>
+        {r.g.role === "captain" && (
+          <span className="shrink-0 text-[9px] font-display uppercase tracking-widest px-1.5 py-0.5 rounded border border-accent/60 text-accent bg-accent/10">
+            Captain
+          </span>
+        )}
+      </span>
+      {FUNNEL_COLS.map((c) => (
+        <span key={c.key} title={c.full} className={`text-right font-display text-sm ${metricClass(r[c.key], c.color)}`}>
+          {r[c.key]}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** Funnel mini-table column headers, aligned to DispatchRow's grid. */
+function DispatchColHeader() {
+  return (
+    <div className="grid grid-cols-[minmax(0,1fr)_repeat(5,2.4rem)] items-center gap-1 px-2">
+      <span />
+      {FUNNEL_COLS.map((c) => (
+        <span key={c.key} title={c.full} className="text-right text-[9px] font-display uppercase tracking-widest text-muted-foreground">
+          {c.short}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** The dispatch roster in Fleet Manager's language: office panels → van
+ *  cards → per-rep funnel rows, plus the Free Agents pen for the vanless.
+ *  Same live data as always — only the grouping is Fleet-style. */
+function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
+  const { matches } = useOfficeFilter();
+
+  const rowsByVan = new Map<string, FunnelRow[]>();
+  const freeAgents: FunnelRow[] = [];
+  const vanIds = new Set(vans.map((v) => v.id));
+  for (const r of rows) {
+    if (r.g.team_id && vanIds.has(r.g.team_id)) {
+      const list = rowsByVan.get(r.g.team_id) ?? [];
+      list.push(r);
+      rowsByVan.set(r.g.team_id, list);
+    } else {
+      freeAgents.push(r);
+    }
+  }
+  const vanSub = (id: string) => (rowsByVan.get(id) ?? []).reduce((a, r) => a + r.sub, 0);
+  const vanConf = (id: string) => (rowsByVan.get(id) ?? []).reduce((a, r) => a + r.conf, 0);
+  const captainName = (v: Van) =>
+    v.captain_id ? rows.find((r) => r.g.ids.includes(v.captain_id!))?.g.display_name ?? null : null;
+
+  const offices = ["San Diego", "Orange County"].filter((o) => matches(o));
+
+  return (
+    <div className="space-y-4">
+      {offices.map((office) => {
+        const list = vans
+          .filter((v) => (v.office_location ?? "San Diego") === office)
+          .sort((a, b) => vanSub(b.id) - vanSub(a.id) || a.name.localeCompare(b.name));
+        if (list.length === 0) return null;
+        return (
+          <ArcadePanel key={office} title={`${office} · ${list.length} ${list.length === 1 ? "Van" : "Vans"}`}>
+            <div className="grid gap-4 md:grid-cols-2">
+              {list.map((v) => {
+                const roster = (rowsByVan.get(v.id) ?? []).sort((a, b) => b.sub - a.sub || b.conf - a.conf);
+                const cap = captainName(v);
                 return (
-                  <MobileCard key={r.g.key}>
-                    <MobileCardHeader
-                      left={
-                        <>
-                          <span className="mr-1.5 font-display text-xs text-muted-foreground">{i + 1}</span>
-                          <span className="mr-1.5" aria-hidden>{emoji}</span>
-                          {r.g.display_name ?? "—"}
-                        </>
-                      }
-                      right={undefined}
-                    />
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="text-xs text-muted-foreground">
-                        {r.g.office_location ?? r.g.team_office ?? "—"}
-                      </span>
-                      {r.g.role === "captain" && (
-                        <span className="text-[9px] font-display uppercase tracking-widest text-accent">
-                          Captain
+                  <div key={v.id} className="van-card p-4 space-y-3">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <Truck className="w-4 h-4 shrink-0" style={{ color: v.color ?? "#888" }} />
+                        <span className="min-w-0 truncate">
+                          <TeamBadge name={v.name} color={v.color ?? "#888"} />
                         </span>
-                      )}
+                        <span
+                          className="shrink-0 text-[10px] font-display uppercase tracking-widest px-1.5 py-0.5 rounded border border-neon/50 text-neon bg-neon/10"
+                          title="Van leads submitted in this date range"
+                        >
+                          {vanSub(v.id)} sub
+                        </span>
+                        <span
+                          className="shrink-0 text-[10px] font-display uppercase tracking-widest px-1.5 py-0.5 rounded border border-victory/50 text-victory bg-victory/10"
+                          title="Van leads confirmed in this date range"
+                        >
+                          {vanConf(v.id)} conf
+                        </span>
+                        {cap && (
+                          <span className="hidden sm:inline text-[10px] text-muted-foreground truncate min-w-0">· {cap}</span>
+                        )}
+                      </div>
                     </div>
-                    <MobileStatGrid cols={3} className="font-display">
-                      <MobileStat label="Submitted" value={r.sub} className={metricClass(r.sub, "neon")} />
-                      <MobileStat label="Unconfirmed" value={r.pen} className={metricClass(r.pen, "warning")} />
-                      <MobileStat label="Confirmed" value={r.conf} className={metricClass(r.conf, "victory")} />
-                      <MobileStat label="Future" value={r.fut} className={metricClass(r.fut, "accent")} />
-                      <MobileStat label="Blowout" value={r.kil} className={metricClass(r.kil, "destructive")} />
-                    </MobileStatGrid>
-                  </MobileCard>
+                    {roster.length === 0 ? (
+                      <div className="text-xs text-muted-foreground italic px-2 py-3 border border-dashed border-border rounded">
+                        No active agents on this van.
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        <DispatchColHeader />
+                        {roster.map((r) => (
+                          <DispatchRow key={r.g.key} r={r} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 );
               })}
-            </MobileCardList>
-            <div className="hidden md:block overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border bg-surface">
-                  <th className="text-left py-2.5 px-3 w-10">#</th>
-                  <th className="text-left py-2.5 px-3">Canvasser</th>
-                  <th className="text-left py-2.5 px-3">Office</th>
-                  <th className="text-right py-2.5 px-3">Submitted</th>
-                  <th className="text-right py-2.5 px-3">Unconfirmed</th>
-                  <th className="text-right py-2.5 px-3">Confirmed</th>
-                  <th className="text-right py-2.5 px-3">Future</th>
-                  <th className="text-right py-2.5 px-3">Blowout</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r, i) => {
-                  const isFire = r.sub > 0;
-                  const emoji = isFire ? "🔥" : "🍩";
-                  return (
-                    <tr key={r.g.key} className="border-b border-border/40 hover:bg-gray-800/50 transition-colors">
-                      <td className="py-2.5 px-3 text-muted-foreground font-display text-xs">
-                        {i + 1}
-                      </td>
-                      <td className="py-2.5 px-3 font-medium">
-                        <span className="mr-2 inline-block" aria-hidden>{emoji}</span>
-                        {r.g.display_name ?? "—"}
-                        {r.g.role === "captain" && (
-                          <span className="ml-2 text-[9px] font-display uppercase tracking-widest text-accent">
-                            Captain
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-2.5 px-3 text-xs text-muted-foreground">
-                        {r.g.office_location ?? r.g.team_office ?? "—"}
-                      </td>
-                      <MetricCell value={r.sub} color="neon" />
-                      <MetricCell value={r.pen} color="warning" />
-                      <MetricCell value={r.conf} color="victory" />
-                      <MetricCell value={r.fut} color="accent" />
-                      <MetricCell value={r.kil} color="destructive" />
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
             </div>
-          </>
-        )}
-      </div>
+          </ArcadePanel>
+        );
+      })}
+
+      {freeAgents.length > 0 && (
+        <div className="free-agents-panel bg-surface p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <h3 className="font-display uppercase tracking-widest text-sm" style={{ color: "var(--neon-orange)" }}>
+              ⚠ Free Agents (Needs Van)
+            </h3>
+            <span
+              className="text-[10px] font-display px-2 py-0.5 rounded-full"
+              style={{
+                color: "var(--neon-orange)",
+                background: "color-mix(in oklab, var(--neon-orange) 12%, transparent)",
+                border: "1px solid color-mix(in oklab, var(--neon-orange) 45%, transparent)",
+              }}
+            >
+              {freeAgents.length}
+            </span>
+          </div>
+          <div className="space-y-1.5">
+            <DispatchColHeader />
+            {freeAgents
+              .sort((a, b) => b.sub - a.sub || (a.g.display_name ?? "").localeCompare(b.g.display_name ?? ""))
+              .map((r) => (
+                <DispatchRow key={r.g.key} r={r} />
+              ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -638,23 +749,6 @@ function metricClass(value: number, color: keyof typeof metricColorClass) {
   return value > 0 ? metricColorClass[color] : "text-muted-foreground/40";
 }
 
-function MetricCell({
-  value,
-  color,
-  suffix = "",
-}: {
-  value: number;
-  color: "neon" | "warning" | "muted-foreground" | "victory" | "destructive" | "accent";
-  suffix?: string;
-}) {
-  const active = value > 0;
-  const colorClass = active ? metricColorClass[color] : "text-muted-foreground/40";
-  return (
-    <td className={`py-2.5 px-3 text-right font-display ${colorClass}`}>
-      {value}{suffix}
-    </td>
-  );
-}
 
 function WebhookUrlBanner() {
   const [copied, setCopied] = useState(false);
