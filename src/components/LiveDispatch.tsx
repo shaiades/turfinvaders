@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { OfficeFilterProvider, OfficeFilterToggle, useOfficeFilter } from "@/components/OfficeFilterContext";
 import { MobileCard, MobileCardHeader, MobileCardList, MobileStat, MobileStatGrid } from "@/components/arcade";
 import { Radio, Users, FileSearch, X, Link2, Copy, Check, KeyRound, Eye, EyeOff, AlertTriangle, Lock } from "lucide-react";
+import { toast } from "sonner";
 import confetti from "canvas-confetti";
 
 
@@ -105,6 +106,9 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
   const qc = useQueryClient();
   const [{ today, yday, locked }, setDates] = useState(reportDates);
   const [preset, setPreset] = useState<Preset>("today");
+  // Chips removed via the X vanish instantly (optimistic) while the
+  // suspension_tracked flag persists server-side.
+  const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
   const { matches } = useOfficeFilter();
   const confettiFired = useRef(false);
 
@@ -330,7 +334,7 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
       ids.reduce((a, id) => a + (genByDay.get(id)?.get(day) ?? 0), 0);
     const [d1, d2] = workedDays;
     return rows.flatMap((r) => {
-      if (!r.g.tracked) return [];
+      if (!r.g.tracked || dismissed.has(r.g.key)) return [];
       if (r.g.oldestCreated > d2) return [];
       if (genOn(r.g.ids, d1) !== 0 || genOn(r.g.ids, d2) !== 0) return [];
       // Consecutive zero worked days, newest backward, only days the profile existed.
@@ -343,7 +347,7 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
       }
       return [{ g: r.g, d1, d2, streak, streakLabel: `${streak}${capped ? "+" : ""}` }];
     });
-  }, [rows, genByDay, workedDays, preset]);
+  }, [rows, genByDay, workedDays, preset, dismissed]);
 
   return (
     <div className="space-y-4">
@@ -416,15 +420,37 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
         onRemove={
           readOnly
             ? undefined
-            : async (g) => {
+            : (g) => {
                 const name = g.display_name ?? "this player";
-                if (!window.confirm(`Remove ${name} from the suspension list? (For old or fired reps — re-enable any time in Manage Players.)`)) return;
-                const { error } = await supabase
+                // Vanish immediately; persist in the background.
+                setDismissed((prev) => new Set(prev).add(g.key));
+                supabase
                   .from("profiles")
                   .update({ suspension_tracked: false })
-                  .in("id", g.ids);
-                if (error) window.alert(`Could not remove ${name}: ${error.message}`);
-                else qc.invalidateQueries({ queryKey: ["dispatch-canvassers"] });
+                  .in("id", g.ids)
+                  .then(({ error }) => {
+                    if (error) {
+                      setDismissed((prev) => { const n = new Set(prev); n.delete(g.key); return n; });
+                      toast.error(`Could not remove ${name}: ${error.message}`);
+                      return;
+                    }
+                    qc.invalidateQueries({ queryKey: ["dispatch-canvassers"] });
+                    toast.success(`${name} removed from the suspension list`, {
+                      action: {
+                        label: "Undo",
+                        onClick: () => {
+                          supabase
+                            .from("profiles")
+                            .update({ suspension_tracked: true })
+                            .in("id", g.ids)
+                            .then(() => {
+                              setDismissed((prev) => { const n = new Set(prev); n.delete(g.key); return n; });
+                              qc.invalidateQueries({ queryKey: ["dispatch-canvassers"] });
+                            });
+                        },
+                      },
+                    });
+                  });
               }
         }
       />
@@ -530,7 +556,7 @@ function SuspensionBanner({
   onRemove,
 }: {
   rows: Array<{ g: { key: string; ids: string[]; display_name: string | null }; d1: string; d2: string; streakLabel: string }>;
-  onRemove?: (g: { ids: string[]; display_name: string | null }) => void;
+  onRemove?: (g: { key: string; ids: string[]; display_name: string | null }) => void;
 }) {
   if (rows.length === 0) return null;
   return (
