@@ -21,15 +21,16 @@ type Profile = {
 
 
 // The dispatch funnel: Submitted (Inbound births) plus the confirmation
-// team's Lead Status flips — Pending / Confirmed / Future / Blow-Out (the
-// killed column, relabeled per owner).
+// team's Lead Status flips — Confirmed / Future / Blowout / N-A (killed and
+// no_answers columns, Monday's labels). Unconfirmed is DERIVED: submitted
+// minus everything actioned — the waiting pool, not a status flip.
 type Metric = {
   id: string;
   canvasser_id: string;
   metric_date: string;
   leads_generated: number;
   leads_confirmed: number;
-  pending: number;
+  no_answers: number;
   killed: number;
   future: number;
   office_location: string;
@@ -190,7 +191,7 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
       const { data } = await supabase
         .from("daily_metrics")
         .select(
-          "id, canvasser_id, metric_date, leads_generated, leads_confirmed, pending, killed, future, office_location",
+          "id, canvasser_id, metric_date, leads_generated, leads_confirmed, no_answers, killed, future, office_location",
         )
         .gte("metric_date", range.start)
         .lte("metric_date", range.end);
@@ -229,12 +230,12 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
 
   // Sum all metric rows per canvasser_id across the selected range.
   const metricByCanvasser = useMemo(() => {
-    const acc = new Map<string, { gen: number; conf: number; pen: number; kil: number; fut: number }>();
+    const acc = new Map<string, { gen: number; conf: number; na: number; kil: number; fut: number }>();
     for (const m of metrics) {
-      const prev = acc.get(m.canvasser_id) ?? { gen: 0, conf: 0, pen: 0, kil: 0, fut: 0 };
+      const prev = acc.get(m.canvasser_id) ?? { gen: 0, conf: 0, na: 0, kil: 0, fut: 0 };
       prev.gen += m.leads_generated ?? 0;
       prev.conf += m.leads_confirmed ?? 0;
-      prev.pen += m.pending ?? 0;
+      prev.na += m.no_answers ?? 0;
       prev.kil += m.killed ?? 0;
       prev.fut += m.future ?? 0;
       acc.set(m.canvasser_id, prev);
@@ -298,15 +299,20 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
       }
     }
     const enriched = Array.from(groups.values()).map((g) => {
-      let gen = 0, conf = 0, pen = 0, kil = 0, fut = 0;
+      let gen = 0, conf = 0, na = 0, kil = 0, fut = 0;
       for (const id of g.ids) {
         const m = metricByCanvasser.get(id);
         if (!m) continue;
-        gen += m.gen; conf += m.conf; pen += m.pen; kil += m.kil; fut += m.fut;
+        gen += m.gen; conf += m.conf; na += m.na; kil += m.kil; fut += m.fut;
       }
       // Submitted = leads GENERATED (new items on the Incoming Leads board),
       // not outcome counts — production shows the moment a lead is entered.
       const sub = gen;
+      // Unconfirmed is the WAITING POOL, not a status flip: submitted leads
+      // the confirmation team hasn't actioned yet into Confirmed / Future /
+      // Blowout / N-A (owner, 2026-07-28). Floored — resolving cards born on
+      // earlier days can push resolutions past today's submissions.
+      const pen = Math.max(0, sub - conf - fut - kil - na);
       return { g, conf, pen, kil, fut, sub };
     });
     return enriched.sort((a, b) => {
