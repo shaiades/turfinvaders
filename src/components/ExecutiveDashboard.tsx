@@ -445,7 +445,7 @@ function WeeklyResults({ weekStart }: { weekStart: Date }) {
         supabase.from("profiles").select("id, display_name, team_id, office_location"),
         supabase.from("teams").select("id, name, color"),
         supabase.from("daily_logs")
-          .select("canvasser_id, demos_sits, sales, no_demo, ctc, non_core, one_legs, future_leads, unmarked")
+          .select("canvasser_id, office_location, demos_sits, sales, no_demo, ctc, non_core, one_legs, future_leads, unmarked")
           .gte("log_date", toISODate(lastWeekStart))
           .lte("log_date", toISODate(lastWeekEnd)),
       ]);
@@ -454,9 +454,14 @@ function WeeklyResults({ weekStart }: { weekStart: Date }) {
       if (logsR.error) throw logsR.error;
 
       const vanById = new Map((vansR.data ?? []).map((v) => [v.id, v]));
+      // One aggregate per (canvasser, WORK office) — the office where the
+      // leads actually ran, not the rep's home office, so a rep who worked
+      // both blocks appears under each office filter with that office's
+      // numbers (mirrors the per-office Setter Reports).
       const agg = new Map<string, { leads: number; sits: number; resets: number; bo: number; ctc: number; nonCore: number; ol: number; sales: number }>();
       for (const l of logsR.data ?? []) {
-        const cur = agg.get(l.canvasser_id) ?? { leads: 0, sits: 0, resets: 0, bo: 0, ctc: 0, nonCore: 0, ol: 0, sales: 0 };
+        const key = `${l.canvasser_id}|${(l as { office_location?: string | null }).office_location ?? "San Diego"}`;
+        const cur = agg.get(key) ?? { leads: 0, sits: 0, resets: 0, bo: 0, ctc: 0, nonCore: 0, ol: 0, sales: 0 };
         cur.leads += leadsSum(l);
         // demos_sits in DB includes sale rows. Sits = demos_sits - sales.
         const sitOnly = Math.max(0, (l.demos_sits ?? 0) - (l.sales ?? 0));
@@ -469,10 +474,10 @@ function WeeklyResults({ weekStart }: { weekStart: Date }) {
         // OL outcomes are persisted in one_legs (webhook DAILY_LOG_VECS).
         cur.ol += l.one_legs ?? 0;
         cur.sales += l.sales ?? 0;
-        agg.set(l.canvasser_id, cur);
+        agg.set(key, cur);
       }
 
-      const activeIds = Array.from(agg.keys());
+      const activeIds = Array.from(new Set(Array.from(agg.keys()).map((k) => k.split("|")[0])));
       // Batched calls to the pay engine (chunked under the server fn's 300-id
       // cap) — same code path as the Payroll tab.
       const payById = new Map<string, { pay: number; error: string | null }>();
@@ -495,16 +500,16 @@ function WeeklyResults({ weekStart }: { weekStart: Date }) {
       }
 
       const rows: WeeklyRow[] = [];
-      for (const id of activeIds) {
+      for (const [key, a] of agg) {
+        const [id, workOffice] = key.split("|");
         const p = profilesR.data?.find((x) => x.id === id);
         const v = p?.team_id ? vanById.get(p.team_id) : null;
-        const a = agg.get(id)!;
         // Strict formula: Points = (Sits * 1) + (Sales * 2)
         const totalPoints = a.sits * 1 + a.sales * 2;
         rows.push({
           canvasserId: id,
           name: p?.display_name ?? "Unknown",
-          officeLocation: (p as { office_location?: string | null } | undefined)?.office_location ?? null,
+          officeLocation: workOffice,
           vanName: v?.name ?? null,
           vanColor: v?.color ?? null,
           totalLeads: a.leads,
@@ -528,7 +533,31 @@ function WeeklyResults({ weekStart }: { weekStart: Date }) {
   });
 
   const { matches, office } = useOfficeFilter();
-  const rows = (q.data ?? []).filter((r) => matches(r.officeLocation));
+  // Rows come per (canvasser, work office). An office filter shows that
+  // office's slice of each rep's week; "All" merges the slices back into one
+  // row per rep (pay is per person, so it's counted once when merging).
+  const rows = useMemo(() => {
+    const visible = (q.data ?? []).filter((r) => matches(r.officeLocation));
+    if (office !== "All") return visible;
+    const merged = new Map<string, WeeklyRow>();
+    for (const r of visible) {
+      const m = merged.get(r.canvasserId);
+      if (!m) {
+        merged.set(r.canvasserId, { ...r });
+      } else {
+        m.totalLeads += r.totalLeads;
+        m.totalSits += r.totalSits;
+        m.totalResets += r.totalResets;
+        m.totalBO += r.totalBO;
+        m.totalCTC += r.totalCTC;
+        m.totalNonCore += r.totalNonCore;
+        m.totalOL += r.totalOL;
+        m.totalSales += r.totalSales;
+        m.totalPoints += r.totalPoints;
+      }
+    }
+    return Array.from(merged.values()).sort((a, b) => b.totalPay - a.totalPay);
+  }, [q.data, matches, office]);
 
   const grand = rows.reduce(
     (acc, r) => ({

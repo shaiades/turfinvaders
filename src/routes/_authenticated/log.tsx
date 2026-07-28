@@ -53,13 +53,26 @@ function LogPage() {
   const qc = useQueryClient();
   const [form, setForm] = useState<LogState>(EMPTY);
 
+  // daily_logs rows are per (canvasser, day, office); the manual log always
+  // targets the canvasser's home-office row.
+  const { data: myOffice = "San Diego" } = useQuery({
+    enabled: !!user,
+    queryKey: ["my_office", user?.id],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("profiles").select("office_location").eq("id", user!.id).maybeSingle();
+      return data?.office_location ?? "San Diego";
+    },
+  });
+
   const existing = useQuery({
     enabled: !!user,
-    queryKey: ["daily_logs", "today", user?.id],
+    queryKey: ["daily_logs", "today", user?.id, myOffice],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("daily_logs").select("*")
         .eq("canvasser_id", user!.id).eq("log_date", todayISO())
+        .eq("office_location", myOffice)
         .maybeSingle();
       if (error) throw error;
       return data;
@@ -93,11 +106,12 @@ function LogPage() {
         canvasser_id: user.id,
         team_id: teamId,
         log_date: todayISO(),
+        office_location: myOffice,
         ...form,
       };
       const { error } = await supabase
         .from("daily_logs")
-        .upsert(payload, { onConflict: "canvasser_id,log_date" });
+        .upsert(payload, { onConflict: "canvasser_id,log_date,office_location" });
       if (error) throw error;
     },
     onSuccess: () => {

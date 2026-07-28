@@ -93,16 +93,17 @@ export const upsertManualWeekly = createServerFn({ method: "POST" })
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: prof } = await supabaseAdmin
-      .from("profiles").select("team_id").eq("id", data.canvasser_id).maybeSingle();
+      .from("profiles").select("team_id, office_location").eq("id", data.canvasser_id).maybeSingle();
 
     const { error } = await supabaseAdmin.from("daily_logs").upsert({
       canvasser_id: data.canvasser_id,
       team_id: prof?.team_id ?? null,
       log_date: data.week_start,
+      office_location: prof?.office_location ?? "San Diego",
       demos_sits,
       sales: data.total_sales,
       no_demo,
-    }, { onConflict: "canvasser_id,log_date" });
+    }, { onConflict: "canvasser_id,log_date,office_location" });
     if (error) throw error;
 
     // Rank + pay-lock evaluation runs from write paths (the per-row

@@ -151,7 +151,7 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
     const errors: { row: number; reason: string }[] = [];
-    const profileCache = new Map<string, { id: string; team_id: string | null }>();
+    const profileCache = new Map<string, { id: string; team_id: string | null; office_location: string }>();
     let created_profiles = 0;
     let updated_logs = 0;
     let inserted_sales = 0;
@@ -250,17 +250,17 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
 
 
     // Resolve / create profiles.
-    async function resolveProfile(name: string): Promise<{ id: string; team_id: string | null } | null> {
+    async function resolveProfile(name: string): Promise<{ id: string; team_id: string | null; office_location: string } | null> {
       const k = name.toLowerCase();
       const cached = profileCache.get(k);
       if (cached) return cached;
       const { data: existing } = await supabaseAdmin
         .from("profiles")
-        .select("id, team_id, display_name")
+        .select("id, team_id, display_name, office_location")
         .ilike("display_name", name)
         .maybeSingle();
       if (existing) {
-        const v = { id: existing.id, team_id: existing.team_id };
+        const v = { id: existing.id, team_id: existing.team_id, office_location: existing.office_location ?? "San Diego" };
         profileCache.set(k, v);
         return v;
       }
@@ -281,7 +281,7 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
         await supabaseAdmin.from("profiles").update({ team_id: data.team_id }).eq("id", created.user.id);
       }
       created_profiles += 1;
-      const v = { id: created.user.id, team_id: data.team_id ?? null };
+      const v = { id: created.user.id, team_id: data.team_id ?? null, office_location: "San Diego" };
       profileCache.set(k, v);
       return v;
     }
@@ -321,7 +321,7 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
       if (!teamId) continue;
       if (profile.team_id !== teamId) {
         await supabaseAdmin.from("profiles").update({ team_id: teamId }).eq("id", profile.id);
-        profileCache.set(agentKey, { id: profile.id, team_id: teamId });
+        profileCache.set(agentKey, { id: profile.id, team_id: teamId, office_location: profile.office_location });
       }
     }
 
@@ -365,6 +365,7 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
       canvasser_id: string;
       team_id: string | null;
       log_date: string;
+      office_location: string;
       no_demo: number;
       one_legs: number;
       future_leads: number;
@@ -391,6 +392,7 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
         canvasser_id: profile.id,
         team_id: profile.team_id,
         log_date: b.log_date,
+        office_location: profile.office_location,
         no_demo: b.no_demo,
         one_legs: b.one_legs,
         future_leads: b.future_leads,
@@ -416,7 +418,7 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
     if (dailyLogRows.length > 0) {
       const { error: upsertErr } = await supabaseAdmin
         .from("daily_logs")
-        .upsert(dailyLogRows, { onConflict: "canvasser_id,log_date" });
+        .upsert(dailyLogRows, { onConflict: "canvasser_id,log_date,office_location" });
       if (upsertErr) {
         throw new Error(`daily_logs batch upsert failed: ${upsertErr.message} (code=${upsertErr.code ?? "?"}, details=${upsertErr.details ?? ""}, hint=${upsertErr.hint ?? ""})`);
       }

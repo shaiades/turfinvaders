@@ -936,15 +936,18 @@ serve(async (req) => {
       if (Object.values(delta).some((v) => v !== 0)) {
         // Ensure the row exists without clobbering fields on existing rows,
         // then read-modify-write only the counters we touch (legacy pattern).
+        // Rows are per (canvasser, day, OFFICE) — the board's office — so a
+        // rep working both blocks gets separate SD and OC rows.
         await supabaseAdmin.from('daily_logs').upsert(
-          { canvasser_id: match.id, team_id: match.team_id ?? null, log_date: metric_date },
-          { onConflict: 'canvasser_id,log_date', ignoreDuplicates: true },
+          { canvasser_id: match.id, team_id: match.team_id ?? null, log_date: metric_date, office_location },
+          { onConflict: 'canvasser_id,log_date,office_location', ignoreDuplicates: true },
         )
         const { data: logRow, error: logReadErr } = await supabaseAdmin
           .from('daily_logs')
           .select('id, ' + DAILY_LOG_KEYS.join(', '))
           .eq('canvasser_id', match.id)
           .eq('log_date', metric_date)
+          .eq('office_location', office_location)
           .maybeSingle()
         if (logReadErr || !logRow) {
           await supabaseAdmin.from('webhook_logs').insert({
