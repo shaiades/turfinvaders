@@ -76,6 +76,7 @@ export type Database = {
           canvasser_id: string
           confirmed_leads: number
           created_at: string
+          ctc: number
           demos_sits: number
           doors_knocked: number
           future_leads: number
@@ -85,6 +86,7 @@ export type Database = {
           next_days: number
           no_demo: number
           no_shows: number
+          non_core: number
           not_interested: number
           notes: string | null
           one_legs: number
@@ -99,6 +101,7 @@ export type Database = {
           canvasser_id: string
           confirmed_leads?: number
           created_at?: string
+          ctc?: number
           demos_sits?: number
           doors_knocked?: number
           future_leads?: number
@@ -108,6 +111,7 @@ export type Database = {
           next_days?: number
           no_demo?: number
           no_shows?: number
+          non_core?: number
           not_interested?: number
           notes?: string | null
           one_legs?: number
@@ -122,6 +126,7 @@ export type Database = {
           canvasser_id?: string
           confirmed_leads?: number
           created_at?: string
+          ctc?: number
           demos_sits?: number
           doors_knocked?: number
           future_leads?: number
@@ -131,6 +136,7 @@ export type Database = {
           next_days?: number
           no_demo?: number
           no_shows?: number
+          non_core?: number
           not_interested?: number
           notes?: string | null
           one_legs?: number

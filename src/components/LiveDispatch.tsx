@@ -72,7 +72,7 @@ export function LiveDispatch({ readOnly = false }: { readOnly?: boolean }) {
   );
 }
 
-type Preset = "today" | "yesterday" | "last7";
+type Preset = "today" | "yesterday" | "week";
 
 function normalizeName(s: string | null | undefined): string {
   return (s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -104,7 +104,13 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
 
   const range = useMemo(() => {
     if (preset === "yesterday") return { start: yday, end: yday, label: "Yesterday" };
-    if (preset === "last7") return { start: addDaysISO(today, -6), end: today, label: "Last 7 Days" };
+    if (preset === "week") {
+      // Calendar Block week (Mon–Sat), same as the Monday boards.
+      const [y, m, d] = today.split("-").map(Number);
+      const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0 = Sun
+      const monday = addDaysISO(today, -((dow + 6) % 7));
+      return { start: monday, end: addDaysISO(monday, 5), label: "This Week" };
+    }
     return { start: today, end: today, label: "Today" };
   }, [preset, today, yday]);
 
@@ -317,7 +323,7 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
         {([
           { id: "today", label: "Today" },
           { id: "yesterday", label: "Yesterday" },
-          { id: "last7", label: "Last 7 Days" },
+          { id: "week", label: "This Week" },
         ] as Array<{ id: Preset; label: string }>).map((p) => {
           const active = preset === p.id;
           return (

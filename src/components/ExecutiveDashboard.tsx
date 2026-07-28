@@ -23,11 +23,12 @@ function startOfMonth(ref = new Date()) {
   return dateFromISO(`${laDateISO(ref).slice(0, 7)}-01`);
 }
 
-// One board card = one lead. demos_sits already includes sold sits (a sale
-// ticks demos_sits AND sales), so sales must NOT be added again here — that
-// double-counted every sold lead in "Total Leads".
-function leadsSum(r: { demos_sits?: number | null; no_demo?: number | null; one_legs?: number | null; future_leads?: number | null; unmarked?: number | null }) {
-  return (r.demos_sits ?? 0) + (r.no_demo ?? 0) + (r.one_legs ?? 0) + (r.future_leads ?? 0) + (r.unmarked ?? 0);
+// One board card = one lead (Setter Report parity). demos_sits already
+// includes sold sits, so sales is not added again. OL is intentionally NOT
+// in the total — outside leads are their own column, and the Monday chart
+// totals don't include them either.
+function leadsSum(r: { demos_sits?: number | null; no_demo?: number | null; ctc?: number | null; future_leads?: number | null; unmarked?: number | null }) {
+  return (r.demos_sits ?? 0) + (r.no_demo ?? 0) + (r.ctc ?? 0) + (r.future_leads ?? 0) + (r.unmarked ?? 0);
 }
 
 /* ============ Main ============ */
@@ -422,6 +423,9 @@ type WeeklyRow = {
   totalLeads: number;
   totalSits: number;
   totalResets: number;
+  totalBO: number;
+  totalCTC: number;
+  totalNonCore: number;
   totalOL: number;
   totalSales: number;
   totalPoints: number;
@@ -441,7 +445,7 @@ function WeeklyResults({ weekStart }: { weekStart: Date }) {
         supabase.from("profiles").select("id, display_name, team_id, office_location"),
         supabase.from("teams").select("id, name, color"),
         supabase.from("daily_logs")
-          .select("canvasser_id, demos_sits, sales, no_demo, one_legs, future_leads, unmarked")
+          .select("canvasser_id, demos_sits, sales, no_demo, ctc, non_core, one_legs, future_leads, unmarked")
           .gte("log_date", toISODate(lastWeekStart))
           .lte("log_date", toISODate(lastWeekEnd)),
       ]);
@@ -450,15 +454,18 @@ function WeeklyResults({ weekStart }: { weekStart: Date }) {
       if (logsR.error) throw logsR.error;
 
       const vanById = new Map((vansR.data ?? []).map((v) => [v.id, v]));
-      const agg = new Map<string, { leads: number; sits: number; resets: number; ol: number; sales: number }>();
+      const agg = new Map<string, { leads: number; sits: number; resets: number; bo: number; ctc: number; nonCore: number; ol: number; sales: number }>();
       for (const l of logsR.data ?? []) {
-        const cur = agg.get(l.canvasser_id) ?? { leads: 0, sits: 0, resets: 0, ol: 0, sales: 0 };
+        const cur = agg.get(l.canvasser_id) ?? { leads: 0, sits: 0, resets: 0, bo: 0, ctc: 0, nonCore: 0, ol: 0, sales: 0 };
         cur.leads += leadsSum(l);
-        // demos_sits in DB includes sale rows. Sits (PM only) = demos_sits - sales.
-        const pmOnly = Math.max(0, (l.demos_sits ?? 0) - (l.sales ?? 0));
-        cur.sits += pmOnly;
-        // RS outcomes are persisted in future_leads (see csv-import.functions.ts).
+        // demos_sits in DB includes sale rows. Sits = demos_sits - sales.
+        const sitOnly = Math.max(0, (l.demos_sits ?? 0) - (l.sales ?? 0));
+        cur.sits += sitOnly;
+        // Reset outcomes are persisted in future_leads.
         cur.resets += l.future_leads ?? 0;
+        cur.bo += l.no_demo ?? 0;
+        cur.ctc += l.ctc ?? 0;
+        cur.nonCore += l.non_core ?? 0;
         // OL outcomes are persisted in one_legs (webhook DAILY_LOG_VECS).
         cur.ol += l.one_legs ?? 0;
         cur.sales += l.sales ?? 0;
@@ -503,6 +510,9 @@ function WeeklyResults({ weekStart }: { weekStart: Date }) {
           totalLeads: a.leads,
           totalSits: a.sits,
           totalResets: a.resets,
+          totalBO: a.bo,
+          totalCTC: a.ctc,
+          totalNonCore: a.nonCore,
           totalOL: a.ol,
           totalSales: a.sales,
           totalPoints,
@@ -525,12 +535,15 @@ function WeeklyResults({ weekStart }: { weekStart: Date }) {
       leads: acc.leads + r.totalLeads,
       sits: acc.sits + r.totalSits,
       resets: acc.resets + r.totalResets,
+      bo: acc.bo + r.totalBO,
+      ctc: acc.ctc + r.totalCTC,
+      nonCore: acc.nonCore + r.totalNonCore,
       ol: acc.ol + r.totalOL,
       sales: acc.sales + r.totalSales,
       points: acc.points + r.totalPoints,
       pay: acc.pay + r.totalPay,
     }),
-    { leads: 0, sits: 0, resets: 0, ol: 0, sales: 0, points: 0, pay: 0 }
+    { leads: 0, sits: 0, resets: 0, bo: 0, ctc: 0, nonCore: 0, ol: 0, sales: 0, points: 0, pay: 0 }
   );
 
   return (
@@ -569,9 +582,12 @@ function WeeklyResults({ weekStart }: { weekStart: Date }) {
                 <MobileStatGrid cols={3}>
                   <MobileStat label="Leads" value={r.totalLeads} />
                   <MobileStat label="Sits" value={r.totalSits} />
-                  <MobileStat label="Resets" value={r.totalResets} className="text-[var(--accent)]" />
-                  <MobileStat label="OL" value={r.totalOL} className="text-warning" />
                   <MobileStat label="Sales" value={r.totalSales} className="text-victory" />
+                  <MobileStat label="Resets" value={r.totalResets} className="text-[var(--accent)]" />
+                  <MobileStat label="BO" value={r.totalBO} className="text-destructive" />
+                  <MobileStat label="CTC" value={r.totalCTC} className="text-muted-foreground" />
+                  <MobileStat label="Non-Core" value={r.totalNonCore} className="text-warning" />
+                  <MobileStat label="OL" value={r.totalOL} className="text-warning" />
                   <MobileStat label="Points" value={r.totalPoints} className="text-neon" />
                 </MobileStatGrid>
               </MobileCard>
@@ -584,9 +600,12 @@ function WeeklyResults({ weekStart }: { weekStart: Date }) {
               <MobileStatGrid cols={3}>
                 <MobileStat label="Leads" value={grand.leads} />
                 <MobileStat label="Sits" value={grand.sits} />
-                <MobileStat label="Resets" value={grand.resets} className="text-[var(--accent)]" />
-                <MobileStat label="OL" value={grand.ol} className="text-warning" />
                 <MobileStat label="Sales" value={grand.sales} className="text-victory" />
+                <MobileStat label="Resets" value={grand.resets} className="text-[var(--accent)]" />
+                <MobileStat label="BO" value={grand.bo} className="text-destructive" />
+                <MobileStat label="CTC" value={grand.ctc} className="text-muted-foreground" />
+                <MobileStat label="Non-Core" value={grand.nonCore} className="text-warning" />
+                <MobileStat label="OL" value={grand.ol} className="text-warning" />
                 <MobileStat label="Points" value={grand.points} className="text-neon" />
               </MobileStatGrid>
             </MobileCard>
@@ -598,12 +617,15 @@ function WeeklyResults({ weekStart }: { weekStart: Date }) {
                 <th className="px-4 py-2">Canvasser</th>
                 <th className="px-4 py-2">Van</th>
                 <th className="px-4 py-2 text-right">Total Leads</th>
-                <th className="px-4 py-2 text-right">Total Sits</th>
-                <th className="px-4 py-2 text-right">Total Resets</th>
-                <th className="px-4 py-2 text-right">Total OL</th>
-                <th className="px-4 py-2 text-right">Total Sales</th>
-                <th className="px-4 py-2 text-right">Total Points</th>
-                <th className="px-4 py-2 text-right">Total Pay</th>
+                <th className="px-4 py-2 text-right">Sits</th>
+                <th className="px-4 py-2 text-right">Resets</th>
+                <th className="px-4 py-2 text-right">BO</th>
+                <th className="px-4 py-2 text-right">CTC</th>
+                <th className="px-4 py-2 text-right">Non-Core</th>
+                <th className="px-4 py-2 text-right">OL</th>
+                <th className="px-4 py-2 text-right">Sales</th>
+                <th className="px-4 py-2 text-right">Points</th>
+                <th className="px-4 py-2 text-right">Pay</th>
               </tr>
             </thead>
             <tbody>
@@ -616,6 +638,9 @@ function WeeklyResults({ weekStart }: { weekStart: Date }) {
                   <td className="px-4 py-2.5 text-right font-display">{r.totalLeads}</td>
                   <td className="px-4 py-2.5 text-right font-display">{r.totalSits}</td>
                   <td className="px-4 py-2.5 text-right font-display text-[var(--accent)]">{r.totalResets}</td>
+                  <td className="px-4 py-2.5 text-right font-display text-destructive">{r.totalBO}</td>
+                  <td className="px-4 py-2.5 text-right font-display text-muted-foreground">{r.totalCTC}</td>
+                  <td className="px-4 py-2.5 text-right font-display text-warning">{r.totalNonCore}</td>
                   <td className="px-4 py-2.5 text-right font-display text-warning">{r.totalOL}</td>
                   <td className="px-4 py-2.5 text-right font-display text-victory">{r.totalSales}</td>
                   <td className="px-4 py-2.5 text-right font-display text-neon">{r.totalPoints}</td>
@@ -633,6 +658,9 @@ function WeeklyResults({ weekStart }: { weekStart: Date }) {
                 <td className="px-4 py-2.5 text-right font-display">{grand.leads}</td>
                 <td className="px-4 py-2.5 text-right font-display">{grand.sits}</td>
                 <td className="px-4 py-2.5 text-right font-display text-[var(--accent)]">{grand.resets}</td>
+                <td className="px-4 py-2.5 text-right font-display text-destructive">{grand.bo}</td>
+                <td className="px-4 py-2.5 text-right font-display text-muted-foreground">{grand.ctc}</td>
+                <td className="px-4 py-2.5 text-right font-display text-warning">{grand.nonCore}</td>
                 <td className="px-4 py-2.5 text-right font-display text-warning">{grand.ol}</td>
                 <td className="px-4 py-2.5 text-right font-display text-victory">{grand.sales}</td>
                 <td className="px-4 py-2.5 text-right font-display text-neon">{grand.points}</td>

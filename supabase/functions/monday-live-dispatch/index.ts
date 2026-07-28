@@ -24,51 +24,45 @@ function todayLA(): string {
  * Returns which daily_metrics counter to bump based on the changed column
  * label and the new cell value. Match is case-insensitive.
  */
-type ScheduleBucket =
-  | 'blowouts'         // BO
-  | 'outside_leads'    // OL
-  | 'resets'           // RS
-  | 'pitch_missed'     // PM
-  | 'sales'            // SALE
-  | 'leads_confirmed'  // Confirmed
-  | 'no_answers'       // N/A
-  | 'killed'           // Blowout/Disconnected (live-dispatch legacy)
-  | 'pending'          // Unconfirmed/Future
-  | null
+type ScheduleBucket = 'sit' | 'sales' | 'resets' | 'blowouts' | 'ctc' | null
 
-function mapScheduleOutcome(columnTitle: string, value: string): ScheduleBucket {
-  const col = (columnTitle || '').trim().toLowerCase()
-  const v = (value || '').trim().toLowerCase()
-  if (!v) return null
+/** Owner's core-product list (2026-07-27). The dropdown label for Paint is
+ *  "Stucco/Paint"; everything not listed here is non-core. Non-core results
+ *  still count (and pay) — they just also tick the non_core tally. */
+const CORE_TOKENS = ['roof', 'stucco/paint', 'paint', 'coolwall', 'windows', 'flat roof', 'trim', 'eaves/fascia']
 
-  // DEDICATED outcome columns ONLY. The board mirrors each result into
-  // rollup columns ("Rep Stats", "Canvass Stats") — the old value-based
-  // fallbacks counted those again, tripling no_demo per blowout and
-  // inflating resets (seen live: Ernie Ruiz week of 7/20 showed 37 leads
-  // for ~22 real cards). Rollup titles must never match here. The funnel
-  // buckets (confirmed/pending/killed/no_answers) come exclusively from the
-  // Incoming Leads board's Lead Status branch, never from Block boards.
-  if (col === 'bo' || col.includes('blowout')) {
-    if (v === 'no show' || v === 'no show text' || v === 'no demo' || v === 'bo') return 'blowouts'
+/** Canvasser result state, straight from the Setter Report's source columns:
+ *  Canvass Stats (id `color`, ONE value per card: Sit / Sale / Reset /
+ *  Blowout / CTC — the marketing "mothership" numbers), Products (core vs
+ *  non-core), and the OL column as an independent flag (a card can be an
+ *  outside lead AND have a Canvass Stats result). The BO/RS/PM/Rep Stats
+ *  columns are closer-side stats and never feed canvasser counters. */
+function deriveCanvassState(cols: MondayCol[]) {
+  const colText = (id: string, title: string) => {
+    const c =
+      cols.find((c) => c.id === id || c.column?.id === id) ??
+      cols.find((c) => (c.column?.title || '').trim().toLowerCase() === title)
+    return (c?.text || '').trim()
   }
-  if (col === 'ol' || col.includes('outside lead')) {
-    if (v === 'ol' || v === 'outside lead') return 'outside_leads'
-  }
-  if (col === 'rs' || col.includes('reset')) {
-    if (v === 'reset' || v === 'rs') return 'resets'
-  }
-  if (col === 'pm' || col.includes('pitch missed')) {
-    if (v === 'pm' || v === 'pm w/ reset' || v === 'pm w reset' || v.startsWith('pm')) return 'pitch_missed'
-  }
-  if (col === 'sale' || col.includes('sale')) {
-    if (v === 'sold' || v === 'reload' || v === 'upsell' || v === 'sale') return 'sales'
-  }
-  return null
+  const cs = colText('color', 'canvass stats').toLowerCase()
+  const bucket: ScheduleBucket =
+    cs === 'sit' ? 'sit'
+    : cs === 'sale' || cs === 'reload' ? 'sales'
+    : cs === 'reset' ? 'resets'
+    : cs === 'blowout' ? 'blowouts'
+    : cs === 'ctc' ? 'ctc'
+    : null
+  const tokens = colText('dropdown', 'products')
+    .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+  const nonCore = !!bucket && tokens.length > 0 && !tokens.some((t) => CORE_TOKENS.includes(t))
+  const olText = colText('status_3', 'ol').toLowerCase()
+  const ol = olText === 'ol' || olText === 'outside lead'
+  return { bucket, nonCore, ol }
 }
 
 type MondayCol = { id: string; text: string | null; display_value?: string | null; column: { title: string; id: string } }
 
-/** Sale-column values that mean the item is sold (mirrors mapScheduleOutcome). */
+/** Sale-column values that mean the item is sold (drives the price sync). */
 const SOLD_VALUES = ['sold', 'reload', 'upsell', 'sale']
 
 /** deny_reason marker for leads voided by an automatic Monday sale revert.
@@ -107,42 +101,30 @@ function findSaleOutcomeCol(cols: MondayCol[]): MondayCol | undefined {
   )
 }
 
-/** Outcome-bucket → daily_logs counter deltas (payroll feed). Mirrors the
- *  legacy monday-webhook translation dictionary: BO/killed→no_demo,
- *  OL→one_legs, RS→future_leads, PM→demos_sits, Sale→demos_sits+sales,
- *  Confirmed→confirmed_leads. leads_called_in is handled separately
- *  (credited once per Monday item, not per status change). */
+/** Canvass Stats bucket → daily_logs counter deltas (payroll + Weekly
+ *  Results feed). A sale implies a sit (demos_sits includes sold sits — the
+ *  display subtracts). non_core and one_legs are applied separately.
+ *  leads_called_in is credited once per Monday item. */
 const DAILY_LOG_VECS: Record<string, Record<string, number>> = {
-  blowouts: { no_demo: 1 },
-  killed: { no_demo: 1 },
-  outside_leads: { one_legs: 1 },
-  resets: { future_leads: 1 },
-  pitch_missed: { demos_sits: 1 },
+  sit: { demos_sits: 1 },
   sales: { demos_sits: 1, sales: 1 },
-  leads_confirmed: { confirmed_leads: 1 },
-  no_answers: {},
-  pending: {},
+  resets: { future_leads: 1 },
+  blowouts: { no_demo: 1 },
+  ctc: { ctc: 1 },
 }
 
 const DAILY_LOG_KEYS = [
-  'no_demo', 'one_legs', 'future_leads', 'demos_sits', 'sales',
-  'confirmed_leads', 'leads_called_in',
+  'demos_sits', 'sales', 'no_demo', 'future_leads', 'ctc', 'non_core',
+  'one_legs', 'leads_called_in',
 ] as const
 
-/** For item-creation events there is no "changed column" — derive the item's
- *  outcome from its full column set, highest-priority first (same precedence
- *  the CSV importer uses: Sale > PM > RS > BO > OL > the legacy statuses). */
-function deriveBucketFromCols(cols: MondayCol[]): ScheduleBucket {
-  const priority: ScheduleBucket[] = [
-    'sales', 'pitch_missed', 'resets', 'blowouts', 'outside_leads',
-  ]
-  const found = new Set<ScheduleBucket>()
-  for (const c of cols) {
-    const b = mapScheduleOutcome(c.column?.title || '', c.text || '')
-    if (b) found.add(b)
-  }
-  for (const p of priority) if (found.has(p)) return p
-  return null
+/** Canvass Stats bucket → daily_metrics outcome column (legacy names:
+ *  Sit lives in pitch_missed). CTC has no daily_metrics mirror. */
+const METRIC_COL: Record<string, 'pitch_missed' | 'sales' | 'resets' | 'blowouts'> = {
+  sit: 'pitch_missed',
+  sales: 'sales',
+  resets: 'resets',
+  blowouts: 'blowouts',
 }
 
 serve(async (req) => {
@@ -637,21 +619,26 @@ serve(async (req) => {
 
     // Step 5: One card = one outcome. Derive the card's CURRENT outcome from
     // its full (re-fetched) column set — dedicated columns only, Sale > PM >
-    // RS > BO > OL, the CSV importer's precedence — and diff it against the
-    // last outcome recorded for this card (Card_Outcome_Recorded marker).
-    // Mirror marks in the rollup columns re-derive the same outcome and
-    // no-op instead of counting again; unsetting a column re-derives to the
-    // next-priority outcome (or none) and the transition self-corrects.
-    const bucket = deriveBucketFromCols(cols)
-    const { data: lastOutcome } = await supabaseAdmin
-      .from('webhook_logs')
-      .select('data')
-      .eq('step', 'Card_Outcome_Recorded')
-      .contains('data', { pulseId: String(pulseId) })
-      .order('created_at', { ascending: false })
-      .limit(1)
-    const prevBucket: ScheduleBucket =
-      ((lastOutcome?.[0]?.data as { bucket?: string } | null)?.bucket as ScheduleBucket) ?? null
+    // Canvass Stats column (Setter Report parity), diffed against the last
+    // state recorded for this card (Card_Outcome_Recorded / Card_OL_Recorded
+    // markers). Marks on any other column re-derive the same state and no-op.
+    const { bucket, nonCore, ol } = deriveCanvassState(cols)
+    const [{ data: lastOutcome }, { data: lastOl }] = await Promise.all([
+      supabaseAdmin.from('webhook_logs').select('data')
+        .eq('step', 'Card_Outcome_Recorded')
+        .contains('data', { pulseId: String(pulseId) })
+        .order('created_at', { ascending: false }).limit(1),
+      supabaseAdmin.from('webhook_logs').select('data')
+        .eq('step', 'Card_OL_Recorded')
+        .contains('data', { pulseId: String(pulseId) })
+        .order('created_at', { ascending: false }).limit(1),
+    ])
+    const prevRec = (lastOutcome?.[0]?.data ?? {}) as { bucket?: string; nonCore?: boolean }
+    const prevBucket: ScheduleBucket = (prevRec.bucket as ScheduleBucket) ?? null
+    const prevNonCore = !!prevBucket && !!prevRec.nonCore
+    const prevOl = !!((lastOl?.[0]?.data as { ol?: boolean } | null)?.ol)
+    const outcomeChanged = bucket !== prevBucket || nonCore !== prevNonCore
+    const olChanged = ol !== prevOl
     const metric_date = todayLA()
     const office_location = boardOffice ?? match.office_location ?? 'San Diego'
 
@@ -823,41 +810,48 @@ serve(async (req) => {
       return new Response('Price event handled', { status: 200, headers: corsHeaders })
     }
 
-    // Traffic cop: if we can't map this outcome AND there's no prev bucket to
-    // decrement AND no new-lead credit to record, there's nothing to do.
-    if (!bucket && !prevBucket && !creditNew) {
-      await supabaseAdmin.from('webhook_logs').insert({
-        step: 'Ignored_Unmapped_Outcome',
-        data: { boardId, boardOffice, changedTitle, changedValue, isCreateEvent },
-      })
-      return new Response('Ignored', { status: 200, headers: corsHeaders })
-    }
-
-    // Card outcome unchanged — this is where the rollup-column mirror marks
-    // ("Rep Stats", "Canvass Stats") and unrelated column edits land: the
-    // card re-derives to the outcome already recorded, so nothing counts.
-    if (bucket && prevBucket && bucket === prevBucket) {
+    // Traffic cop: no state change and no new-lead credit → nothing to do.
+    // This is where closer-side column marks (BO/RS/PM/Rep Stats) and other
+    // edits land: the card re-derives to the state already recorded.
+    if (!outcomeChanged && !olChanged && !creditNew) {
+      if (!bucket && !prevBucket && !ol) {
+        await supabaseAdmin.from('webhook_logs').insert({
+          step: 'Ignored_Unmapped_Outcome',
+          data: { boardId, boardOffice, changedTitle, changedValue, isCreateEvent },
+        })
+        return new Response('Ignored', { status: 200, headers: corsHeaders })
+      }
       await supabaseAdmin.from('webhook_logs').insert({
         step: 'Same_Bucket_NoOp',
         data: {
           pulseId,
           agentName: match.display_name,
           bucket,
+          nonCore,
+          ol,
           changedColumn: changedTitle,
           newValue: changedValue,
-          note: 'Card outcome unchanged; no counter mutation.',
+          note: 'Card state unchanged; no counter mutation.',
         },
       })
-      return new Response('No-op (same bucket)', { status: 200, headers: corsHeaders })
+      return new Response('No-op (same state)', { status: 200, headers: corsHeaders })
     }
 
-    // Claim this card-outcome transition BEFORE writing counters so a burst
-    // of near-simultaneous mirror marks can't double-apply (same claim-first
-    // pattern as lead credits). Released below if the counter write fails.
-    const { data: outcomeClaim } = await supabaseAdmin.from('webhook_logs').insert({
-      step: 'Card_Outcome_Recorded',
-      data: { pulseId: String(pulseId), bucket, prev: prevBucket, canvasser_id: match.id },
-    }).select('id').single()
+    // Claim the state transitions BEFORE writing counters so a burst of
+    // near-simultaneous events can't double-apply (same claim-first pattern
+    // as lead credits). Released below if the counter write fails.
+    const { data: outcomeClaim } = outcomeChanged
+      ? await supabaseAdmin.from('webhook_logs').insert({
+          step: 'Card_Outcome_Recorded',
+          data: { pulseId: String(pulseId), bucket, nonCore, prev: prevBucket, canvasser_id: match.id },
+        }).select('id').single()
+      : { data: null }
+    const { data: olClaim } = olChanged
+      ? await supabaseAdmin.from('webhook_logs').insert({
+          step: 'Card_OL_Recorded',
+          data: { pulseId: String(pulseId), ol, canvasser_id: match.id },
+        }).select('id').single()
+      : { data: null }
 
     const { data: existing } = await supabaseAdmin
       .from('daily_metrics')
@@ -872,22 +866,18 @@ serve(async (req) => {
     }
 
     // Funnel buckets (leads_confirmed / no_answers / killed / pending / future)
-    // belong exclusively to the Incoming Leads board's Lead Status column now —
-    // Block events only move the outcome counters here. Their daily_logs
-    // payroll vectors below are unaffected: a mapped killed/leads_confirmed
-    // bucket still ticks no_demo/confirmed_leads for the pay engine.
-    const bucketKeys = [
-      'blowouts', 'outside_leads', 'resets', 'pitch_missed', 'sales',
-    ] as const
-
+    // belong exclusively to the Incoming Leads board's Lead Status column —
+    // Block events only move the Canvass Stats mirrors + outside_leads here.
     const next: Record<string, number> = { ...cur }
-    // Decrement previous bucket (floor at 0) when it's a real transition.
-    if (prevBucket && bucketKeys.includes(prevBucket as any)) {
-      next[prevBucket] = Math.max(0, (cur[prevBucket] ?? 0) - 1)
+    const decCol = (col?: string) => { if (col) next[col] = Math.max(0, (next[col] ?? 0) - 1) }
+    const incCol = (col?: string) => { if (col) next[col] = (next[col] ?? 0) + 1 }
+    if (outcomeChanged) {
+      decCol(prevBucket ? METRIC_COL[prevBucket] : undefined)
+      incCol(bucket ? METRIC_COL[bucket] : undefined)
     }
-    // Increment new bucket.
-    if (bucket && bucketKeys.includes(bucket as any)) {
-      next[bucket] = (next[bucket] ?? 0) + 1
+    if (olChanged) {
+      if (ol) incCol('outside_leads')
+      else decCol('outside_leads')
     }
 
     const payload = {
@@ -907,9 +897,12 @@ serve(async (req) => {
       .upsert(payload, { onConflict: 'canvasser_id,metric_date' })
 
     if (upErr) {
-      // Release the outcome claim so a Monday redelivery can re-apply.
+      // Release the claims so a Monday redelivery can re-apply.
       if (outcomeClaim?.id) {
         await supabaseAdmin.from('webhook_logs').delete().eq('id', outcomeClaim.id)
+      }
+      if (olClaim?.id) {
+        await supabaseAdmin.from('webhook_logs').delete().eq('id', olClaim.id)
       }
       await supabaseAdmin.from('webhook_logs').insert({
         step: '5_Upsert_Error',
@@ -925,12 +918,17 @@ serve(async (req) => {
     // one, floor at 0. leads_called_in is credited once per Monday item.
     try {
       const delta: Record<string, number> = {}
-      for (const [k, v] of Object.entries((prevBucket && DAILY_LOG_VECS[prevBucket]) || {})) {
-        delta[k] = (delta[k] ?? 0) - v
+      const applyVec = (b: ScheduleBucket, nc: boolean, sign: number) => {
+        for (const [k, v] of Object.entries((b && DAILY_LOG_VECS[b]) || {})) {
+          delta[k] = (delta[k] ?? 0) + sign * v
+        }
+        if (b && nc) delta.non_core = (delta.non_core ?? 0) + sign
       }
-      for (const [k, v] of Object.entries((bucket && DAILY_LOG_VECS[bucket]) || {})) {
-        delta[k] = (delta[k] ?? 0) + v
+      if (outcomeChanged) {
+        applyVec(prevBucket, prevNonCore, -1)
+        applyVec(bucket, nonCore, +1)
       }
+      if (olChanged) delta.one_legs = (delta.one_legs ?? 0) + (ol ? 1 : -1)
       // Credit "leads called in" once per Monday item — claimed above by
       // applyLeadCredit at creation or first mapped outcome, whichever first.
       if (creditNew) delta.leads_called_in = (delta.leads_called_in ?? 0) + 1
@@ -1009,6 +1007,8 @@ serve(async (req) => {
         previousValue: previousStatusFromEvent ?? null,
         previousBucket: prevBucket ?? null,
         recordedAs: bucket ?? 'unmapped',
+        nonCore,
+        ol,
         metric_date,
       },
     })
