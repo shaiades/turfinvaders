@@ -37,7 +37,7 @@ function UsersPage() {
     queryKey: ["manage_users"],
     queryFn: async () => {
       const [profilesRes, rolesRes, teamsRes] = await Promise.all([
-        supabase.from("profiles").select("id, display_name, team_id, level, xp").order("display_name"),
+        supabase.from("profiles").select("id, display_name, team_id, level, xp, suspension_tracked").order("display_name"),
         supabase.from("user_roles").select("user_id, role"),
         supabase.from("teams").select("id, name").order("name"),
       ]);
@@ -69,6 +69,18 @@ function UsersPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["manage_users"] });
       toast.success("Role updated");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const setSuspensionTracked = useMutation({
+    mutationFn: async ({ userId, tracked }: { userId: string; tracked: boolean }) => {
+      const { error } = await supabase.from("profiles").update({ suspension_tracked: tracked }).eq("id", userId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["manage_users"] });
+      toast.success("Suspension tracking updated");
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -139,6 +151,7 @@ function UsersPage() {
                 <th className="px-4 py-2">LVL</th>
                 <th className="px-4 py-2">Role</th>
                 <th className="px-4 py-2">Team</th>
+                <th className="px-4 py-2" title="Counted on the Live Dispatch suspension (donut) list">Suspension</th>
               </tr>
             </thead>
             <tbody>
@@ -189,6 +202,22 @@ function UsersPage() {
                           </option>
                         ))}
                       </select>
+                    </td>
+                    <td className="px-4 py-3">
+                      <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={(p as { suspension_tracked?: boolean }).suspension_tracked ?? true}
+                          disabled={setSuspensionTracked.isPending}
+                          onChange={(e) =>
+                            setSuspensionTracked.mutate({ userId: p.id, tracked: e.target.checked })
+                          }
+                          className="h-4 w-4 accent-[var(--neon)]"
+                        />
+                        <span className="text-xs text-muted-foreground">
+                          {(p as { suspension_tracked?: boolean }).suspension_tracked ?? true ? "tracked" : "off"}
+                        </span>
+                      </label>
                     </td>
                   </tr>
                 );

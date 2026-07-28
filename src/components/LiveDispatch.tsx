@@ -14,6 +14,8 @@ type Profile = {
   team_id: string | null;
   team_office: string | null;
   role: "canvasser" | "captain";
+  suspension_tracked: boolean;
+  created_at: string;
 };
 
 
@@ -54,6 +56,27 @@ function addDaysISO(iso: string, delta: number) {
   dt.setUTCDate(dt.getUTCDate() + delta);
   return dt.toISOString().slice(0, 10);
 }
+/** The last `n` completed worked days (Mon–Sat; Sundays never count),
+ *  walking back from — and excluding — the given report date. Newest first.
+ *  On a Tuesday this yields [Mon, Sat, Fri, …]: Saturday and Monday are
+ *  consecutive worked days for the suspension rule. */
+function lastWorkedDaysBefore(todayISO: string, n: number): string[] {
+  const out: string[] = [];
+  let d = todayISO;
+  while (out.length < n) {
+    d = addDaysISO(d, -1);
+    if (new Date(`${d}T00:00:00Z`).getUTCDay() !== 0) out.push(d);
+  }
+  return out;
+}
+
+/** "Mon 7/28" for a chip label. */
+function fmtWorkedDay(iso: string): string {
+  return new Date(`${iso}T00:00:00Z`)
+    .toLocaleDateString("en-US", { weekday: "short", month: "numeric", day: "numeric", timeZone: "UTC" })
+    .replace(",", "");
+}
+
 /** Report date: before 7 PM PT → current PT date; at/after 7 PM PT → next PT date. */
 function reportDates() {
   const { year, month, day, hour } = ptNow();
@@ -131,7 +154,7 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
       if (ids.length === 0) return [] as Profile[];
       const { data: profs } = await supabase
         .from("profiles")
-        .select("id, display_name, office_location, team_id, teams:team_id(office_location)")
+        .select("id, display_name, office_location, team_id, suspension_tracked, created_at, teams:team_id(office_location)")
         .in("id", ids)
         .eq("is_active", true);
       const rows: Profile[] = ((profs ?? []) as Array<{
@@ -139,6 +162,8 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
         display_name: string | null;
         office_location: string | null;
         team_id: string | null;
+        suspension_tracked: boolean;
+        created_at: string;
         teams: { office_location: string | null } | null;
       }>).map((p) => ({
         id: p.id,
@@ -147,6 +172,8 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
         team_id: p.team_id,
         team_office: p.teams?.office_location ?? null,
         role: roleMap.get(p.id) ?? "canvasser",
+        suspension_tracked: p.suspension_tracked,
+        created_at: p.created_at,
       }));
       return rows;
     },
@@ -167,14 +194,17 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
     },
   });
 
-  const { data: ydayMetrics = [] } = useQuery({
-    queryKey: ["daily-metrics", yday],
+  // Suspension window: the last 14 completed worked days (Sundays excluded).
+  // Feeds the donut check (first two days) and the zero-streak display.
+  const workedDays = useMemo(() => lastWorkedDaysBefore(today, 14), [today]);
+  const { data: windowMetrics = [] } = useQuery({
+    queryKey: ["suspension-window", today],
     queryFn: async () => {
       const { data } = await supabase
         .from("daily_metrics")
-        .select("canvasser_id, leads_generated")
-        .eq("metric_date", yday);
-      return (data ?? []) as Array<Pick<Metric, "canvasser_id" | "leads_generated">>;
+        .select("canvasser_id, metric_date, leads_generated")
+        .in("metric_date", workedDays);
+      return (data ?? []) as Array<Pick<Metric, "canvasser_id" | "metric_date" | "leads_generated">>;
     },
   });
 
@@ -208,10 +238,16 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
     return acc;
   }, [metrics]);
 
-  const ydayMap = useMemo(
-    () => Object.fromEntries(ydayMetrics.map((m) => [m.canvasser_id, m])),
-    [ydayMetrics],
-  );
+  // gen[canvasser_id][date] = leads generated that worked day.
+  const genByDay = useMemo(() => {
+    const acc = new Map<string, Map<string, number>>();
+    for (const m of windowMetrics) {
+      const inner = acc.get(m.canvasser_id) ?? new Map<string, number>();
+      inner.set(m.metric_date, (inner.get(m.metric_date) ?? 0) + (m.leads_generated ?? 0));
+      acc.set(m.canvasser_id, inner);
+    }
+    return acc;
+  }, [windowMetrics]);
 
   const visible = useMemo(
     () => canvassers.filter((c) => matches(c.office_location ?? c.team_office)),
@@ -229,10 +265,13 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
       office_location: string | null;
       team_office: string | null;
       role: "canvasser" | "captain";
+      tracked: boolean;
+      oldestCreated: string;
     };
     const groups = new Map<string, Group>();
     for (const c of visible) {
       const key = normalizeName(c.display_name) || `id:${c.id}`;
+      const created = (c.created_at ?? "").slice(0, 10) || "9999-12-31";
       const g = groups.get(key);
       if (!g) {
         groups.set(key, {
@@ -242,12 +281,16 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
           office_location: c.office_location,
           team_office: c.team_office,
           role: c.role,
+          tracked: c.suspension_tracked,
+          oldestCreated: created,
         });
       } else {
         g.ids.push(c.id);
         if (c.role === "captain") g.role = "captain";
         if (!g.office_location && c.office_location) g.office_location = c.office_location;
         if (!g.team_office && c.team_office) g.team_office = c.team_office;
+        if (!c.suspension_tracked) g.tracked = false;
+        if (created < g.oldestCreated) g.oldestCreated = created;
       }
     }
     const enriched = Array.from(groups.values()).map((g) => {
@@ -275,21 +318,32 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
     return { sub, pen, conf, fut, kil };
   }, [rows]);
 
-  // Suspension warning — 0 today AND 0 yesterday. Only meaningful for "today" preset.
+  // Suspension rule (owner, 2026-07-28): any TWO consecutive WORKED days
+  // (Mon–Sat; Sundays never count) with zero leads generated = donut. Only
+  // completed days count — today-in-progress never flags anyone, so the list
+  // is stable all day and rolls at 7 PM with the report date. Excluded:
+  // profiles with suspension_tracked=false (pseudo-agents, staff) and reps
+  // whose profile didn't exist for both days yet.
   const suspensionRows = useMemo(() => {
-    if (preset !== "today") return [];
-    return rows.filter((r) => {
-      if (r.sub !== 0) return false;
-      // yesterday's generated leads across all IDs in the group.
-      let ySub = 0;
-      for (const id of r.g.ids) {
-        const y = ydayMap[id];
-        if (!y) continue;
-        ySub += y.leads_generated ?? 0;
+    if (preset !== "today" || workedDays.length < 2) return [];
+    const genOn = (ids: string[], day: string) =>
+      ids.reduce((a, id) => a + (genByDay.get(id)?.get(day) ?? 0), 0);
+    const [d1, d2] = workedDays;
+    return rows.flatMap((r) => {
+      if (!r.g.tracked) return [];
+      if (r.g.oldestCreated > d2) return [];
+      if (genOn(r.g.ids, d1) !== 0 || genOn(r.g.ids, d2) !== 0) return [];
+      // Consecutive zero worked days, newest backward, only days the profile existed.
+      let streak = 0;
+      let capped = true;
+      for (const day of workedDays) {
+        if (day < r.g.oldestCreated) { capped = false; break; }
+        if (genOn(r.g.ids, day) === 0) streak++;
+        else { capped = false; break; }
       }
-      return ySub === 0;
+      return [{ g: r.g, d1, d2, streak, streakLabel: `${streak}${capped ? "+" : ""}` }];
     });
-  }, [rows, ydayMap, preset]);
+  }, [rows, genByDay, workedDays, preset]);
 
   return (
     <div className="space-y-4">
@@ -455,26 +509,38 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
   );
 }
 
-function SuspensionBanner({ rows }: { rows: Array<{ g: { key: string; display_name: string | null } }> }) {
+function SuspensionBanner({
+  rows,
+}: {
+  rows: Array<{ g: { key: string; display_name: string | null }; d1: string; d2: string; streakLabel: string }>;
+}) {
   if (rows.length === 0) return null;
   return (
     <div className="arcade-card p-4 border-destructive/60 bg-destructive/10">
-      <div className="flex items-center gap-2 mb-3">
+      <div className="flex items-center gap-2 mb-1">
         <AlertTriangle className="w-4 h-4 text-destructive animate-pulse" />
         <div className="font-display text-sm text-destructive uppercase tracking-widest">
-          🚨 Suspension Warning · 2+ Zeros
+          🚨 Suspension Warning
         </div>
+      </div>
+      <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground mb-3">
+        2 consecutive worked days without a lead · Sundays excluded · completed days only
       </div>
       <div className="flex flex-wrap gap-2">
         {rows.map((r) => (
           <div
             key={r.g.key}
-            className="flex items-center gap-2 arcade-card px-3 py-1.5 border-destructive/40"
+            className="arcade-card px-3 py-1.5 border-destructive/40"
           >
-            <span className="frozen-doughnut" aria-hidden>
-              🍩
-            </span>
-            <span className="text-sm font-medium">{r.g.display_name ?? "—"}</span>
+            <div className="flex items-center gap-2">
+              <span className="frozen-doughnut" aria-hidden>
+                🍩
+              </span>
+              <span className="text-sm font-medium">{r.g.display_name ?? "—"}</span>
+            </div>
+            <div className="text-[10px] font-mono text-muted-foreground mt-0.5">
+              0 leads {fmtWorkedDay(r.d2)} + {fmtWorkedDay(r.d1)} · {r.streakLabel}-day streak
+            </div>
           </div>
         ))}
       </div>
