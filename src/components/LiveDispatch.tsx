@@ -7,6 +7,7 @@ import { Radio, Users, FileSearch, X, Link2, Copy, Check, KeyRound, Eye, EyeOff,
 import { toast } from "sonner";
 import confetti from "canvas-confetti";
 import { addDaysISO, fmtWorkedDay, lastWorkedDaysBefore, reportDates, weekStartOfISO } from "@/lib/dates";
+import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 
 
 type Profile = {
@@ -172,19 +173,11 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
   });
 
   // Realtime — instant updates when Monday webhook upserts.
-  useEffect(() => {
-    const channel = supabase
-      .channel("dispatch-daily-metrics")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "daily_metrics" },
-        () => {
-          qc.invalidateQueries({ queryKey: ["daily-metrics"] });
-        },
-      )
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [qc]);
+  useRealtimeInvalidate({
+    channel: "dispatch-daily-metrics",
+    tables: ["daily_metrics"],
+    invalidateKeys: [["daily-metrics"]],
+  });
 
   // Sum all metric rows per canvasser_id across the selected range.
   const metricByCanvasser = useMemo(() => {
@@ -897,7 +890,6 @@ type WebhookLog = {
 };
 
 function WebhookLogsButton() {
-  const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const { data: logs = [], refetch, isFetching } = useQuery({
     queryKey: ["webhook-logs"],
@@ -911,22 +903,6 @@ function WebhookLogsButton() {
       return (data ?? []) as WebhookLog[];
     },
   });
-
-  // Realtime — new webhook_logs rows pop in instantly.
-  useEffect(() => {
-    if (!open) return;
-    const channel = supabase
-      .channel("webhook-logs-live")
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "webhook_logs" },
-        () => qc.invalidateQueries({ queryKey: ["webhook-logs"] }),
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [open, qc]);
 
   return (
     <>

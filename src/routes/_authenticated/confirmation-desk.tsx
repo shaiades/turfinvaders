@@ -1,6 +1,7 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { ArcadePanel, TeamBadge } from "@/components/arcade";
@@ -70,16 +71,11 @@ function ConfirmationDesk() {
     },
   });
 
-  useEffect(() => {
-    const ch = supabase
-      .channel("pending-leads-live")
-      .on("postgres_changes",
-        { event: "*", schema: "public", table: "leads" },
-        () => qc.invalidateQueries({ queryKey: ["pending_leads"] }),
-      )
-      .subscribe();
-    return () => { supabase.removeChannel(ch); };
-  }, [qc]);
+  useRealtimeInvalidate({
+    channel: "pending-leads-live",
+    tables: ["leads"],
+    invalidateKeys: [["pending_leads"]],
+  });
 
   const decide = useMutation({
     mutationFn: async (args: { id: string; status: "confirmed" | "denied"; deny_reason?: string }) => {

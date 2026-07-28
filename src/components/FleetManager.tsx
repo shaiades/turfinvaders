@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
@@ -195,27 +196,11 @@ export function FleetManager() {
 
   // Live updates — refresh as Monday webhooks arrive: daily_logs feeds the
   // points badges, daily_metrics feeds submits/confirmed.
-  useEffect(() => {
-    const ch = supabase
-      .channel("fleet-live-metrics")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "daily_metrics" },
-        () => qc.invalidateQueries({ queryKey: ["fleet_manager"] }),
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "daily_logs" },
-        () => qc.invalidateQueries({ queryKey: ["fleet_manager"] }),
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "leads" },
-        () => qc.invalidateQueries({ queryKey: ["fleet_manager"] }),
-      )
-      .subscribe();
-    return () => { supabase.removeChannel(ch); };
-  }, [qc]);
+  useRealtimeInvalidate({
+    channel: "fleet-live-metrics",
+    tables: ["daily_metrics", "daily_logs", "leads"],
+    invalidateKeys: [["fleet_manager"]],
+  });
 
 
 

@@ -1,7 +1,8 @@
-import { useEffect, useMemo } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { laTodayISO, laMidnightUtcISO } from "@/lib/dates";
+import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 
 export type TodayLeads = {
   total: number;
@@ -22,8 +23,6 @@ export function useTodayLeads(): {
   data: TodayLeads;
   isLoading: boolean;
 } {
-  const qc = useQueryClient();
-
   const teamsQuery = useQuery({
     queryKey: ["teams", "with-office"],
     queryFn: async () => {
@@ -49,21 +48,11 @@ export function useTodayLeads(): {
     staleTime: 5_000,
   });
 
-  useEffect(() => {
-    const channel = supabase
-      .channel("lead_events-live")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "lead_events" },
-        () => {
-          qc.invalidateQueries({ queryKey: ["lead_events", "today"] });
-        },
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [qc]);
+  useRealtimeInvalidate({
+    channel: "lead_events-live",
+    tables: ["lead_events"],
+    invalidateKeys: [["lead_events", "today"]],
+  });
 
   const data = useMemo<TodayLeads>(() => {
     const teamToOffice = new Map<string, string | null>();

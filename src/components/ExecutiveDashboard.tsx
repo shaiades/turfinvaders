@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel, TeamBadge, MobileCardList, MobileCard, MobileCardHeader, MobileStatGrid, MobileStat } from "@/components/arcade";
@@ -108,7 +109,6 @@ export function ExecutiveDashboard() {
 
 function LiveDailyAction() {
   const today = useMemo(() => laTodayISO(), []);
-  const qc = useQueryClient();
 
   const q = useQuery({
     queryKey: ["live_daily_action", today],
@@ -159,15 +159,11 @@ function LiveDailyAction() {
   });
 
   // Refresh when a new ping lands.
-  useEffect(() => {
-    const ch = supabase
-      .channel("live-daily-action")
-      .on("postgres_changes", { event: "*", schema: "public", table: "daily_logs" }, () => {
-        qc.invalidateQueries({ queryKey: ["live_daily_action", today] });
-      })
-      .subscribe();
-    return () => { supabase.removeChannel(ch); };
-  }, [qc, today]);
+  useRealtimeInvalidate({
+    channel: "live-daily-action",
+    tables: ["daily_logs"],
+    invalidateKeys: [["live_daily_action", today]],
+  });
 
   const t = q.data?.totals ?? { called: 0, nextDay: 0, future: 0, blowout: 0 };
   const donut = q.data?.donut ?? [];
