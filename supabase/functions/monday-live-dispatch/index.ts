@@ -406,7 +406,7 @@ serve(async (req) => {
     const wanted = normalizeName(canvasserName)
     const { data: profiles } = await supabaseAdmin
       .from('profiles')
-      .select('id, display_name, office_location, team_id')
+      .select('id, display_name, office_location, team_id, suspension_tracked')
 
     const candidates = (profiles ?? [])
       .filter((p) => p.display_name)
@@ -442,7 +442,7 @@ serve(async (req) => {
           is_placeholder: true,
           team_id: null,
         })
-        .select('id, display_name, office_location, team_id')
+        .select('id, display_name, office_location, team_id, suspension_tracked')
         .single()
       if (createErr || !created) {
         await supabaseAdmin.from('webhook_logs').insert({
@@ -465,6 +465,42 @@ serve(async (req) => {
       step: '4_Canvasser_Matched',
       data: { canvasserName, matchedId: match.id, matchedName: match.display_name, autoCreated },
     })
+
+    // ── Van sync ── Monday's Van column is authoritative for van membership
+    // (owner, 2026-07-28): every card names the rep's van, so each event
+    // refreshes profiles.team_id. Real reps only — pseudo lead-sources
+    // (suspension_tracked=false) never join vans. Unknown van names are
+    // logged for the owner to add in Fleet, never auto-created.
+    try {
+      const vanCol =
+        cols.find((c) => c.id === 'dropdown__1' || c.column?.id === 'dropdown__1') ??
+        cols.find((c) => (c.column?.title || '').trim().toLowerCase() === 'van')
+      const vanName = ((vanCol?.text || '').split(',')[0] || '').trim()
+      if (vanName && match.suspension_tracked !== false) {
+        const { data: teams } = await supabaseAdmin.from('teams').select('id, name')
+        const team = (teams ?? []).find(
+          (t) => (t.name || '').trim().toLowerCase() === vanName.toLowerCase(),
+        )
+        if (!team) {
+          await supabaseAdmin.from('webhook_logs').insert({
+            step: 'Van_Unknown',
+            data: { pulseId: String(pulseId), vanName, canvasser: match.display_name },
+          })
+        } else if (match.team_id !== team.id) {
+          const { error: vanErr } = await supabaseAdmin
+            .from('profiles')
+            .update({ team_id: team.id })
+            .eq('id', match.id)
+          if (!vanErr) {
+            await supabaseAdmin.from('webhook_logs').insert({
+              step: 'Van_Synced',
+              data: { pulseId: String(pulseId), canvasser: match.display_name, vanName, from: match.team_id, to: team.id },
+            })
+            match.team_id = team.id
+          }
+        }
+      }
+    } catch (_) { /* van sync must never break the pipeline */ }
 
     // ── Lead Status funnel branch ── the confirmation team's flips of the
     // "Lead Status" column on the Incoming Leads board drive the Live Dispatch
