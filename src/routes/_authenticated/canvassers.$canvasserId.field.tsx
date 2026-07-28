@@ -7,6 +7,7 @@ import { ArcadePanel, StatCard } from "@/components/arcade";
 import { NeonMap, type FieldPin, type Territory, type LatLng } from "@/components/NeonMap";
 import { Home, MessageSquare, Sparkles, DollarSign, AlertTriangle, ArrowLeft } from "lucide-react";
 import { commissionRateForPoints, weeklyPoints } from "@/lib/pay";
+import { isManagerRole } from "@/lib/roles";
 import { laDateISO, laMidnightUtcISO, addDaysISO, weekStartOfISO } from "@/lib/dates";
 
 export const Route = createFileRoute("/_authenticated/canvassers/$canvasserId/field")({
@@ -32,7 +33,7 @@ function FieldActivityPage() {
   const { role, user } = useAuth();
   const [day, setDay] = useState(isoDay(new Date()));
 
-  const allowed = role === "owner" || role === "office_staff" || role === "captain" || user?.id === canvasserId;
+  const allowed = isManagerRole(role) || user?.id === canvasserId;
 
   const profileQuery = useQuery({
     enabled: allowed,

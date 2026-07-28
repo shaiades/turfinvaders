@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useAuth } from "@/hooks/useAuth";
+import { isAdminRole } from "@/lib/roles";
 import { useQuery } from "@tanstack/react-query";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { supabase } from "@/integrations/supabase/client";
@@ -63,7 +64,7 @@ function Dashboard() {
   if (!role) return <NoRole />;
 
   // Owners and Office Staff (Admins) both get the full Command view.
-  if (role === "owner" || role === "office_staff") return <OwnerDashboard visibility={!!settings?.global_visibility} />;
+  if (isAdminRole(role)) return <OwnerDashboard visibility={!!settings?.global_visibility} />;
   if (role === "captain") return <CaptainDashboard teamId={teamId} visibility={!!settings?.global_visibility} />;
   return <CanvasserDashboard displayName={displayName} teamId={teamId} userId={user?.id} visibility={!!settings?.global_visibility} />;
 }

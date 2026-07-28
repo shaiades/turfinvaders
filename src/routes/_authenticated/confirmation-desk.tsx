@@ -1,9 +1,10 @@
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { ADMIN_ROLES, requireRoleBeforeLoad } from "@/lib/roles";
 import { ArcadePanel, TeamBadge } from "@/components/arcade";
 import { LiveLeadCounter } from "@/components/LiveLeadCounter";
 import { useTodayLeads } from "@/hooks/useTodayLeads";
@@ -14,16 +15,7 @@ import { Check, X, Inbox } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/confirmation-desk")({
   head: () => ({ meta: [{ title: "Confirmation Desk — Knockout" }] }),
-  beforeLoad: async () => {
-    const { data } = await supabase.auth.getUser();
-    if (!data.user) throw redirect({ to: "/auth" });
-    const { data: roles } = await supabase
-      .from("user_roles").select("role").eq("user_id", data.user.id);
-    const r = (roles ?? []).map((x) => x.role);
-    if (!r.includes("owner") && !r.includes("office_staff")) {
-      throw redirect({ to: "/dashboard", search: { tab: "dispatch" } });
-    }
-  },
+  beforeLoad: requireRoleBeforeLoad(ADMIN_ROLES),
   component: ConfirmationDesk,
 });
 

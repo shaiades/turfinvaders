@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { listRoster, type RosterRow } from "@/lib/users.functions";
+import { isManagerRole } from "@/lib/roles";
 import { ArcadePanel, MobileCardList, MobileCard, MobileCardHeader } from "@/components/arcade";
 import { AddTeamMemberDialog } from "@/components/AddTeamMemberDialog";
 import { Users } from "lucide-react";
@@ -50,7 +51,7 @@ function RosterTable({ rows }: { rows: RosterRow[] }) {
     <>
       <MobileCardList>
         {rows.map((r) => {
-          const isManager = r.role === "owner" || r.role === "office_staff" || r.role === "captain";
+          const isManager = isManagerRole(r.role);
           return (
             <MobileCard key={r.id}>
               <MobileCardHeader
@@ -94,7 +95,7 @@ function RosterTable({ rows }: { rows: RosterRow[] }) {
         </thead>
         <tbody>
           {rows.map((r) => {
-            const isManager = r.role === "owner" || r.role === "office_staff" || r.role === "captain";
+            const isManager = isManagerRole(r.role);
             return (
               <tr key={r.id} className="border-b border-border/40 hover:bg-surface-elevated">
                 <td className="py-2.5">

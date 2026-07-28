@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { addTeamMember } from "@/lib/users.functions";
 import { DEFAULT_OFFICE, OFFICE_LOCATIONS, type OfficeLocation } from "@/lib/offices";
+import type { AppRole } from "@/lib/roles";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,7 +21,6 @@ import { UserPlus } from "lucide-react";
 
 
 
-type Role = "owner" | "office_staff" | "captain" | "canvasser";
 
 export function AddTeamMemberDialog({ variant = "default" }: { variant?: "default" | "neon" } = {}) {
   const qc = useQueryClient();
@@ -28,7 +28,7 @@ export function AddTeamMemberDialog({ variant = "default" }: { variant?: "defaul
   const [open, setOpen] = useState(false);
   const [fullName, setFullName] = useState("");
   const [office, setOffice] = useState<OfficeLocation>(DEFAULT_OFFICE);
-  const [role, setRole] = useState<Role>("canvasser");
+  const [role, setRole] = useState<AppRole>("canvasser");
 
   const create = useMutation({
     mutationFn: async () =>
@@ -123,7 +123,7 @@ export function AddTeamMemberDialog({ variant = "default" }: { variant?: "defaul
             <select
               id="tm-role"
               value={role}
-              onChange={(e) => setRole(e.target.value as Role)}
+              onChange={(e) => setRole(e.target.value as AppRole)}
               className="w-full bg-input border border-border rounded-md px-3 py-2 text-sm"
             >
               <option value="canvasser">Canvasser</option>

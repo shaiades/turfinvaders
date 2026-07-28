@@ -1,4 +1,4 @@
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
@@ -8,28 +8,17 @@ import { ArcadePanel } from "@/components/arcade";
 import { DatabaseCleanup } from "@/components/DatabaseCleanup";
 import { createCanvasser } from "@/lib/users.functions";
 import { toast } from "sonner";
-import type { AppRole } from "@/hooks/useAuth";
+import { APP_ROLES, MANAGER_ROLES, primaryRole, requireRoleBeforeLoad, type AppRole } from "@/lib/roles";
 
 export const Route = createFileRoute("/_authenticated/users")({
   head: () => ({ meta: [{ title: "Manage Users — Knockout" }] }),
-  beforeLoad: async () => {
-    const { data } = await supabase.auth.getUser();
-    if (!data.user) throw redirect({ to: "/auth" });
-    const { data: roles } = await supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", data.user.id)
-      .in("role", ["owner", "captain", "office_staff"]);
-    if (!roles || roles.length === 0) throw redirect({ to: "/dashboard", search: { tab: "dispatch" } });
-  },
+  beforeLoad: requireRoleBeforeLoad(MANAGER_ROLES),
   component: UsersPage,
   errorComponent: ({ error }) => (
     <div className="text-sm text-destructive">Failed to load users: {error.message}</div>
   ),
   notFoundComponent: () => <div className="text-sm text-muted-foreground">Not found.</div>,
 });
-
-const ROLE_OPTIONS: AppRole[] = ["owner", "office_staff", "captain", "canvasser"];
 
 function UsersPage() {
   const qc = useQueryClient();
@@ -158,13 +147,7 @@ function UsersPage() {
             <tbody>
               {data.profiles.map((p) => {
                 const roles = data.rolesByUser.get(p.id) ?? [];
-                const currentRole: AppRole = roles.includes("owner")
-                  ? "owner"
-                  : roles.includes("office_staff")
-                  ? "office_staff"
-                  : roles.includes("captain")
-                  ? "captain"
-                  : "canvasser";
+                const currentRole: AppRole = primaryRole(roles) ?? "canvasser";
                 const lastOwner = currentRole === "owner" && ownerCount <= 1;
                 return (
                   <tr key={p.id} className="border-t border-border">
@@ -180,7 +163,7 @@ function UsersPage() {
                         className="bg-input border border-border rounded-md px-2 py-2 text-base md:text-sm disabled:opacity-50"
                         title={lastOwner ? "Cannot demote the last Owner" : undefined}
                       >
-                        {ROLE_OPTIONS.map((r) => (
+                        {APP_ROLES.map((r) => (
                           <option key={r} value={r}>
                             {r}
                           </option>
@@ -274,7 +257,7 @@ function UsersPage() {
               onChange={(e) => setForm({ ...form, role: e.target.value as AppRole })}
               className="bg-input border border-border rounded-md px-2 py-2 text-base md:text-sm"
             >
-              {ROLE_OPTIONS.map((r) => (
+              {APP_ROLES.map((r) => (
                 <option key={r} value={r}>{r}</option>
               ))}
             </select>

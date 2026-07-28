@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { DEFAULT_OFFICE } from "@/lib/offices";
+import { isAdminRole } from "@/lib/roles";
 import { laTodayISO } from "@/lib/dates";
 import { useAuth } from "@/hooks/useAuth";
 import { ArcadePanel } from "@/components/arcade";
@@ -174,7 +175,7 @@ function LogPage() {
 
       <NewLeadCard userId={user?.id} teamId={teamId} />
 
-      <MondayEmbed canEdit={role === "owner" || role === "office_staff"} />
+      <MondayEmbed canEdit={isAdminRole(role)} />
 
       <MyRecentLeads userId={user?.id} />
     </div>
