@@ -574,8 +574,12 @@ function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
     }
   }
   const looseActive = freeAgents.filter((r) => r.sub + r.pen + r.conf + r.fut + r.kil > 0);
-  const vanSub = (id: string) => (rowsByVan.get(id) ?? []).reduce((a, r) => a + r.sub, 0);
-  const vanConf = (id: string) => (rowsByVan.get(id) ?? []).reduce((a, r) => a + r.conf, 0);
+  const vanTotals = (id: string) =>
+    (rowsByVan.get(id) ?? []).reduce(
+      (a, r) => ({ sub: a.sub + r.sub, pen: a.pen + r.pen, conf: a.conf + r.conf, fut: a.fut + r.fut, kil: a.kil + r.kil }),
+      { sub: 0, pen: 0, conf: 0, fut: 0, kil: 0 },
+    );
+  const vanSub = (id: string) => vanTotals(id).sub;
   const captainName = (v: Van) =>
     v.captain_id ? rows.find((r) => r.g.ids.includes(v.captain_id!))?.g.display_name ?? null : null;
 
@@ -594,6 +598,7 @@ function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
               {list.map((v) => {
                 const roster = (rowsByVan.get(v.id) ?? []).sort((a, b) => b.sub - a.sub || b.conf - a.conf);
                 const cap = captainName(v);
+                const t = vanTotals(v.id);
                 return (
                   <div key={v.id} className="van-card p-4 space-y-3">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -601,18 +606,6 @@ function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
                         <Truck className="w-4 h-4 shrink-0" style={{ color: v.color ?? "#888" }} />
                         <span className="min-w-0 truncate">
                           <TeamBadge name={v.name} color={v.color ?? "#888"} />
-                        </span>
-                        <span
-                          className="shrink-0 text-[10px] font-display uppercase tracking-widest px-1.5 py-0.5 rounded border border-neon/50 text-neon bg-neon/10"
-                          title="Van leads submitted in this date range"
-                        >
-                          {vanSub(v.id)} sub
-                        </span>
-                        <span
-                          className="shrink-0 text-[10px] font-display uppercase tracking-widest px-1.5 py-0.5 rounded border border-victory/50 text-victory bg-victory/10"
-                          title="Van leads confirmed in this date range"
-                        >
-                          {vanConf(v.id)} conf
                         </span>
                         {cap && (
                           <span className="hidden sm:inline text-[10px] text-muted-foreground truncate min-w-0">· {cap}</span>
@@ -626,6 +619,22 @@ function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
                     ) : (
                       <div className="space-y-1.5">
                         <DispatchColHeader />
+                        {/* The whole van at a glance — every funnel stat the
+                            canvassers below sum into. */}
+                        <div className="grid grid-cols-[minmax(0,1fr)_repeat(5,2.4rem)] items-center gap-1 px-2 py-1.5 rounded border border-neon/40 bg-neon/5">
+                          <span className="text-[10px] font-display uppercase tracking-widest text-neon truncate">
+                            Van Total
+                          </span>
+                          {FUNNEL_COLS.map((c) => (
+                            <span
+                              key={c.key}
+                              title={c.full}
+                              className={`text-right font-display text-sm font-bold ${metricClass(t[c.key], c.color)}`}
+                            >
+                              {t[c.key]}
+                            </span>
+                          ))}
+                        </div>
                         {roster.map((r) => (
                           <DispatchRow key={r.g.key} r={r} />
                         ))}
