@@ -573,6 +573,7 @@ function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
       freeAgents.push(r);
     }
   }
+  const looseActive = freeAgents.filter((r) => r.sub + r.pen + r.conf + r.fut + r.kil > 0);
   const vanSub = (id: string) => (rowsByVan.get(id) ?? []).reduce((a, r) => a + r.sub, 0);
   const vanConf = (id: string) => (rowsByVan.get(id) ?? []).reduce((a, r) => a + r.conf, 0);
   const captainName = (v: Van) =>
@@ -638,26 +639,18 @@ function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
         );
       })}
 
-      {freeAgents.length > 0 && (
-        <div className="free-agents-panel bg-surface p-4 space-y-3">
-          <div className="flex items-center gap-2">
-            <h3 className="font-display uppercase tracking-widest text-sm" style={{ color: "var(--neon-orange)" }}>
-              ⚠ Free Agents (Needs Van)
-            </h3>
-            <span
-              className="text-[10px] font-display px-2 py-0.5 rounded-full"
-              style={{
-                color: "var(--neon-orange)",
-                background: "color-mix(in oklab, var(--neon-orange) 12%, transparent)",
-                border: "1px solid color-mix(in oklab, var(--neon-orange) 45%, transparent)",
-              }}
-            >
-              {freeAgents.length}
-            </span>
+      {looseActive.length > 0 && (
+        // No Free Agents pen — van membership auto-syncs from Monday's Van
+        // column. What remains here are lead sources (referral, Self Gen…)
+        // and the rare unassigned rep, shown only when they have numbers in
+        // range so the totals tiles keep reconciling.
+        <div className="arcade-card p-4 space-y-3">
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            Lead Sources · Unassigned ({looseActive.length})
           </div>
           <div className="space-y-1.5">
             <DispatchColHeader />
-            {freeAgents
+            {looseActive
               .sort((a, b) => b.sub - a.sub || (a.g.display_name ?? "").localeCompare(b.g.display_name ?? ""))
               .map((r) => (
                 <DispatchRow key={r.g.key} r={r} />
