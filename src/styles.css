@@ -249,13 +249,6 @@
   box-shadow: 0 4px 20px -6px color-mix(in oklab, var(--neon-blue) 30%, transparent);
   transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
 }
-@utility van-card-over {
-  border-color: var(--neon-orange);
-  box-shadow: 0 0 0 2px color-mix(in oklab, var(--neon-orange) 60%, transparent),
-              0 0 28px 6px color-mix(in oklab, var(--neon-orange) 45%, transparent);
-  transform: translateY(-1px);
-}
-
 /* Glowing green points badge */
 @utility points-badge-glow {
   color: var(--victory);
