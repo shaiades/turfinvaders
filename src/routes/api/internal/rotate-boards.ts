@@ -519,25 +519,34 @@ async function check(): Promise<Response> {
       // past 100 rows this can under-count and defer detection to tomorrow.
       const actData = await monday(
         token,
-        `query ($b: ID!, $from: ISO8601DateTime!, $to: ISO8601DateTime!) { boards(ids: [$b]) { activity_logs(from: $from, to: $to, limit: 100) { event } } }`,
+        `query ($b: ID!, $from: ISO8601DateTime!, $to: ISO8601DateTime!) { boards(ids: [$b]) { activity_logs(from: $from, to: $to, limit: 100) { event data } } }`,
         { b: boardId, from: sinceIso, to: new Date(judgeTo).toISOString() },
       );
       const activity =
-        ((actData.boards as Array<{ activity_logs: Array<{ event: string }> | null }>) ?? [])[0]
+        ((actData.boards as Array<{ activity_logs: Array<{ event: string; data?: string | null }> | null }>) ?? [])[0]
           ?.activity_logs ?? [];
       for (const event of events) {
-        const mapping = LIVENESS_MAP[event as (typeof WEBHOOK_EVENTS)[number]] as
-          | { activityEvent: string; isCreate: "true" | "false" }
-          | undefined;
-        if (!mapping) {
-          // Column-scoped Lead Status hook: activity_logs can't isolate one
-          // column's changes, so delivery-based liveness doesn't apply — the
-          // list-based heal above already re-creates it if missing.
-          liveness[`${office}_${event}`] = "skipped — column-scoped hook has no liveness mapping";
-          continue;
+        let activityEvent: string;
+        let isCreate: "true" | "false";
+        let activityCount: number;
+        if (event === LEAD_STATUS_EVENT) {
+          // Column-scoped hook: only Lead Status column updates count as
+          // expected activity (the activity entry's data JSON carries the
+          // column id). Deliveries: on the leads board the status hook is
+          // the ONLY non-create hook, so boardId + isCreateEvent=false rows
+          // are exactly its deliveries. This is what catches a listed-but-
+          // dead status hook (the 2026-07-28 zombie, id 603027905).
+          activityEvent = "update_column_value";
+          isCreate = "false";
+          activityCount = activity.filter(
+            (a) => a.event === "update_column_value" && (a.data ?? "").includes(LEAD_STATUS_COLUMN_ID),
+          ).length;
+        } else {
+          const mapping = LIVENESS_MAP[event as (typeof WEBHOOK_EVENTS)[number]];
+          activityEvent = mapping.activityEvent;
+          isCreate = mapping.isCreate;
+          activityCount = activity.filter((a) => a.event === activityEvent).length;
         }
-        const { activityEvent, isCreate } = mapping;
-        const activityCount = activity.filter((a) => a.event === activityEvent).length;
         if (!activityCount) {
           liveness[`${office}_${event}`] = "no recent board activity to judge";
           continue;
@@ -569,12 +578,15 @@ async function check(): Promise<Response> {
             /* already gone */
           }
         }
-        const created = await monday(
-          token,
-          `mutation ($b: ID!, $u: String!, $e: WebhookEventType!) { create_webhook(board_id: $b, url: $u, event: $e) { id } }`,
-          { b: boardId, u: edgeUrl(), e: event },
-          { idempotencyKey: `heal-dead-${boardId}-${event}-${runNonce}` },
-        );
+        const deadArgs: Record<string, unknown> = { b: boardId, u: edgeUrl(), e: event };
+        let deadMutation = `mutation ($b: ID!, $u: String!, $e: WebhookEventType!) { create_webhook(board_id: $b, url: $u, event: $e) { id } }`;
+        if (event === LEAD_STATUS_EVENT) {
+          deadMutation = `mutation ($b: ID!, $u: String!, $e: WebhookEventType!, $c: JSON!) { create_webhook(board_id: $b, url: $u, event: $e, config: $c) { id } }`;
+          deadArgs.c = JSON.stringify({ columnId: LEAD_STATUS_COLUMN_ID });
+        }
+        const created = await monday(token, deadMutation, deadArgs, {
+          idempotencyKey: `heal-dead-${boardId}-${event}-${runNonce}`,
+        });
         const newId = String((created.create_webhook as { id: string }).id);
         registry = registry.filter((r) => !(r.board_id === boardId && r.event === event));
         registry.push({
