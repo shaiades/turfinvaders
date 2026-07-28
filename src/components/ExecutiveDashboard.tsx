@@ -13,16 +13,13 @@ import { upsertManualWeekly, getWeeklyPaychecks } from "@/lib/fleet.functions";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 import { OfficeFilterProvider, OfficeFilterToggle, useOfficeFilter } from "@/components/OfficeFilterContext";
-import { weekStartMonday, toISODate, addDays, dateFromISO, laDateISO, laTodayISO, laWeekStartISO, weekStartOfISO, formatWeekRange } from "@/lib/dates";
+import { weekStartMonday, toISODate, addDays, laTodayISO, laWeekStartISO, weekStartOfISO, formatWeekRange } from "@/lib/dates";
 import { useWeekSelector } from "@/hooks/useWeekSelector";
 
 
 /* ============ Helpers ============ */
 /* All day/week/month buckets are America/Los_Angeles (midnight PT resets). */
 
-function startOfMonth(ref = new Date()) {
-  return dateFromISO(`${laDateISO(ref).slice(0, 7)}-01`);
-}
 
 // One board card = one lead (Setter Report parity). demos_sits already
 // includes sold sits, so sales is not added again. OL is intentionally NOT

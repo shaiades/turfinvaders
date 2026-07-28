@@ -25,7 +25,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { RankPill } from "@/components/RankPill";
 import { useOfficeFilter } from "@/components/OfficeFilterContext";
 import { cn } from "@/lib/utils";
-import { addDaysISO, laMidnightUtcISO } from "@/lib/dates";
+import { addDaysISO, laMidnightUtcISO, monthStartISO, nextMonthStartISO } from "@/lib/dates";
 import { useWeekSelector } from "@/hooks/useWeekSelector";
 
 type LogRow = {
@@ -520,7 +520,7 @@ export function PayrollLedger() {
         )}
       </ArcadePanel>
 
-      <MonthlyVolumeBonusPanel monthStart={`${startStr.slice(0, 7)}-01`} />
+      <MonthlyVolumeBonusPanel monthStart={monthStartISO(startStr)} />
     </div>
   );
 }
@@ -536,9 +536,7 @@ function MonthlyVolumeBonusPanel({ monthStart }: { monthStart: string }) {
       // LA-midnight boundaries; exclusive upper bound (start of next month in
       // LA) so timestamps in the final second of the month are not missed.
       const windowStart = laMidnightUtcISO(monthStart);
-      const [y, m] = monthStart.split("-").map(Number);
-      const nextMonth = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, "0")}-01`;
-      const windowEnd = laMidnightUtcISO(nextMonth);
+      const windowEnd = laMidnightUtcISO(nextMonthStartISO(monthStart));
       const [leadsRes, profilesRes] = await Promise.all([
         supabase
           .from("leads")

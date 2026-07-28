@@ -78,6 +78,22 @@ export function laMidnightUtcISO(isoDate: string): string {
   return new Date(guess.getTime() - laHour * 3_600_000).toISOString(); // 01:00 during PDT → back 1h
 }
 
+/** First of the month (YYYY-MM-01) containing a YYYY-MM-DD calendar date. */
+export function monthStartISO(iso: string): string {
+  return `${iso.slice(0, 7)}-01`;
+}
+
+/** First of the current LA month, YYYY-MM-01. */
+export function laMonthStartISO(): string {
+  return monthStartISO(laTodayISO());
+}
+
+/** First of the month after the one containing `iso` (Dec → Jan 1 next year). */
+export function nextMonthStartISO(iso: string): string {
+  const [y, m] = iso.split("-").map(Number);
+  return m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, "0")}-01`;
+}
+
 /** "Jul 6 – 12, 2026" | "Jul 28 – Aug 2, 2026" | "Dec 28, 2026 – Jan 2, 2027".
  *  Viewer-locale month names, matching the existing week-selector labels. */
 export function formatWeekRange(start: Date, end: Date): string {

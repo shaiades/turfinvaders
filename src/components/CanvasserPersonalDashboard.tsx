@@ -25,7 +25,7 @@ import {
   weeklyPoints,
 } from "@/lib/pay";
 import { getMonthlyPaychecks } from "@/lib/fleet.functions";
-import { laTodayISO, laWeekStartISO, addDaysISO, laMidnightUtcISO } from "@/lib/dates";
+import { laTodayISO, laWeekStartISO, addDaysISO, laMidnightUtcISO, laMonthStartISO } from "@/lib/dates";
 
 /**
  * Paycheck engine — automated.
@@ -59,7 +59,6 @@ const RANKS = [
 // All day/week/month buckets are America/Los_Angeles (midnight PT resets).
 const todayISO = () => laTodayISO();
 const startOfWeekISO = () => laWeekStartISO();
-const startOfMonthISO = () => `${laTodayISO().slice(0, 7)}-01`;
 
 type Totals = {
   doors_knocked: number;
@@ -170,7 +169,7 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
         .eq("canvasser_id", userId)
         .eq("status", "confirmed")
         .eq("is_sale", true)
-        .gte("created_at", laMidnightUtcISO(startOfMonthISO()));
+        .gte("created_at", laMidnightUtcISO(laMonthStartISO()));
       if (error) throw error;
       return data ?? [];
     },
@@ -198,7 +197,7 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
   const { today, week, month, monthRevenue, weekRevenue, weekPoints,
           weekHours, hourlyRate, weekBase, weekCommission, monthCommission, funnel } = useMemo(() => {
     const allRows = (logsQuery.data ?? []) as unknown as Array<Record<string, number | null> & { log_date: string }>;
-    const t = todayISO(), w = startOfWeekISO(), m = startOfMonthISO();
+    const t = todayISO(), w = startOfWeekISO(), m = laMonthStartISO();
     const mtdRows = allRows.filter((r) => r.log_date >= m);
     const today = aggregate(allRows.filter((r) => r.log_date === t));
     const week  = aggregate(allRows.filter((r) => r.log_date >= w));
@@ -1026,7 +1025,7 @@ function TakeHomeWidget({ userId, weeklyPay, hourlyRate, weekPoints }: {
   // Authoritative MTD volume bonus from the pay engine (calc_monthly_paycheck)
   // — the same source the owner's payroll screen pays from. Hidden on error
   // rather than showing a possibly-wrong dollar figure.
-  const monthStart = `${laTodayISO().slice(0, 7)}-01`;
+  const monthStart = laMonthStartISO();
   const { data: monthly } = useQuery({
     queryKey: ["takehome_volume_bonus", userId, monthStart],
     queryFn: async () => {

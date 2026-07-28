@@ -4,7 +4,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { formatCurrency } from "@/lib/utils";
-import { weekStartMonday, toISODate, laTodayISO, laMidnightUtcISO } from "@/lib/dates";
+import { weekStartMonday, toISODate, laMidnightUtcISO, laMonthStartISO } from "@/lib/dates";
 import { Lock, EyeOff } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/canvassers/$canvasserId")({
@@ -15,9 +15,6 @@ export const Route = createFileRoute("/_authenticated/canvassers/$canvasserId")(
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Month starts at midnight America/Los_Angeles on the 1st (LA calendar).
-function startOfMonthISO() {
-  return laMidnightUtcISO(`${laTodayISO().slice(0, 7)}-01`);
-}
 
 function CanvasserProfile() {
   const { canvasserId } = Route.useParams();
@@ -78,7 +75,7 @@ function CanvasserProfile() {
           .eq("canvasser_id", canvasserId)
           .eq("status", "confirmed")
           .eq("is_sale", true)
-          .gte("created_at", startOfMonthISO()),
+          .gte("created_at", laMidnightUtcISO(laMonthStartISO())),
       ]);
       if (weekRes.error) throw weekRes.error;
       if (monthRes.error) throw monthRes.error;
