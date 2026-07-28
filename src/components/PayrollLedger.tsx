@@ -3,12 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { CalendarIcon, Download } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import {
-  getWeeklyPaychecks,
-  getMonthlyPaychecks,
-  type PaycheckResult,
-  type MonthlyPaycheckResult,
-} from "@/lib/fleet.functions";
+import { fetchWeeklyPaychecksChunked, fetchMonthlyPaychecksChunked } from "@/lib/paychecks";
 import { sitBonusPerForRank } from "@/lib/pay";
 import {
   ArcadePanel,
@@ -117,16 +112,8 @@ export function PayrollLedger() {
         ]),
       );
 
-      // The authoritative pay engine — batched calls, chunked under the
-      // server fn's 300-id input cap so a large roster can never fail whole.
-      const paychecks: PaycheckResult[] = [];
-      for (let i = 0; i < canvasserIds.length; i += 300) {
-        const chunk = canvasserIds.slice(i, i + 300);
-        const { results } = await getWeeklyPaychecks({
-          data: { week_start: startStr, canvasser_ids: chunk },
-        });
-        paychecks.push(...results);
-      }
+      // The authoritative pay engine — batched, chunked under the 300-id cap.
+      const paychecks = await fetchWeeklyPaychecksChunked(startStr, canvasserIds);
 
       return {
         logs,
@@ -551,13 +538,7 @@ function MonthlyVolumeBonusPanel({ monthStart }: { monthStart: string }) {
       if (profilesRes.error) throw profilesRes.error;
 
       const ids = Array.from(new Set((leadsRes.data ?? []).map((l) => l.canvasser_id)));
-      const results: MonthlyPaycheckResult[] = [];
-      for (let i = 0; i < ids.length; i += 300) {
-        const { results: chunk } = await getMonthlyPaychecks({
-          data: { month_start: monthStart, canvasser_ids: ids.slice(i, i + 300) },
-        });
-        results.push(...chunk);
-      }
+      const results = await fetchMonthlyPaychecksChunked(monthStart, ids);
       return { results, profiles: profilesRes.data ?? [] };
     },
   });

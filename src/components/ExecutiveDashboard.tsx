@@ -9,7 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { upsertManualWeekly, getWeeklyPaychecks } from "@/lib/fleet.functions";
+import { upsertManualWeekly } from "@/lib/fleet.functions";
+import { fetchWeeklyPaychecksChunked } from "@/lib/paychecks";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 import { OfficeFilterProvider, OfficeFilterToggle, useOfficeFilter } from "@/components/OfficeFilterContext";
@@ -449,25 +450,17 @@ function WeeklyResults({ weekStart }: { weekStart: Date }) {
       }
 
       const activeIds = Array.from(new Set(Array.from(agg.keys()).map((k) => k.split("|")[0])));
-      // Batched calls to the pay engine (chunked under the server fn's 300-id
-      // cap) — same code path as the Payroll tab.
+      // Batched calls to the pay engine — same code path as the Payroll tab;
+      // a failed chunk is absorbed as per-id errors instead of failing whole.
       const payById = new Map<string, { pay: number; error: string | null }>();
-      for (let i = 0; i < activeIds.length; i += 300) {
-        const chunk = activeIds.slice(i, i + 300);
-        try {
-          const { results } = await getWeeklyPaychecks({
-            data: { week_start: toISODate(lastWeekStart), canvasser_ids: chunk },
-          });
-          for (const r of results) {
-            payById.set(r.canvasser_id, {
-              pay: Number(r.paycheck?.total_pay ?? 0),
-              error: r.error,
-            });
-          }
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          for (const id of chunk) payById.set(id, { pay: 0, error: msg });
-        }
+      const paychecks = await fetchWeeklyPaychecksChunked(toISODate(lastWeekStart), activeIds, {
+        onChunkError: "absorb",
+      });
+      for (const r of paychecks) {
+        payById.set(r.canvasser_id, {
+          pay: Number(r.paycheck?.total_pay ?? 0),
+          error: r.error,
+        });
       }
 
       const rows: WeeklyRow[] = [];
