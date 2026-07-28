@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
+import { getPositionOrNull } from "@/lib/utils";
 import { laTodayISO } from "@/lib/dates";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -21,16 +22,6 @@ const TALLY_TO_PIN: Record<TallyKey, PinType> = {
 // Field-pin log_date is the LA calendar day (never viewer-local).
 const todayIso = () => laTodayISO();
 
-function getFix(): Promise<GeolocationPosition | null> {
-  return new Promise((resolve) => {
-    if (typeof navigator === "undefined" || !navigator.geolocation) return resolve(null);
-    navigator.geolocation.getCurrentPosition(
-      (p) => resolve(p),
-      () => resolve(null),
-      { enableHighAccuracy: true, maximumAge: 8000, timeout: 8000 },
-    );
-  });
-}
 
 export function FieldMode() {
   const { user, teamId } = useAuth();
@@ -89,7 +80,7 @@ export function FieldMode() {
 
   async function dropPin(pin_type: PinType, opts?: { silent?: boolean }) {
     if (!user?.id) return { ok: false as const };
-    const fix = await getFix();
+    const fix = await getPositionOrNull({ enableHighAccuracy: true, maximumAge: 8000, timeout: 8000 });
     if (!fix) {
       toast.error("No GPS fix yet — enable Location and try again.");
       return { ok: false as const };

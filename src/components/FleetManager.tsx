@@ -18,7 +18,7 @@ import { deleteProfile, deleteVan } from "@/lib/fleet.functions";
 import { addTeamMember } from "@/lib/users.functions";
 import { useAuth } from "@/hooks/useAuth";
 import { isManagerRole } from "@/lib/roles";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, normalizeName } from "@/lib/utils";
 import { weeklyPoints } from "@/lib/pay";
 import { addDays, addDaysISO, formatWeekRange, laMidnightUtcISO, toISODate } from "@/lib/dates";
 import { useWeekSelector } from "@/hooks/useWeekSelector";
@@ -458,7 +458,7 @@ export function FleetManager() {
                     const rosterRaw = profiles.filter((p) => p.team_id === v.id);
                     const rosterMap = new Map<string, typeof rosterRaw[number]>();
                     for (const p of rosterRaw) {
-                      const key = (p.display_name ?? "").trim().toLowerCase().replace(/\s+/g, " ") || `id:${p.id}`;
+                      const key = normalizeName(p.display_name) || `id:${p.id}`;
                       const prev = rosterMap.get(key);
                       if (!prev) rosterMap.set(key, p);
                       else if ((rolesByUser.get(p.id) ?? []).includes("captain") && !(rolesByUser.get(prev.id) ?? []).includes("captain")) {
@@ -581,9 +581,9 @@ export function FleetManager() {
                               const targetIsOwner = (rolesByUser.get(r.id) ?? []).includes("owner");
                               const canModify = canManage && (isOwnerRole || !targetIsOwner);
                               // Sum points and sale volume across every profile with the same display name in this van.
-                              const nameKey = (r.display_name ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+                              const nameKey = normalizeName(r.display_name);
                               const sameNameProfiles = rosterRaw.filter(
-                                (p) => ((p.display_name ?? "").trim().toLowerCase().replace(/\s+/g, " ")) === nameKey,
+                                (p) => normalizeName(p.display_name) === nameKey,
                               );
                               const aggregatedPoints = sameNameProfiles.reduce((sum, p) => sum + (pointsByUser.get(p.id) ?? 0), 0);
                               const aggregatedVolume = sameNameProfiles.reduce((sum, p) => sum + (volumeByUser.get(p.id) ?? 0), 0);

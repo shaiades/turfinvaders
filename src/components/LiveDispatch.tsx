@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import confetti from "canvas-confetti";
 import { addDaysISO, fmtWorkedDay, lastWorkedDaysBefore, reportDates, weekStartOfISO } from "@/lib/dates";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
+import { normalizeName } from "@/lib/utils";
 
 
 type Profile = {
@@ -48,9 +49,6 @@ export function LiveDispatch({ readOnly = false }: { readOnly?: boolean }) {
 
 type Preset = "today" | "yesterday" | "week";
 
-function normalizeName(s: string | null | undefined): string {
-  return (s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
-}
 
 function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
   const qc = useQueryClient();

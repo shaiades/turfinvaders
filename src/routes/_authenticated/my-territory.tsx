@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { getPositionOrNull } from "@/lib/utils";
 import { laTodayISO } from "@/lib/dates";
 import { useAuth } from "@/hooks/useAuth";
 import { isManagerRole } from "@/lib/roles";
@@ -210,14 +211,7 @@ function MyTerritoryPage() {
 
   const dropPin = useMutation({
     mutationFn: async (ll: LatLng) => {
-      const fix = await new Promise<GeolocationPosition | null>((resolve) => {
-        if (!navigator.geolocation) return resolve(null);
-        navigator.geolocation.getCurrentPosition(
-          (p) => resolve(p),
-          () => resolve(null),
-          { enableHighAccuracy: true, maximumAge: 10000, timeout: 8000 },
-        );
-      });
+      const fix = await getPositionOrNull({ enableHighAccuracy: true, maximumAge: 10000, timeout: 8000 });
       const device = fix ? { lat: fix.coords.latitude, lng: fix.coords.longitude } : me;
       const distance_m = device ? haversineMeters(device, ll) : null;
       const is_remote_drop = distance_m == null ? true : distance_m > 18;
