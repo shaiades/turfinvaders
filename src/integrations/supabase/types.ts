@@ -460,6 +460,7 @@ export type Database = {
           id: string
           is_active: boolean
           is_placeholder: boolean
+          suspension_tracked: boolean
           level: number
           monthly_goal: number
           office_location: string
@@ -489,6 +490,7 @@ export type Database = {
           id: string
           is_active?: boolean
           is_placeholder?: boolean
+          suspension_tracked?: boolean
           level?: number
           monthly_goal?: number
           office_location?: string
@@ -518,6 +520,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           is_placeholder?: boolean
+          suspension_tracked?: boolean
           level?: number
           monthly_goal?: number
           office_location?: string
