@@ -81,10 +81,3 @@ BEGIN
         updated_at       = now();
   RETURN NEW;
 END $function$;
-
--- Logan van has never had a captain assigned in the app.
-UPDATE public.teams SET captain_id = p.id
-FROM public.profiles p
-WHERE teams.name = 'Logan'
-  AND p.display_name = 'Logan temple'
-  AND teams.captain_id IS NULL;
