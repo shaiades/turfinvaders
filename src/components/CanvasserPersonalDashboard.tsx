@@ -57,8 +57,6 @@ const RANKS = [
 ] as const;
 
 // All day/week/month buckets are America/Los_Angeles (midnight PT resets).
-const todayISO = () => laTodayISO();
-const startOfWeekISO = () => laWeekStartISO();
 
 type Totals = {
   doors_knocked: number;
@@ -181,7 +179,7 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
     queryKey: ["my_clocked_hours", "week", userId],
     queryFn: async () => {
       // Mon–Sat window, matching calc_weekly_paycheck exactly.
-      const weekStart = startOfWeekISO();
+      const weekStart = laWeekStartISO();
       const { data, error } = await supabase
         .from("time_entries")
         .select("billable_hours")
@@ -197,7 +195,7 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
   const { today, week, month, monthRevenue, weekRevenue, weekPoints,
           weekHours, hourlyRate, weekBase, weekCommission, monthCommission, funnel } = useMemo(() => {
     const allRows = (logsQuery.data ?? []) as unknown as Array<Record<string, number | null> & { log_date: string }>;
-    const t = todayISO(), w = startOfWeekISO(), m = laMonthStartISO();
+    const t = laTodayISO(), w = laWeekStartISO(), m = laMonthStartISO();
     const mtdRows = allRows.filter((r) => r.log_date >= m);
     const today = aggregate(allRows.filter((r) => r.log_date === t));
     const week  = aggregate(allRows.filter((r) => r.log_date >= w));

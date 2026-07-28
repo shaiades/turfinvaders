@@ -16,7 +16,6 @@ export const Route = createFileRoute("/_authenticated/canvassers/$canvasserId/fi
 });
 
 // Field days are LA calendar days (never viewer-local or UTC).
-function isoDay(d: Date) { return laDateISO(d); }
 function fmt(n: number) { return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }); }
 function timeLabel(iso: string) {
   return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -31,7 +30,7 @@ type SaleRow = { id: string; sale_amount: number | null; customer_name: string |
 function FieldActivityPage() {
   const { canvasserId } = Route.useParams();
   const { role, user } = useAuth();
-  const [day, setDay] = useState(isoDay(new Date()));
+  const [day, setDay] = useState(laDateISO(new Date()));
 
   const allowed = isManagerRole(role) || user?.id === canvasserId;
 
@@ -160,7 +159,7 @@ function FieldActivityPage() {
         <input
           type="date"
           value={day}
-          max={isoDay(new Date())}
+          max={laDateISO(new Date())}
           onChange={(e) => setDay(e.target.value)}
           className="bg-surface border border-border rounded px-3 py-2 text-sm font-display"
         />

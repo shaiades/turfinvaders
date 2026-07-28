@@ -19,8 +19,6 @@ const TALLY_TO_PIN: Record<TallyKey, PinType> = {
   not_interested: "not_interested",
 };
 
-// Field-pin log_date is the LA calendar day (never viewer-local).
-const todayIso = () => laTodayISO();
 
 
 export function FieldMode() {
@@ -28,7 +26,7 @@ export function FieldMode() {
   const qc = useQueryClient();
   const [leadOpen, setLeadOpen] = useState(false);
   const [pending, setPending] = useState<PinType | null>(null);
-  const log_date = todayIso();
+  const log_date = laTodayISO();
   const watchIdRef = useRef<number | null>(null);
 
   // Prompt for location as soon as Field Mode opens; keep a warm GPS fix.

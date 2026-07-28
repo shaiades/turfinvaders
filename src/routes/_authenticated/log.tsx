@@ -48,7 +48,6 @@ const EMPTY: LogState = {
   one_legs: 0, no_shows: 0, no_demo: 0, notes: "",
 };
 
-const todayISO = () => laTodayISO();
 
 function LogPage() {
   const { user, teamId, role, loading } = useAuth();
@@ -73,7 +72,7 @@ function LogPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("daily_logs").select("*")
-        .eq("canvasser_id", user!.id).eq("log_date", todayISO())
+        .eq("canvasser_id", user!.id).eq("log_date", laTodayISO())
         .eq("office_location", myOffice)
         .maybeSingle();
       if (error) throw error;
@@ -107,7 +106,7 @@ function LogPage() {
       const payload = {
         canvasser_id: user.id,
         team_id: teamId,
-        log_date: todayISO(),
+        log_date: laTodayISO(),
         office_location: myOffice,
         ...form,
       };
@@ -131,7 +130,7 @@ function LogPage() {
         <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
           {role === "canvasser" ? "Player Log" : "Daily Log"}
         </div>
-        <h1 className="font-display text-2xl text-neon mt-1">DAILY LOG · {todayISO()}</h1>
+        <h1 className="font-display text-2xl text-neon mt-1">DAILY LOG · {laTodayISO()}</h1>
         <p className="text-xs text-muted-foreground mt-2">
           Log your day. Numbers are saved instantly; submitted leads go to the Confirmation Desk.
         </p>

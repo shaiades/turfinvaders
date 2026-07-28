@@ -20,16 +20,13 @@ type WeekTotals = {
   daysWorked: number;
 };
 
-// Week anchor is the LA Monday (midnight PT reset), not viewer-local.
-function startOfISOWeek(): string {
-  return laWeekStartISO();
-}
 
 export function CommandCenter({ teamId }: Props) {
   const totals = useQuery({
     queryKey: ["command_center", teamId ?? "all"],
     queryFn: async (): Promise<WeekTotals> => {
-      const since = startOfISOWeek();
+      // Week anchor is the LA Monday (midnight PT reset), not viewer-local.
+      const since = laWeekStartISO();
       let q = supabase
         .from("daily_logs")
         .select("canvasser_id, log_date, leads_called_in, confirmed_leads, demos_sits, sales, no_shows")

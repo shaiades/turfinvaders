@@ -27,7 +27,6 @@ export const Route = createFileRoute("/_authenticated/my-territory")({
   component: MyTerritoryPage,
 });
 
-const todayISO = () => laTodayISO();
 
 function haversineMeters(a: LatLng, b: LatLng) {
   const R = 6371000;
@@ -125,7 +124,7 @@ function MyTerritoryPage() {
         .from("field_pins")
         .select("id, pin_type, lat, lng, is_remote_drop, distance_m")
         .eq("canvasser_id", user!.id)
-        .eq("log_date", todayISO());
+        .eq("log_date", laTodayISO());
       if (error) throw error;
       return (data ?? []) as FieldPin[];
     },
@@ -220,7 +219,7 @@ function MyTerritoryPage() {
         pin_type: active,
         lat: ll.lat,
         lng: ll.lng,
-        log_date: todayISO(),
+        log_date: laTodayISO(),
         device_lat: device?.lat ?? null,
         device_lng: device?.lng ?? null,
         distance_m,
