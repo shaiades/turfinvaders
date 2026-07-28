@@ -89,6 +89,7 @@ export type Database = {
           non_core: number
           not_interested: number
           notes: string | null
+          office_location: string
           one_legs: number
           people_talked_to: number
           renters: number
@@ -114,6 +115,7 @@ export type Database = {
           non_core?: number
           not_interested?: number
           notes?: string | null
+          office_location?: string
           one_legs?: number
           people_talked_to?: number
           renters?: number
@@ -139,6 +141,7 @@ export type Database = {
           non_core?: number
           not_interested?: number
           notes?: string | null
+          office_location?: string
           one_legs?: number
           people_talked_to?: number
           renters?: number

@@ -224,18 +224,19 @@ export const Route = createFileRoute("/api/public/monday-webhook")({
         // Find canvasser (case-insensitive display_name).
         const { data: profile, error: pErr } = await supabaseAdmin
           .from("profiles")
-          .select("id, team_id, display_name")
+          .select("id, team_id, display_name, office_location")
           .ilike("display_name", canvasserName.trim())
           .maybeSingle();
         if (pErr) return json({ error: pErr.message }, 500);
         if (!profile) return json({ error: `Canvasser not found: ${canvasserName}` }, 404);
+        const logOffice = profile.office_location ?? "San Diego";
 
-        // Ensure today's daily_log row exists.
+        // Ensure today's daily_log row exists (per canvasser+day+office).
         const { error: upErr } = await supabaseAdmin
           .from("daily_logs")
           .upsert(
-            { canvasser_id: profile.id, team_id: profile.team_id, log_date: logDate },
-            { onConflict: "canvasser_id,log_date", ignoreDuplicates: true },
+            { canvasser_id: profile.id, team_id: profile.team_id, log_date: logDate, office_location: logOffice },
+            { onConflict: "canvasser_id,log_date,office_location", ignoreDuplicates: true },
           );
         if (upErr) return json({ error: upErr.message }, 500);
 
@@ -267,6 +268,7 @@ export const Route = createFileRoute("/api/public/monday-webhook")({
           .select(selectCols)
           .eq("canvasser_id", profile.id)
           .eq("log_date", logDate)
+          .eq("office_location", logOffice)
           .maybeSingle();
         if (rErr || !rowData) return json({ error: rErr?.message ?? "Log row missing" }, 500);
         const row = rowData as unknown as Record<string, unknown> & { id: string };

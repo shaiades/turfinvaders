@@ -71,16 +71,18 @@ export function FieldMode() {
     queryKey: ["field-tally", user?.id, log_date],
     enabled: !!user?.id,
     queryFn: async () => {
+      // Rows are per (canvasser, day, office) — sum across them so the tally
+      // is whole-day regardless of which office's row the pins landed on.
       const { data } = await supabase
         .from("daily_logs")
         .select("doors_knocked, people_talked_to, not_interested")
         .eq("canvasser_id", user!.id)
-        .eq("log_date", log_date)
-        .maybeSingle();
+        .eq("log_date", log_date);
+      const rows = (data ?? []) as Array<{ doors_knocked: number | null; people_talked_to: number | null; not_interested?: number | null }>;
       return {
-        doors_knocked: data?.doors_knocked ?? 0,
-        people_talked_to: data?.people_talked_to ?? 0,
-        not_interested: (data as { not_interested?: number } | null)?.not_interested ?? 0,
+        doors_knocked: rows.reduce((a, r) => a + (r.doors_knocked ?? 0), 0),
+        people_talked_to: rows.reduce((a, r) => a + (r.people_talked_to ?? 0), 0),
+        not_interested: rows.reduce((a, r) => a + (r.not_interested ?? 0), 0),
       };
     },
   });
