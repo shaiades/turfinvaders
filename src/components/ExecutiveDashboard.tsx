@@ -172,10 +172,6 @@ function LiveDailyAction() {
   const t = q.data?.totals ?? { called: 0, nextDay: 0, future: 0, blowout: 0 };
   const donut = q.data?.donut ?? [];
 
-  const webhookUrl = typeof window !== "undefined"
-    ? `${window.location.origin}/api/public/monday-webhook`
-    : "/api/public/monday-webhook";
-
   return (
     <section className="space-y-4">
       <div className="flex items-baseline justify-between gap-4">
@@ -183,15 +179,6 @@ function LiveDailyAction() {
           <h2 className="font-display text-sm uppercase tracking-widest text-foreground">Live Daily Action</h2>
           <p className="text-xs text-muted-foreground mt-0.5">{today}</p>
         </div>
-        <button
-          onClick={() => {
-            navigator.clipboard.writeText(webhookUrl);
-            toast.success("Webhook URL copied");
-          }}
-          className="inline-flex items-center min-h-10 md:min-h-9 px-2 -mx-2 text-[10px] font-display uppercase tracking-widest text-neon hover:underline"
-        >
-          Copy Webhook URL
-        </button>
       </div>
 
       <div className="space-y-1 text-sm text-foreground">
