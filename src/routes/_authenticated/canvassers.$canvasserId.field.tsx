@@ -6,7 +6,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { ArcadePanel, StatCard } from "@/components/arcade";
 import { NeonMap, type FieldPin, type Territory, type LatLng } from "@/components/NeonMap";
 import { Home, MessageSquare, Sparkles, DollarSign, AlertTriangle, ArrowLeft } from "lucide-react";
-import { commissionRateForPoints } from "@/lib/pay";
+import { commissionRateForPoints, weeklyPoints } from "@/lib/pay";
 import { laDateISO, laMidnightUtcISO, addDaysISO, weekStartOfISO } from "@/lib/dates";
 
 export const Route = createFileRoute("/_authenticated/canvassers/$canvasserId/field")({
@@ -80,7 +80,7 @@ function FieldActivityPage() {
         .select("demos_sits, sales").eq("canvasser_id", canvasserId).gte("log_date", weekStart);
       const rows = data ?? [];
       // Sit=1pt, Sale=2pt. demos_sits already includes sale rows, so points = demos_sits + sales.
-      return rows.reduce((a, r) => a + (r.demos_sits ?? 0) + (r.sales ?? 0), 0);
+      return rows.reduce((a, r) => a + weeklyPoints(r.demos_sits ?? 0, r.sales ?? 0), 0);
     },
   });
   const commissionRate = commissionRateForPoints(pointsQuery.data ?? 0);

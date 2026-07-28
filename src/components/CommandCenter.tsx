@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { weeklyPoints } from "@/lib/pay";
 import { ArcadePanel } from "@/components/arcade";
 import { LiveFeed } from "@/components/LiveFeed";
 import { laWeekStartISO } from "@/lib/dates";
@@ -55,7 +56,7 @@ export function CommandCenter({ teamId }: Props) {
   });
 
   const t = totals.data ?? { confirmedLeads: 0, leadsCalledIn: 0, demosSits: 0, sales: 0, noShows: 0, daysWorked: 0 };
-  const points = t.demosSits + t.sales;
+  const points = weeklyPoints(t.demosSits, t.sales);
   const pace = t.daysWorked > 0 ? t.confirmedLeads / t.daysWorked : 0;
   const sitRate = t.confirmedLeads > 0 ? (t.demosSits / t.confirmedLeads) * 100 : 0;
   const closeRate = t.demosSits > 0 ? (t.sales / t.demosSits) * 100 : 0;

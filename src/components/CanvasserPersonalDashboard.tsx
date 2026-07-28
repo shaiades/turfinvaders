@@ -22,6 +22,7 @@ import {
   HOURLY_TOP,
   VOLUME_BONUS_STEP,
   PAY_LOCK_MIN_ROLLING_AVG,
+  weeklyPoints,
 } from "@/lib/pay";
 import { getMonthlyPaychecks } from "@/lib/fleet.functions";
 import { laTodayISO, laWeekStartISO, addDaysISO, laMidnightUtcISO } from "@/lib/dates";
@@ -210,7 +211,7 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
       .filter((r) => Date.parse(r.created_at) >= wStartMs)
       .reduce((a, r) => a + Number(r.sale_amount ?? 0), 0);
 
-    const weekPoints = week.demos_sits + week.sales;
+    const weekPoints = weeklyPoints(week.demos_sits, week.sales);
     const weekHours = clockedQuery.data ?? 0;
     const hourlyRate = payRateForPoints(weekPoints);
     const weekBase = weekHours * hourlyRate;

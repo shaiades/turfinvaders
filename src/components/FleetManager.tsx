@@ -19,6 +19,7 @@ import { addTeamMember } from "@/lib/users.functions";
 import { useAuth } from "@/hooks/useAuth";
 import { isManagerRole } from "@/lib/roles";
 import { formatCurrency } from "@/lib/utils";
+import { weeklyPoints } from "@/lib/pay";
 import { addDays, addDaysISO, formatWeekRange, laMidnightUtcISO, toISODate } from "@/lib/dates";
 import { useWeekSelector } from "@/hooks/useWeekSelector";
 
@@ -149,7 +150,7 @@ export function FleetManager() {
       const engineWeekEndISO = toISODate(addDays(weekStart, 5));
       for (const l of logRows) {
         if (!l.canvasser_id || l.log_date > engineWeekEndISO) continue;
-        const pts = (l.demos_sits ?? 0) + (l.sales ?? 0);
+        const pts = weeklyPoints(l.demos_sits ?? 0, l.sales ?? 0);
         if (pts > 0) pointsByUser.set(l.canvasser_id, (pointsByUser.get(l.canvasser_id) ?? 0) + pts);
       }
       // Van Volume: confirmed sale dollars per canvasser, attributed to the
