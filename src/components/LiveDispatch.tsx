@@ -9,6 +9,7 @@ import confetti from "canvas-confetti";
 import { addDaysISO, fmtWorkedDay, lastWorkedDaysBefore, reportDates, weekStartOfISO } from "@/lib/dates";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { normalizeName } from "@/lib/utils";
+import { DEFAULT_OFFICE, OFFICE_LOCATIONS } from "@/lib/offices";
 
 
 type Profile = {
@@ -520,13 +521,13 @@ function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
   const captainName = (v: Van) =>
     v.captain_id ? rows.find((r) => r.g.ids.includes(v.captain_id!))?.g.display_name ?? null : null;
 
-  const offices = ["San Diego", "Orange County"].filter((o) => matches(o));
+  const offices = OFFICE_LOCATIONS.filter((o) => matches(o));
 
   return (
     <div className="space-y-4">
       {offices.map((office) => {
         const list = vans
-          .filter((v) => (v.office_location ?? "San Diego") === office)
+          .filter((v) => (v.office_location ?? DEFAULT_OFFICE) === office)
           .sort((a, b) => vanSub(b.id) - vanSub(a.id) || a.name.localeCompare(b.name));
         if (list.length === 0) return null;
         return (

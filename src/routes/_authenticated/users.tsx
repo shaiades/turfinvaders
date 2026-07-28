@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { OFFICE_LOCATIONS, type OfficeLocation } from "@/lib/offices";
 import { ArcadePanel } from "@/components/arcade";
 import { DatabaseCleanup } from "@/components/DatabaseCleanup";
 import { createCanvasser } from "@/lib/users.functions";
@@ -103,7 +104,7 @@ function UsersPage() {
     password: "",
     display_name: "",
     role: "canvasser" as AppRole,
-    office_location: "" as "" | "San Diego" | "Orange County",
+    office_location: "" as "" | OfficeLocation,
     team_id: "",
   });
 
@@ -286,8 +287,9 @@ function UsersPage() {
               className="bg-input border border-border rounded-md px-2 py-2 text-base md:text-sm"
             >
               <option value="">— none —</option>
-              <option value="San Diego">San Diego</option>
-              <option value="Orange County">Orange County</option>
+              {OFFICE_LOCATIONS.map((o) => (
+                <option key={o} value={o}>{o}</option>
+              ))}
             </select>
           </label>
           <label className="flex flex-col gap-1 text-xs">

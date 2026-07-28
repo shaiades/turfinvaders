@@ -16,6 +16,7 @@ import { Plus } from "lucide-react";
 import { OfficeFilterProvider, OfficeFilterToggle, useOfficeFilter } from "@/components/OfficeFilterContext";
 import { weekStartMonday, toISODate, addDays, laTodayISO, laWeekStartISO, weekStartOfISO, formatWeekRange } from "@/lib/dates";
 import { useWeekSelector } from "@/hooks/useWeekSelector";
+import { DEFAULT_OFFICE } from "@/lib/offices";
 
 
 /* ============ Helpers ============ */
@@ -432,7 +433,7 @@ function WeeklyResults({ weekStart }: { weekStart: Date }) {
       // numbers (mirrors the per-office Setter Reports).
       const agg = new Map<string, { leads: number; sits: number; resets: number; bo: number; ctc: number; nonCore: number; ol: number; sales: number }>();
       for (const l of logsR.data ?? []) {
-        const key = `${l.canvasser_id}|${(l as { office_location?: string | null }).office_location ?? "San Diego"}`;
+        const key = `${l.canvasser_id}|${(l as { office_location?: string | null }).office_location ?? DEFAULT_OFFICE}`;
         const cur = agg.get(key) ?? { leads: 0, sits: 0, resets: 0, bo: 0, ctc: 0, nonCore: 0, ol: 0, sales: 0 };
         cur.leads += leadsSum(l);
         // demos_sits in DB includes sale rows. Sits = demos_sits - sales.

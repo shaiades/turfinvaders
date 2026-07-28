@@ -1,7 +1,7 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import { DEFAULT_OFFICE, OFFICE_FILTER_OPTIONS, type OfficeFilter } from "@/lib/offices";
 
-export const OFFICE_FILTER_OPTIONS = ["All", "San Diego", "Orange County"] as const;
-export type OfficeFilter = (typeof OFFICE_FILTER_OPTIONS)[number];
+export { OFFICE_FILTER_OPTIONS, type OfficeFilter } from "@/lib/offices";
 
 type Ctx = {
   office: OfficeFilter;
@@ -18,7 +18,7 @@ export function OfficeFilterProvider({ children }: { children: ReactNode }) {
     () => ({
       office,
       setOffice,
-      matches: (loc) => office === "All" || (loc ?? "San Diego") === office,
+      matches: (loc) => office === "All" || (loc ?? DEFAULT_OFFICE) === office,
     }),
     [office],
   );

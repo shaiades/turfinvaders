@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { DEFAULT_OFFICE } from "@/lib/offices";
 import { laTodayISO } from "@/lib/dates";
 import { useAuth } from "@/hooks/useAuth";
 import { ArcadePanel } from "@/components/arcade";
@@ -55,13 +56,13 @@ function LogPage() {
 
   // daily_logs rows are per (canvasser, day, office); the manual log always
   // targets the canvasser's home-office row.
-  const { data: myOffice = "San Diego" } = useQuery({
+  const { data: myOffice = DEFAULT_OFFICE } = useQuery({
     enabled: !!user,
     queryKey: ["my_office", user?.id],
     queryFn: async () => {
       const { data } = await supabase
         .from("profiles").select("office_location").eq("id", user!.id).maybeSingle();
-      return data?.office_location ?? "San Diego";
+      return data?.office_location ?? DEFAULT_OFFICE;
     },
   });
 

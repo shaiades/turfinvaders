@@ -20,6 +20,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { isManagerRole } from "@/lib/roles";
 import { formatCurrency, normalizeName } from "@/lib/utils";
 import { weeklyPoints } from "@/lib/pay";
+import { DEFAULT_OFFICE, OFFICE_LOCATIONS, type OfficeLocation } from "@/lib/offices";
 import { addDays, addDaysISO, formatWeekRange, laMidnightUtcISO, toISODate } from "@/lib/dates";
 import { useWeekSelector } from "@/hooks/useWeekSelector";
 
@@ -28,8 +29,6 @@ import { useWeekSelector } from "@/hooks/useWeekSelector";
 // at midnight PT on Monday morning, regardless of the viewer's device timezone.
 
 const VAN_COLORS = ["#ff007a", "#00f0ff", "#a855f7", "#f59e0b", "#22c55e", "#ef4444", "#3b82f6", "#eab308"];
-export const OFFICE_LOCATIONS = ["San Diego", "Orange County"] as const;
-export type OfficeLocation = (typeof OFFICE_LOCATIONS)[number];
 
 
 
@@ -39,7 +38,7 @@ export function FleetManager() {
   const canManage = isManagerRole(realRole);
   const isOwnerRole = realRole === "owner";
   const [newVanName, setNewVanName] = useState("");
-  const [newVanLoc, setNewVanLoc] = useState<OfficeLocation>("San Diego");
+  const [newVanLoc, setNewVanLoc] = useState<OfficeLocation>(DEFAULT_OFFICE);
   const [newVanColor, setNewVanColor] = useState(VAN_COLORS[0]);
   const deleteProfileFn = useServerFn(deleteProfile);
   const deleteVanFn = useServerFn(deleteVan);
@@ -47,10 +46,10 @@ export function FleetManager() {
   const [editingVanId, setEditingVanId] = useState<string | null>(null);
   const [editVanName, setEditVanName] = useState("");
   const [editVanColor, setEditVanColor] = useState(VAN_COLORS[0]);
-  const [editVanLoc, setEditVanLoc] = useState<OfficeLocation>("San Diego");
+  const [editVanLoc, setEditVanLoc] = useState<OfficeLocation>(DEFAULT_OFFICE);
   const [addAgentOpen, setAddAgentOpen] = useState(false);
   const [newAgentName, setNewAgentName] = useState("");
-  const [newAgentOffice, setNewAgentOffice] = useState<OfficeLocation>("San Diego");
+  const [newAgentOffice, setNewAgentOffice] = useState<OfficeLocation>(DEFAULT_OFFICE);
   const [archivedOpen, setArchivedOpen] = useState(false);
 
   const reactivateAgent = useMutation({
@@ -284,7 +283,7 @@ export function FleetManager() {
     setEditingVanId(v.id);
     setEditVanName(v.name);
     setEditVanColor(v.color);
-    setEditVanLoc((v.office_location as OfficeLocation) ?? "San Diego");
+    setEditVanLoc((v.office_location as OfficeLocation) ?? DEFAULT_OFFICE);
   }
 
   if (fleet.isLoading || !fleet.data) {
@@ -301,7 +300,7 @@ export function FleetManager() {
   const vansByOffice = new Map<string, typeof vans>();
   for (const loc of OFFICE_LOCATIONS) vansByOffice.set(loc, []);
   for (const v of vans) {
-    const loc = (v.office_location as string) || "San Diego";
+    const loc = (v.office_location as string) || DEFAULT_OFFICE;
     if (!vansByOffice.has(loc)) vansByOffice.set(loc, []);
     vansByOffice.get(loc)!.push(v);
   }
@@ -544,7 +543,7 @@ export function FleetManager() {
 
                             <div className="flex items-center gap-1">
                               <span className="text-[10px] font-display uppercase tracking-widest hidden sm:flex items-center gap-1 mr-1 text-muted-foreground">
-                                <Building2 className="w-3 h-3" /> {v.office_location ?? "San Diego"}
+                                <Building2 className="w-3 h-3" /> {v.office_location ?? DEFAULT_OFFICE}
                               </span>
                               {canManage && (
                                 <button
