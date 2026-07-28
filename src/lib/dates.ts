@@ -75,3 +75,52 @@ export function laMidnightUtcISO(isoDate: string): string {
   );
   return new Date(guess.getTime() - laHour * 3_600_000).toISOString(); // 01:00 during PDT → back 1h
 }
+
+// --- Report-date clock (7 PM PT lock) ---
+
+const LA_DATE_HOUR_PARTS = new Intl.DateTimeFormat("en-US", {
+  timeZone: LA_TZ,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  hour12: false,
+});
+
+/**
+ * The report-date is the PT calendar date whose 7:00 PM boundary is the "lock".
+ * Before 7 PM PT → report-date = current PT date (live preview of today's totals).
+ * At/after 7 PM PT → report-date rolls forward: today's totals seed the NEXT PT date.
+ * `wkStart` is the LA Monday of the report-date's week.
+ */
+export function reportDates(): { today: string; yday: string; wkStart: string; locked: boolean } {
+  const parts = Object.fromEntries(
+    LA_DATE_HOUR_PARTS.formatToParts(new Date()).map((p) => [p.type, p.value]),
+  );
+  const hour = Number(parts.hour === "24" ? "0" : parts.hour);
+  const currentPT = `${parts.year}-${parts.month}-${parts.day}`;
+  const locked = hour >= 19;
+  const today = locked ? addDaysISO(currentPT, 1) : currentPT;
+  return { today, yday: addDaysISO(today, -1), wkStart: weekStartOfISO(today), locked };
+}
+
+/** The last `n` completed worked days (Mon–Sat; Sundays never count),
+ *  walking back from — and excluding — the given report date. Newest first.
+ *  On a Tuesday this yields [Mon, Sat, Fri, …]: Saturday and Monday are
+ *  consecutive worked days for the suspension rule. */
+export function lastWorkedDaysBefore(todayISO: string, n: number): string[] {
+  const out: string[] = [];
+  let d = todayISO;
+  while (out.length < n) {
+    d = addDaysISO(d, -1);
+    if (new Date(`${d}T00:00:00Z`).getUTCDay() !== 0) out.push(d);
+  }
+  return out;
+}
+
+/** "Mon 7/28" for a chip label. */
+export function fmtWorkedDay(iso: string): string {
+  return new Date(`${iso}T00:00:00Z`)
+    .toLocaleDateString("en-US", { weekday: "short", month: "numeric", day: "numeric", timeZone: "UTC" })
+    .replace(",", "");
+}
