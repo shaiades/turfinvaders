@@ -7,12 +7,9 @@ import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Clock, ChevronLeft, ChevronRight, Save, Trash2, AlertTriangle } from "lucide-react";
-import { weekStartMonday, toISODate } from "@/lib/dates";
+import { useWeekSelector } from "@/hooks/useWeekSelector";
 
-// Weeks anchor to the LA Monday (midnight PT reset); ymd pairs with the
-// local-midnight Dates those helpers hand back.
-const weekStartOf = weekStartMonday;
-const ymd = toISODate;
+// Weeks anchor to the LA Monday (midnight PT reset).
 function toLocalInput(iso: string | null) {
   if (!iso) return "";
   const d = new Date(iso);
@@ -37,12 +34,16 @@ type Profile = { id: string; display_name: string };
 
 export function TimesheetEditor() {
   const qc = useQueryClient();
-  const [weekStart, setWeekStart] = useState<Date>(weekStartOf(new Date()));
+  const {
+    weekStart,
+    weekEnd,
+    weekStartISO: start,
+    weekEndISO: end,
+    shiftWeek,
+    goToWeek,
+  } = useWeekSelector({ endOffsetDays: 6 });
   const [filterUser, setFilterUser] = useState<string>("");
   const [edits, setEdits] = useState<Record<string, { clock_in?: string; clock_out?: string | null }>>({});
-
-  const start = ymd(weekStart);
-  const end = ymd(new Date(weekStart.getTime() + 6 * 86400000));
 
   const { data, isLoading } = useQuery({
     queryKey: ["timesheets", start, end],
@@ -127,12 +128,6 @@ export function TimesheetEditor() {
     onError: (e: Error) => toast.error("Delete failed", { description: e.message }),
   });
 
-  function shiftWeek(delta: number) {
-    const next = new Date(weekStart);
-    next.setDate(next.getDate() + delta * 7);
-    setWeekStart(weekStartOf(next));
-  }
-
   function saveRow(e: Entry) {
     const edit = edits[e.id];
     if (!edit) return;
@@ -155,9 +150,7 @@ export function TimesheetEditor() {
     saveMut.mutate({ id: e.id, patch });
   }
 
-  const weekLabel = `${weekStart.toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${new Date(
-    weekStart.getTime() + 6 * 86400000,
-  ).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
+  const weekLabel = `${weekStart.toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${weekEnd.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
 
   // Shared by the desktop table and mobile card list so both render identical
   // edit state through the same handlers.
@@ -185,7 +178,7 @@ export function TimesheetEditor() {
             <Button variant="outline" size="sm" onClick={() => shiftWeek(1)}>
               <ChevronRight className="w-4 h-4" />
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => setWeekStart(weekStartOf(new Date()))}>
+            <Button variant="ghost" size="sm" onClick={() => goToWeek()}>
               This Week
             </Button>
           </div>

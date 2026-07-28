@@ -76,6 +76,21 @@ export function laMidnightUtcISO(isoDate: string): string {
   return new Date(guess.getTime() - laHour * 3_600_000).toISOString(); // 01:00 during PDT → back 1h
 }
 
+/** "Jul 6 – 12, 2026" | "Jul 28 – Aug 2, 2026" | "Dec 28, 2026 – Jan 2, 2027".
+ *  Viewer-locale month names, matching the existing week-selector labels. */
+export function formatWeekRange(start: Date, end: Date): string {
+  const sameMonth = start.getMonth() === end.getMonth();
+  const sameYear = start.getFullYear() === end.getFullYear();
+  const monthFmt = (d: Date) => d.toLocaleDateString(undefined, { month: "short" });
+  const sM = monthFmt(start);
+  const eM = monthFmt(end);
+  const sD = start.getDate();
+  const eD = end.getDate();
+  if (sameMonth && sameYear) return `${sM} ${sD} – ${eD}, ${end.getFullYear()}`;
+  if (sameYear) return `${sM} ${sD} – ${eM} ${eD}, ${end.getFullYear()}`;
+  return `${sM} ${sD}, ${start.getFullYear()} – ${eM} ${eD}, ${end.getFullYear()}`;
+}
+
 // --- Report-date clock (7 PM PT lock) ---
 
 const LA_DATE_HOUR_PARTS = new Intl.DateTimeFormat("en-US", {

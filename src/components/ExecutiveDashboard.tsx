@@ -13,13 +13,13 @@ import { upsertManualWeekly, getWeeklyPaychecks } from "@/lib/fleet.functions";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 import { OfficeFilterProvider, OfficeFilterToggle, useOfficeFilter } from "@/components/OfficeFilterContext";
-import { weekStartMonday, toISODate, addDays, dateFromISO, laDateISO, laTodayISO, laWeekStartISO, weekStartOfISO } from "@/lib/dates";
+import { weekStartMonday, toISODate, addDays, dateFromISO, laDateISO, laTodayISO, laWeekStartISO, weekStartOfISO, formatWeekRange } from "@/lib/dates";
+import { useWeekSelector } from "@/hooks/useWeekSelector";
 
 
 /* ============ Helpers ============ */
 /* All day/week/month buckets are America/Los_Angeles (midnight PT resets). */
 
-const startOfWeekMon = weekStartMonday;
 function startOfMonth(ref = new Date()) {
   return dateFromISO(`${laDateISO(ref).slice(0, 7)}-01`);
 }
@@ -34,23 +34,15 @@ function leadsSum(r: { demos_sits?: number | null; no_demo?: number | null; ctc?
 
 /* ============ Main ============ */
 
-function formatWeekRange(start: Date, end: Date): string {
-  const monthFmt = (d: Date) => d.toLocaleDateString(undefined, { month: "short" });
-  if (start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear())
-    return `${monthFmt(start)} ${start.getDate()} – ${end.getDate()}, ${end.getFullYear()}`;
-  return `${monthFmt(start)} ${start.getDate()} – ${monthFmt(end)} ${end.getDate()}, ${end.getFullYear()}`;
-}
-
 // Slimmed 2026-07-22: Payroll lives only in the Payroll tab, fleet status in
 // the Fleet tab, CSV import in the header dialog, and DatabaseCleanup on the
 // Manage Players screen — the Executive tab no longer restates them.
 export function ExecutiveDashboard() {
   // Week selector drives Weekly Results. Defaults to last completed week
   // (the historical behavior); Mon–Sat pay week, Pacific time.
-  const [weekStart, setWeekStart] = useState<Date>(() => addDays(weekStartMonday(), -7));
-  const weekEnd = useMemo(() => addDays(weekStart, 5), [weekStart]);
-  const thisWeekISO = toISODate(weekStartMonday());
-  const isCurrentWeek = toISODate(weekStart) === thisWeekISO;
+  const { weekStart, weekEnd, isCurrentWeek, shiftWeek, setWeekStart } = useWeekSelector({
+    initialOffsetWeeks: -1,
+  });
   const isLastWeek = toISODate(weekStart) === toISODate(addDays(weekStartMonday(), -7));
 
   return (
@@ -71,7 +63,7 @@ export function ExecutiveDashboard() {
         >
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-2 min-w-0 flex-1">
-              <Button size="sm" variant="outline" onClick={() => setWeekStart((w) => addDays(w, -7))} aria-label="Previous week">
+              <Button size="sm" variant="outline" onClick={() => shiftWeek(-1)} aria-label="Previous week">
                 ‹
               </Button>
               <div className="min-w-0 flex-1 text-center font-display text-xs sm:text-sm text-neon truncate">
@@ -80,7 +72,7 @@ export function ExecutiveDashboard() {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => setWeekStart((w) => addDays(w, 7))}
+                onClick={() => shiftWeek(1)}
                 disabled={isCurrentWeek}
                 aria-label="Next week"
               >
@@ -393,7 +385,6 @@ function RawDataTable() {
 
 /* ============ 1. Live Fleet Status (Day/Week/Month) ============ */
 
-type Range = "today" | "week" | "month";
 
 /* ============ 2. Last Week's Results ============ */
 
@@ -419,7 +410,7 @@ type WeeklyRow = {
 function WeeklyResults({ weekStart }: { weekStart: Date }) {
   const lastWeekStart = weekStart;
   const lastWeekEnd = useMemo(() => addDays(lastWeekStart, 5), [lastWeekStart]);
-  const isCurrentWeek = toISODate(weekStart) === toISODate(startOfWeekMon());
+  const isCurrentWeek = toISODate(weekStart) === toISODate(weekStartMonday());
 
   const q = useQuery({
     queryKey: ["weekly_results", toISODate(lastWeekStart)],

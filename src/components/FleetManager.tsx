@@ -19,23 +19,12 @@ import { addTeamMember } from "@/lib/users.functions";
 import { useAuth } from "@/hooks/useAuth";
 import { isManagerRole } from "@/lib/roles";
 import { formatCurrency } from "@/lib/utils";
-import { weekStartMonday, toISODate, addDays, addDaysISO, laMidnightUtcISO } from "@/lib/dates";
+import { addDays, addDaysISO, formatWeekRange, laMidnightUtcISO, toISODate } from "@/lib/dates";
+import { useWeekSelector } from "@/hooks/useWeekSelector";
 
 // Week helpers — ISO week, Monday..Sunday. The fleet week is anchored to
 // America/Los_Angeles via the shared helpers in @/lib/dates: all stats reset
 // at midnight PT on Monday morning, regardless of the viewer's device timezone.
-function formatRange(start: Date, end: Date): string {
-  const sameMonth = start.getMonth() === end.getMonth();
-  const sameYear = start.getFullYear() === end.getFullYear();
-  const monthFmt = (d: Date) => d.toLocaleDateString(undefined, { month: "short" });
-  const sM = monthFmt(start);
-  const eM = monthFmt(end);
-  const sD = start.getDate();
-  const eD = end.getDate();
-  if (sameMonth && sameYear) return `${sM} ${sD} – ${eD}, ${end.getFullYear()}`;
-  if (sameYear) return `${sM} ${sD} – ${eM} ${eD}, ${end.getFullYear()}`;
-  return `${sM} ${sD}, ${start.getFullYear()} – ${eM} ${eD}, ${end.getFullYear()}`;
-}
 
 const VAN_COLORS = ["#ff007a", "#00f0ff", "#a855f7", "#f59e0b", "#22c55e", "#ef4444", "#3b82f6", "#eab308"];
 export const OFFICE_LOCATIONS = ["San Diego", "Orange County"] as const;
@@ -76,20 +65,14 @@ export function FleetManager() {
   });
 
   // Week selector — default to current Monday-anchored week (Pacific time).
-  const [weekStart, setWeekStart] = useState<Date>(() => weekStartMonday());
-  const weekEnd = useMemo(() => addDays(weekStart, 6), [weekStart]);
-  const weekStartISO = useMemo(() => toISODate(weekStart), [weekStart]);
-  const weekEndISO = useMemo(() => toISODate(weekEnd), [weekEnd]);
+  const { weekStart, weekEnd, weekStartISO, weekEndISO, isCurrentWeek, shiftWeek, goToWeek } =
+    useWeekSelector({ endOffsetDays: 6 });
   // created_at window: LA-midnight Monday → LA-midnight next Monday (exclusive).
   const selectedDateRange = useMemo(
     () => ({
       startDate: laMidnightUtcISO(weekStartISO),
       endDate: laMidnightUtcISO(addDaysISO(weekStartISO, 7)),
     }),
-    [weekStartISO],
-  );
-  const isCurrentWeek = useMemo(
-    () => toISODate(weekStartMonday()) === weekStartISO,
     [weekStartISO],
   );
 
@@ -351,7 +334,7 @@ export function FleetManager() {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => setWeekStart((w) => addDays(w, -7))}
+              onClick={() => shiftWeek(-1)}
               title="Previous week"
             >
               <ChevronLeft className="w-4 h-4" />
@@ -362,13 +345,13 @@ export function FleetManager() {
                 <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
                   {isCurrentWeek ? "Current Week" : "Selected Week"}
                 </span>
-                <span className="text-sm font-display">{formatRange(weekStart, weekEnd)}</span>
+                <span className="text-sm font-display">{formatWeekRange(weekStart, weekEnd)}</span>
               </div>
             </div>
             <Button
               size="sm"
               variant="outline"
-              onClick={() => setWeekStart((w) => addDays(w, 7))}
+              onClick={() => shiftWeek(1)}
               title="Next week"
             >
               <ChevronRight className="w-4 h-4" />
@@ -378,7 +361,7 @@ export function FleetManager() {
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => setWeekStart(weekStartMonday())}
+              onClick={() => goToWeek()}
             >
               Jump to current week
             </Button>
@@ -401,7 +384,7 @@ export function FleetManager() {
           <ScoreTile label="Fleet Points" value={totalFleetPoints} color="accent" />
         </div>
         <div className="mt-1.5 text-[9px] text-muted-foreground text-center uppercase tracking-widest font-display">
-          {isCurrentWeek ? "Live · this week" : formatRange(weekStart, weekEnd)}
+          {isCurrentWeek ? "Live · this week" : formatWeekRange(weekStart, weekEnd)}
           <span className="mx-1.5 opacity-40">·</span>
           {activeAgentCount} active · {vans.length} vans
         </div>
