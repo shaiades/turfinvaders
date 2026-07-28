@@ -449,7 +449,7 @@ async function check(): Promise<Response> {
       let mutation = `mutation ($b: ID!, $u: String!, $e: WebhookEventType!) { create_webhook(board_id: $b, url: $u, event: $e) { id } }`;
       if (event === LEAD_STATUS_EVENT) {
         mutation = `mutation ($b: ID!, $u: String!, $e: WebhookEventType!, $c: JSON!) { create_webhook(board_id: $b, url: $u, event: $e, config: $c) { id } }`;
-        args.c = JSON.stringify({ columnId: LEAD_STATUS_COLUMN_ID });
+        args.c = JSON.stringify({ columnId: LEAD_STATUS_COLUMN_ID, columnValue: { "$any$": true } });
       }
       const created = await monday(token, mutation, args, { idempotencyKey });
       return String((created.create_webhook as { id: string }).id);
@@ -582,7 +582,7 @@ async function check(): Promise<Response> {
         let deadMutation = `mutation ($b: ID!, $u: String!, $e: WebhookEventType!) { create_webhook(board_id: $b, url: $u, event: $e) { id } }`;
         if (event === LEAD_STATUS_EVENT) {
           deadMutation = `mutation ($b: ID!, $u: String!, $e: WebhookEventType!, $c: JSON!) { create_webhook(board_id: $b, url: $u, event: $e, config: $c) { id } }`;
-          deadArgs.c = JSON.stringify({ columnId: LEAD_STATUS_COLUMN_ID });
+          deadArgs.c = JSON.stringify({ columnId: LEAD_STATUS_COLUMN_ID, columnValue: { "$any$": true } });
         }
         const created = await monday(token, deadMutation, deadArgs, {
           idempotencyKey: `heal-dead-${boardId}-${event}-${runNonce}`,
