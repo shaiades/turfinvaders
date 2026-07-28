@@ -411,7 +411,23 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
         <TotalTile label="Blow-Out" value={totals.kil} accent="danger" />
       </div>
 
-      <SuspensionBanner rows={suspensionRows} />
+      <SuspensionBanner
+        rows={suspensionRows}
+        onRemove={
+          readOnly
+            ? undefined
+            : async (g) => {
+                const name = g.display_name ?? "this player";
+                if (!window.confirm(`Remove ${name} from the suspension list? (For old or fired reps — re-enable any time in Manage Players.)`)) return;
+                const { error } = await supabase
+                  .from("profiles")
+                  .update({ suspension_tracked: false })
+                  .in("id", g.ids);
+                if (error) window.alert(`Could not remove ${name}: ${error.message}`);
+                else qc.invalidateQueries({ queryKey: ["dispatch-canvassers"] });
+              }
+        }
+      />
 
       <div className="arcade-card overflow-hidden">
         {rows.length === 0 ? (
@@ -511,8 +527,10 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
 
 function SuspensionBanner({
   rows,
+  onRemove,
 }: {
-  rows: Array<{ g: { key: string; display_name: string | null }; d1: string; d2: string; streakLabel: string }>;
+  rows: Array<{ g: { key: string; ids: string[]; display_name: string | null }; d1: string; d2: string; streakLabel: string }>;
+  onRemove?: (g: { ids: string[]; display_name: string | null }) => void;
 }) {
   if (rows.length === 0) return null;
   return (
@@ -530,8 +548,19 @@ function SuspensionBanner({
         {rows.map((r) => (
           <div
             key={r.g.key}
-            className="arcade-card px-3 py-1.5 border-destructive/40"
+            className="relative arcade-card pl-3 pr-7 py-1.5 border-destructive/40"
           >
+            {onRemove && (
+              <button
+                type="button"
+                onClick={() => onRemove(r.g)}
+                title="Remove from the suspension list (old / fired). Re-enable in Manage Players."
+                aria-label={`Remove ${r.g.display_name ?? "player"} from the suspension list`}
+                className="absolute top-1 right-1 w-4 h-4 inline-flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/20"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
             <div className="flex items-center gap-2">
               <span className="frozen-doughnut" aria-hidden>
                 🍩
