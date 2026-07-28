@@ -409,10 +409,10 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
         <TotalTile label="Submitted" value={totals.sub} accent="neon" />
-        <TotalTile label="Pending" value={totals.pen} accent="warning" />
+        <TotalTile label="Unconfirmed" value={totals.pen} accent="warning" />
         <TotalTile label="Confirmed" value={totals.conf} accent="victory" />
         <TotalTile label="Future" value={totals.fut} accent="accent" />
-        <TotalTile label="Blow-Out" value={totals.kil} accent="danger" />
+        <TotalTile label="Blowout" value={totals.kil} accent="danger" />
       </div>
 
       <SuspensionBanner
@@ -476,7 +476,7 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
                           {r.g.display_name ?? "—"}
                         </>
                       }
-                      right={<span className={metricClass(r.conf, "victory")}>{r.conf}</span>}
+                      right={undefined}
                     />
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="text-xs text-muted-foreground">
@@ -488,11 +488,12 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
                         </span>
                       )}
                     </div>
-                    <MobileStatGrid cols={4} className="font-display">
+                    <MobileStatGrid cols={3} className="font-display">
                       <MobileStat label="Submitted" value={r.sub} className={metricClass(r.sub, "neon")} />
-                      <MobileStat label="Pending" value={r.pen} className={metricClass(r.pen, "warning")} />
+                      <MobileStat label="Unconfirmed" value={r.pen} className={metricClass(r.pen, "warning")} />
+                      <MobileStat label="Confirmed" value={r.conf} className={metricClass(r.conf, "victory")} />
                       <MobileStat label="Future" value={r.fut} className={metricClass(r.fut, "accent")} />
-                      <MobileStat label="Blow-Out" value={r.kil} className={metricClass(r.kil, "destructive")} />
+                      <MobileStat label="Blowout" value={r.kil} className={metricClass(r.kil, "destructive")} />
                     </MobileStatGrid>
                   </MobileCard>
                 );
@@ -506,10 +507,10 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
                   <th className="text-left py-2.5 px-3">Canvasser</th>
                   <th className="text-left py-2.5 px-3">Office</th>
                   <th className="text-right py-2.5 px-3">Submitted</th>
-                  <th className="text-right py-2.5 px-3">Pending</th>
+                  <th className="text-right py-2.5 px-3">Unconfirmed</th>
                   <th className="text-right py-2.5 px-3">Confirmed</th>
                   <th className="text-right py-2.5 px-3">Future</th>
-                  <th className="text-right py-2.5 px-3">Blow-Out</th>
+                  <th className="text-right py-2.5 px-3">Blowout</th>
                 </tr>
               </thead>
               <tbody>
