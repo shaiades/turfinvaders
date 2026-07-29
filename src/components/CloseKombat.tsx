@@ -186,6 +186,13 @@ function CloseKombatInner() {
           `${res.skipped.length} board${res.skipped.length === 1 ? "" : "s"} skipped — see webhook logs`,
         );
       }
+      const cancels = res.wcc.reports.reduce((s, r) => s + r.cancelled, 0);
+      if (cancels > 0) {
+        toast.info(`${cancels} cancelled sale${cancels === 1 ? "" : "s"} on the Sales Reports`);
+      }
+      if (res.wcc.errors.length > 0) {
+        toast.warning(`WCC pass: ${res.wcc.errors.length} report board(s) failed — see logs`);
+      }
       qc.invalidateQueries({ queryKey: ["block_cards"] });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Sync failed"),
@@ -394,6 +401,7 @@ function CloseKombatInner() {
                     <th className="text-right py-2 px-2 font-normal">Reset</th>
                     <th className="text-right py-2 px-2 font-normal">PM</th>
                     <th className="text-right py-2 px-2 font-normal">Sold</th>
+                    <th className="text-right py-2 px-2 font-normal">WCC</th>
                     <th className="text-right py-2 px-2 font-normal">OL</th>
                     <th className="text-right py-2 px-2 font-normal">Office</th>
                     <th className="text-right py-2 px-2 font-normal">Sit %</th>
@@ -436,6 +444,9 @@ function CloseKombatInner() {
                       <td className="py-2.5 px-2 text-right tabular-nums text-victory font-medium">
                         {fmtCount(r.sold)}
                       </td>
+                      <td className="py-2.5 px-2 text-right tabular-nums text-destructive">
+                        {fmtCount(r.wcc)}
+                      </td>
                       <td className="py-2.5 px-2 text-right tabular-nums text-muted-foreground">
                         {fmtCount(r.ol)}
                       </td>
@@ -474,6 +485,7 @@ function CloseKombatInner() {
                     </td>
                     <td className="py-2.5 px-2 text-right tabular-nums">{fmtCount(totals.pm)}</td>
                     <td className="py-2.5 px-2 text-right tabular-nums">{fmtCount(totals.sold)}</td>
+                    <td className="py-2.5 px-2 text-right tabular-nums">{fmtCount(totals.wcc)}</td>
                     <td className="py-2.5 px-2 text-right tabular-nums">{fmtCount(totals.ol)}</td>
                     <td className="py-2.5 px-2 text-right tabular-nums">
                       {fmtCount(totals.officeAppts)}
@@ -536,10 +548,12 @@ function CloseKombatInner() {
         Columns mirror the Monday.com Block boards — Iss = issued lead · BO splits into No Show / No
         Demo · RS = Reset · Sale = Sold. Office Appointments (job visit, upsale, check pickup) are
         not leads: they show only in the Office column, though upsale money still counts in Revenue.
-        CTC, Not Issued, and Add Rep cards don&apos;t count anywhere. One result per card (Sold &gt;
-        PM &gt; Reset &gt; BO). On a shared card each rep gets full result credit but the sale
-        volume splits evenly; the All-cards row counts each card once. Sit % = (PM + Sold) ÷ Appts ·
-        Close % = Sold ÷ (Sold + PM).
+        CTC, Not Issued, and Add Rep cards don&apos;t count anywhere. WCC = sale later cancelled on
+        the monthly Sales Report — it leaves Sold and Revenue but still counts as a demo (updates
+        when a sync runs). One result per card (Sold &gt; PM &gt; Reset &gt; BO). On a shared card
+        each rep gets full result credit but the sale volume splits evenly; the All-cards row counts
+        each card once. Sit % = demos ÷ Appts · Close % = Sold ÷ demos, where demos = PM + Sold +
+        WCC.
         {range.isLive && totals.unmarked > 0 && (
           <>
             {" "}
@@ -561,6 +575,7 @@ function StatLine({ s }: { s: KombatTotals }) {
     { label: "Reset", value: fmtCount(s.reset), className: "text-accent" },
     { label: "PM", value: fmtCount(s.pm), className: "text-warning" },
     { label: "Sold", value: fmtCount(s.sold), className: "text-victory" },
+    { label: "WCC", value: fmtCount(s.wcc), className: "text-destructive" },
     { label: "OL", value: fmtCount(s.ol), className: "text-muted-foreground" },
     { label: "Office", value: fmtCount(s.officeAppts), className: "text-muted-foreground" },
     { label: "Sit", value: fmtPct(s.sitPct) },

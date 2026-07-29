@@ -34,6 +34,7 @@ export type Database = {
           sale: string | null
           sale_price: number | null
           updated_at: string
+          wcc: string | null
         }
         Insert: {
           board_id: string
@@ -54,6 +55,7 @@ export type Database = {
           sale?: string | null
           sale_price?: number | null
           updated_at?: string
+          wcc?: string | null
         }
         Update: {
           board_id?: string
@@ -74,6 +76,7 @@ export type Database = {
           sale?: string | null
           sale_price?: number | null
           updated_at?: string
+          wcc?: string | null
         }
         Relationships: []
       }

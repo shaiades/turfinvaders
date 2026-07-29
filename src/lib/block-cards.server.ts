@@ -13,7 +13,7 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { monday } from "@/lib/monday.server";
 import { laTodayISO, weekStartOfISO, addDaysISO } from "@/lib/dates";
-import type { BlockCard } from "@/lib/close-kombat";
+import { SOLD_VALUES, type BlockCard } from "@/lib/close-kombat";
 
 type MondayCol = {
   id: string;
@@ -99,14 +99,15 @@ function colText(cols: MondayCol[], title: string): string | null {
 }
 
 /** Monday item → block_cards row (Reps people column `.text` is Monday's
- *  comma-separated display names). */
+ *  comma-separated display names). Deliberately WITHOUT wcc: the upsert
+ *  must never clobber what the Sales-Report pass stamped there. */
 export function buildBlockCardRow(
   item: MondayItem,
   boardId: string,
   office: string,
   weekStartISO: string | null,
   fallbackISO: string | null,
-): BlockCard {
+): Omit<BlockCard, "wcc"> {
   const cols: MondayCol[] = item.column_values ?? [];
   const groupTitle = item.group?.title == null ? null : String(item.group.title);
   const saleCol = findSaleOutcomeCol(cols);
@@ -156,9 +157,20 @@ export type BoardSyncResult = {
   upserted: number;
   deleted: number;
 };
+export type WccReportResult = {
+  board_id: string;
+  name: string;
+  rows: number;
+  cancelled: number;
+  updated: number;
+  /** Cancelled report rows the matcher couldn't tie to a sold Block card. */
+  unmatched: string[];
+};
+
 export type SyncSummary = {
   results: BoardSyncResult[];
   skipped: Array<{ board_id: string; name: string; reason: string }>;
+  wcc: { reports: WccReportResult[]; errors: string[] };
 };
 
 export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSummary> {
@@ -243,7 +255,7 @@ export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSumm
 
       // Full cursor walk. Any page error throws — the board is skipped and,
       // critically, its delete-reconcile never runs on a partial fetch.
-      const rows: BlockCard[] = [];
+      const rows: Array<Omit<BlockCard, "wcc">> = [];
       let cursor: string | null = null;
       do {
         const data: Record<string, unknown> = cursor
@@ -320,11 +332,224 @@ export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSumm
     }
   }
 
+  // ── WCC pass ── cancelled sales are only recorded on the monthly
+  // "... Sales Report" boards (owner, 2026-07-29: WCC column, "Cancelled").
+  // Match report rows back to sold Block cards by customer name and stamp
+  // the raw WCC label. Never fatal to the block sync.
+  const wcc: SyncSummary["wcc"] = { reports: [], errors: [] };
+  try {
+    const data = await monday(
+      token,
+      "query { boards(limit: 100, order_by: created_at) { id name } }",
+    );
+    let reportBoards = ((data.boards as Array<{ id: string; name: string }>) ?? [])
+      .map((b) => ({ id: String(b.id), name: b.name }))
+      .filter((b) => /\bsales report\b/i.test(b.name));
+    if (input.scope !== "all") {
+      // Quick syncs only touch the current + previous month's reports.
+      const labels = recentMonthLabels().map((l) => l.toLowerCase());
+      reportBoards = reportBoards.filter((b) =>
+        labels.some((l) => b.name.toLowerCase().includes(l)),
+      );
+    }
+    if (reportBoards.length > 0) {
+      const soldCards = await fetchSoldCards();
+      for (const rb of reportBoards) {
+        try {
+          wcc.reports.push(await processReportBoard(token, rb, soldCards));
+        } catch (err) {
+          wcc.errors.push(`${rb.name}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    }
+  } catch (err) {
+    wcc.errors.push(err instanceof Error ? err.message : String(err));
+  }
+
   // Owner-auditable trail, same as every other ingestion path.
   await supabaseAdmin.from("webhook_logs").insert({
     step: "Block_Cards_Synced",
-    data: { scope: input.scope, boardIds: input.boardIds ?? null, results, skipped } as never,
+    data: { scope: input.scope, boardIds: input.boardIds ?? null, results, skipped, wcc } as never,
   });
 
-  return { results, skipped };
+  return { results, skipped, wcc };
+}
+
+// ── WCC pass internals ───────────────────────────────────────────────────
+
+const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+/** "July 2026"-style labels for the current and previous LA months. */
+function recentMonthLabels(): string[] {
+  const [y, m] = laTodayISO().split("-").map(Number);
+  const cur = `${MONTH_NAMES[m - 1]} ${y}`;
+  const prev = m === 1 ? `${MONTH_NAMES[11]} ${y - 1}` : `${MONTH_NAMES[m - 2]} ${y}`;
+  return [cur, prev];
+}
+
+/** Customer-name key: lowercase, "(copy)" suffixes and punctuation dropped,
+ *  whitespace collapsed — report items and Block cards name the same
+ *  customer with small formatting differences. */
+export function normalizeCustomer(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/\(copy(\s+\d+)?\)/g, " ")
+    .replace(/[^a-z0-9&]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+type SoldCardLite = {
+  monday_item_id: string;
+  lead_name: string | null;
+  office_location: string;
+  card_date: string | null;
+  wcc: string | null;
+  _norm: string;
+};
+
+/** Every sold Block card, paged past PostgREST's 1000-row cap. */
+async function fetchSoldCards(): Promise<SoldCardLite[]> {
+  const soldSet = new Set(SOLD_VALUES as readonly string[]);
+  const out: SoldCardLite[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabaseAdmin
+      .from("block_cards")
+      .select("monday_item_id, lead_name, office_location, card_date, sale, wcc")
+      .not("sale", "is", null)
+      .order("monday_item_id")
+      .range(from, from + 999);
+    if (error) throw new Error(error.message);
+    for (const r of data ?? []) {
+      if (!soldSet.has((r.sale ?? "").trim().toLowerCase())) continue;
+      out.push({
+        monday_item_id: r.monday_item_id,
+        lead_name: r.lead_name,
+        office_location: r.office_location,
+        card_date: r.card_date,
+        wcc: r.wcc,
+        _norm: normalizeCustomer(r.lead_name ?? ""),
+      });
+    }
+    if (!data || data.length < 1000) break;
+  }
+  return out;
+}
+
+/** Exact normalized name first, then prefix containment (≥8 chars — report
+ *  and card names truncate/extend each other: "Matismo, Reuben & Eli" vs
+ *  "Matismo, Reuben & Elizabeth"). Office narrows when the report board is
+ *  office-prefixed; nearest card_date breaks ties. */
+export function bestSoldMatch(
+  cards: SoldCardLite[],
+  reportNorm: string,
+  office: string | null,
+  aroundISO: string | null,
+): SoldCardLite | null {
+  if (!reportNorm) return null;
+  const pool = office ? cards.filter((c) => c.office_location === office) : cards;
+  let cands = pool.filter((c) => c._norm === reportNorm);
+  if (cands.length === 0 && reportNorm.length >= 8) {
+    cands = pool.filter(
+      (c) =>
+        c._norm.length >= 8 && (c._norm.startsWith(reportNorm) || reportNorm.startsWith(c._norm)),
+    );
+  }
+  if (cands.length === 0) return null;
+  if (cands.length === 1 || !aroundISO) return cands[0];
+  const target = Date.parse(aroundISO);
+  return cands.reduce((best, c) => {
+    const d = (x: SoldCardLite) =>
+      x.card_date ? Math.abs(Date.parse(x.card_date) - target) : Number.MAX_SAFE_INTEGER;
+    return d(c) < d(best) ? c : best;
+  });
+}
+
+async function processReportBoard(
+  token: string,
+  board: { id: string; name: string },
+  soldCards: SoldCardLite[],
+): Promise<WccReportResult> {
+  const office = /^OC\b/i.test(board.name.trim())
+    ? "Orange County"
+    : /^SD\b/i.test(board.name.trim())
+      ? "San Diego"
+      : null;
+  // Mid-month fallback for rows without a parseable Date Sold.
+  const m = board.name.match(new RegExp(`(${MONTH_NAMES.join("|")})\\s+(\\d{4})`, "i"));
+  const monthMidISO = m
+    ? `${m[2]}-${String(MONTH_NAMES.findIndex((n) => n.toLowerCase() === m[1].toLowerCase()) + 1).padStart(2, "0")}-15`
+    : null;
+
+  const result: WccReportResult = {
+    board_id: board.id,
+    name: board.name,
+    rows: 0,
+    cancelled: 0,
+    updated: 0,
+    unmatched: [],
+  };
+
+  let cursor: string | null = null;
+  do {
+    const data: Record<string, unknown> = cursor
+      ? await monday(
+          token,
+          `query ($cursor: String!) { next_items_page(cursor: $cursor, limit: 500) { ${ITEM_PAGE_FIELDS} } }`,
+          { cursor },
+        )
+      : await monday(
+          token,
+          `query ($b: ID!) { boards(ids: [$b]) { items_page(limit: 500) { ${ITEM_PAGE_FIELDS} } } }`,
+          { b: board.id },
+        );
+    const page: ItemsPage | null = cursor
+      ? ((data.next_items_page as ItemsPage | null) ?? null)
+      : (((data.boards as Array<{ items_page: ItemsPage }> | null) ?? [])[0]?.items_page ?? null);
+    if (!page) throw new Error("items_page missing from Monday response");
+
+    for (const item of page.items ?? []) {
+      const name = item.name == null ? "" : String(item.name);
+      const cols: MondayCol[] = item.column_values ?? [];
+      const wccRaw = (colText(cols, "wcc") ?? "").trim();
+      const wccStored = wccRaw === "" || /^none$/i.test(wccRaw) ? null : wccRaw;
+      if (!name.trim()) continue;
+      result.rows += 1;
+      const isCancel = /cancel/i.test(wccStored ?? "");
+      if (isCancel) result.cancelled += 1;
+      // Unset rows still run the matcher: a previously stamped card heals
+      // back to null when the report row un-cancels.
+      const dateSold = colText(cols, "date sold");
+      const around = dateSold && !Number.isNaN(Date.parse(dateSold)) ? dateSold : monthMidISO;
+      const match = bestSoldMatch(soldCards, normalizeCustomer(name), office, around);
+      if (!match) {
+        if (isCancel) result.unmatched.push(name);
+        continue;
+      }
+      if ((match.wcc ?? null) === (wccStored ?? null)) continue;
+      const { error } = await supabaseAdmin
+        .from("block_cards")
+        .update({ wcc: wccStored })
+        .eq("monday_item_id", match.monday_item_id);
+      if (error) throw new Error(error.message);
+      match.wcc = wccStored; // keep the in-memory pool consistent across boards
+      result.updated += 1;
+    }
+    cursor = page.cursor ?? null;
+  } while (cursor);
+
+  return result;
 }
