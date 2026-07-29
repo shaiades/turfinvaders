@@ -2,27 +2,25 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { formatCurrency } from "@/lib/utils";
-import { laTodayISO, addDaysISO } from "@/lib/dates";
+import { laTodayISO, laWeekStartISO, addDaysISO, remainingWorkdaysInWeek } from "@/lib/dates";
+import { backSolveFunnel } from "@/lib/funnel";
+import { useFunnelRates, useProfileGoals } from "@/hooks/useFunnelRates";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { Zap, Target, DoorOpen, PhoneCall, Users, Trophy, Calendar, Sparkles } from "lucide-react";
 
 /**
- * Weekly Playbook
+ * Weekly Playbook — runs on the SHARED funnel engine (useFunnelRates), the
+ * same rates the monthly Mission uses, so the two can never contradict.
  * Equation: [Knocks] × $[Value/Knock] = $[Income Goal]
- * Funnel:   Goal / AvgCommission = Sales → /Close = Sits → /Show = Leads → /Contact = Knocks
- * Daily:    Knocks / 5
+ * Funnel:   Goal ÷ AvgCommission = Sales → ÷Close = Sits → ÷Show = Leads → ÷Contact = Knocks
+ * Daily:    knocks REMAINING this week ÷ remaining Mon–Sat workdays
+ *           (owner, 2026-07-29 — progress counts down, weeks are Mon–Sat).
  */
 
-const WORK_DAYS = 5;
 const DEFAULT_AVG_COMMISSION = 200;
 const DEFAULT_WEEKLY_GOAL = 2000;
-
-// Industry-typical fallbacks when canvasser has no history
-const FALLBACK_CLOSE_RATE = 0.35;     // sales / sits
-const FALLBACK_SIT_RATE = 0.5;        // sits / leads (show rate)
-const FALLBACK_LEAD_DOOR_RATE = 0.05; // leads / knocks (contact-to-lead)
 
 function fmtInt(n: number) {
   if (!isFinite(n)) return "—";
@@ -32,73 +30,59 @@ function fmtInt(n: number) {
 export function WeeklyPlaybook({ userId }: { userId: string }) {
   const qc = useQueryClient();
 
-  const profileQuery = useQuery({
-    queryKey: ["playbook_profile", userId],
+  const goalsQuery = useProfileGoals(userId);
+  const weeklyGoal = Number(goalsQuery.data?.weekly_income_goal ?? DEFAULT_WEEKLY_GOAL);
+  const avgCommission = Number(goalsQuery.data?.avg_commission ?? DEFAULT_AVG_COMMISSION) || DEFAULT_AVG_COMMISSION;
+
+  // Rates come from the shared engine — identical to the monthly Mission's.
+  const funnelRates = useFunnelRates(userId);
+
+  // This week's own knocks (Mon–Sat) — the plan counts DOWN as they log.
+  const weekStart = laWeekStartISO();
+  const weekProgressQuery = useQuery({
+    queryKey: ["funnel", "week-progress", userId, weekStart],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("profiles")
-        .select("weekly_income_goal, avg_commission")
-        .eq("id", userId)
-        .maybeSingle();
+        .from("daily_logs")
+        .select("doors_knocked")
+        .eq("canvasser_id", userId)
+        .gte("log_date", weekStart)
+        .lte("log_date", addDaysISO(weekStart, 5));
       if (error) throw error;
-      return data as { weekly_income_goal: number | null; avg_commission: number | null } | null;
+      return (data ?? []).reduce((a, r) => a + (r.doors_knocked ?? 0), 0);
     },
   });
-
-  const weeklyGoal = Number(profileQuery.data?.weekly_income_goal ?? DEFAULT_WEEKLY_GOAL);
-  const avgCommission = Number(profileQuery.data?.avg_commission ?? DEFAULT_AVG_COMMISSION) || DEFAULT_AVG_COMMISSION;
-
-  // Personal conversion rates from last 60 days
-  const ratesQuery = useQuery({
-    queryKey: ["playbook_rates", userId],
-    queryFn: async () => {
-      const since = addDaysISO(laTodayISO(), -60);
-      const [logsRes, companyLogsRes] = await Promise.all([
-        supabase.from("daily_logs")
-          .select("doors_knocked, confirmed_leads, demos_sits, sales")
-          .eq("canvasser_id", userId)
-          .gte("log_date", since),
-        supabase.from("daily_logs")
-          .select("doors_knocked, confirmed_leads, demos_sits, sales")
-          .gte("log_date", since),
-      ]);
-      const agg = (rows: Array<Record<string, number | null>> | null) => {
-        const t = { doors: 0, leads: 0, sits: 0, sales: 0 };
-        for (const r of rows ?? []) {
-          t.doors += r.doors_knocked ?? 0;
-          t.leads += r.confirmed_leads ?? 0;
-          t.sits  += r.demos_sits ?? 0;
-          t.sales += r.sales ?? 0;
-        }
-        return t;
-      };
-      return { personal: agg(logsRes.data), company: agg(companyLogsRes.data) };
-    },
-  });
+  const weekDoors = weekProgressQuery.data ?? 0;
 
   const math = useMemo(() => {
-    const personal = ratesQuery.data?.personal ?? { doors: 0, leads: 0, sits: 0, sales: 0 };
-    const company  = ratesQuery.data?.company  ?? { doors: 0, leads: 0, sits: 0, sales: 0 };
-    const usePersonal = personal.doors >= 200 && personal.sits >= 5;
-    const src = usePersonal ? personal : company;
-
-    const closeRate    = src.sits  > 0 ? src.sales / src.sits  : FALLBACK_CLOSE_RATE;
-    const sitRate      = src.leads > 0 ? src.sits  / src.leads : FALLBACK_SIT_RATE;
-    const leadDoorRate = src.doors > 0 ? src.leads / src.doors : FALLBACK_LEAD_DOOR_RATE;
-
-    const requiredSales = avgCommission > 0 ? weeklyGoal / avgCommission : 0;
-    const requiredSits  = closeRate > 0 ? requiredSales / closeRate : 0;
-    const requiredLeads = sitRate   > 0 ? requiredSits  / sitRate   : 0;
-    const requiredKnocks = leadDoorRate > 0 ? requiredLeads / leadDoorRate : 0;
+    const rates = funnelRates.rates;
+    const solve = rates
+      ? backSolveFunnel({ incomeGoal: weeklyGoal, avgCommissionPerSale: avgCommission, rates })
+      : null;
+    if (!rates || !solve) {
+      return {
+        ready: false as const,
+        closeRate: 0, sitRate: 0, leadDoorRate: 0,
+        requiredSales: 0, requiredSits: 0, requiredLeads: 0, requiredKnocks: 0,
+        valuePerKnock: 0, doorsPerDay: 0, knocksRemaining: 0, daysLeft: 0,
+      };
+    }
+    const { closeRate, sitRate, leadDoorRate } = rates;
+    const { requiredSales, requiredSits, requiredLeads, requiredDoors: requiredKnocks } = solve;
     const valuePerKnock = requiredKnocks > 0 ? weeklyGoal / requiredKnocks : 0;
-    const doorsPerDay = requiredKnocks / WORK_DAYS;
+    // Remaining-per-day: subtract this week's knocks, divide by the Mon–Sat
+    // days left (0 on Sunday → show the full remainder).
+    const knocksRemaining = Math.max(0, requiredKnocks - weekDoors);
+    const daysLeft = remainingWorkdaysInWeek(laTodayISO());
+    const doorsPerDay = daysLeft > 0 ? knocksRemaining / daysLeft : knocksRemaining;
 
     return {
-      usePersonal, closeRate, sitRate, leadDoorRate,
+      ready: true as const,
+      closeRate, sitRate, leadDoorRate,
       requiredSales, requiredSits, requiredLeads, requiredKnocks,
-      valuePerKnock, doorsPerDay,
+      valuePerKnock, doorsPerDay, knocksRemaining, daysLeft,
     };
-  }, [ratesQuery.data, weeklyGoal, avgCommission]);
+  }, [funnelRates.rates, weeklyGoal, avgCommission, weekDoors]);
 
   const save = useMutation({
     mutationFn: async (patch: { weekly_income_goal?: number; avg_commission?: number }) => {
@@ -107,7 +91,7 @@ export function WeeklyPlaybook({ userId }: { userId: string }) {
     },
     onSuccess: () => {
       toast.success("Playbook updated · funnel re-engineered");
-      qc.invalidateQueries({ queryKey: ["playbook_profile", userId] });
+      qc.invalidateQueries({ queryKey: ["profile_goals", userId] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -123,14 +107,19 @@ export function WeeklyPlaybook({ userId }: { userId: string }) {
             <Trophy className="w-3.5 h-3.5" /> Your Weekly Playbook
           </div>
           <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-            {math.usePersonal ? "Personal historical rates" : "Company-average rates (new player)"}
+            {math.ready
+              ? funnelRates.source === "personal"
+                ? "Personal rates · your last 60 days"
+                : "Company avg · 60d baseline"
+              : "Awaiting conversion data"}
           </div>
         </header>
 
         {/* ===== Equation ===== */}
+        {math.ready && (
         <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr_auto_1fr] items-center gap-3 md:gap-4">
           <EquationTile
-            label="Total Knocks"
+            label="Knocks · This Week"
             value={fmtInt(math.requiredKnocks)}
             accent="var(--neon)"
             icon={<DoorOpen className="w-3.5 h-3.5" />}
@@ -151,6 +140,7 @@ export function WeeklyPlaybook({ userId }: { userId: string }) {
             mega
           />
         </div>
+        )}
 
         {/* ===== Inputs ===== */}
         <GoalInputs
@@ -160,7 +150,20 @@ export function WeeklyPlaybook({ userId }: { userId: string }) {
           onSave={(p) => save.mutate(p)}
         />
 
+        {!math.ready && (
+          <div className="rounded-lg border border-border bg-background/40 p-6 text-center">
+            <div className="font-display text-sm uppercase tracking-widest text-muted-foreground">
+              Playbook unavailable
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground max-w-md mx-auto">
+              We need conversion data — from your own recent logs (200+ doors knocked) or the
+              company-wide 60-day baseline — plus a goal and average commission above.
+            </p>
+          </div>
+        )}
+
         {/* ===== Funnel tiles ===== */}
+        {math.ready && (
         <div>
           <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
             <Zap className="w-3 h-3 text-neon" /> Conversion Funnel · what it takes
@@ -196,9 +199,16 @@ export function WeeklyPlaybook({ userId }: { userId: string }) {
             />
           </div>
         </div>
+        )}
 
         {/* ===== Daily action ===== */}
-        <DailyAction doorsPerDay={math.doorsPerDay} totalKnocks={math.requiredKnocks} />
+        {math.ready && (
+          <DailyAction
+            doorsPerDay={math.doorsPerDay}
+            knocksRemaining={math.knocksRemaining}
+            daysLeft={math.daysLeft}
+          />
+        )}
       </div>
     </section>
   );
@@ -330,14 +340,16 @@ function FunnelTile({
   );
 }
 
-function DailyAction({ doorsPerDay, totalKnocks }: { doorsPerDay: number; totalKnocks: number }) {
+function DailyAction({
+  doorsPerDay, knocksRemaining, daysLeft,
+}: { doorsPerDay: number; knocksRemaining: number; daysLeft: number }) {
   return (
     <div
       className="relative overflow-hidden rounded-lg border border-[color-mix(in_oklab,var(--accent)_50%,var(--border))] bg-[color-mix(in_oklab,var(--accent)_8%,var(--surface))] p-5"
       style={{ boxShadow: "inset 0 0 30px -10px var(--accent)" }}
     >
       <div className="flex items-center gap-2 text-[10px] font-display uppercase tracking-widest text-accent">
-        <Calendar className="w-3.5 h-3.5" /> Daily Action · 5-Day Plan
+        <Calendar className="w-3.5 h-3.5" /> Daily Action · Mon–Sat Plan
       </div>
       <div className="mt-2 flex items-end gap-3 flex-wrap">
         <div className="font-display text-4xl md:text-5xl text-accent leading-none"
@@ -345,7 +357,8 @@ function DailyAction({ doorsPerDay, totalKnocks }: { doorsPerDay: number; totalK
           {fmtInt(doorsPerDay)}
         </div>
         <div className="text-sm text-muted-foreground pb-1">
-          doors / day · for 5 days  →  <span className="text-foreground">{fmtInt(totalKnocks)} total</span>
+          doors / day · {daysLeft > 0 ? `${daysLeft} workday${daysLeft === 1 ? "" : "s"} left this week` : "week complete"}  →{"  "}
+          <span className="text-foreground">{fmtInt(knocksRemaining)} remaining</span>
         </div>
       </div>
     </div>
