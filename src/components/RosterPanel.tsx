@@ -10,6 +10,7 @@ const ROLE_LABEL: Record<string, string> = {
   owner: "Owner",
   office_staff: "Admin",
   captain: "Captain",
+  sales_rep: "Sales Rep",
   canvasser: "Canvasser",
 };
 
@@ -17,6 +18,7 @@ const ROLE_TONE: Record<string, string> = {
   owner: "text-victory border-victory/40",
   office_staff: "text-accent border-accent/40",
   captain: "text-neon border-neon/40",
+  sales_rep: "text-warning border-warning/40",
   canvasser: "text-muted-foreground border-border",
 };
 

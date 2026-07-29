@@ -3,7 +3,7 @@ import { OFFICE_LOCATIONS } from "@/lib/offices";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 
-const ROLES = ["owner", "office_staff", "captain", "canvasser"] as const;
+const ROLES = ["owner", "office_staff", "captain", "sales_rep", "canvasser"] as const;
 
 const createCanvasserSchema = z.object({
   email: z.string().trim().email().max(255),
@@ -31,7 +31,7 @@ export const createCanvasser = createServerFn({ method: "POST" })
     if (!isManager) {
       throw new Error("Only Owners, Captains, or Admins can add new users.");
     }
-    if (!isOwner && !["canvasser", "captain"].includes(data.role)) {
+    if (!isOwner && !["canvasser", "captain", "sales_rep"].includes(data.role)) {
       throw new Error("Only Owners can create Owners or Admins.");
     }
 
@@ -79,7 +79,7 @@ export const createCanvasser = createServerFn({ method: "POST" })
 const addTeamMemberSchema = z.object({
   full_name: z.string().trim().min(1).max(100),
   office_location: z.enum(OFFICE_LOCATIONS),
-  role: z.enum(["owner", "office_staff", "captain", "canvasser"]),
+  role: z.enum(["owner", "office_staff", "captain", "sales_rep", "canvasser"]),
 });
 
 async function assertManager(context: { supabase: any; userId: string }) {
@@ -101,7 +101,7 @@ export const addTeamMember = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { isOwner, isManager } = await assertManager(context);
     if (!isManager) throw new Error("Only Owners, Captains, or Admins can add team members.");
-    if (!isOwner && !["canvasser", "captain"].includes(data.role)) {
+    if (!isOwner && !["canvasser", "captain", "sales_rep"].includes(data.role)) {
       throw new Error("Only Owners can add Owners or Admins.");
     }
 
@@ -151,7 +151,13 @@ export const listRoster = createServerFn({ method: "GET" })
     if (rErr) throw new Error(rErr.message);
     if (tErr) throw new Error(tErr.message);
 
-    const rolePriority: Record<string, number> = { owner: 0, office_staff: 1, captain: 2, canvasser: 3 };
+    const rolePriority: Record<string, number> = {
+      owner: 0,
+      office_staff: 1,
+      captain: 2,
+      sales_rep: 3,
+      canvasser: 4,
+    };
     const roleByUser = new Map<string, string>();
     for (const r of roleRows ?? []) {
       const prev = roleByUser.get(r.user_id);

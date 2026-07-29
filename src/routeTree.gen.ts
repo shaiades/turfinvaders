@@ -22,6 +22,7 @@ import { Route as AuthenticatedFieldRouteImport } from './routes/_authenticated/
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedDailyWrapRouteImport } from './routes/_authenticated/daily-wrap'
 import { Route as AuthenticatedConfirmationDeskRouteImport } from './routes/_authenticated/confirmation-desk'
+import { Route as AuthenticatedCloseKombatRouteImport } from './routes/_authenticated/close-kombat'
 import { Route as AuthenticatedTeamsIndexRouteImport } from './routes/_authenticated/teams.index'
 import { Route as ApiInternalRotateBoardsRouteImport } from './routes/api/internal/rotate-boards'
 import { Route as AuthenticatedTeamsTeamIdRouteImport } from './routes/_authenticated/teams.$teamId'
@@ -95,6 +96,12 @@ const AuthenticatedConfirmationDeskRoute =
     path: '/confirmation-desk',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedCloseKombatRoute =
+  AuthenticatedCloseKombatRouteImport.update({
+    id: '/close-kombat',
+    path: '/close-kombat',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedTeamsIndexRoute = AuthenticatedTeamsIndexRouteImport.update({
   id: '/teams/',
   path: '/teams/',
@@ -127,6 +134,7 @@ const AuthenticatedCanvassersCanvasserIdFieldRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/close-kombat': typeof AuthenticatedCloseKombatRoute
   '/confirmation-desk': typeof AuthenticatedConfirmationDeskRoute
   '/daily-wrap': typeof AuthenticatedDailyWrapRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
@@ -146,6 +154,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/close-kombat': typeof AuthenticatedCloseKombatRoute
   '/confirmation-desk': typeof AuthenticatedConfirmationDeskRoute
   '/daily-wrap': typeof AuthenticatedDailyWrapRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
@@ -167,6 +176,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
+  '/_authenticated/close-kombat': typeof AuthenticatedCloseKombatRoute
   '/_authenticated/confirmation-desk': typeof AuthenticatedConfirmationDeskRoute
   '/_authenticated/daily-wrap': typeof AuthenticatedDailyWrapRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
@@ -188,6 +198,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/auth'
+    | '/close-kombat'
     | '/confirmation-desk'
     | '/daily-wrap'
     | '/dashboard'
@@ -207,6 +218,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/auth'
+    | '/close-kombat'
     | '/confirmation-desk'
     | '/daily-wrap'
     | '/dashboard'
@@ -227,6 +239,7 @@ export interface FileRouteTypes {
     | '/'
     | '/_authenticated'
     | '/auth'
+    | '/_authenticated/close-kombat'
     | '/_authenticated/confirmation-desk'
     | '/_authenticated/daily-wrap'
     | '/_authenticated/dashboard'
@@ -345,6 +358,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedConfirmationDeskRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/close-kombat': {
+      id: '/_authenticated/close-kombat'
+      path: '/close-kombat'
+      fullPath: '/close-kombat'
+      preLoaderRoute: typeof AuthenticatedCloseKombatRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/teams/': {
       id: '/_authenticated/teams/'
       path: '/teams'
@@ -399,6 +419,7 @@ const AuthenticatedCanvassersCanvasserIdRouteWithChildren =
   )
 
 interface AuthenticatedRouteRouteChildren {
+  AuthenticatedCloseKombatRoute: typeof AuthenticatedCloseKombatRoute
   AuthenticatedConfirmationDeskRoute: typeof AuthenticatedConfirmationDeskRoute
   AuthenticatedDailyWrapRoute: typeof AuthenticatedDailyWrapRoute
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
@@ -414,6 +435,7 @@ interface AuthenticatedRouteRouteChildren {
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
+  AuthenticatedCloseKombatRoute: AuthenticatedCloseKombatRoute,
   AuthenticatedConfirmationDeskRoute: AuthenticatedConfirmationDeskRoute,
   AuthenticatedDailyWrapRoute: AuthenticatedDailyWrapRoute,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
