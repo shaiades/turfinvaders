@@ -37,8 +37,9 @@ import { CalendarRange, ChevronLeft, ChevronRight, Crown, RefreshCw, Swords } fr
  * Day / Week / Month ranges are all LA-calendar (card_date is the physical
  * appointment date — no 7 PM report lock here). Shared cards: each rep gets
  * full RESULT credit but the sale VOLUME splits evenly (owner, 2026-07-29);
- * Office Appointments are not leads and only tick the Office column. The
- * totals row counts each card exactly once.
+ * Office Appointments are not leads and aren't tracked here (owner,
+ * 2026-07-29 — upsale money still counts in Revenue). The totals row counts
+ * each card exactly once.
  */
 export function CloseKombat() {
   return (
@@ -403,7 +404,6 @@ function CloseKombatInner() {
                     <th className="text-right py-2 px-2 font-normal">Sold</th>
                     <th className="text-right py-2 px-2 font-normal">WCC</th>
                     <th className="text-right py-2 px-2 font-normal">OL</th>
-                    <th className="text-right py-2 px-2 font-normal">Office</th>
                     <th className="text-right py-2 px-2 font-normal">Sit %</th>
                     <th className="text-right py-2 px-2 font-normal">Close %</th>
                     <th className="text-right py-2 pl-2 font-normal">Revenue</th>
@@ -450,9 +450,6 @@ function CloseKombatInner() {
                       <td className="py-2.5 px-2 text-right tabular-nums text-muted-foreground">
                         {fmtCount(r.ol)}
                       </td>
-                      <td className="py-2.5 px-2 text-right tabular-nums text-muted-foreground">
-                        {fmtCount(r.officeAppts)}
-                      </td>
                       <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
                         {fmtPct(r.sitPct)}
                       </td>
@@ -487,9 +484,6 @@ function CloseKombatInner() {
                     <td className="py-2.5 px-2 text-right tabular-nums">{fmtCount(totals.sold)}</td>
                     <td className="py-2.5 px-2 text-right tabular-nums">{fmtCount(totals.wcc)}</td>
                     <td className="py-2.5 px-2 text-right tabular-nums">{fmtCount(totals.ol)}</td>
-                    <td className="py-2.5 px-2 text-right tabular-nums">
-                      {fmtCount(totals.officeAppts)}
-                    </td>
                     <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
                       {fmtPct(totals.sitPct)}
                     </td>
@@ -547,13 +541,12 @@ function CloseKombatInner() {
       <p className="text-[10px] text-muted-foreground">
         Columns mirror the Monday.com Block boards — Iss = issued lead · BO splits into No Show / No
         Demo · RS = Reset · Sale = Sold. Office Appointments (job visit, upsale, check pickup) are
-        not leads: they show only in the Office column, though upsale money still counts in Revenue.
-        CTC, Not Issued, and Add Rep cards don&apos;t count anywhere. WCC = sale later cancelled on
-        the monthly Sales Report — it leaves Sold and Revenue but still counts as a demo (updates
-        when a sync runs). One result per card (Sold &gt; PM &gt; Reset &gt; BO). On a shared card
-        each rep gets full result credit but the sale volume splits evenly; the All-cards row counts
-        each card once. Sit % = demos ÷ Appts · Close % = Sold ÷ demos, where demos = PM + Sold +
-        WCC.
+        not leads and aren&apos;t tracked here, though upsale money still counts in Revenue. CTC,
+        Not Issued, and Add Rep cards don&apos;t count anywhere. WCC = sale later cancelled on the
+        monthly Sales Report — it leaves Sold and Revenue but still counts as a demo (updates when a
+        sync runs). One result per card (Sold &gt; PM &gt; Reset &gt; BO). On a shared card each rep
+        gets full result credit but the sale volume splits evenly; the All-cards row counts each
+        card once. Sit % = demos ÷ Appts · Close % = Sold ÷ demos, where demos = PM + Sold + WCC.
         {range.isLive && totals.unmarked > 0 && (
           <>
             {" "}
@@ -577,7 +570,6 @@ function StatLine({ s }: { s: KombatTotals }) {
     { label: "Sold", value: fmtCount(s.sold), className: "text-victory" },
     { label: "WCC", value: fmtCount(s.wcc), className: "text-destructive" },
     { label: "OL", value: fmtCount(s.ol), className: "text-muted-foreground" },
-    { label: "Office", value: fmtCount(s.officeAppts), className: "text-muted-foreground" },
     { label: "Sit", value: fmtPct(s.sitPct) },
     { label: "Close", value: fmtPct(s.closePct) },
   ];
