@@ -24,11 +24,12 @@ type Profile = {
 };
 
 
-// The dispatch funnel: Submitted (Inbound births) plus the confirmation
-// team's Lead Status flips — Confirmed / Future / Blowout / N-A (killed and
-// no_answers columns, Monday's labels). No Unconfirmed metric: a card shows
-// nothing beyond Submitted until its Lead Status button is actioned
-// (owner, 2026-07-28).
+// The dispatch funnel counts ONLY actioned Lead Status results (owner,
+// 2026-07-28): Confirmed, Future, and Blowout — where Blowout absorbs the
+// N/A and Disconnected labels (killed + no_answers columns). Submitted is
+// their sum, so Submitted ≡ Confirmed + Future + Blowout always holds.
+// A card contributes nothing until its status button is actioned; card
+// creation (leads_generated) feeds only the suspension window.
 type Metric = {
   id: string;
   canvasser_id: string;
@@ -181,10 +182,9 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
 
   // Sum all metric rows per canvasser_id across the selected range.
   const metricByCanvasser = useMemo(() => {
-    const acc = new Map<string, { gen: number; conf: number; na: number; kil: number; fut: number }>();
+    const acc = new Map<string, { conf: number; na: number; kil: number; fut: number }>();
     for (const m of metrics) {
-      const prev = acc.get(m.canvasser_id) ?? { gen: 0, conf: 0, na: 0, kil: 0, fut: 0 };
-      prev.gen += m.leads_generated ?? 0;
+      const prev = acc.get(m.canvasser_id) ?? { conf: 0, na: 0, kil: 0, fut: 0 };
       prev.conf += m.leads_confirmed ?? 0;
       prev.na += m.no_answers ?? 0;
       prev.kil += m.killed ?? 0;
@@ -253,17 +253,21 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
       }
     }
     const enriched = Array.from(groups.values()).map((g) => {
-      let gen = 0, conf = 0, kil = 0, fut = 0;
+      let conf = 0, kil = 0, fut = 0;
       for (const id of g.ids) {
         const m = metricByCanvasser.get(id);
         if (!m) continue;
-        gen += m.gen; conf += m.conf; kil += m.kil; fut += m.fut;
+        conf += m.conf;
+        // Blowout absorbs N/A: every dead-end button result counts here.
+        kil += m.kil + m.na;
+        fut += m.fut;
       }
-      // Submitted = leads GENERATED (new items on the Incoming Leads board),
-      // not outcome counts — production shows the moment a lead is entered.
-      // No Unconfirmed metric anywhere: nothing is shown for a card until the
-      // confirmation team actions its Lead Status button (owner, 2026-07-28).
-      const sub = gen;
+      // Submitted = the sum of actioned results (owner, 2026-07-28): nothing
+      // is counted for a card until the confirmation team actions its Lead
+      // Status button, so Submitted ≡ Confirmed + Future + Blowout by
+      // construction. Card creation (leads_generated) feeds only the
+      // suspension window, not this funnel.
+      const sub = conf + fut + kil;
       return { g, conf, kil, fut, sub };
     });
     return enriched.sort((a, b) => {
