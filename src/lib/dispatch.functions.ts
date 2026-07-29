@@ -1,6 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { weeklyPoints } from "@/lib/pay";
+import { COMMISSION_BASE, weeklyPoints } from "@/lib/pay";
+import { addDaysISO, laMidnightUtcISO, laTodayISO } from "@/lib/dates";
+import { EMPTY_AGGREGATE, type FunnelAggregate } from "@/lib/funnel";
 
 /**
  * Aggregated per-canvasser production for the Fleet Dispatch board.
@@ -67,4 +69,52 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
     }
 
     return { points, volume };
+  });
+
+/**
+ * Company-wide funnel baseline for the canvasser page's shared rate engine
+ * (owner decision, 2026-07-29: new reps see honest company averages, not
+ * hardcoded starter rates and not their own RLS-scoped rows mislabeled as
+ * "company"). Same transparency contract as getDispatchProduction: any
+ * authenticated user, aggregates only — never raw rows.
+ *
+ * companyAvgCommission is the 60-day average confirmed sale price × the base
+ * 1% commission rate (conservative; the 2% tier is deliberately ignored).
+ */
+export const getFunnelBaseline = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async () => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const since = addDaysISO(laTodayISO(), -60);
+
+    const [logsR, salesR] = await Promise.all([
+      supabaseAdmin
+        .from("daily_logs")
+        .select("doors_knocked, confirmed_leads, demos_sits, sales")
+        .gte("log_date", since),
+      supabaseAdmin
+        .from("leads")
+        .select("sale_amount")
+        .eq("status", "confirmed")
+        .eq("is_sale", true)
+        .gte("created_at", laMidnightUtcISO(since)),
+    ]);
+    if (logsR.error) throw logsR.error;
+    if (salesR.error) throw salesR.error;
+
+    const aggregate: FunnelAggregate = (logsR.data ?? []).reduce(
+      (a, r) => ({
+        doors: a.doors + (r.doors_knocked ?? 0),
+        confirmed: a.confirmed + (r.confirmed_leads ?? 0),
+        sits: a.sits + (r.demos_sits ?? 0),
+        sales: a.sales + (r.sales ?? 0),
+      }),
+      { ...EMPTY_AGGREGATE },
+    );
+
+    const saleRows = salesR.data ?? [];
+    const revenue = saleRows.reduce((a, r) => a + Number(r.sale_amount ?? 0), 0);
+    const avgSale = saleRows.length > 0 ? revenue / saleRows.length : 0;
+
+    return { aggregate, companyAvgCommission: avgSale * COMMISSION_BASE };
   });

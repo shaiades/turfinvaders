@@ -151,6 +151,31 @@ export function lastWorkedDaysBefore(todayISO: string, n: number): string[] {
   return out;
 }
 
+/** Remaining Mon–Sat workdays in the LA month containing `todayISO`,
+ *  today inclusive (Sundays never count — matches the pay week). */
+export function remainingWorkdaysInMonth(todayISO: string): number {
+  const monthPrefix = todayISO.slice(0, 7);
+  let n = 0;
+  for (let d = todayISO; d.startsWith(monthPrefix); d = addDaysISO(d, 1)) {
+    const [y, m, dd] = d.split("-").map(Number);
+    if (new Date(Date.UTC(y, m - 1, dd, 12)).getUTCDay() !== 0) n++;
+  }
+  return n;
+}
+
+/** Remaining Mon–Sat workdays in `todayISO`'s week, today inclusive.
+ *  0 on a Sunday (its Mon–Sat week is over) — callers keep their
+ *  `days > 0 ? x / days : x` guard. */
+export function remainingWorkdaysInWeek(todayISO: string): number {
+  const weekEnd = addDaysISO(weekStartOfISO(todayISO), 5); // Saturday
+  let n = 0;
+  for (let d = todayISO; d <= weekEnd; d = addDaysISO(d, 1)) {
+    const [y, m, dd] = d.split("-").map(Number);
+    if (new Date(Date.UTC(y, m - 1, dd, 12)).getUTCDay() !== 0) n++;
+  }
+  return n;
+}
+
 /** "Mon 7/28" for a chip label. */
 export function fmtWorkedDay(iso: string): string {
   return new Date(`${iso}T00:00:00Z`)
