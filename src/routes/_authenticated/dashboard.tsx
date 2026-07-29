@@ -8,12 +8,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { StatCard, ArcadePanel, TeamBadge, MobileCardList, MobileCard, MobileCardHeader, MobileStatGrid, MobileStat } from "@/components/arcade";
 import { LiveLeadCounter } from "@/components/LiveLeadCounter";
 import { CommandCenter } from "@/components/CommandCenter";
-import { FleetManager } from "@/components/FleetManager";
 import { HistoricalImporter } from "@/components/HistoricalImporter";
 import { PayrollLedger } from "@/components/PayrollLedger";
 import { ExecutiveDashboard } from "@/components/ExecutiveDashboard";
 import { TimesheetEditor } from "@/components/TimesheetEditor";
-import { LiveDispatch } from "@/components/LiveDispatch";
+import { FleetDispatch } from "@/components/FleetDispatch";
 import { WeeklyScheduleSettings } from "@/components/WeeklyScheduleSettings";
 import { CompanySettingsPanel } from "@/components/CompanySettingsPanel";
 import { AddTeamMemberDialog } from "@/components/AddTeamMemberDialog";
@@ -32,15 +31,16 @@ import { formatCurrency } from "@/lib/utils";
 import { weekStartMonday, toISODate, laMidnightUtcISO } from "@/lib/dates";
 import { Zap, DoorOpen, Truck, FileSpreadsheet } from "lucide-react";
 
-type OwnerTab = "dispatch" | "executive" | "fleet" | "timesheets" | "payroll" | "settings";
+type OwnerTab = "dispatch" | "executive" | "timesheets" | "payroll" | "settings";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — Knockout" }] }),
   validateSearch: (s: Record<string, unknown>): { tab: OwnerTab } => {
-    const t = s.tab;
+    // Legacy bookmarks: the old Fleet tab merged into Fleet Dispatch.
+    const t = s.tab === "fleet" ? "dispatch" : s.tab;
     return {
       tab:
-        t === "fleet" || t === "payroll" || t === "timesheets" || t === "dispatch" || t === "settings"
+        t === "payroll" || t === "timesheets" || t === "dispatch" || t === "settings"
           ? t
           : "executive",
     };
@@ -139,18 +139,16 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
       >
         <div className="-mx-4 sm:mx-0 overflow-x-auto scrollbar-hide">
           <TabsList className="bg-surface flex w-max min-w-full flex-nowrap whitespace-nowrap px-4 sm:px-0">
-            <TabsTrigger value="dispatch">Live Dispatch</TabsTrigger>
+            <TabsTrigger value="dispatch">Fleet Dispatch</TabsTrigger>
             <TabsTrigger value="executive">Executive Dashboard</TabsTrigger>
-            <TabsTrigger value="fleet">Fleet Manager</TabsTrigger>
             <TabsTrigger value="timesheets">Timesheets</TabsTrigger>
             <TabsTrigger value="payroll">Payroll</TabsTrigger>
             <TabsTrigger value="settings">Settings</TabsTrigger>
           </TabsList>
         </div>
 
-        <TabsContent value="dispatch" className="mt-0"><LiveDispatch /></TabsContent>
+        <TabsContent value="dispatch" className="mt-0"><FleetDispatch /></TabsContent>
         <TabsContent value="executive" className="mt-0"><ExecutiveDashboard /></TabsContent>
-        <TabsContent value="fleet" className="mt-0"><FleetManager /></TabsContent>
         <TabsContent value="timesheets" className="mt-0"><TimesheetEditor /></TabsContent>
         <TabsContent value="payroll" className="mt-0"><PayrollLedger /></TabsContent>
         <TabsContent value="settings" className="mt-0 space-y-6">
