@@ -162,7 +162,6 @@ export type WccReportResult = {
   name: string;
   rows: number;
   cancelled: number;
-  updated: number;
   /** Cancelled report rows the matcher couldn't tie to a sold Block card. */
   unmatched: string[];
 };
@@ -170,7 +169,7 @@ export type WccReportResult = {
 export type SyncSummary = {
   results: BoardSyncResult[];
   skipped: Array<{ board_id: string; name: string; reason: string }>;
-  wcc: { reports: WccReportResult[]; errors: string[] };
+  wcc: { reports: WccReportResult[]; updated: number; errors: string[] };
 };
 
 export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSummary> {
@@ -334,9 +333,13 @@ export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSumm
 
   // ── WCC pass ── cancelled sales are only recorded on the monthly
   // "... Sales Report" boards (owner, 2026-07-29: WCC column, "Cancelled").
-  // Match report rows back to sold Block cards by customer name and stamp
-  // the raw WCC label. Never fatal to the block sync.
-  const wcc: SyncSummary["wcc"] = { reports: [], errors: [] };
+  // Two phases: COLLECT every report row's best-match sold Block card across
+  // ALL boards, then MERGE per card with cancel-wins and write once. One
+  // customer spans several report rows (sale + reload + "(copy)" siblings,
+  // often "Completed"/unset) — row-by-row writes let a later row erase an
+  // earlier Cancelled stamp (seen live 2026-07-29: 15 cancels collapsed to
+  // 1). Never fatal to the block sync.
+  const wcc: SyncSummary["wcc"] = { reports: [], updated: 0, errors: [] };
   try {
     const data = await monday(
       token,
@@ -354,12 +357,30 @@ export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSumm
     }
     if (reportBoards.length > 0) {
       const soldCards = await fetchSoldCards();
+      // card monday_item_id → every WCC label a matching report row carries.
+      const matches = new Map<string, Array<string | null>>();
       for (const rb of reportBoards) {
         try {
-          wcc.reports.push(await processReportBoard(token, rb, soldCards));
+          wcc.reports.push(await collectReportBoard(token, rb, soldCards, matches));
         } catch (err) {
           wcc.errors.push(`${rb.name}: ${err instanceof Error ? err.message : String(err)}`);
         }
+      }
+      const byId = new Map(soldCards.map((c) => [c.monday_item_id, c]));
+      for (const [cardId, values] of matches) {
+        const desired = chooseWcc(values);
+        const card = byId.get(cardId);
+        if (!card || (card.wcc ?? null) === (desired ?? null)) continue;
+        const { error } = await supabaseAdmin
+          .from("block_cards")
+          .update({ wcc: desired })
+          .eq("monday_item_id", cardId);
+        if (error) {
+          wcc.errors.push(`update ${cardId}: ${error.message}`);
+          continue;
+        }
+        card.wcc = desired;
+        wcc.updated += 1;
       }
     }
   } catch (err) {
@@ -478,10 +499,20 @@ export function bestSoldMatch(
   });
 }
 
-async function processReportBoard(
+/** Cancel-wins merge for one card's matched report-row labels: any cancel
+ *  label sticks; otherwise the first real label; otherwise null (heals a
+ *  stale stamp when every matching row went back to unset). */
+export function chooseWcc(values: Array<string | null>): string | null {
+  const cancel = values.find((v) => /cancel/i.test(v ?? ""));
+  if (cancel) return cancel;
+  return values.find((v) => v !== null) ?? null;
+}
+
+async function collectReportBoard(
   token: string,
   board: { id: string; name: string },
   soldCards: SoldCardLite[],
+  matches: Map<string, Array<string | null>>,
 ): Promise<WccReportResult> {
   const office = /^OC\b/i.test(board.name.trim())
     ? "Orange County"
@@ -499,7 +530,6 @@ async function processReportBoard(
     name: board.name,
     rows: 0,
     cancelled: 0,
-    updated: 0,
     unmatched: [],
   };
 
@@ -539,14 +569,11 @@ async function processReportBoard(
         if (isCancel) result.unmatched.push(name);
         continue;
       }
-      if ((match.wcc ?? null) === (wccStored ?? null)) continue;
-      const { error } = await supabaseAdmin
-        .from("block_cards")
-        .update({ wcc: wccStored })
-        .eq("monday_item_id", match.monday_item_id);
-      if (error) throw new Error(error.message);
-      match.wcc = wccStored; // keep the in-memory pool consistent across boards
-      result.updated += 1;
+      // Collect only — the caller merges every board's rows per card
+      // (cancel-wins) and writes once.
+      const list = matches.get(match.monday_item_id) ?? [];
+      list.push(wccStored);
+      matches.set(match.monday_item_id, list);
     }
     cursor = page.cursor ?? null;
   } while (cursor);
