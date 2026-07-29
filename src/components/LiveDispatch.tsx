@@ -26,8 +26,9 @@ type Profile = {
 
 // The dispatch funnel: Submitted (Inbound births) plus the confirmation
 // team's Lead Status flips — Confirmed / Future / Blowout / N-A (killed and
-// no_answers columns, Monday's labels). Unconfirmed is DERIVED: submitted
-// minus everything actioned — the waiting pool, not a status flip.
+// no_answers columns, Monday's labels). No Unconfirmed metric: a card shows
+// nothing beyond Submitted until its Lead Status button is actioned
+// (owner, 2026-07-28).
 type Metric = {
   id: string;
   canvasser_id: string;
@@ -252,21 +253,18 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
       }
     }
     const enriched = Array.from(groups.values()).map((g) => {
-      let gen = 0, conf = 0, na = 0, kil = 0, fut = 0;
+      let gen = 0, conf = 0, kil = 0, fut = 0;
       for (const id of g.ids) {
         const m = metricByCanvasser.get(id);
         if (!m) continue;
-        gen += m.gen; conf += m.conf; na += m.na; kil += m.kil; fut += m.fut;
+        gen += m.gen; conf += m.conf; kil += m.kil; fut += m.fut;
       }
       // Submitted = leads GENERATED (new items on the Incoming Leads board),
       // not outcome counts — production shows the moment a lead is entered.
+      // No Unconfirmed metric anywhere: nothing is shown for a card until the
+      // confirmation team actions its Lead Status button (owner, 2026-07-28).
       const sub = gen;
-      // Unconfirmed is the WAITING POOL, not a status flip: submitted leads
-      // the confirmation team hasn't actioned yet into Confirmed / Future /
-      // Blowout / N-A (owner, 2026-07-28). Floored — resolving cards born on
-      // earlier days can push resolutions past today's submissions.
-      const pen = Math.max(0, sub - conf - fut - kil - na);
-      return { g, conf, pen, kil, fut, sub };
+      return { g, conf, kil, fut, sub };
     });
     return enriched.sort((a, b) => {
       if (b.sub !== a.sub) return b.sub - a.sub;
@@ -276,9 +274,9 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
   }, [visible, metricByCanvasser]);
 
   const totals = useMemo(() => {
-    let sub = 0, pen = 0, conf = 0, fut = 0, kil = 0;
-    rows.forEach((r) => { sub += r.sub; pen += r.pen; conf += r.conf; fut += r.fut; kil += r.kil; });
-    return { sub, pen, conf, fut, kil };
+    let sub = 0, conf = 0, fut = 0, kil = 0;
+    rows.forEach((r) => { sub += r.sub; conf += r.conf; fut += r.fut; kil += r.kil; });
+    return { sub, conf, fut, kil };
   }, [rows]);
 
   // Suspension rule (owner, 2026-07-28): any TWO consecutive WORKED days
@@ -366,9 +364,8 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
       {!readOnly && <WebhookUrlBanner />}
       {!readOnly && <MondayTokenCard />}
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <TotalTile label="Submitted" value={totals.sub} accent="neon" />
-        <TotalTile label="Unconfirmed" value={totals.pen} accent="warning" />
         <TotalTile label="Confirmed" value={totals.conf} accent="victory" />
         <TotalTile label="Future" value={totals.fut} accent="accent" />
         <TotalTile label="Blowout" value={totals.kil} accent="danger" />
@@ -443,15 +440,13 @@ type FunnelRow = {
     team_id: string | null;
   };
   sub: number;
-  pen: number;
   conf: number;
   fut: number;
   kil: number;
 };
 
-const FUNNEL_COLS: Array<{ short: string; full: string; key: "sub" | "pen" | "conf" | "fut" | "kil"; color: keyof typeof metricColorClass }> = [
+const FUNNEL_COLS: Array<{ short: string; full: string; key: "sub" | "conf" | "fut" | "kil"; color: keyof typeof metricColorClass }> = [
   { short: "Sub", full: "Submitted", key: "sub", color: "neon" },
-  { short: "Unc", full: "Unconfirmed", key: "pen", color: "warning" },
   { short: "Con", full: "Confirmed", key: "conf", color: "victory" },
   { short: "Fut", full: "Future", key: "fut", color: "accent" },
   { short: "BO", full: "Blowout", key: "kil", color: "destructive" },
@@ -460,7 +455,7 @@ const FUNNEL_COLS: Array<{ short: string; full: string; key: "sub" | "pen" | "co
 /** One rep's funnel line — Fleet Manager roster-row styling. */
 function DispatchRow({ r }: { r: FunnelRow }) {
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_repeat(5,2.4rem)] items-center gap-1 px-2 py-1.5 rounded border border-border bg-surface hover:border-neon/60">
+    <div className="grid grid-cols-[minmax(0,1fr)_repeat(4,2.4rem)] items-center gap-1 px-2 py-1.5 rounded border border-border bg-surface hover:border-neon/60">
       <span className="text-sm truncate flex items-center gap-1.5 min-w-0">
         <span aria-hidden>{r.sub > 0 ? "🔥" : "🍩"}</span>
         <span className="truncate">{r.g.display_name ?? "—"}</span>
@@ -482,7 +477,7 @@ function DispatchRow({ r }: { r: FunnelRow }) {
 /** Funnel mini-table column headers, aligned to DispatchRow's grid. */
 function DispatchColHeader() {
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_repeat(5,2.4rem)] items-center gap-1 px-2">
+    <div className="grid grid-cols-[minmax(0,1fr)_repeat(4,2.4rem)] items-center gap-1 px-2">
       <span />
       {FUNNEL_COLS.map((c) => (
         <span key={c.key} title={c.full} className="text-right text-[9px] font-display uppercase tracking-widest text-muted-foreground">
@@ -511,11 +506,11 @@ function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
       freeAgents.push(r);
     }
   }
-  const looseActive = freeAgents.filter((r) => r.sub + r.pen + r.conf + r.fut + r.kil > 0);
+  const looseActive = freeAgents.filter((r) => r.sub + r.conf + r.fut + r.kil > 0);
   const vanTotals = (id: string) =>
     (rowsByVan.get(id) ?? []).reduce(
-      (a, r) => ({ sub: a.sub + r.sub, pen: a.pen + r.pen, conf: a.conf + r.conf, fut: a.fut + r.fut, kil: a.kil + r.kil }),
-      { sub: 0, pen: 0, conf: 0, fut: 0, kil: 0 },
+      (a, r) => ({ sub: a.sub + r.sub, conf: a.conf + r.conf, fut: a.fut + r.fut, kil: a.kil + r.kil }),
+      { sub: 0, conf: 0, fut: 0, kil: 0 },
     );
   const vanSub = (id: string) => vanTotals(id).sub;
   const captainName = (v: Van) =>
@@ -559,7 +554,7 @@ function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
                         <DispatchColHeader />
                         {/* The whole van at a glance — every funnel stat the
                             canvassers below sum into. */}
-                        <div className="grid grid-cols-[minmax(0,1fr)_repeat(5,2.4rem)] items-center gap-1 px-2 py-1.5 rounded border border-neon/40 bg-neon/5">
+                        <div className="grid grid-cols-[minmax(0,1fr)_repeat(4,2.4rem)] items-center gap-1 px-2 py-1.5 rounded border border-neon/40 bg-neon/5">
                           <span className="text-[10px] font-display uppercase tracking-widest text-neon truncate">
                             Van Total
                           </span>
