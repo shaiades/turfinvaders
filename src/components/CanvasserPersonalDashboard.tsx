@@ -25,7 +25,9 @@ import {
   weeklyPoints,
 } from "@/lib/pay";
 import { getMonthlyPaychecks } from "@/lib/fleet.functions";
-import { laTodayISO, laWeekStartISO, addDaysISO, laMidnightUtcISO, laMonthStartISO } from "@/lib/dates";
+import { laTodayISO, laWeekStartISO, addDaysISO, laMidnightUtcISO, laMonthStartISO, remainingWorkdaysInMonth } from "@/lib/dates";
+import { backSolveFunnel } from "@/lib/funnel";
+import { useFunnelRates, useProfileGoals } from "@/hooks/useFunnelRates";
 
 /**
  * Paycheck engine — automated.
@@ -99,16 +101,14 @@ function aggregate(rows: Array<Record<string, number | null> & { log_date: strin
 export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
   const qc = useQueryClient();
 
-  const profileQuery = useQuery({
-    queryKey: ["my_profile_goal", userId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("profiles").select("monthly_goal").eq("id", userId).maybeSingle();
-      if (error) throw error;
-      return data;
-    },
-  });
-  const monthlyGoal = Number((profileQuery.data as { monthly_goal?: number } | null)?.monthly_goal ?? DEFAULT_MONTHLY_GOAL);
+  const goalsQuery = useProfileGoals(userId);
+  const funnelRates = useFunnelRates(userId);
+  const monthlyGoal = Number(goalsQuery.data?.monthly_goal ?? DEFAULT_MONTHLY_GOAL);
+  // Income semantics (owner, 2026-07-29): required sales = goal ÷ avg
+  // commission per sale — the same editable number the Weekly Playbook uses,
+  // falling back to the company 60d average for a missing profile row.
+  const avgCommission =
+    Number(goalsQuery.data?.avg_commission ?? 0) || funnelRates.companyAvgCommission;
 
   // Personal logs — last 60 days for both MTD math and historical conversion rates.
   const logsQuery = useQuery({
@@ -124,39 +124,6 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
       return data ?? [];
     },
   });
-
-  // Company-wide aggregates over last 30 days — used as fallback when canvasser has <2 weeks of data.
-  const companyAvgQuery = useQuery({
-    queryKey: ["company_funnel_avg", "30d"],
-    queryFn: async () => {
-      const sinceISO = addDaysISO(laTodayISO(), -30);
-      const [logsRes, salesRes] = await Promise.all([
-        supabase.from("daily_logs")
-          .select("doors_knocked, confirmed_leads, demos_sits, sales")
-          .gte("log_date", sinceISO),
-        supabase.from("leads")
-          .select("sale_amount")
-          .eq("status", "confirmed")
-          .eq("is_sale", true)
-          .gte("created_at", laMidnightUtcISO(sinceISO)),
-      ]);
-      if (logsRes.error) throw logsRes.error;
-      if (salesRes.error) throw salesRes.error;
-      const t = (logsRes.data ?? []).reduce(
-        (a, r) => ({
-          doors: a.doors + (r.doors_knocked ?? 0),
-          confirmed: a.confirmed + (r.confirmed_leads ?? 0),
-          sits: a.sits + (r.demos_sits ?? 0),
-          sales: a.sales + (r.sales ?? 0),
-        }),
-        { doors: 0, confirmed: 0, sits: 0, sales: 0 },
-      );
-      const sales = salesRes.data ?? [];
-      const revenue = sales.reduce((a, r) => a + Number(r.sale_amount ?? 0), 0);
-      return { ...t, revenue, salesCount: sales.length };
-    },
-  });
-
 
   const salesQuery = useQuery({
     queryKey: ["my_confirmed_sales", "mtd", userId],
@@ -217,42 +184,27 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
     const monthCommission = monthRevenue * COMMISSION_BASE;
 
     // ===== Funnel math (reverse engineering) =====
-    // Personal conversion rates from last 60 days of logs (full sample).
+    // Conversion rates come from the SHARED engine (useFunnelRates) so this
+    // Mission and the WeeklyPlaybook below can never disagree. Only the
+    // talk-per-door extra stays local (dashboard-only tile).
     const personalAgg = aggregate(allRows);
-    const personalDays = personalAgg.days_worked;
-    const personalAvgSale = sales.length > 0 ? monthRevenue / sales.length : 0;
-
-    const company = companyAvgQuery.data ?? { doors: 0, confirmed: 0, sits: 0, sales: 0, revenue: 0, salesCount: 0 };
-    const companyAvgSale = company.salesCount > 0 ? company.revenue / company.salesCount : 0;
-
-    // Fallback rule: <2 weeks (14 unique log days) → use company-wide averages.
-    const usePersonal = personalDays >= 14 && personalAgg.doors_knocked > 0;
-    const src = usePersonal
-      ? { doors: personalAgg.doors_knocked, confirmed: personalAgg.confirmed_leads, sits: personalAgg.demos_sits, sales: personalAgg.sales, avgSale: personalAvgSale }
-      : { doors: company.doors, confirmed: company.confirmed, sits: company.sits, sales: company.sales, avgSale: companyAvgSale };
-
-    const closeRate    = src.sits  > 0 ? src.sales / src.sits  : 0;        // sales per sit
-    const sitRate      = src.confirmed > 0 ? src.sits / src.confirmed : 0; // sits per confirmed lead
-    const leadDoorRate = src.doors > 0 ? src.confirmed / src.doors : 0;    // confirmed leads per door
-    const talkDoorRate = src.doors > 0 && usePersonal
-      ? (personalAgg.people_talked_to / personalAgg.doors_knocked)
-      : 0.27; // industry-typical fallback ~27%
-    // Projections deliberately use the base 1% rate (conservative estimate).
-    const avgCommissionPerSale = src.avgSale * COMMISSION_BASE;
+    const talkDoorRate =
+      funnelRates.source === "personal" && personalAgg.doors_knocked > 0
+        ? personalAgg.people_talked_to / personalAgg.doors_knocked
+        : 0.27; // industry-typical fallback ~27%
 
     const funnel = {
-      usePersonal,
-      sampleDays: personalDays,
-      closeRate, sitRate, leadDoorRate, talkDoorRate,
-      avgSale: src.avgSale,
-      avgCommissionPerSale,
+      source: funnelRates.source,
+      sampleDoors: funnelRates.sampleDoors,
+      rates: funnelRates.rates,
+      talkDoorRate,
     };
 
     return {
       today, week, month, monthRevenue, weekRevenue, weekPoints,
       weekHours, hourlyRate, weekBase, weekCommission, monthCommission, funnel,
     };
-  }, [logsQuery.data, salesQuery.data, companyAvgQuery.data, clockedQuery.data]);
+  }, [logsQuery.data, salesQuery.data, clockedQuery.data, funnelRates.source, funnelRates.sampleDoors, funnelRates.rates]);
 
   const weeklyPay = weekBase + weekCommission;
 
@@ -305,9 +257,12 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
 
   // ===== Reverse-engineering funnel (drives My Goals tab & Value Per Door) =====
   const mission = useMemo(() => {
-    const { closeRate, sitRate, leadDoorRate, talkDoorRate, avgCommissionPerSale } = funnel;
-    const ready = closeRate > 0 && sitRate > 0 && leadDoorRate > 0 && avgCommissionPerSale > 0 && monthlyGoal > 0;
-    if (!ready) {
+    // Income goal ÷ avg commission per sale (owner, 2026-07-29) — the shared
+    // back-solve; null = the shared insufficient-data contract.
+    const solve = funnel.rates
+      ? backSolveFunnel({ incomeGoal: monthlyGoal, avgCommissionPerSale: avgCommission, rates: funnel.rates })
+      : null;
+    if (!solve) {
       return {
         ready: false,
         requiredSales: 0, requiredSits: 0, requiredConfirmed: 0, requiredDoors: 0,
@@ -316,21 +271,10 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
         targetValuePerDoor: 0,
       };
     }
-    const requiredSales     = monthlyGoal / (funnel.avgSale || 1);
-    const requiredSits      = requiredSales / closeRate;
-    const requiredConfirmed = requiredSits / sitRate;
-    const requiredDoors     = requiredConfirmed / leadDoorRate;
-    const requiredPeopleTalkedTo = requiredDoors * talkDoorRate;
+    const { requiredSales, requiredSits, requiredLeads: requiredConfirmed, requiredDoors } = solve;
+    const requiredPeopleTalkedTo = requiredDoors * funnel.talkDoorRate;
 
-    // Remaining working days this month (Mon–Sat, LA calendar), today inclusive.
-    const todayLA = laTodayISO();
-    const monthPrefix = todayLA.slice(0, 7);
-    let workdaysLeft = 0;
-    for (let d = todayLA; d.startsWith(monthPrefix); d = addDaysISO(d, 1)) {
-      const [y, m, dd] = d.split("-").map(Number);
-      const dow = new Date(Date.UTC(y, m - 1, dd, 12)).getUTCDay();
-      if (dow !== 0) workdaysLeft++; // exclude Sunday only
-    }
+    const workdaysLeft = remainingWorkdaysInMonth(laTodayISO());
 
     // Subtract progress already made this month.
     const doorsRemaining   = Math.max(0, requiredDoors - month.doors_knocked);
@@ -338,7 +282,8 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
     const doorsPerDay = workdaysLeft > 0 ? doorsRemaining / workdaysLeft : doorsRemaining;
     const talksPerDay = workdaysLeft > 0 ? talksRemaining / workdaysLeft : talksRemaining;
 
-    const targetValuePerDoor = requiredDoors > 0 ? (monthlyGoal * COMMISSION_BASE) / requiredDoors : 0;
+    // The goal IS commission dollars now — value per door is goal ÷ doors.
+    const targetValuePerDoor = requiredDoors > 0 ? monthlyGoal / requiredDoors : 0;
 
     return {
       ready: true,
@@ -348,7 +293,7 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
       doorsPerDay, talksPerDay,
       targetValuePerDoor,
     };
-  }, [funnel, monthlyGoal, month.doors_knocked, month.people_talked_to]);
+  }, [funnel, monthlyGoal, avgCommission, month.doors_knocked, month.people_talked_to]);
 
 
   const saveGoal = useMutation({
@@ -359,7 +304,7 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
     },
     onSuccess: () => {
       toast.success("Monthly goal updated");
-      qc.invalidateQueries({ queryKey: ["my_profile_goal", userId] });
+      qc.invalidateQueries({ queryKey: ["profile_goals", userId] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -485,17 +430,16 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
           <FunnelBreakdown
             ready={mission.ready}
             goal={monthlyGoal}
-            avgSale={funnel.avgSale}
-            avgCommissionPerSale={funnel.avgCommissionPerSale}
-            closeRate={funnel.closeRate}
-            sitRate={funnel.sitRate}
-            leadDoorRate={funnel.leadDoorRate}
+            avgCommissionPerSale={avgCommission}
+            closeRate={funnel.rates?.closeRate ?? 0}
+            sitRate={funnel.rates?.sitRate ?? 0}
+            leadDoorRate={funnel.rates?.leadDoorRate ?? 0}
             requiredSales={mission.requiredSales}
             requiredSits={mission.requiredSits}
             requiredConfirmed={mission.requiredConfirmed}
             requiredDoors={mission.requiredDoors}
-            usePersonal={funnel.usePersonal}
-            sampleDays={funnel.sampleDays}
+            source={funnel.source}
+            sampleDoors={funnel.sampleDoors}
             mtdDoors={month.doors_knocked}
           />
         </TabsContent>
@@ -842,7 +786,7 @@ function DailyMissionWidget({
         <Swords className="w-6 h-6 text-muted-foreground mx-auto" />
         <div className="mt-3 font-display text-sm uppercase tracking-widest text-muted-foreground">Mission unavailable</div>
         <p className="mt-2 text-xs text-muted-foreground max-w-md mx-auto">
-          Set a target income above. We also need conversion data — either your own (2+ weeks of logs) or company-wide averages from active canvassers.
+          Set a target income above. We also need conversion data — from your own recent logs (200+ doors knocked) or the company-wide 60-day baseline.
         </p>
       </div>
     );
@@ -899,18 +843,18 @@ function MissionStat({
 }
 
 function FunnelBreakdown({
-  ready, goal, avgSale, avgCommissionPerSale, closeRate, sitRate, leadDoorRate,
+  ready, goal, avgCommissionPerSale, closeRate, sitRate, leadDoorRate,
   requiredSales, requiredSits, requiredConfirmed, requiredDoors,
-  usePersonal, sampleDays, mtdDoors,
+  source, sampleDoors, mtdDoors,
 }: {
-  ready: boolean; goal: number; avgSale: number; avgCommissionPerSale: number;
+  ready: boolean; goal: number; avgCommissionPerSale: number;
   closeRate: number; sitRate: number; leadDoorRate: number;
   requiredSales: number; requiredSits: number; requiredConfirmed: number; requiredDoors: number;
-  usePersonal: boolean; sampleDays: number; mtdDoors: number;
+  source: "personal" | "company"; sampleDoors: number; mtdDoors: number;
 }) {
   if (!ready) return null;
   const rows = [
-    { label: "Required Sales",          value: Math.ceil(requiredSales),     formula: `${formatCurrency(goal)} ÷ ${formatCurrency(avgSale)} avg sale`, accent: "var(--victory)" },
+    { label: "Required Sales",          value: Math.ceil(requiredSales),     formula: `${formatCurrency(goal)} ÷ ${formatCurrency(avgCommissionPerSale)} avg commission`, accent: "var(--victory)" },
     { label: "Required Sits / Demos",   value: Math.ceil(requiredSits),      formula: `Sales ÷ ${(closeRate*100).toFixed(0)}% close rate`,    accent: "var(--accent)" },
     { label: "Required Confirmed Leads",value: Math.ceil(requiredConfirmed), formula: `Sits ÷ ${(sitRate*100).toFixed(0)}% sit rate`,         accent: "var(--neon)" },
     { label: "Total Doors to Knock",    value: Math.ceil(requiredDoors),     formula: `Leads ÷ ${(leadDoorRate*100).toFixed(2)}% lead-per-door`, accent: "var(--neon)" },
@@ -920,7 +864,7 @@ function FunnelBreakdown({
       title="Funnel Breakdown · Reverse Engineering"
       action={
         <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-          {usePersonal ? `Personal · ${sampleDays}d sample` : "Company avg · Fallback"}
+          {source === "personal" ? `Personal · ${sampleDoors.toLocaleString()} doors` : "Company avg · 60d baseline"}
         </span>
       }
     >
