@@ -14,6 +14,69 @@ export type Database = {
   }
   public: {
     Tables: {
+      block_cards: {
+        Row: {
+          board_id: string
+          bo: string | null
+          canvass_stats: string | null
+          card_date: string | null
+          created_at: string
+          group_title: string | null
+          iss: string | null
+          lead_name: string | null
+          monday_item_id: string
+          office_location: string
+          ol: string | null
+          pm: string | null
+          products: string | null
+          reps: string[]
+          rs: string | null
+          sale: string | null
+          sale_price: number | null
+          updated_at: string
+        }
+        Insert: {
+          board_id: string
+          bo?: string | null
+          canvass_stats?: string | null
+          card_date?: string | null
+          created_at?: string
+          group_title?: string | null
+          iss?: string | null
+          lead_name?: string | null
+          monday_item_id: string
+          office_location?: string
+          ol?: string | null
+          pm?: string | null
+          products?: string | null
+          reps?: string[]
+          rs?: string | null
+          sale?: string | null
+          sale_price?: number | null
+          updated_at?: string
+        }
+        Update: {
+          board_id?: string
+          bo?: string | null
+          canvass_stats?: string | null
+          card_date?: string | null
+          created_at?: string
+          group_title?: string | null
+          iss?: string | null
+          lead_name?: string | null
+          monday_item_id?: string
+          office_location?: string
+          ol?: string | null
+          pm?: string | null
+          products?: string | null
+          reps?: string[]
+          rs?: string | null
+          sale?: string | null
+          sale_price?: number | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       canvasser_stats: {
         Row: {
           contacts_made: number
@@ -875,7 +938,7 @@ export type Database = {
       }
     }
     Enums: {
-      app_role: "owner" | "captain" | "canvasser" | "office_staff"
+      app_role: "owner" | "captain" | "canvasser" | "office_staff" | "sales_rep"
       canvasser_status:
         | "active"
         | "suspended"
@@ -1010,7 +1073,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["owner", "captain", "canvasser", "office_staff"],
+      app_role: ["owner", "captain", "canvasser", "office_staff", "sales_rep"],
       canvasser_status: [
         "active",
         "suspended",

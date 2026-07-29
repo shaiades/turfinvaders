@@ -1,6 +1,16 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { fetchItemBatched } from './monday.ts'
+import {
+  buildBlockCardRow,
+  findSaleOutcomeCol,
+  findSalePriceCol,
+  mondayOfISO,
+  parseBoardWeekStart,
+  parseMoney,
+  SOLD_VALUES,
+  type MondayCol,
+} from './block-cards.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -60,46 +70,13 @@ function deriveCanvassState(cols: MondayCol[]) {
   return { bucket, nonCore, ol }
 }
 
-type MondayCol = { id: string; text: string | null; display_value?: string | null; column: { title: string; id: string } }
-
-/** Sale-column values that mean the item is sold (drives the price sync). */
-const SOLD_VALUES = ['sold', 'reload', 'upsell', 'sale']
+// MondayCol, SOLD_VALUES, parseMoney, findSalePriceCol, findSaleOutcomeCol
+// moved to block-cards.ts (shared with the Close Kombat snapshot).
 
 /** deny_reason marker for leads voided by an automatic Monday sale revert.
  *  Only leads carrying this exact marker may be auto re-confirmed on a
  *  re-sale — human denials at the Confirmation Desk are never overridden. */
 const REVERT_REASON = 'Monday sale status reverted'
-
-/** Parse Monday money text ("$1,234.56") → number, else null. Rejects
- *  negatives and values beyond the leads.sale_amount numeric(12,2) range. */
-function parseMoney(v: unknown): number | null {
-  if (v === null || v === undefined || v === '') return null
-  const n = typeof v === 'number' ? v : Number(String(v).replace(/[^0-9.\-]/g, ''))
-  if (!Number.isFinite(n) || n < 0 || n >= 1e10) return null
-  return Math.round(n * 100) / 100
-}
-
-/** The "Sale Price" column: exact title first, never the outcome column "Sale". */
-function findSalePriceCol(cols: MondayCol[]): MondayCol | undefined {
-  const norm = (s: string | undefined) => (s || '').trim().toLowerCase()
-  return (
-    cols.find((c) => norm(c.column?.title) === 'sale price') ??
-    cols.find((c) => norm(c.column?.title).replace(/\s+/g, '') === 'saleprice') ??
-    cols.find((c) => norm(c.column?.title).includes('price'))
-  )
-}
-
-/** The Sale outcome/status column (title "Sale", never "Sale Price"). */
-function findSaleOutcomeCol(cols: MondayCol[]): MondayCol | undefined {
-  const norm = (s: string | undefined) => (s || '').trim().toLowerCase()
-  return (
-    cols.find((c) => norm(c.column?.title) === 'sale') ??
-    cols.find((c) => {
-      const t = norm(c.column?.title)
-      return t.includes('sale') && !t.includes('price')
-    })
-  )
-}
 
 /** Canvass Stats bucket → daily_logs counter deltas (payroll + Weekly
  *  Results feed). A sale implies a sit (demos_sits includes sold sits — the
@@ -382,6 +359,45 @@ serve(async (req) => {
       step: '3b_Item_Inspect',
       data: { itemName: item.name, canvasserName, changedTitle, changedValue },
     })
+
+    // ── Close Kombat snapshot ── mirror every Block-board card into
+    // block_cards (sales-rep stats, Monday's own column language). Sits
+    // BEFORE the "(copy)" skip and the no-canvasser-name skip below on
+    // purpose: recycled "(copy)" cards and rep-only cards are real
+    // appointments for the rep who runs them, even though they never touch
+    // canvasser counters. Full-state idempotent upsert — redeliveries,
+    // outcome flips, and rep reassignments all self-heal. Never breaks the
+    // counter pipeline.
+    if (!isIncomingLeadsBoard && boardOffice) {
+      try {
+        const weekStart =
+          parseBoardWeekStart(String(item.board?.name ?? '')) ?? mondayOfISO(todayLA())
+        const cardRow = buildBlockCardRow(item, boardId, boardOffice, weekStart, todayLA())
+        const { error: cardErr } = await supabaseAdmin
+          .from('block_cards')
+          .upsert(cardRow, { onConflict: 'monday_item_id' })
+        await supabaseAdmin.from('webhook_logs').insert({
+          step: cardErr ? 'Rep_Card_Snapshot_Error' : 'Rep_Card_Snapshot',
+          data: {
+            pulseId: String(pulseId),
+            card_date: cardRow.card_date,
+            reps: cardRow.reps,
+            sale: cardRow.sale,
+            error: cardErr?.message ?? null,
+          },
+        })
+      } catch (snapErr) {
+        try {
+          await supabaseAdmin.from('webhook_logs').insert({
+            step: 'Rep_Card_Snapshot_Error',
+            data: {
+              pulseId: String(pulseId),
+              error: snapErr instanceof Error ? snapErr.message : String(snapErr),
+            },
+          })
+        } catch (_) { /* the snapshot must never break the pipeline */ }
+      }
+    }
 
     // Duplicated Monday items ("Endy and Rebecca Kuo (copy)") get fresh
     // pulseIds, so the triggerUuid/pulseId dedupe can't catch them — they

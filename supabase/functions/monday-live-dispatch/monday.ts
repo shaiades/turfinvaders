@@ -143,8 +143,10 @@ export async function mondayQuery(token: string, query: string): Promise<MondayR
 
 export type ItemFetchResult = { item: Record<string, unknown> | null; error: string | null };
 
+// board.name feeds the Close Kombat snapshot's week parsing ("SD Block
+// 7/28/26 - 8/2/26" → card week); nothing else reads item.board.
 const ITEM_FIELDS =
-  "id name board { id } group { id title } column_values { id text column { title id } ... on FormulaValue { display_value } }";
+  "id name board { id name } group { id title } column_values { id text column { title id } ... on FormulaValue { display_value } }";
 
 type Waiter = (r: ItemFetchResult) => void;
 let batch: { token: string; waiters: Map<string, Waiter[]> } | null = null;

@@ -127,6 +127,7 @@ export function AddTeamMemberDialog({ variant = "default" }: { variant?: "defaul
               className="w-full bg-input border border-border rounded-md px-3 py-2 text-sm"
             >
               <option value="canvasser">Canvasser</option>
+              <option value="sales_rep">Sales Rep</option>
               <option value="captain">Captain</option>
               <option value="office_staff">Admin</option>
               <option value="owner">Owner</option>

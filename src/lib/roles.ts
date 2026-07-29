@@ -1,8 +1,10 @@
 import { redirect } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 
-/** All app roles, in priority order (highest first). */
-export const APP_ROLES = ["owner", "office_staff", "captain", "canvasser"] as const;
+/** All app roles, in priority order (highest first). sales_rep (closers,
+ *  added 2026-07-29 for Close Kombat) sits above canvasser: a rep sees only
+ *  their stats section, never the canvassing suite. */
+export const APP_ROLES = ["owner", "office_staff", "captain", "sales_rep", "canvasser"] as const;
 export type AppRole = (typeof APP_ROLES)[number];
 
 export function isAppRole(v: unknown): v is AppRole {
@@ -27,8 +29,17 @@ export function isAdminRole(role: AppRole | string | null | undefined): boolean 
   return (ADMIN_ROLES as readonly string[]).includes(role);
 }
 
-/** Highest-priority role held: owner > office_staff > captain > canvasser;
- *  null when none of the app roles are present. */
+/** Close Kombat (sales-rep stats): owner, office_staff, and the reps
+ *  themselves — captains deliberately excluded (owner decision 2026-07-29).
+ *  Gates the /close-kombat route; block_cards RLS mirrors this list. */
+export const CLOSE_KOMBAT_ROLES: readonly AppRole[] = [
+  "owner",
+  "office_staff",
+  "sales_rep",
+] as const;
+
+/** Highest-priority role held: owner > office_staff > captain > sales_rep >
+ *  canvasser; null when none of the app roles are present. */
 export function primaryRole(roles: ReadonlyArray<AppRole | string>): AppRole | null {
   for (const r of APP_ROLES) if (roles.includes(r)) return r;
   return null;

@@ -2,7 +2,22 @@ import { Link, useRouter, useRouterState } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth, setDevRoleOverride, type AppRole } from "@/hooks/useAuth";
-import { LogOut, LayoutDashboard, Inbox, MapPin, FlaskConical, DollarSign, Zap, Trophy, Target, PhoneCall, Sparkles, Truck } from "lucide-react";
+import { CLOSE_KOMBAT_ROLES, isAdminRole, isManagerRole } from "@/lib/roles";
+import {
+  LogOut,
+  LayoutDashboard,
+  Inbox,
+  MapPin,
+  FlaskConical,
+  DollarSign,
+  Zap,
+  Trophy,
+  Target,
+  PhoneCall,
+  Sparkles,
+  Truck,
+  Swords,
+} from "lucide-react";
 const turfInvadersWordmark = { url: "/turf-invaders-wordmark.png" };
 
 type NavItem = {
@@ -16,6 +31,10 @@ type NavItem = {
 // /dashboard (personal stats), /log (daily log + new lead) and /daily-wrap are
 // canvasser-facing screens — owner opened them up 2026-07-20.
 const CANVASSER_ALLOWED = ["/field", "/my-territory", "/leaderboard", "/playbook", "/dashboard", "/log", "/daily-wrap"];
+
+// Sales reps (closers) get exactly one screen: Close Kombat (owner decision
+// 2026-07-29). Anything else → redirect there.
+const SALES_REP_ALLOWED = ["/close-kombat"];
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, role, realRole, displayName } = useAuth();
@@ -32,7 +51,23 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
   }, [role, pathname, router]);
 
+  // Sales-rep guard: their whole app is Close Kombat. Only force-navigate
+  // when the REAL roles can actually enter /close-kombat — its beforeLoad
+  // checks user_roles, so pushing e.g. a captain preview there would bounce
+  // back to /dashboard and loop forever.
+  useEffect(() => {
+    if (role !== "sales_rep") return;
+    if (!realRole || !CLOSE_KOMBAT_ROLES.includes(realRole)) return;
+    const allowed = SALES_REP_ALLOWED.some((p) => pathname === p || pathname.startsWith(p + "/"));
+    if (!allowed) {
+      router.navigate({ to: "/close-kombat", replace: true });
+    }
+  }, [role, realRole, pathname, router]);
+
   const navItems: NavItem[] = (() => {
+    if (role === "sales_rep") {
+      return [{ to: "/close-kombat", label: "Close Kombat", icon: Swords }];
+    }
     if (role === "canvasser") {
       // Bottom tab bar shows the first 5; Playbook stays reachable from the
       // desktop top nav and by URL.
@@ -46,13 +81,18 @@ export function AppShell({ children }: { children: ReactNode }) {
         { to: "/daily-wrap", label: "Wrap", icon: Sparkles },
       ];
     }
-    // Leadership: owner, captain, office_staff (manager suite)
+    // Leadership: owner, captain, office_staff (manager suite). Close Kombat
+    // only for roles its route guard admits — captains are excluded, so
+    // don't show them a nav item that silently bounces.
     return [
       { to: "/dashboard", search: { tab: "executive" }, label: "Command", icon: LayoutDashboard },
       { to: "/my-territory", label: "Territory", icon: MapPin },
       { to: "/dashboard", search: { tab: "dispatch" }, label: "Fleet Dispatch", icon: Truck },
       { to: "/dashboard", search: { tab: "payroll" }, label: "Payroll", icon: DollarSign },
       { to: "/confirmation-desk", label: "Desk", icon: PhoneCall },
+      ...(role && CLOSE_KOMBAT_ROLES.includes(role)
+        ? [{ to: "/close-kombat", label: "Close Kombat", icon: Swords } as NavItem]
+        : []),
       { to: "/daily-wrap", label: "Wrap", icon: Sparkles },
     ];
   })();
@@ -65,8 +105,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen w-full max-w-full overflow-x-hidden flex flex-col bg-background">
-      {/* Manager-only tool: canvassers (the bulk of phone users) never see it. */}
-      {user && realRole && realRole !== "canvasser" && (
+      {/* Manager-only tool: canvassers and sales reps never see it. */}
+      {user && isManagerRole(realRole) && (
         <div className="border-b border-[var(--neon-magenta)]/30 bg-background text-xs">
           <div className="max-w-7xl mx-auto px-3 sm:px-6 py-1 sm:py-2 flex items-center gap-2 overflow-x-auto scrollbar-hide whitespace-nowrap">
             <FlaskConical className="w-3.5 h-3.5 text-[var(--neon-magenta)] shrink-0" />
@@ -85,6 +125,9 @@ export function AppShell({ children }: { children: ReactNode }) {
               <option value="owner">Owner</option>
               <option value="captain">Captain</option>
               <option value="canvasser">Canvasser</option>
+              {/* Sales Rep preview needs real /close-kombat access — admins
+                  only, captains would just bounce off the route guard. */}
+              {isAdminRole(realRole) && <option value="sales_rep">Sales Rep</option>}
               <option value="office_staff">Office Staff</option>
             </select>
             {isOverridden && (
