@@ -11,7 +11,25 @@ import { RankPill, RANK_PERKS } from "@/components/RankPill";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { DoorOpen, CalendarClock, CalendarDays, PhoneCall, DollarSign, Target, Gauge, Trophy, Sparkles, Pencil, Check, X, Crosshair, Zap, Users, Swords, Flame } from "lucide-react";
+import {
+  DoorOpen,
+  CalendarClock,
+  CalendarDays,
+  PhoneCall,
+  DollarSign,
+  Target,
+  Gauge,
+  Trophy,
+  Sparkles,
+  Pencil,
+  Check,
+  X,
+  Crosshair,
+  Zap,
+  Users,
+  Swords,
+  Flame,
+} from "lucide-react";
 import {
   payRateForPoints,
   commissionRateForPoints,
@@ -25,9 +43,17 @@ import {
   weeklyPoints,
 } from "@/lib/pay";
 import { getMonthlyPaychecks } from "@/lib/fleet.functions";
-import { laTodayISO, laWeekStartISO, addDaysISO, laMidnightUtcISO, laMonthStartISO, remainingWorkdaysInMonth } from "@/lib/dates";
-import { backSolveFunnel } from "@/lib/funnel";
+import {
+  laTodayISO,
+  laWeekStartISO,
+  addDaysISO,
+  laMidnightUtcISO,
+  laMonthStartISO,
+  remainingWorkdaysInMonth,
+} from "@/lib/dates";
+import { backSolveFunnel, commissionGap } from "@/lib/funnel";
 import { useFunnelRates, useProfileGoals } from "@/hooks/useFunnelRates";
+import { useMyEarnings } from "@/hooks/useMyEarnings";
 
 /**
  * Paycheck engine — automated.
@@ -49,13 +75,13 @@ const DEFAULT_MONTHLY_GOAL = 10_000;
 
 /** Rank ladder — order matters. */
 const RANKS = [
-  { key: "rookie",   label: "Rookie",      minSales: 0 },
-  { key: "bronze",   label: "Bronze",      minSales: 5 },
-  { key: "silver",   label: "Silver",      minSales: 15 },
-  { key: "jr_gold",  label: "Jr. Gold",    minSales: 30 },
-  { key: "sr_gold",  label: "Sr. Gold",    minSales: 50 },
-  { key: "platinum", label: "Platinum",    minSales: 80 },
-  { key: "diamond",  label: "Diamond",     minSales: 120 },
+  { key: "rookie", label: "Rookie", minSales: 0 },
+  { key: "bronze", label: "Bronze", minSales: 5 },
+  { key: "silver", label: "Silver", minSales: 15 },
+  { key: "jr_gold", label: "Jr. Gold", minSales: 30 },
+  { key: "sr_gold", label: "Sr. Gold", minSales: 50 },
+  { key: "platinum", label: "Platinum", minSales: 80 },
+  { key: "diamond", label: "Diamond", minSales: 120 },
 ] as const;
 
 // All day/week/month buckets are America/Los_Angeles (midnight PT resets).
@@ -73,25 +99,33 @@ type Totals = {
   days_worked: number;
 };
 const ZERO: Totals = {
-  doors_knocked: 0, people_talked_to: 0, leads_called_in: 0,
-  confirmed_leads: 0, next_days: 0, future_leads: 0,
-  demos_sits: 0, sales: 0, no_shows: 0, days_worked: 0,
+  doors_knocked: 0,
+  people_talked_to: 0,
+  leads_called_in: 0,
+  confirmed_leads: 0,
+  next_days: 0,
+  future_leads: 0,
+  demos_sits: 0,
+  sales: 0,
+  no_shows: 0,
+  days_worked: 0,
 };
 
 function aggregate(rows: Array<Record<string, number | null> & { log_date: string }>): Totals {
   const t = { ...ZERO };
   const days = new Set<string>();
   for (const r of rows) {
-    t.doors_knocked    += r.doors_knocked    ?? 0;
+    t.doors_knocked += r.doors_knocked ?? 0;
     t.people_talked_to += r.people_talked_to ?? 0;
-    t.leads_called_in  += r.leads_called_in  ?? 0;
-    t.confirmed_leads  += r.confirmed_leads  ?? 0;
-    t.next_days        += r.next_days        ?? 0;
-    t.future_leads     += r.future_leads     ?? 0;
-    t.demos_sits       += r.demos_sits       ?? 0;
-    t.sales            += r.sales            ?? 0;
-    t.no_shows         += r.no_shows         ?? 0;
-    const hadActivity = (r.doors_knocked ?? 0) + (r.leads_called_in ?? 0) + (r.confirmed_leads ?? 0) > 0;
+    t.leads_called_in += r.leads_called_in ?? 0;
+    t.confirmed_leads += r.confirmed_leads ?? 0;
+    t.next_days += r.next_days ?? 0;
+    t.future_leads += r.future_leads ?? 0;
+    t.demos_sits += r.demos_sits ?? 0;
+    t.sales += r.sales ?? 0;
+    t.no_shows += r.no_shows ?? 0;
+    const hadActivity =
+      (r.doors_knocked ?? 0) + (r.leads_called_in ?? 0) + (r.confirmed_leads ?? 0) > 0;
     if (hadActivity && typeof r.log_date === "string") days.add(r.log_date);
   }
   t.days_worked = days.size;
@@ -103,6 +137,7 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
 
   const goalsQuery = useProfileGoals(userId);
   const funnelRates = useFunnelRates(userId);
+  const earnings = useMyEarnings(userId);
   const monthlyGoal = Number(goalsQuery.data?.monthly_goal ?? DEFAULT_MONTHLY_GOAL);
   // Income semantics (owner, 2026-07-29): required sales = goal ÷ avg
   // commission per sale — the same editable number the Weekly Playbook uses,
@@ -117,7 +152,9 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
       const since = addDaysISO(laTodayISO(), -60);
       const { data, error } = await supabase
         .from("daily_logs")
-        .select("log_date, doors_knocked, people_talked_to, leads_called_in, confirmed_leads, next_days, future_leads, demos_sits, sales, no_shows")
+        .select(
+          "log_date, doors_knocked, people_talked_to, leads_called_in, confirmed_leads, next_days, future_leads, demos_sits, sales, no_shows",
+        )
         .eq("canvasser_id", userId)
         .gte("log_date", since);
       if (error) throw error;
@@ -159,13 +196,29 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
     },
   });
 
-  const { today, week, month, monthRevenue, weekRevenue, weekPoints,
-          weekHours, hourlyRate, weekBase, weekCommission, monthCommission, funnel } = useMemo(() => {
-    const allRows = (logsQuery.data ?? []) as unknown as Array<Record<string, number | null> & { log_date: string }>;
-    const t = laTodayISO(), w = laWeekStartISO(), m = laMonthStartISO();
+  const {
+    today,
+    week,
+    month,
+    monthRevenue,
+    weekRevenue,
+    weekPoints,
+    weekHours,
+    hourlyRate,
+    weekBase,
+    weekCommission,
+    monthCommission,
+    funnel,
+  } = useMemo(() => {
+    const allRows = (logsQuery.data ?? []) as unknown as Array<
+      Record<string, number | null> & { log_date: string }
+    >;
+    const t = laTodayISO(),
+      w = laWeekStartISO(),
+      m = laMonthStartISO();
     const mtdRows = allRows.filter((r) => r.log_date >= m);
     const today = aggregate(allRows.filter((r) => r.log_date === t));
-    const week  = aggregate(allRows.filter((r) => r.log_date >= w));
+    const week = aggregate(allRows.filter((r) => r.log_date >= w));
     const month = aggregate(mtdRows);
 
     const sales = salesQuery.data ?? [];
@@ -201,12 +254,31 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
     };
 
     return {
-      today, week, month, monthRevenue, weekRevenue, weekPoints,
-      weekHours, hourlyRate, weekBase, weekCommission, monthCommission, funnel,
+      today,
+      week,
+      month,
+      monthRevenue,
+      weekRevenue,
+      weekPoints,
+      weekHours,
+      hourlyRate,
+      weekBase,
+      weekCommission,
+      monthCommission,
+      funnel,
     };
-  }, [logsQuery.data, salesQuery.data, clockedQuery.data, funnelRates.source, funnelRates.sampleDoors, funnelRates.rates]);
+  }, [
+    logsQuery.data,
+    salesQuery.data,
+    clockedQuery.data,
+    funnelRates.source,
+    funnelRates.sampleDoors,
+    funnelRates.rates,
+  ]);
 
-  const weeklyPay = weekBase + weekCommission;
+  // Pay-engine truth (base + commission + sit/monster bonuses, rank locks
+  // honored); the client estimate only bridges the loading gap.
+  const weeklyPay = earnings.weekPaycheck?.total_pay ?? weekBase + weekCommission;
 
   const valuePerDoor = month.doors_knocked > 0 ? monthCommission / month.doors_knocked : 0;
   const lpd = week.days_worked > 0 ? week.confirmed_leads / week.days_worked : 0;
@@ -220,8 +292,9 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
   const current = RANKS[currentIdx];
   const next = RANKS[Math.min(currentIdx + 1, RANKS.length - 1)];
   const rankSpan = Math.max(1, next.minSales - current.minSales);
-  const rankProgress = current === next ? 1 : Math.min(1, (month.sales - current.minSales) / rankSpan);
-  const goalProgress = monthlyGoal > 0 ? Math.min(1, monthRevenue / monthlyGoal) : 0;
+  const rankProgress =
+    current === next ? 1 : Math.min(1, (month.sales - current.minSales) / rankSpan);
+  const goalProgress = monthlyGoal > 0 ? Math.min(1, earnings.monthEarned / monthlyGoal) : 0;
 
   // ===== Level-Up Detection → Hype Feed =====
   useEffect(() => {
@@ -250,56 +323,77 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
         });
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [userId, current.key, current.label]);
 
   const [tab, setTab] = useState<"today" | "week" | "mtd" | "goals">("today");
 
   // ===== Reverse-engineering funnel (drives My Goals tab & Value Per Door) =====
   const mission = useMemo(() => {
-    // Income goal ÷ avg commission per sale (owner, 2026-07-29) — the shared
-    // back-solve; null = the shared insufficient-data contract.
+    // Goal = TOTAL take-home (owner, 2026-07-29). The pay engine says what's
+    // already earned; future base pay is projected for the remaining Mon–Sat
+    // days; the funnel covers only the commission gap. Progress lives in
+    // DOLLARS — no door-count subtraction (banked sales are inside earned).
+    const workdaysLeft = remainingWorkdaysInMonth(laTodayISO());
+    const futureBase = workdaysLeft * earnings.avgDailyBase;
+    const { gap, goalMet } = commissionGap({
+      goal: monthlyGoal,
+      earned: earnings.monthEarned,
+      futureBase,
+    });
+    const empty = {
+      requiredSales: 0,
+      requiredSits: 0,
+      requiredConfirmed: 0,
+      requiredDoors: 0,
+      requiredPeopleTalkedTo: 0,
+      doorsPerDay: 0,
+      talksPerDay: 0,
+      targetValuePerDoor: 0,
+    };
+    const meta = { daysRemaining: workdaysLeft, earned: earnings.monthEarned, futureBase, gap };
+    if (goalMet) return { ready: true, goalMet: true, ...empty, ...meta };
+
     const solve = funnel.rates
-      ? backSolveFunnel({ incomeGoal: monthlyGoal, avgCommissionPerSale: avgCommission, rates: funnel.rates })
+      ? backSolveFunnel({
+          incomeGoal: gap,
+          avgCommissionPerSale: avgCommission,
+          rates: funnel.rates,
+        })
       : null;
-    if (!solve) {
-      return {
-        ready: false,
-        requiredSales: 0, requiredSits: 0, requiredConfirmed: 0, requiredDoors: 0,
-        requiredPeopleTalkedTo: 0,
-        daysRemaining: 0, doorsPerDay: 0, talksPerDay: 0,
-        targetValuePerDoor: 0,
-      };
-    }
+    if (!solve) return { ready: false, goalMet: false, ...empty, ...meta };
+
     const { requiredSales, requiredSits, requiredLeads: requiredConfirmed, requiredDoors } = solve;
     const requiredPeopleTalkedTo = requiredDoors * funnel.talkDoorRate;
-
-    const workdaysLeft = remainingWorkdaysInMonth(laTodayISO());
-
-    // Subtract progress already made this month.
-    const doorsRemaining   = Math.max(0, requiredDoors - month.doors_knocked);
-    const talksRemaining   = Math.max(0, requiredPeopleTalkedTo - month.people_talked_to);
-    const doorsPerDay = workdaysLeft > 0 ? doorsRemaining / workdaysLeft : doorsRemaining;
-    const talksPerDay = workdaysLeft > 0 ? talksRemaining / workdaysLeft : talksRemaining;
-
-    // The goal IS commission dollars now — value per door is goal ÷ doors.
-    const targetValuePerDoor = requiredDoors > 0 ? monthlyGoal / requiredDoors : 0;
+    const doorsPerDay = workdaysLeft > 0 ? requiredDoors / workdaysLeft : requiredDoors;
+    const talksPerDay =
+      workdaysLeft > 0 ? requiredPeopleTalkedTo / workdaysLeft : requiredPeopleTalkedTo;
+    // Each remaining knock is worth this much of the REMAINING gap.
+    const targetValuePerDoor = requiredDoors > 0 ? gap / requiredDoors : 0;
 
     return {
       ready: true,
-      requiredSales, requiredSits, requiredConfirmed, requiredDoors,
+      goalMet: false,
+      requiredSales,
+      requiredSits,
+      requiredConfirmed,
+      requiredDoors,
       requiredPeopleTalkedTo,
-      daysRemaining: workdaysLeft,
-      doorsPerDay, talksPerDay,
+      doorsPerDay,
+      talksPerDay,
       targetValuePerDoor,
+      ...meta,
     };
-  }, [funnel, monthlyGoal, avgCommission, month.doors_knocked, month.people_talked_to]);
-
+  }, [funnel, monthlyGoal, avgCommission, earnings.monthEarned, earnings.avgDailyBase]);
 
   const saveGoal = useMutation({
     mutationFn: async (newGoal: number) => {
       const { error } = await supabase
-        .from("profiles").update({ monthly_goal: newGoal }).eq("id", userId);
+        .from("profiles")
+        .update({ monthly_goal: newGoal })
+        .eq("id", userId);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -312,7 +406,12 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
   return (
     <div className="space-y-6">
       <TimeClock userId={userId} />
-      <TakeHomeWidget userId={userId} weeklyPay={weeklyPay} hourlyRate={hourlyRate} weekPoints={weekPoints} />
+      <TakeHomeWidget
+        userId={userId}
+        weeklyPay={weeklyPay}
+        hourlyRate={hourlyRate}
+        weekPoints={weekPoints}
+      />
       <SCCERankBanner userId={userId} />
       <WeeklyPlaybook userId={userId} />
 
@@ -329,9 +428,24 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
         {/* ============ TODAY ============ */}
         <TabsContent value="today" className="mt-6 space-y-6">
           <div className="grid sm:grid-cols-3 gap-4">
-            <GrindCounter label="Leads Called In"          value={today.leads_called_in} icon={<PhoneCall className="w-4 h-4" />}     accent="var(--neon)" />
-            <GrindCounter label="Confirmed Next Day Leads" value={today.next_days}       icon={<CalendarClock className="w-4 h-4" />} accent="var(--victory)" />
-            <GrindCounter label="Confirmed Future Leads"   value={today.future_leads}    icon={<CalendarDays className="w-4 h-4" />}  accent="var(--accent)" />
+            <GrindCounter
+              label="Leads Called In"
+              value={today.leads_called_in}
+              icon={<PhoneCall className="w-4 h-4" />}
+              accent="var(--neon)"
+            />
+            <GrindCounter
+              label="Confirmed Next Day Leads"
+              value={today.next_days}
+              icon={<CalendarClock className="w-4 h-4" />}
+              accent="var(--victory)"
+            />
+            <GrindCounter
+              label="Confirmed Future Leads"
+              value={today.future_leads}
+              icon={<CalendarDays className="w-4 h-4" />}
+              accent="var(--accent)"
+            />
           </div>
 
           <ValuePerDoorWidget
@@ -344,14 +458,13 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
           />
         </TabsContent>
 
-
         {/* ============ THIS WEEK ============ */}
         <TabsContent value="week" className="mt-6 space-y-6">
           <div className="grid sm:grid-cols-2 gap-4">
             <BigStat
               label="Weekly Pay"
               value={formatCurrency(weeklyPay)}
-              sub={`${weekHours.toFixed(1)} hrs × $${hourlyRate}/hr + ${formatCurrency(weekCommission)} commission`}
+              sub={`${weekHours.toFixed(1)} hrs clocked · base + commission + bonuses`}
               icon={<DollarSign className="w-4 h-4" />}
               accent="var(--victory)"
             />
@@ -404,7 +517,7 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
           </div>
 
           <GoalBar
-            revenue={monthRevenue}
+            earned={earnings.monthEarned}
             goal={monthlyGoal}
             pct={goalProgress}
             onSave={(g) => saveGoal.mutate(g)}
@@ -421,6 +534,8 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
           />
           <DailyMissionWidget
             ready={mission.ready}
+            goalMet={mission.goalMet}
+            earned={mission.earned}
             goal={monthlyGoal}
             doorsPerDay={mission.doorsPerDay}
             talksPerDay={mission.talksPerDay}
@@ -440,10 +555,11 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
             requiredDoors={mission.requiredDoors}
             source={funnel.source}
             sampleDoors={funnel.sampleDoors}
-            mtdDoors={month.doors_knocked}
+            earned={mission.earned}
+            futureBase={mission.futureBase}
+            gap={mission.gap}
           />
         </TabsContent>
-
       </Tabs>
     </div>
   );
@@ -463,8 +579,16 @@ function ArcadeTab({ value, children }: { value: string; children: React.ReactNo
 }
 
 function GrindCounter({
-  label, value, icon, accent,
-}: { label: string; value: number; icon: React.ReactNode; accent: string }) {
+  label,
+  value,
+  icon,
+  accent,
+}: {
+  label: string;
+  value: number;
+  icon: React.ReactNode;
+  accent: string;
+}) {
   return (
     <div
       className="relative overflow-hidden rounded-lg border p-5"
@@ -475,7 +599,10 @@ function GrindCounter({
     >
       <div className="absolute inset-0 pointer-events-none scanlines opacity-30" />
       <div className="relative">
-        <div className="flex items-center gap-1.5 text-[10px] font-display uppercase tracking-widest" style={{ color: accent }}>
+        <div
+          className="flex items-center gap-1.5 text-[10px] font-display uppercase tracking-widest"
+          style={{ color: accent }}
+        >
           {icon} {label}
         </div>
         <div className="mt-3 flex items-end gap-2">
@@ -490,8 +617,20 @@ function GrindCounter({
 }
 
 function ValuePerDoorWidget({
-  value, doors, commission, targetValue, targetReady, monthlyGoal,
-}: { value: number; doors: number; commission: number; targetValue: number; targetReady: boolean; monthlyGoal: number }) {
+  value,
+  doors,
+  commission,
+  targetValue,
+  targetReady,
+  monthlyGoal,
+}: {
+  value: number;
+  doors: number;
+  commission: number;
+  targetValue: number;
+  targetReady: boolean;
+  monthlyGoal: number;
+}) {
   // If a target has been set and funnel math is ready, show the goal-driven value per door.
   // Otherwise, fall back to historical (commission MTD / doors MTD).
   const showTarget = targetReady && targetValue > 0;
@@ -506,7 +645,8 @@ function ValuePerDoorWidget({
       <div className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-6">
         <div>
           <div className="flex items-center gap-1.5 text-[10px] font-display uppercase tracking-widest text-victory">
-            <Sparkles className="w-3 h-3" /> Value Per Door {showTarget && <span className="text-victory/60">· TARGET</span>}
+            <Sparkles className="w-3 h-3" /> Value Per Door{" "}
+            {showTarget && <span className="text-victory/60">· TARGET</span>}
           </div>
           <div className="mt-3 font-display text-5xl sm:text-6xl md:text-7xl text-mega-victory leading-none">
             {formatCurrency(display)}
@@ -518,14 +658,28 @@ function ValuePerDoorWidget({
         <div className="text-xs text-muted-foreground space-y-1 md:text-right">
           {showTarget ? (
             <>
-              <div>Target Income · <span className="text-victory font-display">{formatCurrency(monthlyGoal)}</span></div>
-              <div>Historical pace · <span className="text-neon font-display">{formatCurrency(value)}/door</span></div>
-              <div className="text-[10px] uppercase tracking-widest mt-2">goal commission / required doors</div>
+              <div>
+                Target Income ·{" "}
+                <span className="text-victory font-display">{formatCurrency(monthlyGoal)}</span>
+              </div>
+              <div>
+                Historical pace ·{" "}
+                <span className="text-neon font-display">{formatCurrency(value)}/door</span>
+              </div>
+              <div className="text-[10px] uppercase tracking-widest mt-2">
+                goal commission / required doors
+              </div>
             </>
           ) : (
             <>
-              <div>Commission MTD · <span className="text-victory font-display">{formatCurrency(commission)}</span></div>
-              <div>Doors knocked MTD · <span className="text-neon font-display">{doors.toLocaleString()}</span></div>
+              <div>
+                Commission MTD ·{" "}
+                <span className="text-victory font-display">{formatCurrency(commission)}</span>
+              </div>
+              <div>
+                Doors knocked MTD ·{" "}
+                <span className="text-neon font-display">{doors.toLocaleString()}</span>
+              </div>
               <div className="text-[10px] uppercase tracking-widest mt-2">commission / doors</div>
             </>
           )}
@@ -535,10 +689,19 @@ function ValuePerDoorWidget({
   );
 }
 
-
 function BigStat({
-  label, value, sub, icon, accent,
-}: { label: string; value: string; sub: string; icon: React.ReactNode; accent: string }) {
+  label,
+  value,
+  sub,
+  icon,
+  accent,
+}: {
+  label: string;
+  value: string;
+  sub: string;
+  icon: React.ReactNode;
+  accent: string;
+}) {
   return (
     <div
       className="relative overflow-hidden rounded-lg border p-5"
@@ -549,10 +712,19 @@ function BigStat({
     >
       <div className="absolute inset-0 pointer-events-none scanlines opacity-25" />
       <div className="relative">
-        <div className="flex items-center gap-1.5 text-[10px] font-display uppercase tracking-widest" style={{ color: accent }}>
+        <div
+          className="flex items-center gap-1.5 text-[10px] font-display uppercase tracking-widest"
+          style={{ color: accent }}
+        >
           {icon} {label}
         </div>
-        <div className="mt-3 font-display text-4xl md:text-5xl leading-none" style={{ color: accent, textShadow: `0 0 18px color-mix(in oklab, ${accent} 55%, transparent)` }}>
+        <div
+          className="mt-3 font-display text-4xl md:text-5xl leading-none"
+          style={{
+            color: accent,
+            textShadow: `0 0 18px color-mix(in oklab, ${accent} 55%, transparent)`,
+          }}
+        >
           {value}
         </div>
         <div className="mt-2 text-[11px] text-muted-foreground">{sub}</div>
@@ -562,38 +734,79 @@ function BigStat({
 }
 
 function RankProgress({
-  current, next, sales, currentMin, nextMin, pct, maxed,
-}: { current: string; next: string; sales: number; currentMin: number; nextMin: number; pct: number; maxed: boolean }) {
+  current,
+  next,
+  sales,
+  currentMin,
+  nextMin,
+  pct,
+  maxed,
+}: {
+  current: string;
+  next: string;
+  sales: number;
+  currentMin: number;
+  nextMin: number;
+  pct: number;
+  maxed: boolean;
+}) {
   return (
-    <ArcadePanel title="Rank Progression"
-      action={<span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">MTD · Sales-based</span>}
+    <ArcadePanel
+      title="Rank Progression"
+      action={
+        <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+          MTD · Sales-based
+        </span>
+      }
     >
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
           <Trophy className="w-5 h-5 text-victory" />
           <div>
-            <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Current Rank</div>
+            <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+              Current Rank
+            </div>
             <div className="font-display text-lg text-neon">{current.toUpperCase()}</div>
           </div>
         </div>
         <div className="text-right">
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Next</div>
-          <div className="font-display text-lg text-victory">{maxed ? "MAXED" : next.toUpperCase()}</div>
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            Next
+          </div>
+          <div className="font-display text-lg text-victory">
+            {maxed ? "MAXED" : next.toUpperCase()}
+          </div>
         </div>
       </div>
       <NeonBar pct={pct} accent="var(--neon)" />
       <div className="mt-2 flex justify-between text-[10px] font-display uppercase tracking-widest text-muted-foreground">
         <span>{sales} sales</span>
-        <span>{maxed ? "Top tier reached" : `${Math.max(0, nextMin - sales)} sales to ${next}`}</span>
+        <span>
+          {maxed ? "Top tier reached" : `${Math.max(0, nextMin - sales)} sales to ${next}`}
+        </span>
       </div>
-      <div className="mt-1 text-[10px] text-muted-foreground">Tier · {currentMin}–{maxed ? "∞" : nextMin}</div>
+      <div className="mt-1 text-[10px] text-muted-foreground">
+        Tier · {currentMin}–{maxed ? "∞" : nextMin}
+      </div>
     </ArcadePanel>
   );
 }
 
 function PaycheckEngineWidget({
-  points, hours, hourlyRate, base, commission, revenue,
-}: { points: number; hours: number; hourlyRate: number; base: number; commission: number; revenue: number }) {
+  points,
+  hours,
+  hourlyRate,
+  base,
+  commission,
+  revenue,
+}: {
+  points: number;
+  hours: number;
+  hourlyRate: number;
+  base: number;
+  commission: number;
+  revenue: number;
+}) {
   const atTop = hourlyRate >= HOURLY_TOP;
   const nextTarget = points >= POINTS_TIER_MID ? POINTS_TIER_TOP : POINTS_TIER_MID;
   const nextRate = points >= POINTS_TIER_MID ? HOURLY_TOP : HOURLY_MID;
@@ -602,13 +815,26 @@ function PaycheckEngineWidget({
   const commissionPct = Math.round(commissionRateForPoints(points) * 100);
   const accent = atTop ? "var(--victory)" : "var(--neon)";
   return (
-    <ArcadePanel title="Paycheck Engine"
-      action={<span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Auto · Weekly</span>}
+    <ArcadePanel
+      title="Paycheck Engine"
+      action={
+        <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+          Auto · Weekly
+        </span>
+      }
     >
       <div className="grid sm:grid-cols-3 gap-4">
         <div>
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Hourly Tier</div>
-          <div className="font-display text-3xl mt-1" style={{ color: accent, textShadow: `0 0 14px color-mix(in oklab, ${accent} 60%, transparent)` }}>
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            Hourly Tier
+          </div>
+          <div
+            className="font-display text-3xl mt-1"
+            style={{
+              color: accent,
+              textShadow: `0 0 14px color-mix(in oklab, ${accent} 60%, transparent)`,
+            }}
+          >
             ${hourlyRate}/hr
           </div>
           <div className="text-[10px] uppercase tracking-widest text-muted-foreground mt-1">
@@ -618,14 +844,18 @@ function PaycheckEngineWidget({
           </div>
         </div>
         <div>
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Clocked Hours</div>
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            Clocked Hours
+          </div>
           <div className="font-display text-3xl text-neon mt-1">{hours.toFixed(1)}</div>
           <div className="text-[10px] uppercase tracking-widest text-muted-foreground mt-1">
             from time clock · lunch deducted
           </div>
         </div>
         <div>
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Sits / Points</div>
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            Sits / Points
+          </div>
           <div className="font-display text-3xl text-accent mt-1">{points}</div>
           <div className="text-[10px] uppercase tracking-widest text-muted-foreground mt-1">
             Sit = 1 · Sale = 2
@@ -634,23 +864,40 @@ function PaycheckEngineWidget({
       </div>
       <NeonBar pct={pct} accent={accent} />
       <div className="mt-3 grid sm:grid-cols-3 gap-2 text-[11px] text-muted-foreground border-t border-border pt-3">
-        <div>Base · <span className="text-foreground">{formatCurrency(base)}</span></div>
+        <div>
+          Base · <span className="text-foreground">{formatCurrency(base)}</span>
+        </div>
         <div>
           Commission ({commissionPct}% of {formatCurrency(revenue)}) ·{" "}
           <span className="text-victory">{formatCurrency(commission)}</span>
         </div>
-        <div className="sm:text-right">Total · <span className="font-display text-victory">{formatCurrency(base + commission)}</span></div>
+        <div className="sm:text-right">
+          Total ·{" "}
+          <span className="font-display text-victory">{formatCurrency(base + commission)}</span>
+        </div>
       </div>
     </ArcadePanel>
   );
 }
 
 function GoalBar({
-  revenue, goal, pct, onSave, saving,
-}: { revenue: number; goal: number; pct: number; onSave: (g: number) => void; saving: boolean }) {
+  earned,
+  goal,
+  pct,
+  onSave,
+  saving,
+}: {
+  earned: number;
+  goal: number;
+  pct: number;
+  onSave: (g: number) => void;
+  saving: boolean;
+}) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(goal));
-  useEffect(() => { if (!editing) setDraft(String(goal)); }, [goal, editing]);
+  useEffect(() => {
+    if (!editing) setDraft(String(goal));
+  }, [goal, editing]);
 
   const submit = () => {
     const n = Math.max(0, Math.round(Number(draft) || 0));
@@ -659,10 +906,13 @@ function GoalBar({
   };
 
   return (
-    <ArcadePanel title="Monthly Goal"
+    <ArcadePanel
+      title="Monthly Goal"
       action={
         editing ? (
-          <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Set your target</span>
+          <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            Set your target
+          </span>
         ) : (
           <Button variant="ghost" onClick={() => setEditing(true)}>
             <Pencil className="w-3.5 h-3.5 mr-1.5" /> Edit Goal
@@ -672,15 +922,24 @@ function GoalBar({
     >
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Revenue MTD</div>
-          <div className="font-display text-4xl md:text-5xl text-mega-victory leading-none mt-1">{formatCurrency(revenue)}</div>
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            Earned MTD · All Pay Combined
+          </div>
+          <div className="font-display text-4xl md:text-5xl text-mega-victory leading-none mt-1">
+            {formatCurrency(earned)}
+          </div>
         </div>
         <div className="text-right">
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Goal</div>
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            Goal
+          </div>
           {editing ? (
             <div className="mt-1 flex items-center gap-2 justify-end">
               <Input
-                type="number" min={0} step={100} inputMode="numeric"
+                type="number"
+                min={0}
+                step={100}
+                inputMode="numeric"
                 className="w-36 font-display text-lg"
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
@@ -689,7 +948,14 @@ function GoalBar({
               <Button size="sm" onClick={submit} disabled={saving}>
                 <Check className="w-3.5 h-3.5" />
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => { setDraft(String(goal)); setEditing(false); }}>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setDraft(String(goal));
+                  setEditing(false);
+                }}
+              >
                 <X className="w-3.5 h-3.5" />
               </Button>
             </div>
@@ -701,7 +967,9 @@ function GoalBar({
       <NeonBar pct={pct} accent="var(--victory)" tall />
       <div className="mt-2 flex justify-between text-[10px] font-display uppercase tracking-widest text-muted-foreground">
         <span>{(pct * 100).toFixed(0)}% complete</span>
-        <span>{pct >= 1 ? "🏆 Goal smashed" : `${formatCurrency(Math.max(0, goal - revenue))} to go`}</span>
+        <span>
+          {pct >= 1 ? "🏆 Goal smashed" : `${formatCurrency(Math.max(0, goal - earned))} to go`}
+        </span>
       </div>
     </ArcadePanel>
   );
@@ -710,7 +978,9 @@ function GoalBar({
 function NeonBar({ pct, accent, tall = false }: { pct: number; accent: string; tall?: boolean }) {
   const w = Math.max(0, Math.min(1, pct)) * 100;
   return (
-    <div className={`mt-4 relative ${tall ? "h-4" : "h-3"} w-full rounded-full overflow-hidden border border-border bg-[color-mix(in_oklab,var(--foreground)_4%,transparent)]`}>
+    <div
+      className={`mt-4 relative ${tall ? "h-4" : "h-3"} w-full rounded-full overflow-hidden border border-border bg-[color-mix(in_oklab,var(--foreground)_4%,transparent)]`}
+    >
       <div
         className="h-full rounded-full transition-[width] duration-700 ease-out"
         style={{
@@ -727,10 +997,18 @@ function NeonBar({ pct, accent, tall = false }: { pct: number; accent: string; t
 /* ============ My Goals — Reverse Engineering ============ */
 
 function GoalInputPanel({
-  goal, onSave, saving,
-}: { goal: number; onSave: (g: number) => void; saving: boolean }) {
+  goal,
+  onSave,
+  saving,
+}: {
+  goal: number;
+  onSave: (g: number) => void;
+  saving: boolean;
+}) {
   const [draft, setDraft] = useState(String(goal));
-  useEffect(() => { setDraft(String(goal)); }, [goal]);
+  useEffect(() => {
+    setDraft(String(goal));
+  }, [goal]);
   const submit = () => {
     const n = Math.max(0, Math.round(Number(draft) || 0));
     onSave(n);
@@ -738,19 +1016,29 @@ function GoalInputPanel({
   return (
     <div className="relative overflow-hidden rounded-lg border border-[color-mix(in_oklab,var(--neon)_45%,var(--border))] bg-[color-mix(in_oklab,var(--neon)_6%,var(--surface))] p-6">
       <div className="absolute inset-0 pointer-events-none scanlines opacity-25" />
-      <div className="absolute -inset-1 pointer-events-none rounded-lg opacity-50" style={{ boxShadow: "inset 0 0 50px -8px var(--neon)" }} />
+      <div
+        className="absolute -inset-1 pointer-events-none rounded-lg opacity-50"
+        style={{ boxShadow: "inset 0 0 50px -8px var(--neon)" }}
+      />
       <div className="relative space-y-4">
         <div className="flex items-center gap-2 text-[10px] font-display uppercase tracking-widest text-neon">
           <Crosshair className="w-3.5 h-3.5" /> Target Monthly Income · Quest Input
         </div>
         <div className="flex items-end gap-3 flex-wrap">
           <div className="relative flex-1 min-w-0">
-            <span className="absolute left-4 top-1/2 -translate-y-1/2 font-display text-3xl text-neon/70 pointer-events-none">$</span>
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 font-display text-3xl text-neon/70 pointer-events-none">
+              $
+            </span>
             <Input
-              type="number" min={0} step={100} inputMode="numeric"
+              type="number"
+              min={0}
+              step={100}
+              inputMode="numeric"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submit();
+              }}
               className="h-16 pl-10 pr-4 font-display text-3xl bg-background/60 border-[color-mix(in_oklab,var(--neon)_50%,var(--border))] text-neon"
               style={{ boxShadow: "0 0 24px -6px var(--neon), inset 0 0 16px -8px var(--neon)" }}
               placeholder="5000"
@@ -775,18 +1063,45 @@ function GoalInputPanel({
 }
 
 function DailyMissionWidget({
-  ready, goal, doorsPerDay, talksPerDay, daysRemaining, targetValuePerDoor,
+  ready,
+  goalMet,
+  earned,
+  goal,
+  doorsPerDay,
+  talksPerDay,
+  daysRemaining,
+  targetValuePerDoor,
 }: {
-  ready: boolean; goal: number; doorsPerDay: number; talksPerDay: number;
-  daysRemaining: number; targetValuePerDoor: number;
+  ready: boolean;
+  goalMet: boolean;
+  earned: number;
+  goal: number;
+  doorsPerDay: number;
+  talksPerDay: number;
+  daysRemaining: number;
+  targetValuePerDoor: number;
 }) {
+  if (goalMet) {
+    return (
+      <div className="rounded-lg border-2 border-[color-mix(in_oklab,var(--victory)_55%,transparent)] bg-[color-mix(in_oklab,var(--victory)_10%,var(--surface))] p-8 text-center">
+        <div className="font-display text-2xl text-victory">🏆 Goal met</div>
+        <p className="mt-2 text-sm text-muted-foreground max-w-md mx-auto">
+          You&apos;ve already cleared {formatCurrency(goal)} in total earnings this month (
+          {formatCurrency(earned)} banked). Everything from here is gravy.
+        </p>
+      </div>
+    );
+  }
   if (!ready) {
     return (
       <div className="rounded-lg border border-border bg-surface p-6 text-center">
         <Swords className="w-6 h-6 text-muted-foreground mx-auto" />
-        <div className="mt-3 font-display text-sm uppercase tracking-widest text-muted-foreground">Mission unavailable</div>
+        <div className="mt-3 font-display text-sm uppercase tracking-widest text-muted-foreground">
+          Mission unavailable
+        </div>
         <p className="mt-2 text-xs text-muted-foreground max-w-md mx-auto">
-          Set a target income above. We also need conversion data — from your own recent logs (200+ doors knocked) or the company-wide 60-day baseline.
+          Set a target income above. We also need conversion data — from your own recent logs (200+
+          doors knocked) or the company-wide 60-day baseline.
         </p>
       </div>
     );
@@ -796,7 +1111,10 @@ function DailyMissionWidget({
   return (
     <div className="relative overflow-hidden rounded-lg border-2 border-[color-mix(in_oklab,var(--victory)_55%,transparent)] bg-gradient-to-br from-[color-mix(in_oklab,var(--victory)_12%,var(--surface))] to-[color-mix(in_oklab,var(--neon)_8%,var(--surface))] p-8">
       <div className="absolute inset-0 pointer-events-none scanlines opacity-30" />
-      <div className="absolute -inset-1 pointer-events-none rounded-lg opacity-60" style={{ boxShadow: "inset 0 0 80px -12px var(--victory)" }} />
+      <div
+        className="absolute -inset-1 pointer-events-none rounded-lg opacity-60"
+        style={{ boxShadow: "inset 0 0 80px -12px var(--victory)" }}
+      />
       <div className="relative">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2 text-[10px] font-display uppercase tracking-widest text-victory">
@@ -808,16 +1126,37 @@ function DailyMissionWidget({
         </div>
 
         <div className="mt-4 font-display text-lg md:text-xl text-foreground/90 leading-relaxed">
-          To hit <span className="text-victory text-mega-victory">{formatCurrency(goal)}</span>, your mission today is to knock{" "}
-          <span className="text-neon" style={{ textShadow: "0 0 18px var(--neon)" }}>{doors.toLocaleString()} doors</span>{" "}
+          To hit <span className="text-victory text-mega-victory">{formatCurrency(goal)}</span>,
+          your mission today is to knock{" "}
+          <span className="text-neon" style={{ textShadow: "0 0 18px var(--neon)" }}>
+            {doors.toLocaleString()} doors
+          </span>{" "}
           and talk to{" "}
-          <span className="text-accent" style={{ textShadow: "0 0 18px var(--accent)" }}>{talks.toLocaleString()} people</span>.
+          <span className="text-accent" style={{ textShadow: "0 0 18px var(--accent)" }}>
+            {talks.toLocaleString()} people
+          </span>
+          .
         </div>
 
         <div className="mt-6 grid sm:grid-cols-3 gap-4">
-          <MissionStat icon={<DoorOpen className="w-4 h-4" />} label="Doors / Day" value={doors.toLocaleString()} accent="var(--neon)" />
-          <MissionStat icon={<Users   className="w-4 h-4" />} label="Talk To / Day" value={talks.toLocaleString()} accent="var(--accent)" />
-          <MissionStat icon={<DollarSign className="w-4 h-4" />} label="Per-Door Value" value={formatCurrency(targetValuePerDoor)} accent="var(--victory)" />
+          <MissionStat
+            icon={<DoorOpen className="w-4 h-4" />}
+            label="Doors / Day"
+            value={doors.toLocaleString()}
+            accent="var(--neon)"
+          />
+          <MissionStat
+            icon={<Users className="w-4 h-4" />}
+            label="Talk To / Day"
+            value={talks.toLocaleString()}
+            accent="var(--accent)"
+          />
+          <MissionStat
+            icon={<DollarSign className="w-4 h-4" />}
+            label="Per-Door Value"
+            value={formatCurrency(targetValuePerDoor)}
+            accent="var(--victory)"
+          />
         </div>
       </div>
     </div>
@@ -825,17 +1164,37 @@ function DailyMissionWidget({
 }
 
 function MissionStat({
-  icon, label, value, accent,
-}: { icon: React.ReactNode; label: string; value: string; accent: string }) {
+  icon,
+  label,
+  value,
+  accent,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  accent: string;
+}) {
   return (
-    <div className="rounded-md border p-4" style={{
-      borderColor: `color-mix(in oklab, ${accent} 40%, var(--border))`,
-      background: `color-mix(in oklab, ${accent} 6%, var(--surface))`,
-    }}>
-      <div className="flex items-center gap-1.5 text-[10px] font-display uppercase tracking-widest" style={{ color: accent }}>
+    <div
+      className="rounded-md border p-4"
+      style={{
+        borderColor: `color-mix(in oklab, ${accent} 40%, var(--border))`,
+        background: `color-mix(in oklab, ${accent} 6%, var(--surface))`,
+      }}
+    >
+      <div
+        className="flex items-center gap-1.5 text-[10px] font-display uppercase tracking-widest"
+        style={{ color: accent }}
+      >
         {icon} {label}
       </div>
-      <div className="mt-2 font-display text-3xl leading-none" style={{ color: accent, textShadow: `0 0 16px color-mix(in oklab, ${accent} 60%, transparent)` }}>
+      <div
+        className="mt-2 font-display text-3xl leading-none"
+        style={{
+          color: accent,
+          textShadow: `0 0 16px color-mix(in oklab, ${accent} 60%, transparent)`,
+        }}
+      >
         {value}
       </div>
     </div>
@@ -843,46 +1202,108 @@ function MissionStat({
 }
 
 function FunnelBreakdown({
-  ready, goal, avgCommissionPerSale, closeRate, sitRate, leadDoorRate,
-  requiredSales, requiredSits, requiredConfirmed, requiredDoors,
-  source, sampleDoors, mtdDoors,
+  ready,
+  goal,
+  avgCommissionPerSale,
+  closeRate,
+  sitRate,
+  leadDoorRate,
+  requiredSales,
+  requiredSits,
+  requiredConfirmed,
+  requiredDoors,
+  source,
+  sampleDoors,
+  earned,
+  futureBase,
+  gap,
 }: {
-  ready: boolean; goal: number; avgCommissionPerSale: number;
-  closeRate: number; sitRate: number; leadDoorRate: number;
-  requiredSales: number; requiredSits: number; requiredConfirmed: number; requiredDoors: number;
-  source: "personal" | "company"; sampleDoors: number; mtdDoors: number;
+  ready: boolean;
+  goal: number;
+  avgCommissionPerSale: number;
+  closeRate: number;
+  sitRate: number;
+  leadDoorRate: number;
+  requiredSales: number;
+  requiredSits: number;
+  requiredConfirmed: number;
+  requiredDoors: number;
+  source: "personal" | "company";
+  sampleDoors: number;
+  earned: number;
+  futureBase: number;
+  gap: number;
 }) {
   if (!ready) return null;
   const rows = [
-    { label: "Required Sales",          value: Math.ceil(requiredSales),     formula: `${formatCurrency(goal)} ÷ ${formatCurrency(avgCommissionPerSale)} avg commission`, accent: "var(--victory)" },
-    { label: "Required Sits / Demos",   value: Math.ceil(requiredSits),      formula: `Sales ÷ ${(closeRate*100).toFixed(0)}% close rate`,    accent: "var(--accent)" },
-    { label: "Required Confirmed Leads",value: Math.ceil(requiredConfirmed), formula: `Sits ÷ ${(sitRate*100).toFixed(0)}% sit rate`,         accent: "var(--neon)" },
-    { label: "Total Doors to Knock",    value: Math.ceil(requiredDoors),     formula: `Leads ÷ ${(leadDoorRate*100).toFixed(2)}% lead-per-door`, accent: "var(--neon)" },
+    {
+      label: "Required Sales",
+      value: Math.ceil(requiredSales),
+      formula: `${formatCurrency(gap)} gap ÷ ${formatCurrency(avgCommissionPerSale)} avg commission`,
+      accent: "var(--victory)",
+    },
+    {
+      label: "Required Sits / Demos",
+      value: Math.ceil(requiredSits),
+      formula: `Sales ÷ ${(closeRate * 100).toFixed(0)}% close rate`,
+      accent: "var(--accent)",
+    },
+    {
+      label: "Required Confirmed Leads",
+      value: Math.ceil(requiredConfirmed),
+      formula: `Sits ÷ ${(sitRate * 100).toFixed(0)}% sit rate`,
+      accent: "var(--neon)",
+    },
+    {
+      label: "Total Doors to Knock",
+      value: Math.ceil(requiredDoors),
+      formula: `Leads ÷ ${(leadDoorRate * 100).toFixed(2)}% lead-per-door`,
+      accent: "var(--neon)",
+    },
   ];
   return (
     <ArcadePanel
       title="Funnel Breakdown · Reverse Engineering"
       action={
         <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-          {source === "personal" ? `Personal · ${sampleDoors.toLocaleString()} doors` : "Company avg · 60d baseline"}
+          {source === "personal"
+            ? `Personal · ${sampleDoors.toLocaleString()} doors`
+            : "Company avg · 60d baseline"}
         </span>
       }
     >
       <div className="space-y-3">
         {rows.map((r) => (
-          <div key={r.label} className="flex items-center justify-between gap-4 rounded-md border border-border bg-background/40 px-4 py-3">
+          <div
+            key={r.label}
+            className="flex items-center justify-between gap-4 rounded-md border border-border bg-background/40 px-4 py-3"
+          >
             <div>
-              <div className="text-[10px] font-display uppercase tracking-widest" style={{ color: r.accent }}>{r.label}</div>
+              <div
+                className="text-[10px] font-display uppercase tracking-widest"
+                style={{ color: r.accent }}
+              >
+                {r.label}
+              </div>
               <div className="text-[10px] text-muted-foreground mt-0.5">{r.formula}</div>
             </div>
-            <div className="font-display text-2xl" style={{ color: r.accent, textShadow: `0 0 14px color-mix(in oklab, ${r.accent} 60%, transparent)` }}>
+            <div
+              className="font-display text-2xl"
+              style={{
+                color: r.accent,
+                textShadow: `0 0 14px color-mix(in oklab, ${r.accent} 60%, transparent)`,
+              }}
+            >
               {r.value.toLocaleString()}
             </div>
           </div>
         ))}
         <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-t border-border pt-3 flex justify-between flex-wrap gap-2">
-          <span>Avg commission / sale · {formatCurrency(avgCommissionPerSale)}</span>
-          <span>MTD progress · {mtdDoors.toLocaleString()} / {Math.ceil(requiredDoors).toLocaleString()} doors</span>
+          <span>
+            Earned so far · {formatCurrency(earned)} of {formatCurrency(goal)}
+          </span>
+          <span>Projected future base · {formatCurrency(futureBase)}</span>
+          <span>Gap to close · {formatCurrency(gap)}</span>
         </div>
       </div>
     </ArcadePanel>
@@ -895,7 +1316,9 @@ function SCCERankBanner({ userId }: { userId: string }) {
     queryFn: async () => {
       const { data } = await supabase
         .from("profiles")
-        .select("current_rank, consecutive_weeks_3_plus_sits, consecutive_weeks_7_plus_sits, rolling_4_week_sit_avg, recruits_count, pay_lock_status")
+        .select(
+          "current_rank, consecutive_weeks_3_plus_sits, consecutive_weeks_7_plus_sits, rolling_4_week_sit_avg, recruits_count, pay_lock_status",
+        )
         .eq("id", userId)
         .maybeSingle();
       return data as {
@@ -912,39 +1335,69 @@ function SCCERankBanner({ userId }: { userId: string }) {
   const payLock = data?.pay_lock_status ?? "active";
   return (
     <>
-    {payLock === "warned" && (
-      <div className="rounded-xl border border-warning/50 bg-warning/10 p-4 text-xs">
-        <span className="font-display uppercase tracking-widest text-warning">⚠ Pay Lock Warning</span>
-        <span className="text-muted-foreground"> — your rolling 4-week sit average is below {PAY_LOCK_MIN_ROLLING_AVG}. A second violation within 90 days reverts your comp to the weekly tier reset (rank retained).</span>
-      </div>
-    )}
-    {payLock === "reverted" && (
-      <div className="rounded-xl border border-destructive/50 bg-destructive/10 p-4 text-xs">
-        <span className="font-display uppercase tracking-widest text-destructive">Pay Lock Reverted</span>
-        <span className="text-muted-foreground"> — you're currently paid on the weekly point tiers. Reinstatement: 3 consecutive weeks at 7+ sits.</span>
-      </div>
-    )}
-    <div className="arcade-card p-4 flex flex-wrap items-center justify-between gap-4">
-      <div className="flex items-center gap-3 min-w-0">
-        <RankPill rank={rank} size="md" />
-        <div className="min-w-0">
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">SCCE Rank</div>
-          <div className="text-xs text-muted-foreground truncate">{RANK_PERKS[rank] ?? ""}</div>
+      {payLock === "warned" && (
+        <div className="rounded-xl border border-warning/50 bg-warning/10 p-4 text-xs">
+          <span className="font-display uppercase tracking-widest text-warning">
+            ⚠ Pay Lock Warning
+          </span>
+          <span className="text-muted-foreground">
+            {" "}
+            — your rolling 4-week sit average is below {PAY_LOCK_MIN_ROLLING_AVG}. A second
+            violation within 90 days reverts your comp to the weekly tier reset (rank retained).
+          </span>
+        </div>
+      )}
+      {payLock === "reverted" && (
+        <div className="rounded-xl border border-destructive/50 bg-destructive/10 p-4 text-xs">
+          <span className="font-display uppercase tracking-widest text-destructive">
+            Pay Lock Reverted
+          </span>
+          <span className="text-muted-foreground">
+            {" "}
+            — you're currently paid on the weekly point tiers. Reinstatement: 3 consecutive weeks at
+            7+ sits.
+          </span>
+        </div>
+      )}
+      <div className="arcade-card p-4 flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <RankPill rank={rank} size="md" />
+          <div className="min-w-0">
+            <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+              SCCE Rank
+            </div>
+            <div className="text-xs text-muted-foreground truncate">{RANK_PERKS[rank] ?? ""}</div>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+          <span>
+            3+ sits wks ·{" "}
+            <span className="text-neon">{data?.consecutive_weeks_3_plus_sits ?? 0}</span>
+          </span>
+          <span>
+            7+ sits wks ·{" "}
+            <span className="text-victory">{data?.consecutive_weeks_7_plus_sits ?? 0}</span>
+          </span>
+          <span>
+            4-wk avg ·{" "}
+            <span className="text-accent">{(data?.rolling_4_week_sit_avg ?? 0).toFixed(1)}</span>
+          </span>
+          <span>
+            recruits · <span className="text-foreground">{data?.recruits_count ?? 0}</span>
+          </span>
         </div>
       </div>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-        <span>3+ sits wks · <span className="text-neon">{data?.consecutive_weeks_3_plus_sits ?? 0}</span></span>
-        <span>7+ sits wks · <span className="text-victory">{data?.consecutive_weeks_7_plus_sits ?? 0}</span></span>
-        <span>4-wk avg · <span className="text-accent">{(data?.rolling_4_week_sit_avg ?? 0).toFixed(1)}</span></span>
-        <span>recruits · <span className="text-foreground">{data?.recruits_count ?? 0}</span></span>
-      </div>
-    </div>
     </>
   );
 }
 
 /* ============ TAKE-HOME WIDGET (top of canvasser dashboard) ============ */
-function TakeHomeWidget({ userId, weeklyPay, hourlyRate, weekPoints }: {
+function TakeHomeWidget({
+  userId,
+  weeklyPay,
+  hourlyRate,
+  weekPoints,
+}: {
   userId: string;
   weeklyPay: number;
   hourlyRate: number;
@@ -983,7 +1436,7 @@ function TakeHomeWidget({ userId, weeklyPay, hourlyRate, weekPoints }: {
       <div className="flex flex-wrap items-center justify-between gap-6">
         <div>
           <div className="text-[10px] font-display uppercase tracking-widest text-victory/80">
-            Est. Weekly Pay
+            Weekly Pay · All Sources
           </div>
           <div className="mt-2 font-display text-4xl sm:text-5xl text-victory leading-none">
             {formatCurrency(weeklyPay)}
@@ -993,8 +1446,21 @@ function TakeHomeWidget({ userId, weeklyPay, hourlyRate, weekPoints }: {
           </div>
           {monthly && (
             <div className="mt-1 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-              Volume bonus earned this month · <span className={Number(monthly.volume_bonus) > 0 ? "text-victory" : ""}>{formatCurrency(Number(monthly.volume_bonus))}</span>
-              {" (paid next month) · "}{formatCurrency(VOLUME_BONUS_STEP - (Number(monthly.sale_price_total) % VOLUME_BONUS_STEP))} to next $1,500
+              Volume bonus earned this month ·{" "}
+              <span className={Number(monthly.volume_bonus) > 0 ? "text-victory" : ""}>
+                {formatCurrency(Number(monthly.volume_bonus))}
+              </span>
+              {" (paid next month) · "}
+              {formatCurrency(
+                VOLUME_BONUS_STEP - (Number(monthly.sale_price_total) % VOLUME_BONUS_STEP),
+              )}{" "}
+              to next $1,500
+            </div>
+          )}
+          {monthly && (
+            <div className="mt-1 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+              Month take-home so far ·{" "}
+              <span className="text-victory">{formatCurrency(Number(monthly.total_pay))}</span>
             </div>
           )}
         </div>
@@ -1010,4 +1476,3 @@ function TakeHomeWidget({ userId, weeklyPay, hourlyRate, weekPoints }: {
     </div>
   );
 }
-

@@ -47,6 +47,25 @@ export function ratesUsable(r: ConversionRates): boolean {
   return r.closeRate > 0 && r.sitRate > 0 && r.leadDoorRate > 0;
 }
 
+/**
+ * The commission the funnel must still produce (owner, 2026-07-29: the goal
+ * is TOTAL take-home — commission + hourly base + bonuses). Subtract what
+ * the pay engine says is already earned and the projected future base pay
+ * for the remaining Mon–Sat workdays; the funnel covers only what's left.
+ */
+export function commissionGap({
+  goal,
+  earned,
+  futureBase,
+}: {
+  goal: number;
+  earned: number;
+  futureBase: number;
+}): { gap: number; goalMet: boolean } {
+  const gap = Math.max(0, goal - earned - futureBase);
+  return { gap, goalMet: goal > 0 && gap === 0 };
+}
+
 export type FunnelBackSolve = {
   requiredSales: number;
   requiredSits: number;
