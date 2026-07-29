@@ -356,7 +356,7 @@ export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSumm
       );
     }
     if (reportBoards.length > 0) {
-      const soldCards = await fetchSoldCards();
+      const soldCards = await fetchCandidateCards();
       // card monday_item_id → every WCC label a matching report row carries.
       const matches = new Map<string, Array<string | null>>();
       for (const rb of reportBoards) {
@@ -439,29 +439,33 @@ type SoldCardLite = {
   office_location: string;
   card_date: string | null;
   wcc: string | null;
+  /** Sale cell still carries a sold label. Cancelled sales usually get the
+   *  Block card's Sale cell reverted too (the webhook's Sale_Lead_Voided
+   *  flow), so cancel rows must be allowed to match non-sold cards. */
+  sold: boolean;
   _norm: string;
 };
 
-/** Every sold Block card, paged past PostgREST's 1000-row cap. */
-async function fetchSoldCards(): Promise<SoldCardLite[]> {
+/** EVERY Block card, paged past PostgREST's 1000-row cap. Non-cancel report
+ *  rows only stamp sold cards; cancel rows may stamp any card (see `sold`). */
+async function fetchCandidateCards(): Promise<SoldCardLite[]> {
   const soldSet = new Set(SOLD_VALUES as readonly string[]);
   const out: SoldCardLite[] = [];
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabaseAdmin
       .from("block_cards")
       .select("monday_item_id, lead_name, office_location, card_date, sale, wcc")
-      .not("sale", "is", null)
       .order("monday_item_id")
       .range(from, from + 999);
     if (error) throw new Error(error.message);
     for (const r of data ?? []) {
-      if (!soldSet.has((r.sale ?? "").trim().toLowerCase())) continue;
       out.push({
         monday_item_id: r.monday_item_id,
         lead_name: r.lead_name,
         office_location: r.office_location,
         card_date: r.card_date,
         wcc: r.wcc,
+        sold: soldSet.has((r.sale ?? "").trim().toLowerCase()),
         _norm: normalizeCustomer(r.lead_name ?? ""),
       });
     }
@@ -564,7 +568,15 @@ async function collectReportBoard(
       // back to null when the report row un-cancels.
       const dateSold = colText(cols, "date sold");
       const around = dateSold && !Number.isNaN(Date.parse(dateSold)) ? dateSold : monthMidISO;
-      const match = bestSoldMatch(soldCards, normalizeCustomer(name), office, around);
+      // Non-cancel rows only stamp cards still marked sold; a CANCEL row
+      // falls back to any card for that customer — the sale's Block card
+      // usually had its Sale cell reverted when the job died.
+      const norm = normalizeCustomer(name);
+      const soldPool = soldCards.filter((c) => c.sold);
+      let match = bestSoldMatch(soldPool, norm, office, around);
+      if (!match && isCancel) {
+        match = bestSoldMatch(soldCards, norm, office, around);
+      }
       if (!match) {
         if (isCancel) result.unmatched.push(name);
         continue;
