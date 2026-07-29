@@ -8,14 +8,7 @@ import {
   OfficeFilterToggle,
   useOfficeFilter,
 } from "@/components/OfficeFilterContext";
-import {
-  ArcadePanel,
-  MobileCard,
-  MobileCardHeader,
-  MobileCardList,
-  MobileStat,
-  MobileStatGrid,
-} from "@/components/arcade";
+import { ArcadePanel, MobileCard, MobileCardHeader, MobileCardList } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 import { useWeekSelector } from "@/hooks/useWeekSelector";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
@@ -28,7 +21,12 @@ import {
   monthStartISO,
   nextMonthStartISO,
 } from "@/lib/dates";
-import { aggregateCloseKombat, type BlockCard, type RepStats } from "@/lib/close-kombat";
+import {
+  aggregateCloseKombat,
+  type BlockCard,
+  type KombatTotals,
+  type RepStats,
+} from "@/lib/close-kombat";
 import { syncBlockCards } from "@/lib/close-kombat.functions";
 import { toast } from "sonner";
 import { CalendarRange, ChevronLeft, ChevronRight, Crown, RefreshCw, Swords } from "lucide-react";
@@ -515,19 +513,7 @@ function CloseKombatInner() {
                     }
                     right={<span className="text-victory">{fmtMoney(r.revenue)}</span>}
                   />
-                  <MobileStatGrid cols={3}>
-                    <MobileStat label="Appts" value={fmtCount(r.appts)} />
-                    <MobileStat label="Sold" value={fmtCount(r.sold)} className="text-victory" />
-                    <MobileStat label="PM" value={fmtCount(r.pm)} className="text-warning" />
-                    <MobileStat label="Reset" value={fmtCount(r.reset)} className="text-accent" />
-                    <MobileStat
-                      label="No Show"
-                      value={fmtCount(r.noShow)}
-                      className="text-destructive"
-                    />
-                    <MobileStat label="Sit %" value={fmtPct(r.sitPct)} />
-                    <MobileStat label="Close %" value={fmtPct(r.closePct)} />
-                  </MobileStatGrid>
+                  <StatLine s={r} />
                 </MobileCard>
               ))}
               <MobileCard className="border-neon/40">
@@ -539,23 +525,7 @@ function CloseKombatInner() {
                   }
                   right={<span className="text-victory">{fmtMoney(totals.revenue)}</span>}
                 />
-                <MobileStatGrid cols={3}>
-                  <MobileStat label="Appts" value={fmtCount(totals.appts)} />
-                  <MobileStat label="Sold" value={fmtCount(totals.sold)} className="text-victory" />
-                  <MobileStat label="PM" value={fmtCount(totals.pm)} className="text-warning" />
-                  <MobileStat
-                    label="Reset"
-                    value={fmtCount(totals.reset)}
-                    className="text-accent"
-                  />
-                  <MobileStat
-                    label="No Show"
-                    value={fmtCount(totals.noShow)}
-                    className="text-destructive"
-                  />
-                  <MobileStat label="Sit %" value={fmtPct(totals.sitPct)} />
-                  <MobileStat label="Close %" value={fmtPct(totals.closePct)} />
-                </MobileStatGrid>
+                <StatLine s={totals} />
               </MobileCard>
             </MobileCardList>
           </>
@@ -577,6 +547,35 @@ function CloseKombatInner() {
           </>
         )}
       </p>
+    </div>
+  );
+}
+
+/** Every lead stat on ONE line (owner request 2026-07-29), desktop-column
+ *  order; scrolls sideways on narrow phones rather than wrapping. */
+function StatLine({ s }: { s: KombatTotals }) {
+  const items: Array<{ label: string; value: string; className?: string }> = [
+    { label: "Appts", value: fmtCount(s.appts) },
+    { label: "No Show", value: fmtCount(s.noShow), className: "text-destructive" },
+    { label: "No Demo", value: fmtCount(s.noDemo), className: "text-destructive" },
+    { label: "Reset", value: fmtCount(s.reset), className: "text-accent" },
+    { label: "PM", value: fmtCount(s.pm), className: "text-warning" },
+    { label: "Sold", value: fmtCount(s.sold), className: "text-victory" },
+    { label: "OL", value: fmtCount(s.ol), className: "text-muted-foreground" },
+    { label: "Office", value: fmtCount(s.officeAppts), className: "text-muted-foreground" },
+    { label: "Sit", value: fmtPct(s.sitPct) },
+    { label: "Close", value: fmtPct(s.closePct) },
+  ];
+  return (
+    <div className="flex items-baseline gap-x-3 overflow-x-auto scrollbar-hide whitespace-nowrap text-sm tabular-nums">
+      {items.map((it) => (
+        <span key={it.label} className="shrink-0">
+          <span className={`font-medium ${it.className ?? ""}`}>{it.value}</span>{" "}
+          <span className="text-[9px] font-display uppercase tracking-wider text-muted-foreground">
+            {it.label}
+          </span>
+        </span>
+      ))}
     </div>
   );
 }
