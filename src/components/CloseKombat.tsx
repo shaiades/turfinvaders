@@ -348,11 +348,12 @@ function CloseKombatInner() {
       </div>
 
       {/* Company totals — computed from cards, never from summed rep rows */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-7 gap-3">
         <KombatTile label="Appts" value={fmtCount(totals.appts)} accent="neon" />
         <KombatTile label="Sold" value={fmtCount(totals.sold)} accent="victory" />
         <KombatTile label="PM" value={fmtCount(totals.pm)} accent="warning" />
         <KombatTile label="Reset" value={fmtCount(totals.reset)} accent="accent" />
+        <KombatTile label="Sit %" value={fmtPct(totals.sitPct)} accent="accent" />
         <KombatTile label="Close %" value={fmtPct(totals.closePct)} accent="neon" />
         <KombatTile label="Revenue" value={fmtMoney(totals.revenue)} accent="victory" />
       </div>
@@ -397,6 +398,7 @@ function CloseKombatInner() {
                     <th className="text-right py-2 px-2 font-normal">Sold</th>
                     <th className="text-right py-2 px-2 font-normal">OL</th>
                     <th className="text-right py-2 px-2 font-normal">Office</th>
+                    <th className="text-right py-2 px-2 font-normal">Sit %</th>
                     <th className="text-right py-2 px-2 font-normal">Close %</th>
                     <th className="text-right py-2 pl-2 font-normal">Revenue</th>
                   </tr>
@@ -443,6 +445,9 @@ function CloseKombatInner() {
                         {fmtCount(r.officeAppts)}
                       </td>
                       <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                        {fmtPct(r.sitPct)}
+                      </td>
+                      <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
                         {fmtPct(r.closePct)}
                       </td>
                       <td className="py-2.5 pl-2 text-right tabular-nums text-victory">
@@ -474,6 +479,9 @@ function CloseKombatInner() {
                     <td className="py-2.5 px-2 text-right tabular-nums">{fmtCount(totals.ol)}</td>
                     <td className="py-2.5 px-2 text-right tabular-nums">
                       {fmtCount(totals.officeAppts)}
+                    </td>
+                    <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                      {fmtPct(totals.sitPct)}
                     </td>
                     <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
                       {fmtPct(totals.closePct)}
@@ -517,6 +525,7 @@ function CloseKombatInner() {
                       value={fmtCount(r.noShow)}
                       className="text-destructive"
                     />
+                    <MobileStat label="Sit %" value={fmtPct(r.sitPct)} />
                     <MobileStat label="Close %" value={fmtPct(r.closePct)} />
                   </MobileStatGrid>
                 </MobileCard>
@@ -544,6 +553,7 @@ function CloseKombatInner() {
                     value={fmtCount(totals.noShow)}
                     className="text-destructive"
                   />
+                  <MobileStat label="Sit %" value={fmtPct(totals.sitPct)} />
                   <MobileStat label="Close %" value={fmtPct(totals.closePct)} />
                 </MobileStatGrid>
               </MobileCard>
@@ -558,7 +568,8 @@ function CloseKombatInner() {
         not leads: they show only in the Office column, though upsale money still counts in Revenue.
         CTC, Not Issued, and Add Rep cards don&apos;t count anywhere. One result per card (Sold &gt;
         PM &gt; Reset &gt; BO). On a shared card each rep gets full result credit but the sale
-        volume splits evenly; the All-cards row counts each card once. Close % = Sold ÷ (Sold + PM).
+        volume splits evenly; the All-cards row counts each card once. Sit % = (PM + Sold) ÷ Appts ·
+        Close % = Sold ÷ (Sold + PM).
         {range.isLive && totals.unmarked > 0 && (
           <>
             {" "}
