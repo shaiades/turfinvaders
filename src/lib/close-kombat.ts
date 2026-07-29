@@ -59,20 +59,29 @@ const marked = (v: string | null | undefined): boolean => {
   return t !== "" && t !== "none";
 };
 
-/** ONE outcome per card: Sold > PM > Reset > BO. A sold card whose Sales
- *  Report WCC label says cancelled becomes "cancelled" instead of "sold".
- *  The BO column's own label splits No Show vs No Demo ("No Show" text →
- *  no_show, anything else marked → no_demo). Unmarked = the appointment
- *  hasn't resolved yet. */
+/** ONE outcome per card: Cancelled > Sold > PM > Reset > BO. A WCC cancel
+ *  wins even when the card's Sale cell is empty — when a sale cancels the
+ *  office usually reverts the Block board's Sale column too, but the Sales
+ *  Report row proves the sale happened and died. The BO column's own label
+ *  splits No Show vs No Demo ("No Show" text → no_show, anything else
+ *  marked → no_demo). Unmarked = the appointment hasn't resolved yet. */
 export function cardOutcome(c: Pick<BlockCard, "bo" | "rs" | "pm" | "sale" | "wcc">): CardOutcome {
+  if (/cancel/i.test(c.wcc ?? "")) return "cancelled";
   const sale = (c.sale ?? "").trim().toLowerCase();
-  if ((SOLD_VALUES as readonly string[]).includes(sale)) {
-    return /cancel/i.test(c.wcc ?? "") ? "cancelled" : "sold";
-  }
+  if ((SOLD_VALUES as readonly string[]).includes(sale)) return "sold";
   if (marked(c.pm)) return "pm";
   if (marked(c.rs)) return "reset";
   if (marked(c.bo)) return /no\s*show/i.test(c.bo as string) ? "no_show" : "no_demo";
   return "unmarked";
+}
+
+/** An active Reload sale (owner, 2026-07-29: reloads count inside Sold but
+ *  get their own tally too). Cancelled reloads are WCC, not reloads. */
+export function isReload(c: Pick<BlockCard, "sale" | "wcc">): boolean {
+  return (
+    cardOutcome({ bo: null, rs: null, pm: null, sale: c.sale, wcc: c.wcc }) === "sold" &&
+    (c.sale ?? "").trim().toLowerCase() === "reload"
+  );
 }
 
 /** Office Appointment per the Iss column (label truncates to "Office A…" on
@@ -99,6 +108,9 @@ export type RepStats = {
   reset: number;
   pm: number;
   sold: number;
+  /** Reload sales — counted INSIDE sold, tallied separately (owner,
+   *  2026-07-29). */
+  reloads: number;
   /** Sales later cancelled on the monthly report's WCC column — out of Sold
    *  and Revenue, still a demo that ran. */
   wcc: number;
@@ -125,6 +137,7 @@ const emptyStats = (): Omit<RepStats, "rep"> => ({
   reset: 0,
   pm: 0,
   sold: 0,
+  reloads: 0,
   wcc: 0,
   ol: 0,
   unmarked: 0,
@@ -162,6 +175,7 @@ export function aggregateCloseKombat(cards: BlockCard[]): {
       s.appts += 1;
       if (outcome === "unmarked") s.unmarked += 1;
       else s[OUTCOME_KEY[outcome]] += 1;
+      if (isReload(c)) s.reloads += 1;
       if (marked(c.ol)) s.ol += 1;
     }
     // Money is money — an office-appt upsale still pays.
