@@ -26,8 +26,9 @@ import {
 } from "@/lib/pay";
 import { getMonthlyPaychecks } from "@/lib/fleet.functions";
 import { laTodayISO, laWeekStartISO, addDaysISO, laMidnightUtcISO, laMonthStartISO, remainingWorkdaysInMonth } from "@/lib/dates";
-import { backSolveFunnel } from "@/lib/funnel";
+import { backSolveFunnel, commissionGap } from "@/lib/funnel";
 import { useFunnelRates, useProfileGoals } from "@/hooks/useFunnelRates";
+import { useMyEarnings } from "@/hooks/useMyEarnings";
 
 /**
  * Paycheck engine — automated.
@@ -103,6 +104,7 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
 
   const goalsQuery = useProfileGoals(userId);
   const funnelRates = useFunnelRates(userId);
+  const earnings = useMyEarnings(userId);
   const monthlyGoal = Number(goalsQuery.data?.monthly_goal ?? DEFAULT_MONTHLY_GOAL);
   // Income semantics (owner, 2026-07-29): required sales = goal ÷ avg
   // commission per sale — the same editable number the Weekly Playbook uses,
@@ -206,7 +208,9 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
     };
   }, [logsQuery.data, salesQuery.data, clockedQuery.data, funnelRates.source, funnelRates.sampleDoors, funnelRates.rates]);
 
-  const weeklyPay = weekBase + weekCommission;
+  // Pay-engine truth (base + commission + sit/monster bonuses, rank locks
+  // honored); the client estimate only bridges the loading gap.
+  const weeklyPay = earnings.weekPaycheck?.total_pay ?? weekBase + weekCommission;
 
   const valuePerDoor = month.doors_knocked > 0 ? monthCommission / month.doors_knocked : 0;
   const lpd = week.days_worked > 0 ? week.confirmed_leads / week.days_worked : 0;
@@ -221,7 +225,7 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
   const next = RANKS[Math.min(currentIdx + 1, RANKS.length - 1)];
   const rankSpan = Math.max(1, next.minSales - current.minSales);
   const rankProgress = current === next ? 1 : Math.min(1, (month.sales - current.minSales) / rankSpan);
-  const goalProgress = monthlyGoal > 0 ? Math.min(1, monthRevenue / monthlyGoal) : 0;
+  const goalProgress = monthlyGoal > 0 ? Math.min(1, earnings.monthEarned / monthlyGoal) : 0;
 
   // ===== Level-Up Detection → Hype Feed =====
   useEffect(() => {
@@ -257,43 +261,45 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
 
   // ===== Reverse-engineering funnel (drives My Goals tab & Value Per Door) =====
   const mission = useMemo(() => {
-    // Income goal ÷ avg commission per sale (owner, 2026-07-29) — the shared
-    // back-solve; null = the shared insufficient-data contract.
+    // Goal = TOTAL take-home (owner, 2026-07-29). The pay engine says what's
+    // already earned; future base pay is projected for the remaining Mon–Sat
+    // days; the funnel covers only the commission gap. Progress lives in
+    // DOLLARS — no door-count subtraction (banked sales are inside earned).
+    const workdaysLeft = remainingWorkdaysInMonth(laTodayISO());
+    const futureBase = workdaysLeft * earnings.avgDailyBase;
+    const { gap, goalMet } = commissionGap({
+      goal: monthlyGoal,
+      earned: earnings.monthEarned,
+      futureBase,
+    });
+    const empty = {
+      requiredSales: 0, requiredSits: 0, requiredConfirmed: 0, requiredDoors: 0,
+      requiredPeopleTalkedTo: 0,
+      doorsPerDay: 0, talksPerDay: 0, targetValuePerDoor: 0,
+    };
+    const meta = { daysRemaining: workdaysLeft, earned: earnings.monthEarned, futureBase, gap };
+    if (goalMet) return { ready: true, goalMet: true, ...empty, ...meta };
+
     const solve = funnel.rates
-      ? backSolveFunnel({ incomeGoal: monthlyGoal, avgCommissionPerSale: avgCommission, rates: funnel.rates })
+      ? backSolveFunnel({ incomeGoal: gap, avgCommissionPerSale: avgCommission, rates: funnel.rates })
       : null;
-    if (!solve) {
-      return {
-        ready: false,
-        requiredSales: 0, requiredSits: 0, requiredConfirmed: 0, requiredDoors: 0,
-        requiredPeopleTalkedTo: 0,
-        daysRemaining: 0, doorsPerDay: 0, talksPerDay: 0,
-        targetValuePerDoor: 0,
-      };
-    }
+    if (!solve) return { ready: false, goalMet: false, ...empty, ...meta };
+
     const { requiredSales, requiredSits, requiredLeads: requiredConfirmed, requiredDoors } = solve;
     const requiredPeopleTalkedTo = requiredDoors * funnel.talkDoorRate;
-
-    const workdaysLeft = remainingWorkdaysInMonth(laTodayISO());
-
-    // Subtract progress already made this month.
-    const doorsRemaining   = Math.max(0, requiredDoors - month.doors_knocked);
-    const talksRemaining   = Math.max(0, requiredPeopleTalkedTo - month.people_talked_to);
-    const doorsPerDay = workdaysLeft > 0 ? doorsRemaining / workdaysLeft : doorsRemaining;
-    const talksPerDay = workdaysLeft > 0 ? talksRemaining / workdaysLeft : talksRemaining;
-
-    // The goal IS commission dollars now — value per door is goal ÷ doors.
-    const targetValuePerDoor = requiredDoors > 0 ? monthlyGoal / requiredDoors : 0;
+    const doorsPerDay = workdaysLeft > 0 ? requiredDoors / workdaysLeft : requiredDoors;
+    const talksPerDay = workdaysLeft > 0 ? requiredPeopleTalkedTo / workdaysLeft : requiredPeopleTalkedTo;
+    // Each remaining knock is worth this much of the REMAINING gap.
+    const targetValuePerDoor = requiredDoors > 0 ? gap / requiredDoors : 0;
 
     return {
-      ready: true,
+      ready: true, goalMet: false,
       requiredSales, requiredSits, requiredConfirmed, requiredDoors,
       requiredPeopleTalkedTo,
-      daysRemaining: workdaysLeft,
-      doorsPerDay, talksPerDay,
-      targetValuePerDoor,
+      doorsPerDay, talksPerDay, targetValuePerDoor,
+      ...meta,
     };
-  }, [funnel, monthlyGoal, avgCommission, month.doors_knocked, month.people_talked_to]);
+  }, [funnel, monthlyGoal, avgCommission, earnings.monthEarned, earnings.avgDailyBase]);
 
 
   const saveGoal = useMutation({
@@ -351,7 +357,7 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
             <BigStat
               label="Weekly Pay"
               value={formatCurrency(weeklyPay)}
-              sub={`${weekHours.toFixed(1)} hrs × $${hourlyRate}/hr + ${formatCurrency(weekCommission)} commission`}
+              sub={`${weekHours.toFixed(1)} hrs clocked · base + commission + bonuses`}
               icon={<DollarSign className="w-4 h-4" />}
               accent="var(--victory)"
             />
@@ -404,7 +410,7 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
           </div>
 
           <GoalBar
-            revenue={monthRevenue}
+            earned={earnings.monthEarned}
             goal={monthlyGoal}
             pct={goalProgress}
             onSave={(g) => saveGoal.mutate(g)}
@@ -421,6 +427,8 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
           />
           <DailyMissionWidget
             ready={mission.ready}
+            goalMet={mission.goalMet}
+            earned={mission.earned}
             goal={monthlyGoal}
             doorsPerDay={mission.doorsPerDay}
             talksPerDay={mission.talksPerDay}
@@ -440,7 +448,9 @@ export function CanvasserPersonalDashboard({ userId }: { userId: string }) {
             requiredDoors={mission.requiredDoors}
             source={funnel.source}
             sampleDoors={funnel.sampleDoors}
-            mtdDoors={month.doors_knocked}
+            earned={mission.earned}
+            futureBase={mission.futureBase}
+            gap={mission.gap}
           />
         </TabsContent>
 
@@ -646,8 +656,8 @@ function PaycheckEngineWidget({
 }
 
 function GoalBar({
-  revenue, goal, pct, onSave, saving,
-}: { revenue: number; goal: number; pct: number; onSave: (g: number) => void; saving: boolean }) {
+  earned, goal, pct, onSave, saving,
+}: { earned: number; goal: number; pct: number; onSave: (g: number) => void; saving: boolean }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(goal));
   useEffect(() => { if (!editing) setDraft(String(goal)); }, [goal, editing]);
@@ -672,8 +682,8 @@ function GoalBar({
     >
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Revenue MTD</div>
-          <div className="font-display text-4xl md:text-5xl text-mega-victory leading-none mt-1">{formatCurrency(revenue)}</div>
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Earned MTD · All Pay Combined</div>
+          <div className="font-display text-4xl md:text-5xl text-mega-victory leading-none mt-1">{formatCurrency(earned)}</div>
         </div>
         <div className="text-right">
           <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Goal</div>
@@ -701,7 +711,7 @@ function GoalBar({
       <NeonBar pct={pct} accent="var(--victory)" tall />
       <div className="mt-2 flex justify-between text-[10px] font-display uppercase tracking-widest text-muted-foreground">
         <span>{(pct * 100).toFixed(0)}% complete</span>
-        <span>{pct >= 1 ? "🏆 Goal smashed" : `${formatCurrency(Math.max(0, goal - revenue))} to go`}</span>
+        <span>{pct >= 1 ? "🏆 Goal smashed" : `${formatCurrency(Math.max(0, goal - earned))} to go`}</span>
       </div>
     </ArcadePanel>
   );
@@ -775,11 +785,23 @@ function GoalInputPanel({
 }
 
 function DailyMissionWidget({
-  ready, goal, doorsPerDay, talksPerDay, daysRemaining, targetValuePerDoor,
+  ready, goalMet, earned, goal, doorsPerDay, talksPerDay, daysRemaining, targetValuePerDoor,
 }: {
-  ready: boolean; goal: number; doorsPerDay: number; talksPerDay: number;
+  ready: boolean; goalMet: boolean; earned: number; goal: number;
+  doorsPerDay: number; talksPerDay: number;
   daysRemaining: number; targetValuePerDoor: number;
 }) {
+  if (goalMet) {
+    return (
+      <div className="rounded-lg border-2 border-[color-mix(in_oklab,var(--victory)_55%,transparent)] bg-[color-mix(in_oklab,var(--victory)_10%,var(--surface))] p-8 text-center">
+        <div className="font-display text-2xl text-victory">🏆 Goal met</div>
+        <p className="mt-2 text-sm text-muted-foreground max-w-md mx-auto">
+          You&apos;ve already cleared {formatCurrency(goal)} in total earnings this month
+          ({formatCurrency(earned)} banked). Everything from here is gravy.
+        </p>
+      </div>
+    );
+  }
   if (!ready) {
     return (
       <div className="rounded-lg border border-border bg-surface p-6 text-center">
@@ -845,16 +867,17 @@ function MissionStat({
 function FunnelBreakdown({
   ready, goal, avgCommissionPerSale, closeRate, sitRate, leadDoorRate,
   requiredSales, requiredSits, requiredConfirmed, requiredDoors,
-  source, sampleDoors, mtdDoors,
+  source, sampleDoors, earned, futureBase, gap,
 }: {
   ready: boolean; goal: number; avgCommissionPerSale: number;
   closeRate: number; sitRate: number; leadDoorRate: number;
   requiredSales: number; requiredSits: number; requiredConfirmed: number; requiredDoors: number;
-  source: "personal" | "company"; sampleDoors: number; mtdDoors: number;
+  source: "personal" | "company"; sampleDoors: number;
+  earned: number; futureBase: number; gap: number;
 }) {
   if (!ready) return null;
   const rows = [
-    { label: "Required Sales",          value: Math.ceil(requiredSales),     formula: `${formatCurrency(goal)} ÷ ${formatCurrency(avgCommissionPerSale)} avg commission`, accent: "var(--victory)" },
+    { label: "Required Sales",          value: Math.ceil(requiredSales),     formula: `${formatCurrency(gap)} gap ÷ ${formatCurrency(avgCommissionPerSale)} avg commission`, accent: "var(--victory)" },
     { label: "Required Sits / Demos",   value: Math.ceil(requiredSits),      formula: `Sales ÷ ${(closeRate*100).toFixed(0)}% close rate`,    accent: "var(--accent)" },
     { label: "Required Confirmed Leads",value: Math.ceil(requiredConfirmed), formula: `Sits ÷ ${(sitRate*100).toFixed(0)}% sit rate`,         accent: "var(--neon)" },
     { label: "Total Doors to Knock",    value: Math.ceil(requiredDoors),     formula: `Leads ÷ ${(leadDoorRate*100).toFixed(2)}% lead-per-door`, accent: "var(--neon)" },
@@ -881,8 +904,9 @@ function FunnelBreakdown({
           </div>
         ))}
         <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-t border-border pt-3 flex justify-between flex-wrap gap-2">
-          <span>Avg commission / sale · {formatCurrency(avgCommissionPerSale)}</span>
-          <span>MTD progress · {mtdDoors.toLocaleString()} / {Math.ceil(requiredDoors).toLocaleString()} doors</span>
+          <span>Earned so far · {formatCurrency(earned)} of {formatCurrency(goal)}</span>
+          <span>Projected future base · {formatCurrency(futureBase)}</span>
+          <span>Gap to close · {formatCurrency(gap)}</span>
         </div>
       </div>
     </ArcadePanel>
@@ -983,7 +1007,7 @@ function TakeHomeWidget({ userId, weeklyPay, hourlyRate, weekPoints }: {
       <div className="flex flex-wrap items-center justify-between gap-6">
         <div>
           <div className="text-[10px] font-display uppercase tracking-widest text-victory/80">
-            Est. Weekly Pay
+            Weekly Pay · All Sources
           </div>
           <div className="mt-2 font-display text-4xl sm:text-5xl text-victory leading-none">
             {formatCurrency(weeklyPay)}
@@ -995,6 +1019,11 @@ function TakeHomeWidget({ userId, weeklyPay, hourlyRate, weekPoints }: {
             <div className="mt-1 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
               Volume bonus earned this month · <span className={Number(monthly.volume_bonus) > 0 ? "text-victory" : ""}>{formatCurrency(Number(monthly.volume_bonus))}</span>
               {" (paid next month) · "}{formatCurrency(VOLUME_BONUS_STEP - (Number(monthly.sale_price_total) % VOLUME_BONUS_STEP))} to next $1,500
+            </div>
+          )}
+          {monthly && (
+            <div className="mt-1 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+              Month take-home so far · <span className="text-victory">{formatCurrency(Number(monthly.total_pay))}</span>
             </div>
           )}
         </div>
