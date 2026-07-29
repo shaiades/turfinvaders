@@ -40,7 +40,7 @@ export function DatabaseCleanup() {
     onSuccess: () => {
       toast.success("Van deleted");
       qc.invalidateQueries({ queryKey: ["cleanup_inventory"] });
-      qc.invalidateQueries({ queryKey: ["fleet_manager"] });
+      qc.invalidateQueries({ queryKey: ["fleet_dispatch"] });
       qc.invalidateQueries({ queryKey: ["fleet_status"] });
       qc.invalidateQueries({ queryKey: ["offices"] });
     },
@@ -52,7 +52,7 @@ export function DatabaseCleanup() {
     onSuccess: () => {
       toast.success("User deleted");
       qc.invalidateQueries({ queryKey: ["cleanup_inventory"] });
-      qc.invalidateQueries({ queryKey: ["fleet_manager"] });
+      qc.invalidateQueries({ queryKey: ["fleet_dispatch"] });
       qc.invalidateQueries({ queryKey: ["weekly_results"] });
     },
     onError: (e: Error) => toast.error(e.message ?? "Failed to delete"),

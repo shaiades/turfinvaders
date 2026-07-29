@@ -1,28 +1,78 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { OfficeFilterProvider, OfficeFilterToggle, useOfficeFilter } from "@/components/OfficeFilterContext";
+import {
+  OfficeFilterProvider,
+  OfficeFilterToggle,
+  useOfficeFilter,
+} from "@/components/OfficeFilterContext";
 import { ArcadePanel, TeamBadge } from "@/components/arcade";
-import { Radio, Users, FileSearch, X, Link2, Copy, Check, KeyRound, Eye, EyeOff, AlertTriangle, Lock, Truck } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Radio,
+  Users,
+  FileSearch,
+  X,
+  Link2,
+  Copy,
+  Check,
+  KeyRound,
+  Eye,
+  EyeOff,
+  AlertTriangle,
+  Lock,
+  Truck,
+  ChevronLeft,
+  ChevronRight,
+  CalendarRange,
+  Wrench,
+  ChevronDown,
+  ChevronUp,
+} from "lucide-react";
 import { toast } from "sonner";
 import confetti from "canvas-confetti";
-import { addDaysISO, fmtWorkedDay, lastWorkedDaysBefore, reportDates, weekStartOfISO } from "@/lib/dates";
+import {
+  addDaysISO,
+  dateFromISO,
+  fmtWorkedDay,
+  formatWeekRange,
+  laMidnightUtcISO,
+  laMonthStartISO,
+  lastWorkedDaysBefore,
+  monthStartISO,
+  nextMonthStartISO,
+  reportDates,
+} from "@/lib/dates";
+import { useWeekSelector } from "@/hooks/useWeekSelector";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
-import { normalizeName } from "@/lib/utils";
+import { useAuth } from "@/hooks/useAuth";
+import { isManagerRole } from "@/lib/roles";
+import { formatCurrency, normalizeName } from "@/lib/utils";
 import { DEFAULT_OFFICE, OFFICE_LOCATIONS } from "@/lib/offices";
+import { getDispatchProduction } from "@/lib/dispatch.functions";
+import { FleetDispatchManage } from "@/components/FleetDispatchManage";
 
-
-type Profile = {
+/** One profile row as the board consumes it (dispatch membership). */
+export type RosterProfile = {
   id: string;
   display_name: string | null;
   office_location: string | null;
   team_id: string | null;
   team_office: string | null;
-  role: "canvasser" | "captain";
+  is_active: boolean | null;
   suspension_tracked: boolean;
   created_at: string;
 };
 
+type BoardProfile = RosterProfile & { role: "canvasser" | "captain" };
+
+export type Van = {
+  id: string;
+  name: string;
+  color: string | null;
+  captain_id: string | null;
+  office_location: string | null;
+};
 
 // The dispatch funnel counts ONLY actioned Lead Status results (owner,
 // 2026-07-28): Confirmed, Future, and Blowout — where Blowout absorbs the
@@ -31,44 +81,62 @@ type Profile = {
 // A card contributes nothing until its status button is actioned; card
 // creation (leads_generated) feeds only the suspension window.
 type Metric = {
-  id: string;
   canvasser_id: string;
   metric_date: string;
-  leads_generated: number;
   leads_confirmed: number;
   no_answers: number;
   killed: number;
   future: number;
-  office_location: string;
 };
 
-export function LiveDispatch({ readOnly = false }: { readOnly?: boolean }) {
+export function FleetDispatch({ readOnly = false }: { readOnly?: boolean }) {
   return (
     <OfficeFilterProvider>
-      <LiveDispatchInner readOnly={readOnly} />
+      <FleetDispatchInner readOnly={readOnly} />
     </OfficeFilterProvider>
   );
 }
 
-type Preset = "today" | "yesterday" | "week";
+type RangeTab = "day" | "week" | "month";
+type DayPreset = "today" | "yesterday";
 
+type ResolvedRange = {
+  funnelStart: string;
+  funnelEnd: string;
+  logStart: string;
+  logEnd: string;
+  volStartISO: string;
+  volEndISO: string;
+  label: string;
+  sub: string;
+  isLive: boolean;
+};
 
-function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
+function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
   const qc = useQueryClient();
+  const { realRole } = useAuth();
+
+  // --- Range engine: Day (report-date clock) / Week (Mon–Sat) / Month ---
+  const [tab, setTab] = useState<RangeTab>("day");
+  const [dayPreset, setDayPreset] = useState<DayPreset>("today");
   const [{ today, yday, locked }, setDates] = useState(reportDates);
-  const [preset, setPreset] = useState<Preset>("today");
   // Chips removed via the X vanish instantly (optimistic) while the
   // suspension_tracked flag persists server-side.
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
+  const [manageOpen, setManageOpen] = useState(false);
   const { matches } = useOfficeFilter();
   const confettiFired = useRef(false);
+  // The 30s tick closure must see the CURRENT view, not the mount-time one.
+  const liveDayView = useRef(false);
+  liveDayView.current = tab === "day" && dayPreset === "today";
 
-  // Re-evaluate report date every 30s; fire confetti once when we cross 7 PM PT.
+  // Re-evaluate report date every 30s; fire confetti once when we cross 7 PM
+  // PT while actually watching the live day.
   useEffect(() => {
     const tick = () => {
       const next = reportDates();
       setDates((prev) => {
-        if (!prev.locked && next.locked && !confettiFired.current) {
+        if (!prev.locked && next.locked && !confettiFired.current && liveDayView.current) {
           confettiFired.current = true;
           fireEndOfDayConfetti();
         }
@@ -80,105 +148,226 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
     return () => window.clearInterval(id);
   }, []);
 
-  const range = useMemo(() => {
-    if (preset === "yesterday") return { start: yday, end: yday, label: "Yesterday" };
-    if (preset === "week") {
-      // Calendar Block week (Mon–Sat), same as the Monday boards.
-      const monday = weekStartOfISO(today);
-      return { start: monday, end: addDaysISO(monday, 5), label: "This Week" };
-    }
-    return { start: today, end: today, label: "Today" };
-  }, [preset, today, yday]);
+  const week = useWeekSelector({ endOffsetDays: 5 }); // Mon–Sat, Block-board convention
+  const [monthStart, setMonthStart] = useState<string>(() => laMonthStartISO());
+  const shiftMonth = (delta: 1 | -1) =>
+    setMonthStart((m) => (delta > 0 ? nextMonthStartISO(m) : monthStartISO(addDaysISO(m, -1))));
+  const isCurrentMonth = monthStart === laMonthStartISO();
+  const monthLabel = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(
+    dateFromISO(monthStart),
+  );
 
-  const { data: canvassers = [] } = useQuery({
-    queryKey: ["dispatch-canvassers"],
+  const range: ResolvedRange = useMemo(() => {
+    if (tab === "day") {
+      const d = dayPreset === "yesterday" ? yday : today;
+      return {
+        funnelStart: d,
+        funnelEnd: d,
+        logStart: d,
+        logEnd: d,
+        volStartISO: laMidnightUtcISO(d),
+        volEndISO: laMidnightUtcISO(addDaysISO(d, 1)),
+        label: dayPreset === "yesterday" ? "Yesterday" : "Today",
+        sub: d,
+        isLive: dayPreset === "today",
+      };
+    }
+    if (tab === "week") {
+      return {
+        funnelStart: week.weekStartISO,
+        funnelEnd: week.weekEndISO,
+        logStart: week.weekStartISO,
+        logEnd: week.weekEndISO,
+        // Volume window is Mon 00:00 → next Mon 00:00 LA (pay-engine week
+        // attribution) even though the funnel/points label reads Mon–Sat.
+        volStartISO: laMidnightUtcISO(week.weekStartISO),
+        volEndISO: laMidnightUtcISO(addDaysISO(week.weekStartISO, 7)),
+        label: formatWeekRange(week.weekStart, week.weekEnd),
+        sub: `${week.weekStartISO} → ${week.weekEndISO}`,
+        isLive: week.isCurrentWeek,
+      };
+    }
+    const monthEnd = addDaysISO(nextMonthStartISO(monthStart), -1);
+    return {
+      funnelStart: monthStart,
+      funnelEnd: monthEnd,
+      logStart: monthStart,
+      logEnd: monthEnd,
+      volStartISO: laMidnightUtcISO(monthStart),
+      volEndISO: laMidnightUtcISO(nextMonthStartISO(monthStart)),
+      label: monthLabel,
+      sub: `${monthStart} → ${monthEnd}`,
+      isLive: isCurrentMonth,
+    };
+  }, [
+    tab,
+    dayPreset,
+    today,
+    yday,
+    week.weekStart,
+    week.weekEnd,
+    week.weekStartISO,
+    week.weekEndISO,
+    week.isCurrentWeek,
+    monthStart,
+    monthLabel,
+    isCurrentMonth,
+  ]);
+
+  // --- Queries (one key family; realtime prefix-invalidates all of it) ---
+
+  // Roster serves BOTH the board and Manage Fleet from one fetch so the two
+  // can never disagree after a mutation.
+  const rosterQuery = useQuery({
+    queryKey: ["fleet_dispatch", "roster"],
     queryFn: async () => {
-      const { data: roles } = await supabase
-        .from("user_roles")
-        .select("user_id, role")
-        .in("role", ["canvasser", "captain"]);
-      const roleMap = new Map<string, "canvasser" | "captain">();
-      (roles ?? []).forEach((r) => {
-        const prev = roleMap.get(r.user_id);
-        if (prev === "captain") return;
-        roleMap.set(r.user_id, r.role as "canvasser" | "captain");
-      });
-      const ids = Array.from(roleMap.keys());
-      if (ids.length === 0) return [] as Profile[];
-      const { data: profs } = await supabase
-        .from("profiles")
-        .select("id, display_name, office_location, team_id, suspension_tracked, created_at, teams:team_id(office_location)")
-        .in("id", ids)
-        .eq("is_active", true);
-      const rows: Profile[] = ((profs ?? []) as Array<{
-        id: string;
-        display_name: string | null;
-        office_location: string | null;
-        team_id: string | null;
-        suspension_tracked: boolean;
-        created_at: string;
-        teams: { office_location: string | null } | null;
-      }>).map((p) => ({
+      const [profsR, rolesR] = await Promise.all([
+        supabase
+          .from("profiles")
+          .select(
+            "id, display_name, office_location, team_id, is_active, suspension_tracked, created_at, teams:team_id(office_location)",
+          )
+          .order("display_name"),
+        supabase.from("user_roles").select("user_id, role"),
+      ]);
+      if (profsR.error) throw profsR.error;
+      if (rolesR.error) throw rolesR.error;
+      const rolesByUser = new Map<string, string[]>();
+      for (const r of rolesR.data ?? []) {
+        const arr = rolesByUser.get(r.user_id) ?? [];
+        arr.push(r.role);
+        rolesByUser.set(r.user_id, arr);
+      }
+      const profiles: RosterProfile[] = (
+        (profsR.data ?? []) as Array<{
+          id: string;
+          display_name: string | null;
+          office_location: string | null;
+          team_id: string | null;
+          is_active: boolean | null;
+          suspension_tracked: boolean;
+          created_at: string;
+          teams: { office_location: string | null } | null;
+        }>
+      ).map((p) => ({
         id: p.id,
         display_name: p.display_name,
         office_location: p.office_location,
         team_id: p.team_id,
-        team_office: p.teams?.office_location ?? null,
-        role: roleMap.get(p.id) ?? "canvasser",
+        is_active: p.is_active,
         suspension_tracked: p.suspension_tracked,
         created_at: p.created_at,
+        team_office: p.teams?.office_location ?? null,
       }));
-      return rows;
+      return { profiles, rolesByUser };
+    },
+  });
+  const allProfiles = rosterQuery.data?.profiles ?? [];
+  const rolesByUser = rosterQuery.data?.rolesByUser ?? new Map<string, string[]>();
+
+  // Board membership keeps LiveDispatch's strict semantics: active canvassers
+  // and captains only (is_active === true — null is NOT active here, while
+  // Manage Fleet deliberately treats null as active, matching the old split).
+  const canvassers: BoardProfile[] = useMemo(() => {
+    const out: BoardProfile[] = [];
+    for (const p of allProfiles) {
+      if (p.is_active !== true) continue;
+      const roles = rolesByUser.get(p.id) ?? [];
+      const role = roles.includes("captain")
+        ? "captain"
+        : roles.includes("canvasser")
+          ? "canvasser"
+          : null;
+      if (!role) continue;
+      out.push({ ...p, role });
+    }
+    return out;
+  }, [allProfiles, rolesByUser]);
+
+  const { data: vans = [] } = useQuery({
+    queryKey: ["fleet_dispatch", "vans"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("teams")
+        .select("id, name, color, captain_id, office_location")
+        .order("name");
+      if (error) throw error;
+      return (data ?? []) as Van[];
     },
   });
 
-
   const { data: metrics = [] } = useQuery({
-    queryKey: ["daily-metrics", range.start, range.end],
+    queryKey: ["fleet_dispatch", "funnel", range.funnelStart, range.funnelEnd],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("daily_metrics")
-        .select(
-          "id, canvasser_id, metric_date, leads_generated, leads_confirmed, no_answers, killed, future, office_location",
-        )
-        .gte("metric_date", range.start)
-        .lte("metric_date", range.end);
+        .select("canvasser_id, metric_date, leads_confirmed, no_answers, killed, future")
+        .gte("metric_date", range.funnelStart)
+        .lte("metric_date", range.funnelEnd);
+      if (error) throw error;
       return (data ?? []) as Metric[];
     },
   });
 
-  // Vans — same source Fleet Manager renders, so the dispatch board can
-  // group the funnel action by van in the same visual language.
-  const { data: vans = [] } = useQuery({
-    queryKey: ["dispatch-vans"],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("teams")
-        .select("id, name, color, captain_id, office_location");
-      return (data ?? []) as Van[];
-    },
+  // Points + Volume come from the server fn so every viewer (including
+  // canvassers on /leaderboard) sees everyone's full production — the
+  // owner's transparency decision. Raw rows stay RLS-locked.
+  const production = useQuery({
+    queryKey: [
+      "fleet_dispatch",
+      "production",
+      range.logStart,
+      range.logEnd,
+      range.volStartISO,
+      range.volEndISO,
+    ],
+    queryFn: async () =>
+      getDispatchProduction({
+        data: {
+          log_start: range.logStart,
+          log_end: range.logEnd,
+          vol_start: range.volStartISO,
+          vol_end: range.volEndISO,
+        },
+      }),
   });
+  const pointsByUser = useMemo(
+    () => new Map(Object.entries(production.data?.points ?? {})),
+    [production.data],
+  );
+  const volumeByUser = useMemo(
+    () => new Map(Object.entries(production.data?.volume ?? {})),
+    [production.data],
+  );
 
   // Suspension window: the last 14 completed worked days (Sundays excluded).
   // Feeds the donut check (first two days) and the zero-streak display.
   const workedDays = useMemo(() => lastWorkedDaysBefore(today, 14), [today]);
   const { data: windowMetrics = [] } = useQuery({
-    queryKey: ["suspension-window", today],
+    queryKey: ["fleet_dispatch", "suspension-window", today],
+    enabled: tab === "day",
     queryFn: async () => {
       const { data } = await supabase
         .from("daily_metrics")
         .select("canvasser_id, metric_date, leads_generated")
         .in("metric_date", workedDays);
-      return (data ?? []) as Array<Pick<Metric, "canvasser_id" | "metric_date" | "leads_generated">>;
+      return (data ?? []) as Array<{
+        canvasser_id: string;
+        metric_date: string;
+        leads_generated: number;
+      }>;
     },
   });
 
-  // Realtime — instant updates when Monday webhook upserts.
+  // Realtime — one channel; prefix invalidation refreshes funnel, production,
+  // suspension window, roster, and vans (fixes the old stale-banner gap).
   useRealtimeInvalidate({
-    channel: "dispatch-daily-metrics",
-    tables: ["daily_metrics"],
-    invalidateKeys: [["daily-metrics"]],
+    channel: "fleet-dispatch-live",
+    tables: ["daily_metrics", "daily_logs", "leads"],
+    invalidateKeys: [["fleet_dispatch"]],
   });
+
+  // --- Derived ---
 
   // Sum all metric rows per canvasser_id across the selected range.
   const metricByCanvasser = useMemo(() => {
@@ -211,8 +400,8 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
   );
 
   // De-duplicate by normalized display_name. If any duplicate is a captain,
-  // the merged row inherits the captain role. Metrics from every duplicate
-  // canvasser_id aggregate into a single row.
+  // the merged row inherits the captain role. Metrics, points, and volume
+  // from every duplicate canvasser_id aggregate into a single row.
   const rows = useMemo(() => {
     type Group = {
       key: string;
@@ -253,34 +442,50 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
       }
     }
     const enriched = Array.from(groups.values()).map((g) => {
-      let conf = 0, kil = 0, fut = 0;
+      let conf = 0,
+        kil = 0,
+        fut = 0,
+        pts = 0,
+        vol = 0;
       for (const id of g.ids) {
         const m = metricByCanvasser.get(id);
-        if (!m) continue;
-        conf += m.conf;
-        // Blowout absorbs N/A: every dead-end button result counts here.
-        kil += m.kil + m.na;
-        fut += m.fut;
+        if (m) {
+          conf += m.conf;
+          // Blowout absorbs N/A: every dead-end button result counts here.
+          kil += m.kil + m.na;
+          fut += m.fut;
+        }
+        pts += pointsByUser.get(id) ?? 0;
+        vol += volumeByUser.get(id) ?? 0;
       }
-      // Submitted = the sum of actioned results (owner, 2026-07-28): nothing
-      // is counted for a card until the confirmation team actions its Lead
-      // Status button, so Submitted ≡ Confirmed + Future + Blowout by
-      // construction. Card creation (leads_generated) feeds only the
-      // suspension window, not this funnel.
+      // Submitted = the sum of actioned results (owner, 2026-07-28):
+      // Submitted ≡ Confirmed + Future + Blowout by construction.
       const sub = conf + fut + kil;
-      return { g, conf, kil, fut, sub };
+      return { g, conf, kil, fut, sub, pts, vol };
     });
     return enriched.sort((a, b) => {
       if (b.sub !== a.sub) return b.sub - a.sub;
       if (b.conf !== a.conf) return b.conf - a.conf;
       return (a.g.display_name ?? "").localeCompare(b.g.display_name ?? "");
     });
-  }, [visible, metricByCanvasser]);
+  }, [visible, metricByCanvasser, pointsByUser, volumeByUser]);
 
   const totals = useMemo(() => {
-    let sub = 0, conf = 0, fut = 0, kil = 0;
-    rows.forEach((r) => { sub += r.sub; conf += r.conf; fut += r.fut; kil += r.kil; });
-    return { sub, conf, fut, kil };
+    let sub = 0,
+      conf = 0,
+      fut = 0,
+      kil = 0,
+      pts = 0,
+      vol = 0;
+    rows.forEach((r) => {
+      sub += r.sub;
+      conf += r.conf;
+      fut += r.fut;
+      kil += r.kil;
+      pts += r.pts;
+      vol += r.vol;
+    });
+    return { sub, conf, fut, kil, pts, vol };
   }, [rows]);
 
   // Suspension rule (owner, 2026-07-28): any TWO consecutive WORKED days
@@ -290,7 +495,7 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
   // profiles with suspension_tracked=false (pseudo-agents, staff) and reps
   // whose profile didn't exist for both days yet.
   const suspensionRows = useMemo(() => {
-    if (preset !== "today" || workedDays.length < 2) return [];
+    if (tab !== "day" || dayPreset !== "today" || workedDays.length < 2) return [];
     const genOn = (ids: string[], day: string) =>
       ids.reduce((a, id) => a + (genByDay.get(id)?.get(day) ?? 0), 0);
     const [d1, d2] = workedDays;
@@ -302,13 +507,28 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
       let streak = 0;
       let capped = true;
       for (const day of workedDays) {
-        if (day < r.g.oldestCreated) { capped = false; break; }
+        if (day < r.g.oldestCreated) {
+          capped = false;
+          break;
+        }
         if (genOn(r.g.ids, day) === 0) streak++;
-        else { capped = false; break; }
+        else {
+          capped = false;
+          break;
+        }
       }
       return [{ g: r.g, d1, d2, streak, streakLabel: `${streak}${capped ? "+" : ""}` }];
     });
-  }, [rows, genByDay, workedDays, preset, dismissed]);
+  }, [rows, genByDay, workedDays, tab, dayPreset, dismissed]);
+
+  const canManage = !readOnly && isManagerRole(realRole);
+
+  const footnote =
+    tab === "day"
+      ? "Points = Sits + Sales from daily logs (PM = 1 pt, Sale = 2 pts) for the selected report day. Volume = confirmed sale dollars, midnight–midnight Pacific."
+      : tab === "week"
+        ? "Points reflect Mon–Sat of the selected week, Pacific time (PM = 1 pt, Sale = 2 pts; BO/RS = 0). Volume runs Mon 12:00 AM → next Mon 12:00 AM Pacific."
+        : "Points cover the calendar month, Pacific time (PM = 1 pt, Sale = 2 pts). Volume resets on the 1st, 12:00 AM Pacific.";
 
   return (
     <div className="space-y-4">
@@ -317,8 +537,8 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
           <Radio className="w-4 h-4 text-victory animate-pulse" />
           <div>
             <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground flex items-center gap-2">
-              Live Dispatch · {range.label}
-              {locked && preset === "today" && (
+              Fleet Dispatch · {range.label}
+              {locked && tab === "day" && dayPreset === "today" && (
                 <span className="inline-flex items-center gap-1 text-warning">
                   <Lock className="w-3 h-3" /> 7PM LOCK
                 </span>
@@ -337,19 +557,21 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
         )}
       </div>
 
-      {/* Fast-switch date presets */}
+      {/* Range tabs: Day / Week / Month, plus each range's own controls */}
       <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide">
-        {([
-          { id: "today", label: "Today" },
-          { id: "yesterday", label: "Yesterday" },
-          { id: "week", label: "This Week" },
-        ] as Array<{ id: Preset; label: string }>).map((p) => {
-          const active = preset === p.id;
+        {(
+          [
+            { id: "day", label: "Day" },
+            { id: "week", label: "Week" },
+            { id: "month", label: "Month" },
+          ] as Array<{ id: RangeTab; label: string }>
+        ).map((p) => {
+          const active = tab === p.id;
           return (
             <button
               key={p.id}
               type="button"
-              onClick={() => setPreset(p.id)}
+              onClick={() => setTab(p.id)}
               className={`px-3 py-2 rounded-full text-[10px] font-display uppercase tracking-widest whitespace-nowrap border transition-colors ${
                 active
                   ? "bg-neon text-background border-neon"
@@ -360,20 +582,103 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
             </button>
           );
         })}
+
+        <span className="mx-1 h-5 w-px bg-border shrink-0" aria-hidden />
+
+        {tab === "day" && (
+          <>
+            {(
+              [
+                { id: "today", label: "Today" },
+                { id: "yesterday", label: "Yesterday" },
+              ] as Array<{ id: DayPreset; label: string }>
+            ).map((p) => {
+              const active = dayPreset === p.id;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setDayPreset(p.id)}
+                  className={`px-2.5 py-1.5 rounded-full text-[10px] font-display uppercase tracking-widest whitespace-nowrap border transition-colors ${
+                    active
+                      ? "bg-neon text-background border-neon"
+                      : "border-border text-muted-foreground hover:text-foreground hover:border-neon/40"
+                  }`}
+                >
+                  {p.label}
+                </button>
+              );
+            })}
+          </>
+        )}
+
+        {tab === "week" && (
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => week.shiftWeek(-1)}
+              title="Previous week"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+            <div className="px-3 py-1 rounded border border-neon/40 bg-neon/5 flex items-center gap-2 whitespace-nowrap">
+              <CalendarRange className="w-4 h-4 text-neon shrink-0" />
+              <span className="text-xs font-display">{range.label}</span>
+            </div>
+            <Button size="sm" variant="outline" onClick={() => week.shiftWeek(1)} title="Next week">
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+            {!week.isCurrentWeek && (
+              <Button size="sm" variant="ghost" onClick={() => week.goToWeek()}>
+                Jump to current week
+              </Button>
+            )}
+          </>
+        )}
+
+        {tab === "month" && (
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => shiftMonth(-1)}
+              title="Previous month"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+            <div className="px-3 py-1 rounded border border-neon/40 bg-neon/5 flex items-center gap-2 whitespace-nowrap">
+              <CalendarRange className="w-4 h-4 text-neon shrink-0" />
+              <span className="text-xs font-display">{range.label}</span>
+            </div>
+            <Button size="sm" variant="outline" onClick={() => shiftMonth(1)} title="Next month">
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+            {!isCurrentMonth && (
+              <Button size="sm" variant="ghost" onClick={() => setMonthStart(laMonthStartISO())}>
+                Jump to current month
+              </Button>
+            )}
+          </>
+        )}
+
         <span className="ml-2 text-[10px] text-muted-foreground font-mono whitespace-nowrap">
-          {range.start === range.end ? range.start : `${range.start} → ${range.end}`}
+          {range.sub}
         </span>
       </div>
 
       {!readOnly && <WebhookUrlBanner />}
       {!readOnly && <MondayTokenCard />}
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
         <TotalTile label="Submitted" value={totals.sub} accent="neon" />
         <TotalTile label="Confirmed" value={totals.conf} accent="victory" />
         <TotalTile label="Future" value={totals.fut} accent="accent" />
         <TotalTile label="Blowout" value={totals.kil} accent="danger" />
+        <TotalTile label="Points" value={totals.pts} accent="warning" />
+        <TotalTile label="Volume" value={formatCurrency(totals.vol)} accent="victory" />
       </div>
+      <p className="text-[10px] text-muted-foreground -mt-2">{footnote}</p>
 
       <SuspensionBanner
         rows={suspensionRows}
@@ -390,11 +695,15 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
                   .in("id", g.ids)
                   .then(({ error }) => {
                     if (error) {
-                      setDismissed((prev) => { const n = new Set(prev); n.delete(g.key); return n; });
+                      setDismissed((prev) => {
+                        const n = new Set(prev);
+                        n.delete(g.key);
+                        return n;
+                      });
                       toast.error(`Could not remove ${name}: ${error.message}`);
                       return;
                     }
-                    qc.invalidateQueries({ queryKey: ["dispatch-canvassers"] });
+                    qc.invalidateQueries({ queryKey: ["fleet_dispatch", "roster"] });
                     toast.success(`${name} removed from the suspension list`, {
                       action: {
                         label: "Undo",
@@ -404,8 +713,12 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
                             .update({ suspension_tracked: true })
                             .in("id", g.ids)
                             .then(() => {
-                              setDismissed((prev) => { const n = new Set(prev); n.delete(g.key); return n; });
-                              qc.invalidateQueries({ queryKey: ["dispatch-canvassers"] });
+                              setDismissed((prev) => {
+                                const n = new Set(prev);
+                                n.delete(g.key);
+                                return n;
+                              });
+                              qc.invalidateQueries({ queryKey: ["fleet_dispatch", "roster"] });
                             });
                         },
                       },
@@ -423,17 +736,38 @@ function LiveDispatchInner({ readOnly }: { readOnly: boolean }) {
       ) : (
         <DispatchFleet rows={rows} vans={vans} />
       )}
+
+      {canManage && (
+        <div className="space-y-4">
+          <button
+            type="button"
+            onClick={() => setManageOpen((o) => !o)}
+            className="arcade-card w-full px-4 py-3 flex items-center justify-between text-left hover:bg-surface-elevated"
+          >
+            <span className="flex items-center gap-2 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+              <Wrench className="w-4 h-4 text-accent" />
+              Manage Fleet · Vans, Agents, Archive
+            </span>
+            {manageOpen ? (
+              <ChevronUp className="w-4 h-4 text-muted-foreground" />
+            ) : (
+              <ChevronDown className="w-4 h-4 text-muted-foreground" />
+            )}
+          </button>
+          {manageOpen && (
+            <FleetDispatchManage
+              vans={vans}
+              profiles={allProfiles}
+              rolesByUser={rolesByUser}
+              pointsByUser={pointsByUser}
+              volumeByUser={volumeByUser}
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 }
-
-type Van = {
-  id: string;
-  name: string;
-  color: string | null;
-  captain_id: string | null;
-  office_location: string | null;
-};
 
 type FunnelRow = {
   g: {
@@ -447,9 +781,16 @@ type FunnelRow = {
   conf: number;
   fut: number;
   kil: number;
+  pts: number;
+  vol: number;
 };
 
-const FUNNEL_COLS: Array<{ short: string; full: string; key: "sub" | "conf" | "fut" | "kil"; color: keyof typeof metricColorClass }> = [
+const FUNNEL_COLS: Array<{
+  short: string;
+  full: string;
+  key: "sub" | "conf" | "fut" | "kil";
+  color: keyof typeof metricColorClass;
+}> = [
   { short: "Sub", full: "Submitted", key: "sub", color: "neon" },
   { short: "Con", full: "Confirmed", key: "conf", color: "victory" },
   { short: "Fut", full: "Future", key: "fut", color: "accent" },
@@ -470,7 +811,11 @@ function DispatchRow({ r }: { r: FunnelRow }) {
         )}
       </span>
       {FUNNEL_COLS.map((c) => (
-        <span key={c.key} title={c.full} className={`text-right font-display text-sm ${metricClass(r[c.key], c.color)}`}>
+        <span
+          key={c.key}
+          title={c.full}
+          className={`text-right font-display text-sm ${metricClass(r[c.key], c.color)}`}
+        >
           {r[c.key]}
         </span>
       ))}
@@ -484,7 +829,11 @@ function DispatchColHeader() {
     <div className="grid grid-cols-[minmax(0,1fr)_repeat(4,2.4rem)] items-center gap-1 px-2">
       <span />
       {FUNNEL_COLS.map((c) => (
-        <span key={c.key} title={c.full} className="text-right text-[9px] font-display uppercase tracking-widest text-muted-foreground">
+        <span
+          key={c.key}
+          title={c.full}
+          className="text-right text-[9px] font-display uppercase tracking-widest text-muted-foreground"
+        >
           {c.short}
         </span>
       ))}
@@ -492,9 +841,8 @@ function DispatchColHeader() {
   );
 }
 
-/** The dispatch roster in Fleet Manager's language: office panels → van
- *  cards → per-rep funnel rows, plus the Free Agents pen for the vanless.
- *  Same live data as always — only the grouping is Fleet-style. */
+/** The board: office panels → van cards → per-rep funnel rows, with per-van
+ *  Points and Volume pills, plus the unassigned lead-source pen. */
 function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
   const { matches } = useOfficeFilter();
 
@@ -510,15 +858,24 @@ function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
       freeAgents.push(r);
     }
   }
-  const looseActive = freeAgents.filter((r) => r.sub + r.conf + r.fut + r.kil > 0);
+  const looseActive = freeAgents.filter((r) => r.sub + r.conf + r.fut + r.kil + r.pts + r.vol > 0);
   const vanTotals = (id: string) =>
     (rowsByVan.get(id) ?? []).reduce(
-      (a, r) => ({ sub: a.sub + r.sub, conf: a.conf + r.conf, fut: a.fut + r.fut, kil: a.kil + r.kil }),
-      { sub: 0, conf: 0, fut: 0, kil: 0 },
+      (a, r) => ({
+        sub: a.sub + r.sub,
+        conf: a.conf + r.conf,
+        fut: a.fut + r.fut,
+        kil: a.kil + r.kil,
+        pts: a.pts + r.pts,
+        vol: a.vol + r.vol,
+      }),
+      { sub: 0, conf: 0, fut: 0, kil: 0, pts: 0, vol: 0 },
     );
   const vanSub = (id: string) => vanTotals(id).sub;
   const captainName = (v: Van) =>
-    v.captain_id ? rows.find((r) => r.g.ids.includes(v.captain_id!))?.g.display_name ?? null : null;
+    v.captain_id
+      ? (rows.find((r) => r.g.ids.includes(v.captain_id!))?.g.display_name ?? null)
+      : null;
 
   const offices = OFFICE_LOCATIONS.filter((o) => matches(o));
 
@@ -530,10 +887,15 @@ function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
           .sort((a, b) => vanSub(b.id) - vanSub(a.id) || a.name.localeCompare(b.name));
         if (list.length === 0) return null;
         return (
-          <ArcadePanel key={office} title={`${office} · ${list.length} ${list.length === 1 ? "Van" : "Vans"}`}>
+          <ArcadePanel
+            key={office}
+            title={`${office} · ${list.length} ${list.length === 1 ? "Van" : "Vans"}`}
+          >
             <div className="grid gap-4 md:grid-cols-2">
               {list.map((v) => {
-                const roster = (rowsByVan.get(v.id) ?? []).sort((a, b) => b.sub - a.sub || b.conf - a.conf);
+                const roster = (rowsByVan.get(v.id) ?? []).sort(
+                  (a, b) => b.sub - a.sub || b.conf - a.conf,
+                );
                 const cap = captainName(v);
                 const t = vanTotals(v.id);
                 return (
@@ -544,8 +906,22 @@ function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
                         <span className="min-w-0 truncate">
                           <TeamBadge name={v.name} color={v.color ?? "#888"} />
                         </span>
+                        <span
+                          className="shrink-0 text-[10px] font-display px-1.5 py-0.5 rounded border border-neon/40 text-neon"
+                          title="Van Points for the selected range (PM = 1 pt, Sale = 2 pts)"
+                        >
+                          {t.pts}p
+                        </span>
+                        <span
+                          className="shrink-0 text-[10px] font-display px-1.5 py-0.5 rounded border border-victory/40 text-victory"
+                          title="Van Volume — confirmed sale dollars in the selected range"
+                        >
+                          {formatCurrency(t.vol)}
+                        </span>
                         {cap && (
-                          <span className="hidden sm:inline text-[10px] text-muted-foreground truncate min-w-0">· {cap}</span>
+                          <span className="hidden sm:inline text-[10px] text-muted-foreground truncate min-w-0">
+                            · {cap}
+                          </span>
                         )}
                       </div>
                     </div>
@@ -597,7 +973,10 @@ function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
           <div className="space-y-1.5">
             <DispatchColHeader />
             {looseActive
-              .sort((a, b) => b.sub - a.sub || (a.g.display_name ?? "").localeCompare(b.g.display_name ?? ""))
+              .sort(
+                (a, b) =>
+                  b.sub - a.sub || (a.g.display_name ?? "").localeCompare(b.g.display_name ?? ""),
+              )
               .map((r) => (
                 <DispatchRow key={r.g.key} r={r} />
               ))}
@@ -612,7 +991,12 @@ function SuspensionBanner({
   rows,
   onRemove,
 }: {
-  rows: Array<{ g: { key: string; ids: string[]; display_name: string | null }; d1: string; d2: string; streakLabel: string }>;
+  rows: Array<{
+    g: { key: string; ids: string[]; display_name: string | null };
+    d1: string;
+    d2: string;
+    streakLabel: string;
+  }>;
   onRemove?: (g: { key: string; ids: string[]; display_name: string | null }) => void;
 }) {
   if (rows.length === 0) return null;
@@ -660,7 +1044,6 @@ function SuspensionBanner({
   );
 }
 
-
 function fireEndOfDayConfetti() {
   const duration = 3000;
   const end = Date.now() + duration;
@@ -671,8 +1054,6 @@ function fireEndOfDayConfetti() {
     if (Date.now() < end) requestAnimationFrame(frame);
   })();
 }
-
-
 
 const metricColorClass = {
   neon: "text-neon",
@@ -688,15 +1069,12 @@ function metricClass(value: number, color: keyof typeof metricColorClass) {
   return value > 0 ? metricColorClass[color] : "text-muted-foreground/40";
 }
 
-
 function WebhookUrlBanner() {
   const [copied, setCopied] = useState(false);
   // Direct backend Edge Function URL — bypasses the frontend entirely so
   // Monday.com receives a naked JSON challenge response, not HTML.
-  const supabaseUrl =
-    (import.meta.env.VITE_SUPABASE_URL as string | undefined) ?? "";
-  const anonKey =
-    (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined) ?? "";
+  const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined) ?? "";
+  const anonKey = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined) ?? "";
   const url = supabaseUrl
     ? `${supabaseUrl.replace(/\/$/, "")}/functions/v1/monday-live-dispatch${anonKey ? `?apikey=${encodeURIComponent(anonKey)}` : ""}`
     : "";
@@ -720,10 +1098,10 @@ function WebhookUrlBanner() {
         </div>
       </div>
       <div className="text-xs text-muted-foreground mb-3">
-        Paste this raw backend URL into Monday.com. It returns naked JSON for the
-        challenge handshake. Send POST with{" "}
-        <code className="text-foreground">{`{ canvasser_name, status }`}</code> and the
-        header <code className="text-foreground">x-monday-secret</code>.
+        Paste this raw backend URL into Monday.com. It returns naked JSON for the challenge
+        handshake. Send POST with{" "}
+        <code className="text-foreground">{`{ canvasser_name, status }`}</code> and the header{" "}
+        <code className="text-foreground">x-monday-secret</code>.
       </div>
       <div className="flex flex-col sm:flex-row gap-2 items-stretch">
         <input
@@ -798,9 +1176,8 @@ function MondayTokenCard() {
         )}
       </div>
       <div className="text-xs text-muted-foreground mb-3">
-        Required for the webhook to look up the canvasser name from Monday when
-        only <code className="text-foreground">pulseId</code> is sent. Stored
-        securely (owners only).
+        Required for the webhook to look up the canvasser name from Monday when only{" "}
+        <code className="text-foreground">pulseId</code> is sent. Stored securely (owners only).
       </div>
       <div className="flex flex-col sm:flex-row gap-2 items-stretch">
         <div className="relative flex-1">
@@ -835,9 +1212,7 @@ function MondayTokenCard() {
           {saving ? "Saving…" : "Save Token"}
         </button>
       </div>
-      {error && (
-        <div className="mt-2 text-[11px] text-destructive font-mono">{error}</div>
-      )}
+      {error && <div className="mt-2 text-[11px] text-destructive font-mono">{error}</div>}
       {savedAt && !error && (
         <div className="mt-2 text-[11px] text-victory font-display uppercase tracking-widest">
           Saved
@@ -889,7 +1264,11 @@ type WebhookLog = {
 
 function WebhookLogsButton() {
   const [open, setOpen] = useState(false);
-  const { data: logs = [], refetch, isFetching } = useQuery({
+  const {
+    data: logs = [],
+    refetch,
+    isFetching,
+  } = useQuery({
     queryKey: ["webhook-logs"],
     enabled: open,
     queryFn: async () => {
@@ -960,7 +1339,7 @@ function WebhookLogsButton() {
                       <span>{new Date(l.created_at).toLocaleString()}</span>
                     </div>
                     <pre className="text-[11px] font-mono text-foreground whitespace-pre-wrap break-all max-h-64 overflow-auto">
-{JSON.stringify(l.data ?? l.raw_payload ?? {}, null, 2)}
+                      {JSON.stringify(l.data ?? l.raw_payload ?? {}, null, 2)}
                     </pre>
                   </div>
                 ))
@@ -972,4 +1351,3 @@ function WebhookLogsButton() {
     </>
   );
 }
-

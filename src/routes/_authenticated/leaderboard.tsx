@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { LiveDispatch } from "@/components/LiveDispatch";
+import { FleetDispatch } from "@/components/FleetDispatch";
 import { Trophy } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/leaderboard")({
@@ -16,7 +16,7 @@ function LeaderboardPage() {
           Leaderboard
         </h1>
       </div>
-      <LiveDispatch readOnly />
+      <FleetDispatch readOnly />
     </div>
   );
 }
