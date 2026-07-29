@@ -556,9 +556,9 @@ function CloseKombatInner() {
         Columns mirror the Monday.com Block boards — Iss = issued lead · BO splits into No Show / No
         Demo · RS = Reset · Sale = Sold. Office Appointments (job visit, upsale, check pickup) are
         not leads: they show only in the Office column, though upsale money still counts in Revenue.
-        One result per card (Sold &gt; PM &gt; Reset &gt; BO). On a shared card each rep gets full
-        result credit but the sale volume splits evenly; the All-cards row counts each card once.
-        Close % = Sold ÷ (Sold + PM).
+        CTC, Not Issued, and Add Rep cards don&apos;t count anywhere. One result per card (Sold &gt;
+        PM &gt; Reset &gt; BO). On a shared card each rep gets full result credit but the sale
+        volume splits evenly; the All-cards row counts each card once. Close % = Sold ÷ (Sold + PM).
         {range.isLive && totals.unmarked > 0 && (
           <>
             {" "}

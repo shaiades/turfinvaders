@@ -10,7 +10,12 @@
 // - Iss column: "Iss" = issued lead. An Office Appointment is NOT a lead
 //   (job visit / upsale / collecting a check) and never counts in the lead
 //   numbers — it ticks the separate officeAppts tally instead, though upsale
-//   money still lands in revenue.
+//   money still lands in revenue. CTC / Not Issued / Add Rep cards are
+//   pipeline states, not appointments a rep ran — they are excluded from
+//   Close Kombat entirely (owner, 2026-07-29).
+// - Monday's status columns return the literal text "None" for an unset
+//   cell (verified live 2026-07-29: rs "None" ×1210 vs "Reset" ×255) —
+//   "None" is never a result.
 //
 // Pure module: no imports, unit-testable like funnel.ts.
 
@@ -40,7 +45,12 @@ export const SOLD_VALUES = ["sold", "reload", "upsell", "sale"] as const;
 
 export type CardOutcome = "sold" | "pm" | "reset" | "no_show" | "no_demo" | "unmarked";
 
-const marked = (v: string | null | undefined): boolean => !!v && v.trim() !== "";
+/** A cell counts only when it carries a real label — Monday hands back ""
+ *  or the literal "None" for unset status cells depending on the column. */
+const marked = (v: string | null | undefined): boolean => {
+  const t = (v ?? "").trim().toLowerCase();
+  return t !== "" && t !== "none";
+};
 
 /** ONE outcome per card: Sold > PM > Reset > BO. The BO column's own label
  *  splits No Show vs No Demo ("No Show" text → no_show, anything else
@@ -59,6 +69,14 @@ export function cardOutcome(c: Pick<BlockCard, "bo" | "rs" | "pm" | "sale">): Ca
  *  only an explicit office mark pulls a card out of the lead numbers. */
 export function isOfficeAppt(c: Pick<BlockCard, "iss">): boolean {
   return /office/i.test(c.iss ?? "");
+}
+
+/** Pipeline states, not appointments a rep ran — excluded from Close Kombat
+ *  entirely (owner, 2026-07-29): CTC (cancelled before running), Not Issued,
+ *  Add Rep. Exact labels as seen on the live boards. */
+export function isExcludedCard(c: Pick<BlockCard, "iss">): boolean {
+  const v = (c.iss ?? "").trim().toLowerCase();
+  return v === "ctc" || v === "not issued" || v === "add rep";
 }
 
 export type RepStats = {
@@ -130,6 +148,8 @@ export function aggregateCloseKombat(cards: BlockCard[]): {
   };
 
   for (const card of cards) {
+    // CTC / Not Issued / Add Rep never reach the stats at all.
+    if (isExcludedCard(card)) continue;
     // Totals count every card exactly once — reps.length never inflates them.
     bump(totals, card, 1);
     const names = card.reps.map((r) => r.trim()).filter(Boolean);
