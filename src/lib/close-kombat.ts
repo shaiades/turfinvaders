@@ -16,6 +16,10 @@
 // - Monday's status columns return the literal text "None" for an unset
 //   cell (verified live 2026-07-29: rs "None" ×1210 vs "Reset" ×255) —
 //   "None" is never a result.
+// - WCC (owner, 2026-07-29): a sale that later shows "Cancelled" in the
+//   monthly Sales Report's WCC column leaves Sold and Revenue and moves to
+//   its own WCC bucket. The demo still happened, so it stays in the Sit %
+//   numerator and drags Close % down — net numbers, not gross.
 //
 // Pure module: no imports, unit-testable like funnel.ts.
 
@@ -37,13 +41,16 @@ export type BlockCard = {
   sale_price: number | null;
   products: string | null;
   canvass_stats: string | null;
+  /** Raw WCC label from the monthly Sales Report, matched on by the sync. */
+  wcc: string | null;
 };
 
 /** Sale-column values that mean sold — keep in sync with SOLD_VALUES in
  *  supabase/functions/monday-live-dispatch/index.ts. */
 export const SOLD_VALUES = ["sold", "reload", "upsell", "sale"] as const;
 
-export type CardOutcome = "sold" | "pm" | "reset" | "no_show" | "no_demo" | "unmarked";
+export type CardOutcome =
+  "sold" | "cancelled" | "pm" | "reset" | "no_show" | "no_demo" | "unmarked";
 
 /** A cell counts only when it carries a real label — Monday hands back ""
  *  or the literal "None" for unset status cells depending on the column. */
@@ -52,12 +59,16 @@ const marked = (v: string | null | undefined): boolean => {
   return t !== "" && t !== "none";
 };
 
-/** ONE outcome per card: Sold > PM > Reset > BO. The BO column's own label
- *  splits No Show vs No Demo ("No Show" text → no_show, anything else
- *  marked → no_demo). Unmarked = the appointment hasn't resolved yet. */
-export function cardOutcome(c: Pick<BlockCard, "bo" | "rs" | "pm" | "sale">): CardOutcome {
+/** ONE outcome per card: Sold > PM > Reset > BO. A sold card whose Sales
+ *  Report WCC label says cancelled becomes "cancelled" instead of "sold".
+ *  The BO column's own label splits No Show vs No Demo ("No Show" text →
+ *  no_show, anything else marked → no_demo). Unmarked = the appointment
+ *  hasn't resolved yet. */
+export function cardOutcome(c: Pick<BlockCard, "bo" | "rs" | "pm" | "sale" | "wcc">): CardOutcome {
   const sale = (c.sale ?? "").trim().toLowerCase();
-  if ((SOLD_VALUES as readonly string[]).includes(sale)) return "sold";
+  if ((SOLD_VALUES as readonly string[]).includes(sale)) {
+    return /cancel/i.test(c.wcc ?? "") ? "cancelled" : "sold";
+  }
   if (marked(c.pm)) return "pm";
   if (marked(c.rs)) return "reset";
   if (marked(c.bo)) return /no\s*show/i.test(c.bo as string) ? "no_show" : "no_demo";
@@ -88,14 +99,18 @@ export type RepStats = {
   reset: number;
   pm: number;
   sold: number;
+  /** Sales later cancelled on the monthly report's WCC column — out of Sold
+   *  and Revenue, still a demo that ran. */
+  wcc: number;
   ol: number;
   unmarked: number;
   /** Office Appointments (job visit / upsale / check pickup) — not leads. */
   officeAppts: number;
-  /** (PM + Sold) ÷ Appts — share of issued leads where a demo actually ran
-   *  (owner, 2026-07-29: "sit rate"); null until an appt exists. */
+  /** Demos (PM + Sold + WCC) ÷ Appts — share of issued leads where a demo
+   *  actually ran (owner, 2026-07-29: "sit rate"); null until an appt exists. */
   sitPct: number | null;
-  /** Sold ÷ (Sold + PM) — sold share of demos that ran; null until a demo exists. */
+  /** Sold ÷ demos (Sold + PM + WCC) — cancelled sales drag it down; null
+   *  until a demo exists. */
   closePct: number | null;
   /** Sale volume: split evenly across the card's reps; includes office-appt upsales. */
   revenue: number;
@@ -110,6 +125,7 @@ const emptyStats = (): Omit<RepStats, "rep"> => ({
   reset: 0,
   pm: 0,
   sold: 0,
+  wcc: 0,
   ol: 0,
   unmarked: 0,
   officeAppts: 0,
@@ -120,6 +136,7 @@ const emptyStats = (): Omit<RepStats, "rep"> => ({
 
 const OUTCOME_KEY: Record<Exclude<CardOutcome, "unmarked">, keyof KombatTotals> = {
   sold: "sold",
+  cancelled: "wcc",
   pm: "pm",
   reset: "reset",
   no_show: "noShow",
@@ -169,7 +186,7 @@ export function aggregateCloseKombat(cards: BlockCard[]): {
   }
 
   const finalize = (s: Omit<RepStats, "rep">) => {
-    const demos = s.sold + s.pm;
+    const demos = s.sold + s.pm + s.wcc;
     s.sitPct = s.appts > 0 ? demos / s.appts : null;
     s.closePct = demos > 0 ? s.sold / demos : null;
     s.revenue = Math.round(s.revenue * 100) / 100;
