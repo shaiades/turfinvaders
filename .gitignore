@@ -16,8 +16,12 @@ dist-ssr
 .nitro
 *.local
 
-# Local env files (use .env.example as the template)
+# Local env files (use .env.example as the template) — every variant stays
+# out of git (.env.local is also caught by *.local above), only the template
+# is tracked.
 .env
+.env.*
+!.env.example
 
 # Vercel
 .vercel
