@@ -26,10 +26,11 @@
 // - CTC (owner, 2026-07-30): WCC label "CTC" is the same as a cancel — it
 //   folds into the WCC column: volume removed, still a demo for Sit %, a
 //   miss for Close %.
-// - Open cards (owner, 2026-07-30): an appointment with no result marked yet
-//   doesn't count against the percentages — Sit % divides by resulted appts
-//   (appts − unmarked), not all appts. Close % was always resulted-only
-//   (Sold ÷ demos).
+// - Open cards (owner, 2026-07-30, superseding the same-day Sit % rule): an
+//   appointment with no result marked yet doesn't count ANYWHERE — not in
+//   Appts, not in the percentages, and it isn't displayed. A card enters the
+//   stats the moment the board carries a result; until then it's only
+//   tracked internally (unmarked).
 //
 // Pure module: no imports, unit-testable like funnel.ts.
 
@@ -120,7 +121,8 @@ export function isExcludedCard(c: Pick<BlockCard, "iss">): boolean {
 
 export type RepStats = {
   rep: string;
-  /** Issued leads only — Office Appointments never count here. */
+  /** RESULTED leads only — a card with nothing marked yet isn't an appt, and
+   *  Office Appointments never count here (owner, 2026-07-30). */
   appts: number;
   noShow: number;
   noDemo: number;
@@ -137,13 +139,14 @@ export type RepStats = {
    *  own tally (owner, 2026-07-30). */
   ftd: number;
   ol: number;
+  /** Cards with no result yet — internal tally only: NOT in appts and never
+   *  displayed (owner, 2026-07-30). */
   unmarked: number;
   /** Office Appointments (job visit / upsale / check pickup) — not leads. */
   officeAppts: number;
-  /** Demos (PM + Sold + WCC + FTD) ÷ resulted appts (appts − unmarked) —
-   *  share of RESULTED leads where a demo actually ran (owner, 2026-07-30:
-   *  Open cards don't count until they're marked); null until a resulted
-   *  appt exists. */
+  /** Demos (PM + Sold + WCC + FTD) ÷ appts — appts are resulted-only by
+   *  construction (owner, 2026-07-30: unresulted cards don't count); null
+   *  until a resulted appt exists. */
   sitPct: number | null;
   /** Sold ÷ demos (Sold + PM + WCC + FTD) — cancels and turn-downs drag it
    *  down; null until a demo exists. */
@@ -197,10 +200,13 @@ export function aggregateCloseKombat(cards: BlockCard[]): {
     if (office) {
       // Not a lead: only the office tally — never appts/results/close %.
       s.officeAppts += 1;
+    } else if (outcome === "unmarked") {
+      // No result on the board yet: not an appt at all (owner, 2026-07-30) —
+      // internal tally only, the card joins the stats once it's resulted.
+      s.unmarked += 1;
     } else {
       s.appts += 1;
-      if (outcome === "unmarked") s.unmarked += 1;
-      else s[OUTCOME_KEY[outcome]] += 1;
+      s[OUTCOME_KEY[outcome]] += 1;
       if (isReload(c)) s.reloads += 1;
       if (marked(c.ol)) s.ol += 1;
     }
@@ -230,14 +236,16 @@ export function aggregateCloseKombat(cards: BlockCard[]): {
 
   const finalize = (s: Omit<RepStats, "rep">) => {
     const demos = s.sold + s.pm + s.wcc + s.ftd;
-    const resulted = s.appts - s.unmarked;
-    s.sitPct = resulted > 0 ? demos / resulted : null;
+    s.sitPct = s.appts > 0 ? demos / s.appts : null;
     s.closePct = demos > 0 ? s.sold / demos : null;
     s.revenue = Math.round(s.revenue * 100) / 100;
   };
   finalize(totals);
 
-  const reps = [...byRep.values()];
+  // A rep whose cards are all still unresulted has nothing countable yet —
+  // no all-zero rows in the standings (office-appt reps keep their row for
+  // the upsale revenue).
+  const reps = [...byRep.values()].filter((r) => r.appts > 0 || r.officeAppts > 0);
   for (const r of reps) finalize(r);
   reps.sort(
     (a, b) =>
