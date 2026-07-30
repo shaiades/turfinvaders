@@ -371,15 +371,13 @@ export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSumm
         const card = byId.get(cardId);
         if (!card) continue;
         const desired = chooseWcc(hits.map((h) => h.wcc));
-        const patch: { wcc?: string | null; sale_price?: number } = {};
+        // WCC label ONLY. The Sales Report must never write a sale price:
+        // owner, 2026-07-30, after a card whose Block Sale Price was blank
+        // showed $10,000 in Revenue because this pass copied the report's
+        // Sale Amt in. The Block board's Sale Price column is the single
+        // source of truth for volume — blank means $0, not "look elsewhere".
+        const patch: { wcc?: string | null } = {};
         if ((card.wcc ?? null) !== (desired ?? null)) patch.wcc = desired;
-        // Backfill ONLY a missing Block Sale Price from the report's Sale
-        // Amt (a sold card left at $0 otherwise undercounts revenue) —
-        // never overwrite a price someone entered on the board.
-        if (card.sold && card.sale_price === null) {
-          const amt = hits.map((h) => h.amt).find((a) => a !== null && a > 0);
-          if (amt) patch.sale_price = amt;
-        }
         if (Object.keys(patch).length === 0) continue;
         const { error } = await supabaseAdmin
           .from("block_cards")
@@ -390,7 +388,6 @@ export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSumm
           continue;
         }
         if (patch.wcc !== undefined) card.wcc = patch.wcc;
-        if (patch.sale_price !== undefined) card.sale_price = patch.sale_price;
         wcc.updated += 1;
       }
     }
@@ -580,8 +577,10 @@ export function chooseWcc(values: Array<string | null>): string | null {
   return values.find((v) => v !== null) ?? null;
 }
 
-/** One report row's contribution to a matched card: its WCC label and its
- *  Sale Amt (used only to backfill Block cards missing a Sale Price). */
+/** One report row's contribution to a matched card. Only `wcc` is ever
+ *  written to block_cards — `amt` is carried for logging/diagnostics and must
+ *  NOT flow into sale_price (owner, 2026-07-30: the Block board's Sale Price
+ *  column is the only source of volume). */
 export type ReportRowHit = { wcc: string | null; amt: number | null };
 
 async function collectReportBoard(
@@ -656,8 +655,8 @@ async function collectReportBoard(
         continue;
       }
       // Collect only — the caller merges every board's rows per card
-      // (cancel-wins) and writes once. Sale Amt rides along so cards whose
-      // Block Sale Price cell was left empty can be backfilled.
+      // (cancel-wins) and writes the WCC label once. Sale Amt rides along for
+      // diagnostics only; it never becomes a card's sale_price.
       const list = matches.get(match.monday_item_id) ?? [];
       list.push({ wcc: wccStored, amt: parseMoney(colText(cols, "sale amt")) });
       matches.set(match.monday_item_id, list);

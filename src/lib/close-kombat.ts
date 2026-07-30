@@ -16,16 +16,17 @@
 // - Monday's status columns return the literal text "None" for an unset
 //   cell (verified live 2026-07-29: rs "None" ×1210 vs "Reset" ×255) —
 //   "None" is never a result.
-// - WCC (owner, 2026-07-29): a sale that later shows "Cancelled" in the
-//   monthly Sales Report's WCC column leaves Sold and Revenue and moves to
-//   its own WCC bucket. The demo still happened, so it stays in the Sit %
-//   numerator and drags Close % down — net numbers, not gross.
-// - FTD (owner, 2026-07-30): WCC label "FTD" = financial turn down —
-//   treated exactly like a cancel (no volume, still a demo) but tallied in
-//   its own FTD column.
+// - Cancels, née WCC (owner, 2026-07-29, renamed 2026-07-30): a sale that
+//   later shows "Cancelled" in the monthly Sales Report's WCC column leaves
+//   Sold and Revenue and moves to its own Cancels bucket — net numbers, not
+//   gross. Owner, 2026-07-30: a cancel is NOT a demo — Sit % counts only
+//   PM + Sold + Reload, so a cancelled sale leaves the Sit % numerator and
+//   the Close % denominator entirely. It stays an Appt.
+// - FTD (owner, 2026-07-30, supersedes its own column): WCC label "FTD" =
+//   financial turn down. The demo ran and the money fell through, so it now
+//   counts as a PM — no separate FTD tally anywhere.
 // - CTC (owner, 2026-07-30): WCC label "CTC" is the same as a cancel — it
-//   folds into the WCC column: volume removed, still a demo for Sit %, a
-//   miss for Close %.
+//   folds into the Cancels column.
 // - Open cards (owner, 2026-07-30, superseding the same-day Sit % rule): an
 //   appointment with no result marked yet doesn't count ANYWHERE — not in
 //   Appts, not in the percentages, and it isn't displayed. A card enters the
@@ -34,7 +35,10 @@
 // - Reload (owner, 2026-07-30, supersedes "reloads count inside Sold"):
 //   Reload is its own result column next to Sold. Both are sales — Close % =
 //   (Sold + Reload) ÷ demos and revenue counts both — but the Sold number no
-//   longer includes reloads. Reload % = Reload ÷ Appts.
+//   longer includes reloads. Reload % = Reload ÷ (Sold + Reload), i.e. the
+//   share of sales that were reloads (owner, 2026-07-30 — was ÷ Appts).
+// - OL (owner, 2026-07-30): dropped from Close Kombat entirely. The column
+//   still lands in block_cards, it just isn't a stat here any more.
 //
 // Pure module: no imports, unit-testable like funnel.ts.
 
@@ -65,7 +69,7 @@ export type BlockCard = {
 export const SOLD_VALUES = ["sold", "reload", "upsell", "sale"] as const;
 
 export type CardOutcome =
-  "sold" | "cancelled" | "ftd" | "pm" | "reset" | "no_show" | "no_demo" | "unmarked";
+  "sold" | "cancelled" | "pm" | "reset" | "no_show" | "no_demo" | "unmarked";
 
 /** WCC label tests — "Cancelled"/"CTC" and "FTD" (financial turn down) all
  *  kill the sale's volume; CTC counts inside the WCC column while FTD gets
@@ -85,12 +89,13 @@ const marked = (v: string | null | undefined): boolean => {
 /** ONE outcome per card: Cancelled/CTC > FTD > Sold > PM > Reset > BO. A WCC
  *  cancel wins even when the card's Sale cell is empty — when a sale cancels the
  *  office usually reverts the Block board's Sale column too, but the Sales
- *  Report row proves the sale happened and died. The BO column's own label
- *  splits No Show vs No Demo ("No Show" text → no_show, anything else
- *  marked → no_demo). Unmarked = the appointment hasn't resolved yet. */
+ *  Report row proves the sale happened and died. FTD keeps its slot in the
+ *  order (it must outrank a leftover "Sold" cell) but resolves to a PM. The BO
+ *  column's own label splits No Show vs No Demo ("No Show" text → no_show,
+ *  anything else marked → no_demo). Unmarked = hasn't resolved yet. */
 export function cardOutcome(c: Pick<BlockCard, "bo" | "rs" | "pm" | "sale" | "wcc">): CardOutcome {
   if (isCancelLabel(c.wcc)) return "cancelled";
-  if (isFtdLabel(c.wcc)) return "ftd";
+  if (isFtdLabel(c.wcc)) return "pm";
   const sale = (c.sale ?? "").trim().toLowerCase();
   if ((SOLD_VALUES as readonly string[]).includes(sale)) return "sold";
   if (marked(c.pm)) return "pm";
@@ -137,34 +142,37 @@ export type RepStats = {
   /** Reload sales — their own result, NOT inside sold (owner, 2026-07-30);
    *  still a sale for Close % and Revenue. */
   reloads: number;
-  /** Sales later cancelled on the monthly report's WCC column — out of Sold
-   *  and Revenue, still a demo that ran. */
-  wcc: number;
-  /** Financial turn downs (WCC label "FTD") — same treatment as a cancel,
-   *  own tally (owner, 2026-07-30). */
-  ftd: number;
-  ol: number;
+  /** Sales later cancelled on the monthly report (Cancelled / CTC) — out of
+   *  Sold and Revenue, and NOT a demo (owner, 2026-07-30), so they sit
+   *  outside Sit % and Close % while still counting as an Appt. */
+  cancels: number;
   /** Cards with no result yet — internal tally only: NOT in appts and never
    *  displayed (owner, 2026-07-30). */
   unmarked: number;
   /** Office Appointments (job visit / upsale / check pickup) — not leads. */
   officeAppts: number;
-  /** Demos (PM + Sold + WCC + FTD) ÷ appts — appts are resulted-only by
-   *  construction (owner, 2026-07-30: unresulted cards don't count); null
-   *  until a resulted appt exists. */
+  /** Demos (PM + Sold + Reload) ÷ Appts (owner, 2026-07-30) — appts are
+   *  resulted-only by construction; null until a resulted appt exists. */
   sitPct: number | null;
-  /** Sold ÷ demos (Sold + PM + WCC + FTD) — cancels and turn-downs drag it
-   *  down; null until a demo exists. */
+  /** (Sold + Reload) ÷ demos (PM + Sold + Reload) — owner, 2026-07-30; null
+   *  until a demo exists. */
   closePct: number | null;
-  /** Reset ÷ Appts (owner, 2026-07-30: "Leads RS / Leads Issued") — share of
-   *  resulted leads that got reset; null until an appt exists. */
-  rsPct: number | null;
-  /** Reload ÷ Appts (owner, 2026-07-30) — share of resulted leads that were
-   *  reload sales; null until an appt exists. */
+  /** Reset ÷ Appts — null until an appt exists. */
+  resetPct: number | null;
+  /** Reload ÷ (Sold + Reload) (owner, 2026-07-30) — the share of sales that
+   *  were reloads, NOT a share of leads; null until a sale exists. */
   reloadPct: number | null;
-  /** No Demo ÷ Appts (owner, 2026-07-30: "No Demo / amount of leads") — share
-   *  of resulted leads where no demo ran; null until an appt exists. */
+  /** No Demo ÷ Appts — null until an appt exists. */
   noDemoPct: number | null;
+  /** No Show ÷ Appts — completes the BO split alongside No Demo %. */
+  noShowPct: number | null;
+  /** Cancels ÷ (Sold + Reload + Cancels) — share of written sales that later
+   *  died on the Sales Report; null until a sale was written. */
+  cancelPct: number | null;
+  /** Appts ÷ (Sold + Reload) (owner, 2026-07-30) — leads needed per sale,
+   *  rendered as a plain number (4.5), not a percentage; null until a sale
+   *  exists, since dividing by zero sales is meaningless rather than zero. */
+  leadsToSale: number | null;
   /** Sale volume: split evenly across the card's reps; includes office-appt upsales. */
   revenue: number;
 };
@@ -179,23 +187,23 @@ const emptyStats = (): Omit<RepStats, "rep"> => ({
   pm: 0,
   sold: 0,
   reloads: 0,
-  wcc: 0,
-  ftd: 0,
-  ol: 0,
+  cancels: 0,
   unmarked: 0,
   officeAppts: 0,
   sitPct: null,
   closePct: null,
-  rsPct: null,
+  resetPct: null,
   reloadPct: null,
   noDemoPct: null,
+  noShowPct: null,
+  cancelPct: null,
+  leadsToSale: null,
   revenue: 0,
 });
 
 const OUTCOME_KEY: Record<Exclude<CardOutcome, "unmarked">, keyof KombatTotals> = {
   sold: "sold",
-  cancelled: "wcc",
-  ftd: "ftd",
+  cancelled: "cancels",
   pm: "pm",
   reset: "reset",
   no_show: "noShow",
@@ -226,9 +234,11 @@ export function aggregateCloseKombat(cards: BlockCard[]): {
       // A reload is its own result, not a kind of Sold (owner, 2026-07-30).
       if (outcome === "sold" && isReload(c)) s.reloads += 1;
       else s[OUTCOME_KEY[outcome]] += 1;
-      if (marked(c.ol)) s.ol += 1;
     }
-    // Money is money — an office-appt upsale still pays.
+    // Money is money — an office-appt upsale still pays. A blank Sale Price
+    // on the Block board is $0, full stop (owner, 2026-07-30): never infer a
+    // price from another source, never guess. Nothing else may write
+    // sale_price either — see the Sales-Report pass in block-cards.server.ts.
     if (outcome === "sold") s.revenue += (c.sale_price ?? 0) * revenueShare;
   };
 
@@ -236,7 +246,7 @@ export function aggregateCloseKombat(cards: BlockCard[]): {
     // CTC / Not Issued / Add Rep never reach the stats at all — UNLESS the
     // monthly report stamped the card dead (Cancelled/CTC/FTD): the office
     // often flips a dead sale's Iss cell to "CTC" too, and the report proves
-    // an issued lead ran and sold, so it must count as an appt + WCC demo.
+    // an issued lead ran and sold, so it must count as an appt.
     if (isExcludedCard(card) && !isCancelLabel(card.wcc) && !isFtdLabel(card.wcc)) continue;
     // Totals count every card exactly once — reps.length never inflates them.
     bump(totals, card, 1);
@@ -252,14 +262,22 @@ export function aggregateCloseKombat(cards: BlockCard[]): {
     }
   }
 
+  /** Owner's formulas, 2026-07-30. A demo is PM + Sold + Reload: a cancelled
+   *  sale is deliberately NOT one, so it never lands in Sit % or Close %.
+   *  Every ratio is null (renders "—") rather than 0 when its denominator is
+   *  empty — "no sales yet" and "0%" are different claims. */
   const finalize = (s: Omit<RepStats, "rep">) => {
     const sales = s.sold + s.reloads;
-    const demos = sales + s.pm + s.wcc + s.ftd;
+    const demos = s.pm + sales;
+    const written = sales + s.cancels;
     s.sitPct = s.appts > 0 ? demos / s.appts : null;
     s.closePct = demos > 0 ? sales / demos : null;
-    s.rsPct = s.appts > 0 ? s.reset / s.appts : null;
-    s.reloadPct = s.appts > 0 ? s.reloads / s.appts : null;
+    s.resetPct = s.appts > 0 ? s.reset / s.appts : null;
     s.noDemoPct = s.appts > 0 ? s.noDemo / s.appts : null;
+    s.noShowPct = s.appts > 0 ? s.noShow / s.appts : null;
+    s.reloadPct = sales > 0 ? s.reloads / sales : null;
+    s.cancelPct = written > 0 ? s.cancels / written : null;
+    s.leadsToSale = sales > 0 ? s.appts / sales : null;
     s.revenue = Math.round(s.revenue * 100) / 100;
   };
   finalize(totals);
