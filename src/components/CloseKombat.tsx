@@ -357,11 +357,12 @@ function CloseKombatInner() {
 
       {/* Company totals — computed from cards, never from summed rep rows.
           Appts = resulted cards only (owner, 2026-07-30 — unresulted cards
-          don't count anywhere), so Sold + PM + Reset + No Show + No Demo +
-          WCC + FTD always equals Appts. */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-3">
+          don't count anywhere), so Sold + Reload + PM + Reset + No Show +
+          No Demo + WCC + FTD always equals Appts. */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-7 gap-3">
         <KombatTile label="Appts" value={fmtCount(totals.appts)} accent="neon" />
         <KombatTile label="Sold" value={fmtCount(totals.sold)} accent="victory" />
+        <KombatTile label="Reload" value={fmtCount(totals.reloads)} accent="victory" />
         <KombatTile label="PM" value={fmtCount(totals.pm)} accent="warning" />
         <KombatTile label="Reset" value={fmtCount(totals.reset)} accent="accent" />
         <KombatTile label="No Show" value={fmtCount(totals.noShow)} accent="destructive" />
@@ -371,6 +372,7 @@ function CloseKombatInner() {
         <KombatTile label="Sit %" value={fmtPct(totals.sitPct)} accent="accent" />
         <KombatTile label="Close %" value={fmtPct(totals.closePct)} accent="neon" />
         <KombatTile label="RS %" value={fmtPct(totals.rsPct)} accent="accent" />
+        <KombatTile label="Reload %" value={fmtPct(totals.reloadPct)} accent="victory" />
         <KombatTile label="Revenue" value={fmtMoney(totals.revenue)} accent="victory" />
       </div>
 
@@ -412,13 +414,14 @@ function CloseKombatInner() {
                     <th className="text-right py-2 px-2 font-normal">Reset</th>
                     <th className="text-right py-2 px-2 font-normal">PM</th>
                     <th className="text-right py-2 px-2 font-normal">Sold</th>
-                    <th className="text-right py-2 px-2 font-normal">Reloads</th>
+                    <th className="text-right py-2 px-2 font-normal">Reload</th>
                     <th className="text-right py-2 px-2 font-normal">WCC</th>
                     <th className="text-right py-2 px-2 font-normal">FTD</th>
                     <th className="text-right py-2 px-2 font-normal">OL</th>
                     <th className="text-right py-2 px-2 font-normal">Sit %</th>
                     <th className="text-right py-2 px-2 font-normal">Close %</th>
                     <th className="text-right py-2 px-2 font-normal">RS %</th>
+                    <th className="text-right py-2 px-2 font-normal">Reload %</th>
                     <th className="text-right py-2 pl-2 font-normal">Revenue</th>
                   </tr>
                 </thead>
@@ -431,7 +434,7 @@ function CloseKombatInner() {
                       }`}
                     >
                       <td className="py-2.5 pr-2 text-muted-foreground tabular-nums">
-                        {i === 0 && r.sold > 0 ? (
+                        {i === 0 && r.sold + r.reloads > 0 ? (
                           <Crown className="w-4 h-4 text-warning inline" aria-label="Champion" />
                         ) : (
                           i + 1
@@ -478,6 +481,9 @@ function CloseKombatInner() {
                       <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-accent">
                         {fmtPct(r.rsPct)}
                       </td>
+                      <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-victory">
+                        {fmtPct(r.reloadPct)}
+                      </td>
                       <td className="py-2.5 pl-2 text-right tabular-nums text-victory">
                         {fmtMoney(r.revenue)}
                       </td>
@@ -519,6 +525,9 @@ function CloseKombatInner() {
                     <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
                       {fmtPct(totals.rsPct)}
                     </td>
+                    <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                      {fmtPct(totals.reloadPct)}
+                    </td>
                     <td className="py-2.5 pl-2 text-right tabular-nums">
                       {fmtMoney(totals.revenue)}
                     </td>
@@ -537,7 +546,7 @@ function CloseKombatInner() {
                   <MobileCardHeader
                     left={
                       <span className="flex items-center gap-1.5">
-                        {i === 0 && r.sold > 0 ? (
+                        {i === 0 && r.sold + r.reloads > 0 ? (
                           <Crown className="w-3.5 h-3.5 text-warning shrink-0" />
                         ) : (
                           <span className="text-muted-foreground tabular-nums">{i + 1}.</span>
@@ -571,15 +580,17 @@ function CloseKombatInner() {
         Columns mirror the Monday.com Block boards — Iss = issued lead · BO splits into No Show / No
         Demo · RS = Reset · Sale = Sold. Office Appointments (job visit, upsale, check pickup) are
         not leads and aren&apos;t tracked here, though upsale money still counts in Revenue. CTC,
-        Not Issued, and Add Rep cards don&apos;t count anywhere. Sold includes Reloads — the Reloads
-        column shows how many of them were reloads. WCC = sale later marked Cancelled or CTC on the
-        monthly Sales Report; FTD = financial turn down — both leave Sold and Revenue but still
-        count as demos (they update when a sync runs). One result per card (Sold &gt; PM &gt; Reset
-        &gt; BO). An appointment with nothing marked on the board yet doesn&apos;t count anywhere —
-        it joins Appts and the stats the moment a result lands, so Sold + PM + Reset + No Show + No
-        Demo + WCC + FTD always adds up to Appts. On a shared card each rep gets full result credit
-        but the sale volume splits evenly; the All-cards row counts each card once. Sit % = demos ÷
-        Appts · Close % = Sold ÷ demos · RS % = Reset ÷ Appts, where demos = PM + Sold + WCC + FTD.
+        Not Issued, and Add Rep cards don&apos;t count anywhere. Sold and Reload are separate
+        results — a Reload is still a sale, so both count toward Close % and Revenue. WCC = sale
+        later marked Cancelled or CTC on the monthly Sales Report; FTD = financial turn down — both
+        leave Sold and Revenue but still count as demos (they update when a sync runs). One result
+        per card (Sold &gt; PM &gt; Reset &gt; BO). An appointment with nothing marked on the board
+        yet doesn&apos;t count anywhere — it joins Appts and the stats the moment a result lands, so
+        Sold + Reload + PM + Reset + No Show + No Demo + WCC + FTD always adds up to Appts. On a
+        shared card each rep gets full result credit but the sale volume splits evenly; the
+        All-cards row counts each card once. Sit % = demos ÷ Appts · Close % = (Sold + Reload) ÷
+        demos · RS % = Reset ÷ Appts · Reload % = Reload ÷ Appts, where demos = Sold + Reload + PM +
+        WCC + FTD.
       </p>
     </div>
   );
@@ -595,13 +606,14 @@ function StatLine({ s }: { s: KombatTotals }) {
     { label: "Reset", value: fmtCount(s.reset), className: "text-accent" },
     { label: "PM", value: fmtCount(s.pm), className: "text-warning" },
     { label: "Sold", value: fmtCount(s.sold), className: "text-victory" },
-    { label: "Reloads", value: fmtCount(s.reloads), className: "text-victory" },
+    { label: "Reload", value: fmtCount(s.reloads), className: "text-victory" },
     { label: "WCC", value: fmtCount(s.wcc), className: "text-destructive" },
     { label: "FTD", value: fmtCount(s.ftd), className: "text-destructive" },
     { label: "OL", value: fmtCount(s.ol), className: "text-muted-foreground" },
     { label: "Sit", value: fmtPct(s.sitPct) },
     { label: "Close", value: fmtPct(s.closePct) },
     { label: "RS %", value: fmtPct(s.rsPct), className: "text-accent" },
+    { label: "Reload %", value: fmtPct(s.reloadPct), className: "text-victory" },
   ];
   return (
     <div className="flex items-baseline gap-x-3 overflow-x-auto scrollbar-hide whitespace-nowrap text-sm tabular-nums">
@@ -618,7 +630,7 @@ function StatLine({ s }: { s: KombatTotals }) {
 }
 
 function FlawlessBadge({ r }: { r: RepStats }) {
-  if (r.sold < 1 || r.closePct !== 1) return null;
+  if (r.sold + r.reloads < 1 || r.closePct !== 1) return null;
   return (
     <span className="ml-1.5 inline-block align-middle rounded border border-victory/40 px-1.5 py-0.5 text-[9px] font-display uppercase tracking-widest text-victory whitespace-nowrap">
       Flawless Victory
