@@ -576,8 +576,9 @@ function CloseKombatInner() {
         count as demos (they update when a sync runs). One result per card (Sold &gt; PM &gt; Reset
         &gt; BO); Open = no result on the board yet, so Sold + PM + Reset + No Show + No Demo + WCC
         + FTD + Open always adds up to Appts. On a shared card each rep gets full result credit but
-        the sale volume splits evenly; the All-cards row counts each card once. Sit % = demos ÷
-        Appts · Close % = Sold ÷ demos, where demos = PM + Sold + WCC + FTD.
+        the sale volume splits evenly; the All-cards row counts each card once. Open cards
+        don&apos;t count against the percentages until they&apos;re resulted: Sit % = demos ÷
+        resulted appts (Appts − Open) · Close % = Sold ÷ demos, where demos = PM + Sold + WCC + FTD.
       </p>
     </div>
   );
