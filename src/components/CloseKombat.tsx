@@ -381,7 +381,12 @@ function CloseKombatInner() {
           sub={{ label: "RS %", value: fmtPct(totals.rsPct), accent: "accent" }}
         />
         <KombatTile label="No Show" value={fmtCount(totals.noShow)} accent="destructive" />
-        <KombatTile label="No Demo" value={fmtCount(totals.noDemo)} accent="destructive" />
+        <KombatTile
+          label="No Demo"
+          value={fmtCount(totals.noDemo)}
+          accent="destructive"
+          sub={{ label: "ND %", value: fmtPct(totals.noDemoPct), accent: "destructive" }}
+        />
         <KombatTile label="WCC" value={fmtCount(totals.wcc)} accent="destructive" />
         <KombatTile label="FTD" value={fmtCount(totals.ftd)} accent="destructive" />
         <KombatTile label="Sit %" value={fmtPct(totals.sitPct)} accent="accent" />
@@ -601,8 +606,8 @@ function CloseKombatInner() {
         Sold + Reload + PM + Reset + No Show + No Demo + WCC + FTD always adds up to Appts. On a
         shared card each rep gets full result credit but the sale volume splits evenly; the
         All-cards row counts each card once. Sit % = demos ÷ Appts · Close % = (Sold + Reload) ÷
-        demos · RS % = Reset ÷ Appts · Reload % = Reload ÷ Appts, where demos = Sold + Reload + PM +
-        WCC + FTD.
+        demos · RS % = Reset ÷ Appts · Reload % = Reload ÷ Appts · ND % = No Demo ÷ Appts, where
+        demos = Sold + Reload + PM + WCC + FTD.
       </p>
     </div>
   );

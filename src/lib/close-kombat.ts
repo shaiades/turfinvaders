@@ -162,6 +162,9 @@ export type RepStats = {
   /** Reload ÷ Appts (owner, 2026-07-30) — share of resulted leads that were
    *  reload sales; null until an appt exists. */
   reloadPct: number | null;
+  /** No Demo ÷ Appts (owner, 2026-07-30: "No Demo / amount of leads") — share
+   *  of resulted leads where no demo ran; null until an appt exists. */
+  noDemoPct: number | null;
   /** Sale volume: split evenly across the card's reps; includes office-appt upsales. */
   revenue: number;
 };
@@ -185,6 +188,7 @@ const emptyStats = (): Omit<RepStats, "rep"> => ({
   closePct: null,
   rsPct: null,
   reloadPct: null,
+  noDemoPct: null,
   revenue: 0,
 });
 
@@ -255,6 +259,7 @@ export function aggregateCloseKombat(cards: BlockCard[]): {
     s.closePct = demos > 0 ? sales / demos : null;
     s.rsPct = s.appts > 0 ? s.reset / s.appts : null;
     s.reloadPct = s.appts > 0 ? s.reloads / s.appts : null;
+    s.noDemoPct = s.appts > 0 ? s.noDemo / s.appts : null;
     s.revenue = Math.round(s.revenue * 100) / 100;
   };
   finalize(totals);
