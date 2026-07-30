@@ -444,13 +444,18 @@ export function normalizeCustomer(s: string): string {
     .replace(/\s+/g, " ");
 }
 
+/** Words that carry no customer identity: joiners plus the canvass-side
+ *  annotations the office tacks onto card names ("RJ Smith sho",
+ *  "Robbie Montgomery (Widow)") — the report never writes them. */
+const NOISE_TOKENS = new Set(["and", "&", "sho", "widow", "widowed", "widower"]);
+
 /** Order-insensitive name tokens: the report writes "Muilwyk, Wolfgang &
- *  Trudi" while the Block card says "Wolfgang and Trudi Muilwyk". Joiner
+ *  Trudi" while the Block card says "Wolfgang and Trudi Muilwyk". Noise
  *  words drop; the rest sort. */
 export function customerTokens(s: string): string[] {
   return normalizeCustomer(s)
     .split(" ")
-    .filter((w) => w !== "" && w !== "and" && w !== "&")
+    .filter((w) => w !== "" && !NOISE_TOKENS.has(w))
     .sort();
 }
 
@@ -521,19 +526,23 @@ export function bestSoldMatch(
   if (cands.length === 0) {
     // Order-insensitive tiers: "Muilwyk, Wolfgang & Trudi" (report) is
     // "Wolfgang and Trudi Muilwyk" (card). Exact sorted-token key first,
-    // then subset (≥3 shared tokens) for extra suffix words like "sho".
-    const tokens = reportNorm.split(" ").filter((w) => w !== "and" && w !== "&");
-    tokens.sort();
+    // then full containment of the shorter name — the report shortens
+    // "Norma(Daughter)& Jesus(Dad)&Rachel(mom) Miranda" to "Miranda, Norma",
+    // so every one of the shorter side's tokens (≥2 of them, at least one
+    // ≥4 chars as a surname-ish anchor) must appear in the longer side.
+    const tokens = customerTokens(reportNorm);
     const tkey = tokens.join(" ");
     cands = pool.filter((c) => c._tkey !== "" && c._tkey === tkey);
-    if (cands.length === 0 && tokens.length >= 3) {
+    if (cands.length === 0 && tokens.length >= 2) {
       const tset = new Set(tokens);
       cands = pool.filter((c) => {
-        const ctokens = c._tkey.split(" ");
-        if (ctokens.length < 3) return false;
+        const ctokens = c._tkey.split(" ").filter((t) => t !== "");
+        if (ctokens.length < 2) return false;
         const [small, big] =
           ctokens.length <= tokens.length ? [ctokens, tset] : [tokens, new Set(ctokens)];
-        return small.length >= 3 && small.every((t) => big.has(t));
+        return (
+          small.length >= 2 && small.some((t) => t.length >= 4) && small.every((t) => big.has(t))
+        );
       });
     }
   }
@@ -547,18 +556,24 @@ export function bestSoldMatch(
   });
 }
 
-/** A label that kills the sale's volume: Cancelled, or FTD (financial turn
- *  down — owner, 2026-07-30). Keep in sync with the label tests in
- *  src/lib/close-kombat.ts. */
+/** A label that kills the sale's volume: Cancelled, CTC (same bucket as a
+ *  cancel — owner, 2026-07-30), or FTD (financial turn down — owner,
+ *  2026-07-30). Keep in sync with the label tests in src/lib/close-kombat.ts. */
 export function isDeadLabel(v: string | null | undefined): boolean {
-  return /cancel/i.test(v ?? "") || /\bftd\b/i.test(v ?? "") || /financial\s*turn/i.test(v ?? "");
+  return (
+    /cancel/i.test(v ?? "") ||
+    /\bctc\b/i.test(v ?? "") ||
+    /\bftd\b/i.test(v ?? "") ||
+    /financial\s*turn/i.test(v ?? "")
+  );
 }
 
 /** Dead-label-wins merge for one card's matched report-row labels: a cancel
- *  sticks first, then an FTD, otherwise the first real label; otherwise
- *  null (heals a stale stamp when every matching row went back to unset). */
+ *  (Cancelled or CTC — same bucket) sticks first, then an FTD, otherwise the
+ *  first real label; otherwise null (heals a stale stamp when every matching
+ *  row went back to unset). */
 export function chooseWcc(values: Array<string | null>): string | null {
-  const cancel = values.find((v) => /cancel/i.test(v ?? ""));
+  const cancel = values.find((v) => /cancel/i.test(v ?? "") || /\bctc\b/i.test(v ?? ""));
   if (cancel) return cancel;
   const ftd = values.find((v) => /\bftd\b/i.test(v ?? "") || /financial\s*turn/i.test(v ?? ""));
   if (ftd) return ftd;
