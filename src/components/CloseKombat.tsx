@@ -355,12 +355,19 @@ function CloseKombatInner() {
         </span>
       </div>
 
-      {/* Company totals — computed from cards, never from summed rep rows */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-7 gap-3">
+      {/* Company totals — computed from cards, never from summed rep rows.
+          Every outcome bucket shows, so Sold + PM + Reset + No Show + No Demo
+          + WCC + FTD + Open always equals Appts. */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-3">
         <KombatTile label="Appts" value={fmtCount(totals.appts)} accent="neon" />
         <KombatTile label="Sold" value={fmtCount(totals.sold)} accent="victory" />
         <KombatTile label="PM" value={fmtCount(totals.pm)} accent="warning" />
         <KombatTile label="Reset" value={fmtCount(totals.reset)} accent="accent" />
+        <KombatTile label="No Show" value={fmtCount(totals.noShow)} accent="destructive" />
+        <KombatTile label="No Demo" value={fmtCount(totals.noDemo)} accent="destructive" />
+        <KombatTile label="WCC" value={fmtCount(totals.wcc)} accent="destructive" />
+        <KombatTile label="FTD" value={fmtCount(totals.ftd)} accent="destructive" />
+        <KombatTile label="Open" value={fmtCount(totals.unmarked)} accent="muted" />
         <KombatTile label="Sit %" value={fmtPct(totals.sitPct)} accent="accent" />
         <KombatTile label="Close %" value={fmtPct(totals.closePct)} accent="neon" />
         <KombatTile label="Revenue" value={fmtMoney(totals.revenue)} accent="victory" />
@@ -407,6 +414,7 @@ function CloseKombatInner() {
                     <th className="text-right py-2 px-2 font-normal">Reloads</th>
                     <th className="text-right py-2 px-2 font-normal">WCC</th>
                     <th className="text-right py-2 px-2 font-normal">FTD</th>
+                    <th className="text-right py-2 px-2 font-normal">Open</th>
                     <th className="text-right py-2 px-2 font-normal">OL</th>
                     <th className="text-right py-2 px-2 font-normal">Sit %</th>
                     <th className="text-right py-2 px-2 font-normal">Close %</th>
@@ -458,6 +466,9 @@ function CloseKombatInner() {
                         {fmtCount(r.ftd)}
                       </td>
                       <td className="py-2.5 px-2 text-right tabular-nums text-muted-foreground">
+                        {fmtCount(r.unmarked)}
+                      </td>
+                      <td className="py-2.5 px-2 text-right tabular-nums text-muted-foreground">
                         {fmtCount(r.ol)}
                       </td>
                       <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
@@ -497,6 +508,9 @@ function CloseKombatInner() {
                     </td>
                     <td className="py-2.5 px-2 text-right tabular-nums">{fmtCount(totals.wcc)}</td>
                     <td className="py-2.5 px-2 text-right tabular-nums">{fmtCount(totals.ftd)}</td>
+                    <td className="py-2.5 px-2 text-right tabular-nums">
+                      {fmtCount(totals.unmarked)}
+                    </td>
                     <td className="py-2.5 px-2 text-right tabular-nums">{fmtCount(totals.ol)}</td>
                     <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
                       {fmtPct(totals.sitPct)}
@@ -560,15 +574,10 @@ function CloseKombatInner() {
         column shows how many of them were reloads. WCC = sale later marked Cancelled or CTC on the
         monthly Sales Report; FTD = financial turn down — both leave Sold and Revenue but still
         count as demos (they update when a sync runs). One result per card (Sold &gt; PM &gt; Reset
-        &gt; BO). On a shared card each rep gets full result credit but the sale volume splits
-        evenly; the All-cards row counts each card once. Sit % = demos ÷ Appts · Close % = Sold ÷
-        demos, where demos = PM + Sold + WCC.
-        {range.isLive && totals.unmarked > 0 && (
-          <>
-            {" "}
-            {fmtCount(totals.unmarked)} appointment{totals.unmarked === 1 ? "" : "s"} still open.
-          </>
-        )}
+        &gt; BO); Open = no result on the board yet, so Sold + PM + Reset + No Show + No Demo + WCC
+        + FTD + Open always adds up to Appts. On a shared card each rep gets full result credit but
+        the sale volume splits evenly; the All-cards row counts each card once. Sit % = demos ÷
+        Appts · Close % = Sold ÷ demos, where demos = PM + Sold + WCC + FTD.
       </p>
     </div>
   );
@@ -587,6 +596,7 @@ function StatLine({ s }: { s: KombatTotals }) {
     { label: "Reloads", value: fmtCount(s.reloads), className: "text-victory" },
     { label: "WCC", value: fmtCount(s.wcc), className: "text-destructive" },
     { label: "FTD", value: fmtCount(s.ftd), className: "text-destructive" },
+    { label: "Open", value: fmtCount(s.unmarked), className: "text-muted-foreground" },
     { label: "OL", value: fmtCount(s.ol), className: "text-muted-foreground" },
     { label: "Sit", value: fmtPct(s.sitPct) },
     { label: "Close", value: fmtPct(s.closePct) },
@@ -621,13 +631,15 @@ function KombatTile({
 }: {
   label: string;
   value: number | string;
-  accent: "neon" | "victory" | "accent" | "warning";
+  accent: "neon" | "victory" | "accent" | "warning" | "destructive" | "muted";
 }) {
   const color = {
     neon: "text-neon",
     victory: "text-victory",
     accent: "text-accent",
     warning: "text-warning",
+    destructive: "text-destructive",
+    muted: "text-muted-foreground",
   }[accent];
   return (
     <div className="arcade-card p-4">

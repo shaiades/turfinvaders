@@ -5,7 +5,9 @@ import tailwindcss from "@tailwindcss/vite";
 import tsConfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig(async ({ command }) => ({
-  server: { host: "::", port: 8080 },
+  // PORT lets a second checkout (e.g. a git worktree) run its own dev server
+  // while the main one holds 8080.
+  server: { host: "::", port: Number(process.env.PORT) || 8080 },
   resolve: {
     dedupe: [
       "react",
