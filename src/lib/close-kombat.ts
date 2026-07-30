@@ -31,6 +31,10 @@
 //   Appts, not in the percentages, and it isn't displayed. A card enters the
 //   stats the moment the board carries a result; until then it's only
 //   tracked internally (unmarked).
+// - Reload (owner, 2026-07-30, supersedes "reloads count inside Sold"):
+//   Reload is its own result column next to Sold. Both are sales — Close % =
+//   (Sold + Reload) ÷ demos and revenue counts both — but the Sold number no
+//   longer includes reloads. Reload % = Reload ÷ Appts.
 //
 // Pure module: no imports, unit-testable like funnel.ts.
 
@@ -95,8 +99,9 @@ export function cardOutcome(c: Pick<BlockCard, "bo" | "rs" | "pm" | "sale" | "wc
   return "unmarked";
 }
 
-/** An active Reload sale (owner, 2026-07-29: reloads count inside Sold but
- *  get their own tally too). Cancelled reloads are WCC, not reloads. */
+/** An active Reload sale (owner, 2026-07-30: Reload is its own result,
+ *  separate from Sold — both count as sales for Close % and Revenue).
+ *  Cancelled reloads are WCC, not reloads. */
 export function isReload(c: Pick<BlockCard, "sale" | "wcc">): boolean {
   return (
     cardOutcome({ bo: null, rs: null, pm: null, sale: c.sale, wcc: c.wcc }) === "sold" &&
@@ -129,8 +134,8 @@ export type RepStats = {
   reset: number;
   pm: number;
   sold: number;
-  /** Reload sales — counted INSIDE sold, tallied separately (owner,
-   *  2026-07-29). */
+  /** Reload sales — their own result, NOT inside sold (owner, 2026-07-30);
+   *  still a sale for Close % and Revenue. */
   reloads: number;
   /** Sales later cancelled on the monthly report's WCC column — out of Sold
    *  and Revenue, still a demo that ran. */
@@ -154,6 +159,9 @@ export type RepStats = {
   /** Reset ÷ Appts (owner, 2026-07-30: "Leads RS / Leads Issued") — share of
    *  resulted leads that got reset; null until an appt exists. */
   rsPct: number | null;
+  /** Reload ÷ Appts (owner, 2026-07-30) — share of resulted leads that were
+   *  reload sales; null until an appt exists. */
+  reloadPct: number | null;
   /** Sale volume: split evenly across the card's reps; includes office-appt upsales. */
   revenue: number;
 };
@@ -176,6 +184,7 @@ const emptyStats = (): Omit<RepStats, "rep"> => ({
   sitPct: null,
   closePct: null,
   rsPct: null,
+  reloadPct: null,
   revenue: 0,
 });
 
@@ -210,8 +219,9 @@ export function aggregateCloseKombat(cards: BlockCard[]): {
       s.unmarked += 1;
     } else {
       s.appts += 1;
-      s[OUTCOME_KEY[outcome]] += 1;
-      if (isReload(c)) s.reloads += 1;
+      // A reload is its own result, not a kind of Sold (owner, 2026-07-30).
+      if (outcome === "sold" && isReload(c)) s.reloads += 1;
+      else s[OUTCOME_KEY[outcome]] += 1;
       if (marked(c.ol)) s.ol += 1;
     }
     // Money is money — an office-appt upsale still pays.
@@ -239,10 +249,12 @@ export function aggregateCloseKombat(cards: BlockCard[]): {
   }
 
   const finalize = (s: Omit<RepStats, "rep">) => {
-    const demos = s.sold + s.pm + s.wcc + s.ftd;
+    const sales = s.sold + s.reloads;
+    const demos = sales + s.pm + s.wcc + s.ftd;
     s.sitPct = s.appts > 0 ? demos / s.appts : null;
-    s.closePct = demos > 0 ? s.sold / demos : null;
+    s.closePct = demos > 0 ? sales / demos : null;
     s.rsPct = s.appts > 0 ? s.reset / s.appts : null;
+    s.reloadPct = s.appts > 0 ? s.reloads / s.appts : null;
     s.revenue = Math.round(s.revenue * 100) / 100;
   };
   finalize(totals);
@@ -252,9 +264,14 @@ export function aggregateCloseKombat(cards: BlockCard[]): {
   // otherwise display nothing (office appts themselves aren't rendered).
   const reps = [...byRep.values()].filter((r) => r.appts > 0 || r.revenue > 0);
   for (const r of reps) finalize(r);
+  // Rank by total sales (Sold + Reload) so the split doesn't reshuffle the
+  // bracket — a reload win is still a win.
   reps.sort(
     (a, b) =>
-      b.sold - a.sold || b.revenue - a.revenue || b.appts - a.appts || a.rep.localeCompare(b.rep),
+      b.sold + b.reloads - (a.sold + a.reloads) ||
+      b.revenue - a.revenue ||
+      b.appts - a.appts ||
+      a.rep.localeCompare(b.rep),
   );
   return { reps, totals };
 }
