@@ -189,7 +189,9 @@ function CloseKombatInner() {
       }
       const cancels = res.wcc.reports.reduce((s, r) => s + r.cancelled, 0);
       if (cancels > 0) {
-        toast.info(`${cancels} cancelled/FTD sale${cancels === 1 ? "" : "s"} on the Sales Reports`);
+        toast.info(
+          `${cancels} cancelled/CTC/FTD sale${cancels === 1 ? "" : "s"} on the Sales Reports`,
+        );
       }
       if (res.wcc.errors.length > 0) {
         toast.warning(`WCC pass: ${res.wcc.errors.length} report board(s) failed — see logs`);
@@ -555,12 +557,12 @@ function CloseKombatInner() {
         Demo · RS = Reset · Sale = Sold. Office Appointments (job visit, upsale, check pickup) are
         not leads and aren&apos;t tracked here, though upsale money still counts in Revenue. CTC,
         Not Issued, and Add Rep cards don&apos;t count anywhere. Sold includes Reloads — the Reloads
-        column shows how many of them were reloads. WCC = sale later cancelled on the monthly Sales
-        Report; FTD = financial turn down — both leave Sold and Revenue but still count as demos
-        (they update when a sync runs). One result per card (Sold &gt; PM &gt; Reset &gt; BO). On a
-        shared card each rep gets full result credit but the sale volume splits evenly; the
-        All-cards row counts each card once. Sit % = demos ÷ Appts · Close % = Sold ÷ demos, where
-        demos = PM + Sold + WCC.
+        column shows how many of them were reloads. WCC = sale later marked Cancelled or CTC on the
+        monthly Sales Report; FTD = financial turn down — both leave Sold and Revenue but still
+        count as demos (they update when a sync runs). One result per card (Sold &gt; PM &gt; Reset
+        &gt; BO). On a shared card each rep gets full result credit but the sale volume splits
+        evenly; the All-cards row counts each card once. Sit % = demos ÷ Appts · Close % = Sold ÷
+        demos, where demos = PM + Sold + WCC.
         {range.isLive && totals.unmarked > 0 && (
           <>
             {" "}

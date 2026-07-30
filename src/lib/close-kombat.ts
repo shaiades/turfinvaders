@@ -23,6 +23,9 @@
 // - FTD (owner, 2026-07-30): WCC label "FTD" = financial turn down —
 //   treated exactly like a cancel (no volume, still a demo) but tallied in
 //   its own FTD column.
+// - CTC (owner, 2026-07-30): WCC label "CTC" is the same as a cancel — it
+//   folds into the WCC column: volume removed, still a demo for Sit %, a
+//   miss for Close %.
 //
 // Pure module: no imports, unit-testable like funnel.ts.
 
@@ -55,9 +58,11 @@ export const SOLD_VALUES = ["sold", "reload", "upsell", "sale"] as const;
 export type CardOutcome =
   "sold" | "cancelled" | "ftd" | "pm" | "reset" | "no_show" | "no_demo" | "unmarked";
 
-/** WCC label tests — "Cancelled" and "FTD" (financial turn down) both kill
- *  the sale's volume; each gets its own column (owner, 2026-07-30). */
-const isCancelLabel = (v: string | null | undefined): boolean => /cancel/i.test(v ?? "");
+/** WCC label tests — "Cancelled"/"CTC" and "FTD" (financial turn down) all
+ *  kill the sale's volume; CTC counts inside the WCC column while FTD gets
+ *  its own (owner, 2026-07-30). */
+const isCancelLabel = (v: string | null | undefined): boolean =>
+  /cancel/i.test(v ?? "") || /\bctc\b/i.test(v ?? "");
 const isFtdLabel = (v: string | null | undefined): boolean =>
   /\bftd\b/i.test(v ?? "") || /financial\s*turn/i.test(v ?? "");
 
@@ -68,8 +73,8 @@ const marked = (v: string | null | undefined): boolean => {
   return t !== "" && t !== "none";
 };
 
-/** ONE outcome per card: Cancelled > Sold > PM > Reset > BO. A WCC cancel
- *  wins even when the card's Sale cell is empty — when a sale cancels the
+/** ONE outcome per card: Cancelled/CTC > FTD > Sold > PM > Reset > BO. A WCC
+ *  cancel wins even when the card's Sale cell is empty — when a sale cancels the
  *  office usually reverts the Block board's Sale column too, but the Sales
  *  Report row proves the sale happened and died. The BO column's own label
  *  splits No Show vs No Demo ("No Show" text → no_show, anything else
@@ -199,8 +204,11 @@ export function aggregateCloseKombat(cards: BlockCard[]): {
   };
 
   for (const card of cards) {
-    // CTC / Not Issued / Add Rep never reach the stats at all.
-    if (isExcludedCard(card)) continue;
+    // CTC / Not Issued / Add Rep never reach the stats at all — UNLESS the
+    // monthly report stamped the card dead (Cancelled/CTC/FTD): the office
+    // often flips a dead sale's Iss cell to "CTC" too, and the report proves
+    // an issued lead ran and sold, so it must count as an appt + WCC demo.
+    if (isExcludedCard(card) && !isCancelLabel(card.wcc) && !isFtdLabel(card.wcc)) continue;
     // Totals count every card exactly once — reps.length never inflates them.
     bump(totals, card, 1);
     const names = card.reps.map((r) => r.trim()).filter(Boolean);
