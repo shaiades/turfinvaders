@@ -20,6 +20,9 @@
 //   monthly Sales Report's WCC column leaves Sold and Revenue and moves to
 //   its own WCC bucket. The demo still happened, so it stays in the Sit %
 //   numerator and drags Close % down — net numbers, not gross.
+// - FTD (owner, 2026-07-30): WCC label "FTD" = financial turn down —
+//   treated exactly like a cancel (no volume, still a demo) but tallied in
+//   its own FTD column.
 //
 // Pure module: no imports, unit-testable like funnel.ts.
 
@@ -50,7 +53,13 @@ export type BlockCard = {
 export const SOLD_VALUES = ["sold", "reload", "upsell", "sale"] as const;
 
 export type CardOutcome =
-  "sold" | "cancelled" | "pm" | "reset" | "no_show" | "no_demo" | "unmarked";
+  "sold" | "cancelled" | "ftd" | "pm" | "reset" | "no_show" | "no_demo" | "unmarked";
+
+/** WCC label tests — "Cancelled" and "FTD" (financial turn down) both kill
+ *  the sale's volume; each gets its own column (owner, 2026-07-30). */
+const isCancelLabel = (v: string | null | undefined): boolean => /cancel/i.test(v ?? "");
+const isFtdLabel = (v: string | null | undefined): boolean =>
+  /\bftd\b/i.test(v ?? "") || /financial\s*turn/i.test(v ?? "");
 
 /** A cell counts only when it carries a real label — Monday hands back ""
  *  or the literal "None" for unset status cells depending on the column. */
@@ -66,7 +75,8 @@ const marked = (v: string | null | undefined): boolean => {
  *  splits No Show vs No Demo ("No Show" text → no_show, anything else
  *  marked → no_demo). Unmarked = the appointment hasn't resolved yet. */
 export function cardOutcome(c: Pick<BlockCard, "bo" | "rs" | "pm" | "sale" | "wcc">): CardOutcome {
-  if (/cancel/i.test(c.wcc ?? "")) return "cancelled";
+  if (isCancelLabel(c.wcc)) return "cancelled";
+  if (isFtdLabel(c.wcc)) return "ftd";
   const sale = (c.sale ?? "").trim().toLowerCase();
   if ((SOLD_VALUES as readonly string[]).includes(sale)) return "sold";
   if (marked(c.pm)) return "pm";
@@ -114,15 +124,19 @@ export type RepStats = {
   /** Sales later cancelled on the monthly report's WCC column — out of Sold
    *  and Revenue, still a demo that ran. */
   wcc: number;
+  /** Financial turn downs (WCC label "FTD") — same treatment as a cancel,
+   *  own tally (owner, 2026-07-30). */
+  ftd: number;
   ol: number;
   unmarked: number;
   /** Office Appointments (job visit / upsale / check pickup) — not leads. */
   officeAppts: number;
-  /** Demos (PM + Sold + WCC) ÷ Appts — share of issued leads where a demo
-   *  actually ran (owner, 2026-07-29: "sit rate"); null until an appt exists. */
+  /** Demos (PM + Sold + WCC + FTD) ÷ Appts — share of issued leads where a
+   *  demo actually ran (owner, 2026-07-29: "sit rate"); null until an appt
+   *  exists. */
   sitPct: number | null;
-  /** Sold ÷ demos (Sold + PM + WCC) — cancelled sales drag it down; null
-   *  until a demo exists. */
+  /** Sold ÷ demos (Sold + PM + WCC + FTD) — cancels and turn-downs drag it
+   *  down; null until a demo exists. */
   closePct: number | null;
   /** Sale volume: split evenly across the card's reps; includes office-appt upsales. */
   revenue: number;
@@ -139,6 +153,7 @@ const emptyStats = (): Omit<RepStats, "rep"> => ({
   sold: 0,
   reloads: 0,
   wcc: 0,
+  ftd: 0,
   ol: 0,
   unmarked: 0,
   officeAppts: 0,
@@ -150,6 +165,7 @@ const emptyStats = (): Omit<RepStats, "rep"> => ({
 const OUTCOME_KEY: Record<Exclude<CardOutcome, "unmarked">, keyof KombatTotals> = {
   sold: "sold",
   cancelled: "wcc",
+  ftd: "ftd",
   pm: "pm",
   reset: "reset",
   no_show: "noShow",
@@ -200,7 +216,7 @@ export function aggregateCloseKombat(cards: BlockCard[]): {
   }
 
   const finalize = (s: Omit<RepStats, "rep">) => {
-    const demos = s.sold + s.pm + s.wcc;
+    const demos = s.sold + s.pm + s.wcc + s.ftd;
     s.sitPct = s.appts > 0 ? demos / s.appts : null;
     s.closePct = demos > 0 ? s.sold / demos : null;
     s.revenue = Math.round(s.revenue * 100) / 100;
