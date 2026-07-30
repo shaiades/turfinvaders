@@ -26,6 +26,10 @@
 // - CTC (owner, 2026-07-30): WCC label "CTC" is the same as a cancel — it
 //   folds into the WCC column: volume removed, still a demo for Sit %, a
 //   miss for Close %.
+// - Open cards (owner, 2026-07-30): an appointment with no result marked yet
+//   doesn't count against the percentages — Sit % divides by resulted appts
+//   (appts − unmarked), not all appts. Close % was always resulted-only
+//   (Sold ÷ demos).
 //
 // Pure module: no imports, unit-testable like funnel.ts.
 
@@ -136,9 +140,10 @@ export type RepStats = {
   unmarked: number;
   /** Office Appointments (job visit / upsale / check pickup) — not leads. */
   officeAppts: number;
-  /** Demos (PM + Sold + WCC + FTD) ÷ Appts — share of issued leads where a
-   *  demo actually ran (owner, 2026-07-29: "sit rate"); null until an appt
-   *  exists. */
+  /** Demos (PM + Sold + WCC + FTD) ÷ resulted appts (appts − unmarked) —
+   *  share of RESULTED leads where a demo actually ran (owner, 2026-07-30:
+   *  Open cards don't count until they're marked); null until a resulted
+   *  appt exists. */
   sitPct: number | null;
   /** Sold ÷ demos (Sold + PM + WCC + FTD) — cancels and turn-downs drag it
    *  down; null until a demo exists. */
@@ -225,7 +230,8 @@ export function aggregateCloseKombat(cards: BlockCard[]): {
 
   const finalize = (s: Omit<RepStats, "rep">) => {
     const demos = s.sold + s.pm + s.wcc + s.ftd;
-    s.sitPct = s.appts > 0 ? demos / s.appts : null;
+    const resulted = s.appts - s.unmarked;
+    s.sitPct = resulted > 0 ? demos / resulted : null;
     s.closePct = demos > 0 ? s.sold / demos : null;
     s.revenue = Math.round(s.revenue * 100) / 100;
   };
