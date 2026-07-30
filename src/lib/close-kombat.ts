@@ -18,10 +18,11 @@
 //   "None" is never a result.
 // - Cancels, née WCC (owner, 2026-07-29, renamed 2026-07-30): a sale that
 //   later shows "Cancelled" in the monthly Sales Report's WCC column leaves
-//   Sold and Revenue and moves to its own Cancels bucket — net numbers, not
-//   gross. Owner, 2026-07-30: a cancel is NOT a demo — Sit % counts only
-//   PM + Sold, so a cancelled sale leaves the Sit % numerator and the
-//   Close % denominator entirely. It stays an Appt.
+//   Sold and Revenue — net numbers, not gross. Owner, 2026-07-30: the rep
+//   still SAT that demo, so a cancelled sale counts as a PM and keeps its
+//   sit ("5 PM + 2 sales, 1 cancels" reads as 6 PM + 1 sale, still 7 sits).
+//   The Cancels column is a tally that rides alongside the PM, not a bucket
+//   of its own, so results still sum to Appts and Close % takes the hit.
 // - FTD (owner, 2026-07-30, supersedes its own column): WCC label "FTD" =
 //   financial turn down. The demo ran and the money fell through, so it now
 //   counts as a PM — no separate FTD tally anywhere.
@@ -137,11 +138,13 @@ export type RepStats = {
   rep: string;
   /** RESULTED leads only — a card with nothing marked yet isn't an appt, and
    *  neither Office Appointments nor reloads count here (owner, 2026-07-30).
-   *  noShow + noDemo + reset + pm + sold + cancels always equals this. */
+   *  noShow + noDemo + reset + pm + sold always equals this. */
   appts: number;
   noShow: number;
   noDemo: number;
   reset: number;
+  /** Demos that didn't end in a kept sale — includes FTDs and cancelled
+   *  sales, since the rep sat those too (owner, 2026-07-30). */
   pm: number;
   sold: number;
   /** Reload sales — their own channel, NOT inside sold and NOT inside appts
@@ -150,8 +153,9 @@ export type RepStats = {
    *  Appt", which it almost always does. Money still counts in Revenue. */
   reloads: number;
   /** Sales later cancelled on the monthly report (Cancelled / CTC) — out of
-   *  Sold and Revenue, and NOT a demo (owner, 2026-07-30), so they sit
-   *  outside Sit % and Close % while still counting as an Appt. */
+   *  Sold and Revenue. A TALLY, not a bucket: each one is already counted in
+   *  `pm` (owner, 2026-07-30 — the demo ran), so never add this to the
+   *  result columns or Appts will double-count. */
   cancels: number;
   /** Cards with no result yet — internal tally only: NOT in appts and never
    *  displayed (owner, 2026-07-30). */
@@ -211,9 +215,12 @@ const emptyStats = (): Omit<RepStats, "rep"> => ({
   revenue: 0,
 });
 
+/** A cancelled sale lands in PM (owner, 2026-07-30): the rep sat the demo, so
+ *  it's still a sit — they just don't keep the sale. `cancels` is tallied
+ *  alongside in bump(), not instead, which is why "cancelled" maps to pm. */
 const OUTCOME_KEY: Record<Exclude<CardOutcome, "unmarked">, keyof KombatTotals> = {
   sold: "sold",
-  cancelled: "cancels",
+  cancelled: "pm",
   pm: "pm",
   reset: "reset",
   no_show: "noShow",
@@ -250,7 +257,13 @@ export function aggregateCloseKombat(cards: BlockCard[]): {
       s.unmarked += 1;
     } else {
       s.appts += 1;
+      // "cancelled" maps to pm here — the rep still sat the demo, so a
+      // cancelled sale is a sit they don't get to keep (owner, 2026-07-30:
+      // 5 PM + 2 sales with 1 cancel reads as 6 PM + 1 sale, still 7 sits).
       s[OUTCOME_KEY[outcome]] += 1;
+      // Tallied ALONGSIDE the PM, never instead of it, so Cancel % can still
+      // report how many written sales died.
+      if (outcome === "cancelled") s.cancels += 1;
     }
     // Money is money — an office-appt upsale still pays. A blank Sale Price
     // on the Block board is $0, full stop (owner, 2026-07-30): never infer a
@@ -279,14 +292,15 @@ export function aggregateCloseKombat(cards: BlockCard[]): {
     }
   }
 
-  /** Owner's formulas, 2026-07-30. A demo is PM + Sold + Reload: a cancelled
-   *  sale is deliberately NOT one, so it never lands in Sit % or Close %.
-   *  Every ratio is null (renders "—") rather than 0 when its denominator is
-   *  empty — "no sales yet" and "0%" are different claims. */
+  /** Owner's formulas, 2026-07-30. Every ratio is null (renders "—") rather
+   *  than 0 when its denominator is empty — "no sales yet" and "0%" are
+   *  different claims. */
   const finalize = (s: Omit<RepStats, "rep">) => {
-    // Lead funnel: demos and sales that came from an issued lead. Reloads are
-    // excluded on purpose (owner, 2026-07-30) — counting a re-sale to an
-    // existing customer as a lead demo would flatter every lead percentage.
+    // Lead funnel: demos and sales that came from an issued lead. Cancelled
+    // sales are already inside `pm` (the demo ran), so sits stay whole.
+    // Reloads are excluded on purpose (owner, 2026-07-30) — counting a
+    // re-sale to an existing customer as a lead demo would flatter every
+    // lead percentage.
     const demos = s.pm + s.sold;
     const written = s.sold + s.cancels;
     // Both channels together — the only place a reload belongs.
@@ -308,12 +322,13 @@ export function aggregateCloseKombat(cards: BlockCard[]): {
   // otherwise hide a rep who did sell something.
   const reps = [...byRep.values()].filter((r) => r.appts > 0 || r.reloads > 0 || r.revenue > 0);
   for (const r of reps) finalize(r);
-  // Rank by total sales (Sold + Reload) so the split doesn't reshuffle the
-  // bracket — a reload win is still a win.
+  // Rank by SALE VOLUME, highest first (owner, 2026-07-30) — the same order
+  // in the day, week and month views, since the aggregate is what's sorted.
+  // Sale count breaks ties, then appts, then name so the order is stable.
   reps.sort(
     (a, b) =>
-      b.sold + b.reloads - (a.sold + a.reloads) ||
       b.revenue - a.revenue ||
+      b.sold + b.reloads - (a.sold + a.reloads) ||
       b.appts - a.appts ||
       a.rep.localeCompare(b.rep),
   );

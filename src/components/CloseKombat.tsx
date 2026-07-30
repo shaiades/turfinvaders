@@ -33,9 +33,10 @@ import { CalendarRange, ChevronLeft, ChevronRight, Crown, RefreshCw, Swords } fr
 
 /**
  * Close Kombat — sales-rep standings straight from the Monday.com Block
- * boards, in Monday's own column language (Iss / BO / OL / RS / PM / Sale).
+ * boards, in Monday's own column language (Iss / BO / RS / PM / Sale).
  * Day / Week / Month ranges are all LA-calendar (card_date is the physical
- * appointment date — no 7 PM report lock here). Shared cards: each rep gets
+ * appointment date — no 7 PM report lock here). Standings are ranked by sale
+ * volume in every range (owner, 2026-07-30). Shared cards: each rep gets
  * full RESULT credit but the sale VOLUME splits evenly (owner, 2026-07-29);
  * Office Appointments are not leads and aren't tracked here (owner,
  * 2026-07-29 — upsale money still counts in Revenue). The totals row counts
@@ -361,9 +362,10 @@ function CloseKombatInner() {
 
       {/* Company totals — computed from cards, never from summed rep rows.
           Appts = resulted cards only (owner, 2026-07-30 — unresulted cards
-          don't count anywhere), so No Show + No Demo + Reset + PM + Sold +
-          Reload + Cancels always equals Appts. Result order follows the
-          board's own funnel (owner, 2026-07-30). */}
+          don't count anywhere), so No Show + No Demo + Reset + PM + Sold
+          always equals Appts. Cancels sit inside PM and Reloads sit outside
+          Appts entirely, so neither belongs in that sum. Result order follows
+          the board's own funnel (owner, 2026-07-30). */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-3">
         <KombatTile label="Appts" value={fmtCount(totals.appts)} accent="neon" />
         <KombatTile
@@ -470,7 +472,7 @@ function CloseKombatInner() {
                       }`}
                     >
                       <td className="py-2.5 pr-2 text-muted-foreground tabular-nums">
-                        {i === 0 && r.sold + r.reloads > 0 ? (
+                        {i === 0 && r.revenue > 0 ? (
                           <Crown className="w-4 h-4 text-warning inline" aria-label="Champion" />
                         ) : (
                           i + 1
@@ -600,7 +602,7 @@ function CloseKombatInner() {
                   <MobileCardHeader
                     left={
                       <span className="flex items-center gap-1.5">
-                        {i === 0 && r.sold + r.reloads > 0 ? (
+                        {i === 0 && r.revenue > 0 ? (
                           <Crown className="w-3.5 h-3.5 text-warning shrink-0" />
                         ) : (
                           <span className="text-muted-foreground tabular-nums">{i + 1}.</span>
@@ -639,19 +641,22 @@ function CloseKombatInner() {
         says (reloads happen at the job, so they&apos;re nearly always marked Office Appt), its
         money counts in Revenue, but it is not an Appt — no lead was issued for it, so it stays out
         of Sit %, Close %, Reset % and Leads / Sale. Cancels = a sale later marked Cancelled or CTC
-        on the monthly Sales Report: the volume comes back out and it stops counting as a demo. An
-        FTD (financial turn down) counts as a PM — the demo ran, the money didn&apos;t. Both update
-        when a sync runs. One result per card (Cancel &gt; FTD &gt; Sold &gt; PM &gt; Reset &gt;
-        BO). An appointment with nothing marked on the board yet doesn&apos;t count anywhere — it
-        joins Appts and the stats the moment a result lands, so No Show + No Demo + Reset + PM +
-        Sold + Cancels always adds up to Appts. On a shared card each rep gets full result credit
-        but the sale volume splits evenly; the All-cards row counts each card once. Sit % = (PM +
-        Sold) ÷ Appts · NS % = No Show ÷ Appts · ND % = No Demo ÷ Appts · Reset % = Reset ÷ Appts ·
-        Close % = Sold ÷ (PM + Sold) · Cancel % = Cancels ÷ (Sold + Cancels) · Leads / Sale = Appts
-        ÷ Sold, shown as a number, not a percentage. Those are all lead metrics, so reloads are
-        outside every one of them; Reload % = Reload ÷ (Sold + Reload) is the one that counts both,
-        being the share of all sales that were reloads. A ratio with nothing in its denominator
-        shows &quot;—&quot;, not 0%.
+        on the monthly Sales Report: the volume comes back out, but the rep still sat that demo, so
+        it counts as a PM and the sit stands — 5 PM and 2 sales with 1 cancel reads as 6 PM and 1
+        sale, still 7 sits. The Cancels column tallies those alongside rather than as a result of
+        their own. An FTD (financial turn down) is a PM the same way — the demo ran, the money
+        didn&apos;t. Both update when a sync runs. One result per card (Cancel &gt; FTD &gt; Sold
+        &gt; PM &gt; Reset &gt; BO). An appointment with nothing marked on the board yet
+        doesn&apos;t count anywhere — it joins Appts and the stats the moment a result lands, so No
+        Show + No Demo + Reset + PM + Sold always adds up to Appts. Reps are ranked by sale volume,
+        highest first, in every range. On a shared card each rep gets full result credit but the
+        sale volume splits evenly; the All-cards row counts each card once. Sit % = (PM + Sold) ÷
+        Appts · NS % = No Show ÷ Appts · ND % = No Demo ÷ Appts · Reset % = Reset ÷ Appts · Close %
+        = Sold ÷ (PM + Sold) · Cancel % = Cancels ÷ (Sold + Cancels) · Leads / Sale = Appts ÷ Sold,
+        shown as a number, not a percentage. Those are all lead metrics, so reloads are outside
+        every one of them; Reload % = Reload ÷ (Sold + Reload) is the one that counts both, being
+        the share of all sales that were reloads. A ratio with nothing in its denominator shows
+        &quot;—&quot;, not 0%.
       </p>
     </div>
   );
