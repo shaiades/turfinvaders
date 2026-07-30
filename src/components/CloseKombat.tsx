@@ -634,20 +634,24 @@ function CloseKombatInner() {
         Columns mirror the Monday.com Block boards — Iss = issued lead · BO splits into No Show / No
         Demo · RS = Reset · Sale = Sold. Office Appointments (job visit, upsale, check pickup) are
         not leads and aren&apos;t tracked here, though upsale money still counts in Revenue. CTC,
-        Not Issued, and Add Rep cards don&apos;t count anywhere. Sold and Reload are separate
-        results — a Reload is still a sale, so both count toward Close % and Revenue. Cancels = a
-        sale later marked Cancelled or CTC on the monthly Sales Report: the volume comes back out
-        and it stops counting as a demo. An FTD (financial turn down) counts as a PM — the demo ran,
-        the money didn&apos;t. Both update when a sync runs. One result per card (Cancel &gt; FTD
-        &gt; Sold &gt; PM &gt; Reset &gt; BO). An appointment with nothing marked on the board yet
-        doesn&apos;t count anywhere — it joins Appts and the stats the moment a result lands, so No
-        Show + No Demo + Reset + PM + Sold + Reload + Cancels always adds up to Appts. On a shared
-        card each rep gets full result credit but the sale volume splits evenly; the All-cards row
-        counts each card once. Sit % = (PM + Sold + Reload) ÷ Appts · NS % = No Show ÷ Appts · ND %
-        = No Demo ÷ Appts · Reset % = Reset ÷ Appts · Close % = (Sold + Reload) ÷ (PM + Sold +
-        Reload) · Reload % = Reload ÷ (Sold + Reload) · Cancel % = Cancels ÷ (Sold + Reload +
-        Cancels) · Leads / Sale = Appts ÷ (Sold + Reload), shown as a number, not a percentage. A
-        ratio with nothing in its denominator shows &quot;—&quot;, not 0%.
+        Not Issued, and Add Rep cards don&apos;t count anywhere. A Reload is a re-sale to an
+        existing customer and stands as its own channel: it&apos;s counted whatever the Iss cell
+        says (reloads happen at the job, so they&apos;re nearly always marked Office Appt), its
+        money counts in Revenue, but it is not an Appt — no lead was issued for it, so it stays out
+        of Sit %, Close %, Reset % and Leads / Sale. Cancels = a sale later marked Cancelled or CTC
+        on the monthly Sales Report: the volume comes back out and it stops counting as a demo. An
+        FTD (financial turn down) counts as a PM — the demo ran, the money didn&apos;t. Both update
+        when a sync runs. One result per card (Cancel &gt; FTD &gt; Sold &gt; PM &gt; Reset &gt;
+        BO). An appointment with nothing marked on the board yet doesn&apos;t count anywhere — it
+        joins Appts and the stats the moment a result lands, so No Show + No Demo + Reset + PM +
+        Sold + Cancels always adds up to Appts. On a shared card each rep gets full result credit
+        but the sale volume splits evenly; the All-cards row counts each card once. Sit % = (PM +
+        Sold) ÷ Appts · NS % = No Show ÷ Appts · ND % = No Demo ÷ Appts · Reset % = Reset ÷ Appts ·
+        Close % = Sold ÷ (PM + Sold) · Cancel % = Cancels ÷ (Sold + Cancels) · Leads / Sale = Appts
+        ÷ Sold, shown as a number, not a percentage. Those are all lead metrics, so reloads are
+        outside every one of them; Reload % = Reload ÷ (Sold + Reload) is the one that counts both,
+        being the share of all sales that were reloads. A ratio with nothing in its denominator
+        shows &quot;—&quot;, not 0%.
       </p>
     </div>
   );
