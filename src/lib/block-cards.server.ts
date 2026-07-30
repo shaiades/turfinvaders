@@ -501,10 +501,66 @@ async function fetchCandidateCards(): Promise<SoldCardLite[]> {
   return out;
 }
 
+/** How far a card's date may sit from the report row's Date Sold and still be
+ *  considered the same sale. Deliberately tighter than a week: repeat
+ *  customers get a fresh card most weeks, and 3 days is enough slack for the
+ *  office writing the report a day or two after the appointment (owner,
+ *  2026-07-30 — see matchReportRow). */
+export const SALE_DATE_WINDOW_DAYS = 3;
+
+/** Cards that ran within `days` of `aroundISO`. Cards with no date can't be
+ *  proven near it, so they only survive the unrestricted fallback pass. */
+export function withinDays(cards: SoldCardLite[], aroundISO: string, days: number): SoldCardLite[] {
+  const target = Date.parse(aroundISO);
+  if (Number.isNaN(target)) return cards;
+  const span = days * 86_400_000;
+  return cards.filter(
+    (c) => c.card_date !== null && Math.abs(Date.parse(c.card_date) - target) <= span,
+  );
+}
+
+/** Bind one Sales-Report row to a Block card, DATE FIRST (owner, 2026-07-30).
+ *
+ *  The bug this exists to kill: bestSoldMatch returns as soon as a name tier
+ *  yields a single candidate, so Date Sold was never consulted on the common
+ *  path. A repeat customer whose two cards are written differently — "Mary &
+ *  Joe LaBruno" on 7/24 vs "LaBruno, Mary & Joe" on 7/30 — had last week's
+ *  report row bind to this week's card, because only the newer card hit the
+ *  exact-name tier. That put a $10,000 sale from one week onto another.
+ *
+ *  So when the row carries a real Date Sold, match against cards that ran near
+ *  it before considering anyone else. Only if that finds nothing do we fall
+ *  back to the old date-blind search — a fuzzy match still beats an unmatched
+ *  cancel, and the fallback keeps sloppy Date Sold entry working. `pools` is
+ *  tried in order (sold cards first, then every card for cancel rows), and the
+ *  date-true pass sweeps ALL pools before any date-blind one does. */
+export function matchReportRow(
+  pools: SoldCardLite[][],
+  reportNorm: string,
+  office: string | null,
+  saleDateISO: string | null,
+  fallbackISO: string | null,
+): SoldCardLite | null {
+  if (saleDateISO) {
+    for (const pool of pools) {
+      const near = withinDays(pool, saleDateISO, SALE_DATE_WINDOW_DAYS);
+      const hit = bestSoldMatch(near, reportNorm, office, saleDateISO);
+      if (hit) return hit;
+    }
+  }
+  for (const pool of pools) {
+    const hit = bestSoldMatch(pool, reportNorm, office, saleDateISO ?? fallbackISO);
+    if (hit) return hit;
+  }
+  return null;
+}
+
 /** Exact normalized name first, then prefix containment (≥8 chars — report
  *  and card names truncate/extend each other: "Matismo, Reuben & Eli" vs
  *  "Matismo, Reuben & Elizabeth"). Office narrows when the report board is
- *  office-prefixed; nearest card_date breaks ties. */
+ *  office-prefixed; nearest card_date breaks ties. Callers should reach for
+ *  matchReportRow instead — this alone is date-blind whenever a name tier
+ *  produces exactly one candidate. */
 export function bestSoldMatch(
   cards: SoldCardLite[],
   reportNorm: string,
@@ -608,6 +664,12 @@ async function collectReportBoard(
     unmatched: [],
   };
 
+  // Pool order handed to matchReportRow: sold cards first, and for cancel rows
+  // every card after them (a dead sale usually had its Sale cell reverted).
+  const soldPool = soldCards.filter((c) => c.sold);
+  const soldOnly = [soldPool];
+  const soldThenAll = [soldPool, soldCards];
+
   let cursor: string | null = null;
   do {
     const data: Record<string, unknown> = cursor
@@ -640,16 +702,20 @@ async function collectReportBoard(
       // Unset rows still run the matcher: a previously stamped card heals
       // back to null when the report row un-cancels.
       const dateSold = colText(cols, "date sold");
-      const around = dateSold && !Number.isNaN(Date.parse(dateSold)) ? dateSold : monthMidISO;
+      // Only a REAL Date Sold may narrow by date; monthMidISO is a guess off
+      // the board name (the 15th), so it stays a tiebreaker, never a filter.
+      const saleDate = dateSold && !Number.isNaN(Date.parse(dateSold)) ? dateSold : null;
       // Non-cancel rows only stamp cards still marked sold; a CANCEL row
       // falls back to any card for that customer — the sale's Block card
       // usually had its Sale cell reverted when the job died.
       const norm = normalizeCustomer(name);
-      const soldPool = soldCards.filter((c) => c.sold);
-      let match = bestSoldMatch(soldPool, norm, office, around);
-      if (!match && isCancel) {
-        match = bestSoldMatch(soldCards, norm, office, around);
-      }
+      const match = matchReportRow(
+        isCancel ? soldThenAll : soldOnly,
+        norm,
+        office,
+        saleDate,
+        monthMidISO,
+      );
       if (!match) {
         if (isCancel) result.unmatched.push(name);
         continue;
