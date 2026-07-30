@@ -547,12 +547,21 @@ export function bestSoldMatch(
   });
 }
 
-/** Cancel-wins merge for one card's matched report-row labels: any cancel
- *  label sticks; otherwise the first real label; otherwise null (heals a
- *  stale stamp when every matching row went back to unset). */
+/** A label that kills the sale's volume: Cancelled, or FTD (financial turn
+ *  down — owner, 2026-07-30). Keep in sync with the label tests in
+ *  src/lib/close-kombat.ts. */
+export function isDeadLabel(v: string | null | undefined): boolean {
+  return /cancel/i.test(v ?? "") || /\bftd\b/i.test(v ?? "") || /financial\s*turn/i.test(v ?? "");
+}
+
+/** Dead-label-wins merge for one card's matched report-row labels: a cancel
+ *  sticks first, then an FTD, otherwise the first real label; otherwise
+ *  null (heals a stale stamp when every matching row went back to unset). */
 export function chooseWcc(values: Array<string | null>): string | null {
   const cancel = values.find((v) => /cancel/i.test(v ?? ""));
   if (cancel) return cancel;
+  const ftd = values.find((v) => /\bftd\b/i.test(v ?? "") || /financial\s*turn/i.test(v ?? ""));
+  if (ftd) return ftd;
   return values.find((v) => v !== null) ?? null;
 }
 
@@ -610,7 +619,9 @@ async function collectReportBoard(
       const wccStored = wccRaw === "" || /^none$/i.test(wccRaw) ? null : wccRaw;
       if (!name.trim()) continue;
       result.rows += 1;
-      const isCancel = /cancel/i.test(wccStored ?? "");
+      // FTDs count with cancels here: both kill the sale, both may have had
+      // the Block card's Sale cell reverted.
+      const isCancel = isDeadLabel(wccStored);
       if (isCancel) result.cancelled += 1;
       // Unset rows still run the matcher: a previously stamped card heals
       // back to null when the report row un-cancels.

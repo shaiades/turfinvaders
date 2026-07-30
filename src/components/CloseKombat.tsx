@@ -189,7 +189,7 @@ function CloseKombatInner() {
       }
       const cancels = res.wcc.reports.reduce((s, r) => s + r.cancelled, 0);
       if (cancels > 0) {
-        toast.info(`${cancels} cancelled sale${cancels === 1 ? "" : "s"} on the Sales Reports`);
+        toast.info(`${cancels} cancelled/FTD sale${cancels === 1 ? "" : "s"} on the Sales Reports`);
       }
       if (res.wcc.errors.length > 0) {
         toast.warning(`WCC pass: ${res.wcc.errors.length} report board(s) failed — see logs`);
@@ -404,6 +404,7 @@ function CloseKombatInner() {
                     <th className="text-right py-2 px-2 font-normal">Sold</th>
                     <th className="text-right py-2 px-2 font-normal">Reloads</th>
                     <th className="text-right py-2 px-2 font-normal">WCC</th>
+                    <th className="text-right py-2 px-2 font-normal">FTD</th>
                     <th className="text-right py-2 px-2 font-normal">OL</th>
                     <th className="text-right py-2 px-2 font-normal">Sit %</th>
                     <th className="text-right py-2 px-2 font-normal">Close %</th>
@@ -451,6 +452,9 @@ function CloseKombatInner() {
                       <td className="py-2.5 px-2 text-right tabular-nums text-destructive">
                         {fmtCount(r.wcc)}
                       </td>
+                      <td className="py-2.5 px-2 text-right tabular-nums text-destructive">
+                        {fmtCount(r.ftd)}
+                      </td>
                       <td className="py-2.5 px-2 text-right tabular-nums text-muted-foreground">
                         {fmtCount(r.ol)}
                       </td>
@@ -490,6 +494,7 @@ function CloseKombatInner() {
                       {fmtCount(totals.reloads)}
                     </td>
                     <td className="py-2.5 px-2 text-right tabular-nums">{fmtCount(totals.wcc)}</td>
+                    <td className="py-2.5 px-2 text-right tabular-nums">{fmtCount(totals.ftd)}</td>
                     <td className="py-2.5 px-2 text-right tabular-nums">{fmtCount(totals.ol)}</td>
                     <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
                       {fmtPct(totals.sitPct)}
@@ -551,10 +556,11 @@ function CloseKombatInner() {
         not leads and aren&apos;t tracked here, though upsale money still counts in Revenue. CTC,
         Not Issued, and Add Rep cards don&apos;t count anywhere. Sold includes Reloads — the Reloads
         column shows how many of them were reloads. WCC = sale later cancelled on the monthly Sales
-        Report — it leaves Sold and Revenue but still counts as a demo (updates when a sync runs).
-        One result per card (Sold &gt; PM &gt; Reset &gt; BO). On a shared card each rep gets full
-        result credit but the sale volume splits evenly; the All-cards row counts each card once.
-        Sit % = demos ÷ Appts · Close % = Sold ÷ demos, where demos = PM + Sold + WCC.
+        Report; FTD = financial turn down — both leave Sold and Revenue but still count as demos
+        (they update when a sync runs). One result per card (Sold &gt; PM &gt; Reset &gt; BO). On a
+        shared card each rep gets full result credit but the sale volume splits evenly; the
+        All-cards row counts each card once. Sit % = demos ÷ Appts · Close % = Sold ÷ demos, where
+        demos = PM + Sold + WCC.
         {range.isLive && totals.unmarked > 0 && (
           <>
             {" "}
@@ -578,6 +584,7 @@ function StatLine({ s }: { s: KombatTotals }) {
     { label: "Sold", value: fmtCount(s.sold), className: "text-victory" },
     { label: "Reloads", value: fmtCount(s.reloads), className: "text-victory" },
     { label: "WCC", value: fmtCount(s.wcc), className: "text-destructive" },
+    { label: "FTD", value: fmtCount(s.ftd), className: "text-destructive" },
     { label: "OL", value: fmtCount(s.ol), className: "text-muted-foreground" },
     { label: "Sit", value: fmtPct(s.sitPct) },
     { label: "Close", value: fmtPct(s.closePct) },
