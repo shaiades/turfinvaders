@@ -357,8 +357,8 @@ export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSumm
     }
     if (reportBoards.length > 0) {
       const soldCards = await fetchCandidateCards();
-      // card monday_item_id → every WCC label a matching report row carries.
-      const matches = new Map<string, Array<string | null>>();
+      // card monday_item_id → every matching report row's WCC label + Sale Amt.
+      const matches = new Map<string, ReportRowHit[]>();
       for (const rb of reportBoards) {
         try {
           wcc.reports.push(await collectReportBoard(token, rb, soldCards, matches));
@@ -367,19 +367,30 @@ export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSumm
         }
       }
       const byId = new Map(soldCards.map((c) => [c.monday_item_id, c]));
-      for (const [cardId, values] of matches) {
-        const desired = chooseWcc(values);
+      for (const [cardId, hits] of matches) {
         const card = byId.get(cardId);
-        if (!card || (card.wcc ?? null) === (desired ?? null)) continue;
+        if (!card) continue;
+        const desired = chooseWcc(hits.map((h) => h.wcc));
+        const patch: { wcc?: string | null; sale_price?: number } = {};
+        if ((card.wcc ?? null) !== (desired ?? null)) patch.wcc = desired;
+        // Backfill ONLY a missing Block Sale Price from the report's Sale
+        // Amt (a sold card left at $0 otherwise undercounts revenue) —
+        // never overwrite a price someone entered on the board.
+        if (card.sold && card.sale_price === null) {
+          const amt = hits.map((h) => h.amt).find((a) => a !== null && a > 0);
+          if (amt) patch.sale_price = amt;
+        }
+        if (Object.keys(patch).length === 0) continue;
         const { error } = await supabaseAdmin
           .from("block_cards")
-          .update({ wcc: desired })
+          .update(patch)
           .eq("monday_item_id", cardId);
         if (error) {
           wcc.errors.push(`update ${cardId}: ${error.message}`);
           continue;
         }
-        card.wcc = desired;
+        if (patch.wcc !== undefined) card.wcc = patch.wcc;
+        if (patch.sale_price !== undefined) card.sale_price = patch.sale_price;
         wcc.updated += 1;
       }
     }
@@ -433,17 +444,29 @@ export function normalizeCustomer(s: string): string {
     .replace(/\s+/g, " ");
 }
 
+/** Order-insensitive name tokens: the report writes "Muilwyk, Wolfgang &
+ *  Trudi" while the Block card says "Wolfgang and Trudi Muilwyk". Joiner
+ *  words drop; the rest sort. */
+export function customerTokens(s: string): string[] {
+  return normalizeCustomer(s)
+    .split(" ")
+    .filter((w) => w !== "" && w !== "and" && w !== "&")
+    .sort();
+}
+
 type SoldCardLite = {
   monday_item_id: string;
   lead_name: string | null;
   office_location: string;
   card_date: string | null;
   wcc: string | null;
+  sale_price: number | null;
   /** Sale cell still carries a sold label. Cancelled sales usually get the
    *  Block card's Sale cell reverted too (the webhook's Sale_Lead_Voided
    *  flow), so cancel rows must be allowed to match non-sold cards. */
   sold: boolean;
   _norm: string;
+  _tkey: string;
 };
 
 /** EVERY Block card, paged past PostgREST's 1000-row cap. Non-cancel report
@@ -454,7 +477,7 @@ async function fetchCandidateCards(): Promise<SoldCardLite[]> {
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabaseAdmin
       .from("block_cards")
-      .select("monday_item_id, lead_name, office_location, card_date, sale, wcc")
+      .select("monday_item_id, lead_name, office_location, card_date, sale, sale_price, wcc")
       .order("monday_item_id")
       .range(from, from + 999);
     if (error) throw new Error(error.message);
@@ -465,8 +488,10 @@ async function fetchCandidateCards(): Promise<SoldCardLite[]> {
         office_location: r.office_location,
         card_date: r.card_date,
         wcc: r.wcc,
+        sale_price: r.sale_price,
         sold: soldSet.has((r.sale ?? "").trim().toLowerCase()),
         _norm: normalizeCustomer(r.lead_name ?? ""),
+        _tkey: customerTokens(r.lead_name ?? "").join(" "),
       });
     }
     if (!data || data.length < 1000) break;
@@ -493,6 +518,25 @@ export function bestSoldMatch(
         c._norm.length >= 8 && (c._norm.startsWith(reportNorm) || reportNorm.startsWith(c._norm)),
     );
   }
+  if (cands.length === 0) {
+    // Order-insensitive tiers: "Muilwyk, Wolfgang & Trudi" (report) is
+    // "Wolfgang and Trudi Muilwyk" (card). Exact sorted-token key first,
+    // then subset (≥3 shared tokens) for extra suffix words like "sho".
+    const tokens = reportNorm.split(" ").filter((w) => w !== "and" && w !== "&");
+    tokens.sort();
+    const tkey = tokens.join(" ");
+    cands = pool.filter((c) => c._tkey !== "" && c._tkey === tkey);
+    if (cands.length === 0 && tokens.length >= 3) {
+      const tset = new Set(tokens);
+      cands = pool.filter((c) => {
+        const ctokens = c._tkey.split(" ");
+        if (ctokens.length < 3) return false;
+        const [small, big] =
+          ctokens.length <= tokens.length ? [ctokens, tset] : [tokens, new Set(ctokens)];
+        return small.length >= 3 && small.every((t) => big.has(t));
+      });
+    }
+  }
   if (cands.length === 0) return null;
   if (cands.length === 1 || !aroundISO) return cands[0];
   const target = Date.parse(aroundISO);
@@ -512,11 +556,15 @@ export function chooseWcc(values: Array<string | null>): string | null {
   return values.find((v) => v !== null) ?? null;
 }
 
+/** One report row's contribution to a matched card: its WCC label and its
+ *  Sale Amt (used only to backfill Block cards missing a Sale Price). */
+export type ReportRowHit = { wcc: string | null; amt: number | null };
+
 async function collectReportBoard(
   token: string,
   board: { id: string; name: string },
   soldCards: SoldCardLite[],
-  matches: Map<string, Array<string | null>>,
+  matches: Map<string, ReportRowHit[]>,
 ): Promise<WccReportResult> {
   const office = /^OC\b/i.test(board.name.trim())
     ? "Orange County"
@@ -582,9 +630,10 @@ async function collectReportBoard(
         continue;
       }
       // Collect only — the caller merges every board's rows per card
-      // (cancel-wins) and writes once.
+      // (cancel-wins) and writes once. Sale Amt rides along so cards whose
+      // Block Sale Price cell was left empty can be backfilled.
       const list = matches.get(match.monday_item_id) ?? [];
-      list.push(wccStored);
+      list.push({ wcc: wccStored, amt: parseMoney(colText(cols, "sale amt")) });
       matches.set(match.monday_item_id, list);
     }
     cursor = page.cursor ?? null;
