@@ -242,10 +242,10 @@ export function aggregateCloseKombat(cards: BlockCard[]): {
   };
   finalize(totals);
 
-  // A rep whose cards are all still unresulted has nothing countable yet —
-  // no all-zero rows in the standings (office-appt reps keep their row for
-  // the upsale revenue).
-  const reps = [...byRep.values()].filter((r) => r.appts > 0 || r.officeAppts > 0);
+  // No all-zero rows in the standings: a rep shows up once they have a
+  // resulted appt — or office-appt upsale money, since the row would
+  // otherwise display nothing (office appts themselves aren't rendered).
+  const reps = [...byRep.values()].filter((r) => r.appts > 0 || r.revenue > 0);
   for (const r of reps) finalize(r);
   reps.sort(
     (a, b) =>
