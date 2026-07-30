@@ -370,6 +370,7 @@ function CloseKombatInner() {
         <KombatTile label="FTD" value={fmtCount(totals.ftd)} accent="destructive" />
         <KombatTile label="Sit %" value={fmtPct(totals.sitPct)} accent="accent" />
         <KombatTile label="Close %" value={fmtPct(totals.closePct)} accent="neon" />
+        <KombatTile label="RS %" value={fmtPct(totals.rsPct)} accent="accent" />
         <KombatTile label="Revenue" value={fmtMoney(totals.revenue)} accent="victory" />
       </div>
 
@@ -417,6 +418,7 @@ function CloseKombatInner() {
                     <th className="text-right py-2 px-2 font-normal">OL</th>
                     <th className="text-right py-2 px-2 font-normal">Sit %</th>
                     <th className="text-right py-2 px-2 font-normal">Close %</th>
+                    <th className="text-right py-2 px-2 font-normal">RS %</th>
                     <th className="text-right py-2 pl-2 font-normal">Revenue</th>
                   </tr>
                 </thead>
@@ -473,6 +475,9 @@ function CloseKombatInner() {
                       <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
                         {fmtPct(r.closePct)}
                       </td>
+                      <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-accent">
+                        {fmtPct(r.rsPct)}
+                      </td>
                       <td className="py-2.5 pl-2 text-right tabular-nums text-victory">
                         {fmtMoney(r.revenue)}
                       </td>
@@ -510,6 +515,9 @@ function CloseKombatInner() {
                     </td>
                     <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
                       {fmtPct(totals.closePct)}
+                    </td>
+                    <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                      {fmtPct(totals.rsPct)}
                     </td>
                     <td className="py-2.5 pl-2 text-right tabular-nums">
                       {fmtMoney(totals.revenue)}
@@ -571,7 +579,7 @@ function CloseKombatInner() {
         it joins Appts and the stats the moment a result lands, so Sold + PM + Reset + No Show + No
         Demo + WCC + FTD always adds up to Appts. On a shared card each rep gets full result credit
         but the sale volume splits evenly; the All-cards row counts each card once. Sit % = demos ÷
-        Appts · Close % = Sold ÷ demos, where demos = PM + Sold + WCC + FTD.
+        Appts · Close % = Sold ÷ demos · RS % = Reset ÷ Appts, where demos = PM + Sold + WCC + FTD.
       </p>
     </div>
   );
@@ -593,6 +601,7 @@ function StatLine({ s }: { s: KombatTotals }) {
     { label: "OL", value: fmtCount(s.ol), className: "text-muted-foreground" },
     { label: "Sit", value: fmtPct(s.sitPct) },
     { label: "Close", value: fmtPct(s.closePct) },
+    { label: "RS %", value: fmtPct(s.rsPct), className: "text-accent" },
   ];
   return (
     <div className="flex items-baseline gap-x-3 overflow-x-auto scrollbar-hide whitespace-nowrap text-sm tabular-nums">
