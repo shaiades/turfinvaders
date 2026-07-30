@@ -73,6 +73,10 @@ const fmtCount = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1))
 
 const fmtPct = (p: number | null) => (p === null ? "—" : `${Math.round(p * 100)}%`);
 
+/** Leads / Sale is a rate, not a share — one decimal, no % sign (owner,
+ *  2026-07-30: "4.5, not 4.5654"). */
+const fmtRatio = (n: number | null) => (n === null ? "—" : n.toFixed(1));
+
 function CloseKombatInner() {
   const qc = useQueryClient();
   const { realRole, displayName } = useAuth();
@@ -194,7 +198,7 @@ function CloseKombatInner() {
         );
       }
       if (res.wcc.errors.length > 0) {
-        toast.warning(`WCC pass: ${res.wcc.errors.length} report board(s) failed — see logs`);
+        toast.warning(`Cancels pass: ${res.wcc.errors.length} report board(s) failed — see logs`);
       }
       qc.invalidateQueries({ queryKey: ["block_cards"] });
     },
@@ -357,10 +361,30 @@ function CloseKombatInner() {
 
       {/* Company totals — computed from cards, never from summed rep rows.
           Appts = resulted cards only (owner, 2026-07-30 — unresulted cards
-          don't count anywhere), so Sold + Reload + PM + Reset + No Show +
-          No Demo + WCC + FTD always equals Appts. */}
+          don't count anywhere), so No Show + No Demo + Reset + PM + Sold +
+          Reload + Cancels always equals Appts. Result order follows the
+          board's own funnel (owner, 2026-07-30). */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-3">
         <KombatTile label="Appts" value={fmtCount(totals.appts)} accent="neon" />
+        <KombatTile
+          label="No Show"
+          value={fmtCount(totals.noShow)}
+          accent="destructive"
+          sub={{ label: "NS %", value: fmtPct(totals.noShowPct), accent: "destructive" }}
+        />
+        <KombatTile
+          label="No Demo"
+          value={fmtCount(totals.noDemo)}
+          accent="destructive"
+          sub={{ label: "ND %", value: fmtPct(totals.noDemoPct), accent: "destructive" }}
+        />
+        <KombatTile
+          label="Reset"
+          value={fmtCount(totals.reset)}
+          accent="accent"
+          sub={{ label: "Reset %", value: fmtPct(totals.resetPct), accent: "accent" }}
+        />
+        <KombatTile label="PM" value={fmtCount(totals.pm)} accent="warning" />
         <KombatTile
           label="Sold"
           value={fmtCount(totals.sold)}
@@ -373,23 +397,14 @@ function CloseKombatInner() {
           accent="victory"
           sub={{ label: "Reload %", value: fmtPct(totals.reloadPct), accent: "victory" }}
         />
-        <KombatTile label="PM" value={fmtCount(totals.pm)} accent="warning" />
         <KombatTile
-          label="Reset"
-          value={fmtCount(totals.reset)}
-          accent="accent"
-          sub={{ label: "RS %", value: fmtPct(totals.rsPct), accent: "accent" }}
-        />
-        <KombatTile label="No Show" value={fmtCount(totals.noShow)} accent="destructive" />
-        <KombatTile
-          label="No Demo"
-          value={fmtCount(totals.noDemo)}
+          label="Cancels"
+          value={fmtCount(totals.cancels)}
           accent="destructive"
-          sub={{ label: "ND %", value: fmtPct(totals.noDemoPct), accent: "destructive" }}
+          sub={{ label: "Cancel %", value: fmtPct(totals.cancelPct), accent: "destructive" }}
         />
-        <KombatTile label="WCC" value={fmtCount(totals.wcc)} accent="destructive" />
-        <KombatTile label="FTD" value={fmtCount(totals.ftd)} accent="destructive" />
         <KombatTile label="Sit %" value={fmtPct(totals.sitPct)} accent="accent" />
+        <KombatTile label="Leads / Sale" value={fmtRatio(totals.leadsToSale)} accent="neon" />
         <KombatTile label="Revenue" value={fmtMoney(totals.revenue)} accent="victory" />
       </div>
 
@@ -432,13 +447,17 @@ function CloseKombatInner() {
                     <th className="text-right py-2 px-2 font-normal">PM</th>
                     <th className="text-right py-2 px-2 font-normal">Sold</th>
                     <th className="text-right py-2 px-2 font-normal">Reload</th>
-                    <th className="text-right py-2 px-2 font-normal">WCC</th>
-                    <th className="text-right py-2 px-2 font-normal">FTD</th>
-                    <th className="text-right py-2 px-2 font-normal">OL</th>
-                    <th className="text-right py-2 px-2 font-normal">Sit %</th>
+                    <th className="text-right py-2 px-2 font-normal">Cancels</th>
+                    <th className="text-right py-2 px-2 font-normal border-l border-border/60">
+                      Sit %
+                    </th>
+                    <th className="text-right py-2 px-2 font-normal">NS %</th>
+                    <th className="text-right py-2 px-2 font-normal">ND %</th>
+                    <th className="text-right py-2 px-2 font-normal">Reset %</th>
                     <th className="text-right py-2 px-2 font-normal">Close %</th>
-                    <th className="text-right py-2 px-2 font-normal">RS %</th>
                     <th className="text-right py-2 px-2 font-normal">Reload %</th>
+                    <th className="text-right py-2 px-2 font-normal">Cancel %</th>
+                    <th className="text-right py-2 px-2 font-normal">Leads / Sale</th>
                     <th className="text-right py-2 pl-2 font-normal">Revenue</th>
                   </tr>
                 </thead>
@@ -481,25 +500,31 @@ function CloseKombatInner() {
                         {fmtCount(r.reloads)}
                       </td>
                       <td className="py-2.5 px-2 text-right tabular-nums text-destructive">
-                        {fmtCount(r.wcc)}
+                        {fmtCount(r.cancels)}
                       </td>
-                      <td className="py-2.5 px-2 text-right tabular-nums text-destructive">
-                        {fmtCount(r.ftd)}
-                      </td>
-                      <td className="py-2.5 px-2 text-right tabular-nums text-muted-foreground">
-                        {fmtCount(r.ol)}
-                      </td>
-                      <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                      <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs border-l border-border/60">
                         {fmtPct(r.sitPct)}
+                      </td>
+                      <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-destructive">
+                        {fmtPct(r.noShowPct)}
+                      </td>
+                      <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-destructive">
+                        {fmtPct(r.noDemoPct)}
+                      </td>
+                      <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-accent">
+                        {fmtPct(r.resetPct)}
                       </td>
                       <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
                         {fmtPct(r.closePct)}
                       </td>
-                      <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-accent">
-                        {fmtPct(r.rsPct)}
-                      </td>
                       <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-victory">
                         {fmtPct(r.reloadPct)}
+                      </td>
+                      <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-destructive">
+                        {fmtPct(r.cancelPct)}
+                      </td>
+                      <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                        {fmtRatio(r.leadsToSale)}
                       </td>
                       <td className="py-2.5 pl-2 text-right tabular-nums text-victory">
                         {fmtMoney(r.revenue)}
@@ -530,20 +555,32 @@ function CloseKombatInner() {
                     <td className="py-2.5 px-2 text-right tabular-nums">
                       {fmtCount(totals.reloads)}
                     </td>
-                    <td className="py-2.5 px-2 text-right tabular-nums">{fmtCount(totals.wcc)}</td>
-                    <td className="py-2.5 px-2 text-right tabular-nums">{fmtCount(totals.ftd)}</td>
-                    <td className="py-2.5 px-2 text-right tabular-nums">{fmtCount(totals.ol)}</td>
-                    <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                    <td className="py-2.5 px-2 text-right tabular-nums">
+                      {fmtCount(totals.cancels)}
+                    </td>
+                    <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs border-l border-border/60">
                       {fmtPct(totals.sitPct)}
+                    </td>
+                    <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                      {fmtPct(totals.noShowPct)}
+                    </td>
+                    <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                      {fmtPct(totals.noDemoPct)}
+                    </td>
+                    <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                      {fmtPct(totals.resetPct)}
                     </td>
                     <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
                       {fmtPct(totals.closePct)}
                     </td>
                     <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
-                      {fmtPct(totals.rsPct)}
+                      {fmtPct(totals.reloadPct)}
                     </td>
                     <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
-                      {fmtPct(totals.reloadPct)}
+                      {fmtPct(totals.cancelPct)}
+                    </td>
+                    <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                      {fmtRatio(totals.leadsToSale)}
                     </td>
                     <td className="py-2.5 pl-2 text-right tabular-nums">
                       {fmtMoney(totals.revenue)}
@@ -598,16 +635,19 @@ function CloseKombatInner() {
         Demo · RS = Reset · Sale = Sold. Office Appointments (job visit, upsale, check pickup) are
         not leads and aren&apos;t tracked here, though upsale money still counts in Revenue. CTC,
         Not Issued, and Add Rep cards don&apos;t count anywhere. Sold and Reload are separate
-        results — a Reload is still a sale, so both count toward Close % and Revenue. WCC = sale
-        later marked Cancelled or CTC on the monthly Sales Report; FTD = financial turn down — both
-        leave Sold and Revenue but still count as demos (they update when a sync runs). One result
-        per card (Sold &gt; PM &gt; Reset &gt; BO). An appointment with nothing marked on the board
-        yet doesn&apos;t count anywhere — it joins Appts and the stats the moment a result lands, so
-        Sold + Reload + PM + Reset + No Show + No Demo + WCC + FTD always adds up to Appts. On a
-        shared card each rep gets full result credit but the sale volume splits evenly; the
-        All-cards row counts each card once. Sit % = demos ÷ Appts · Close % = (Sold + Reload) ÷
-        demos · RS % = Reset ÷ Appts · Reload % = Reload ÷ Appts · ND % = No Demo ÷ Appts, where
-        demos = Sold + Reload + PM + WCC + FTD.
+        results — a Reload is still a sale, so both count toward Close % and Revenue. Cancels = a
+        sale later marked Cancelled or CTC on the monthly Sales Report: the volume comes back out
+        and it stops counting as a demo. An FTD (financial turn down) counts as a PM — the demo ran,
+        the money didn&apos;t. Both update when a sync runs. One result per card (Cancel &gt; FTD
+        &gt; Sold &gt; PM &gt; Reset &gt; BO). An appointment with nothing marked on the board yet
+        doesn&apos;t count anywhere — it joins Appts and the stats the moment a result lands, so No
+        Show + No Demo + Reset + PM + Sold + Reload + Cancels always adds up to Appts. On a shared
+        card each rep gets full result credit but the sale volume splits evenly; the All-cards row
+        counts each card once. Sit % = (PM + Sold + Reload) ÷ Appts · NS % = No Show ÷ Appts · ND %
+        = No Demo ÷ Appts · Reset % = Reset ÷ Appts · Close % = (Sold + Reload) ÷ (PM + Sold +
+        Reload) · Reload % = Reload ÷ (Sold + Reload) · Cancel % = Cancels ÷ (Sold + Reload +
+        Cancels) · Leads / Sale = Appts ÷ (Sold + Reload), shown as a number, not a percentage. A
+        ratio with nothing in its denominator shows &quot;—&quot;, not 0%.
       </p>
     </div>
   );
@@ -624,13 +664,15 @@ function StatLine({ s }: { s: KombatTotals }) {
     { label: "PM", value: fmtCount(s.pm), className: "text-warning" },
     { label: "Sold", value: fmtCount(s.sold), className: "text-victory" },
     { label: "Reload", value: fmtCount(s.reloads), className: "text-victory" },
-    { label: "WCC", value: fmtCount(s.wcc), className: "text-destructive" },
-    { label: "FTD", value: fmtCount(s.ftd), className: "text-destructive" },
-    { label: "OL", value: fmtCount(s.ol), className: "text-muted-foreground" },
+    { label: "Cancels", value: fmtCount(s.cancels), className: "text-destructive" },
     { label: "Sit", value: fmtPct(s.sitPct) },
+    { label: "NS %", value: fmtPct(s.noShowPct), className: "text-destructive" },
+    { label: "ND %", value: fmtPct(s.noDemoPct), className: "text-destructive" },
+    { label: "Reset %", value: fmtPct(s.resetPct), className: "text-accent" },
     { label: "Close", value: fmtPct(s.closePct) },
-    { label: "RS %", value: fmtPct(s.rsPct), className: "text-accent" },
     { label: "Reload %", value: fmtPct(s.reloadPct), className: "text-victory" },
+    { label: "Cancel %", value: fmtPct(s.cancelPct), className: "text-destructive" },
+    { label: "Leads / Sale", value: fmtRatio(s.leadsToSale) },
   ];
   return (
     <div className="flex items-baseline gap-x-3 overflow-x-auto scrollbar-hide whitespace-nowrap text-sm tabular-nums">
