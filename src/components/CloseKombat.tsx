@@ -359,20 +359,32 @@ function CloseKombatInner() {
           Appts = resulted cards only (owner, 2026-07-30 — unresulted cards
           don't count anywhere), so Sold + Reload + PM + Reset + No Show +
           No Demo + WCC + FTD always equals Appts. */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-7 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-3">
         <KombatTile label="Appts" value={fmtCount(totals.appts)} accent="neon" />
-        <KombatTile label="Sold" value={fmtCount(totals.sold)} accent="victory" />
-        <KombatTile label="Reload" value={fmtCount(totals.reloads)} accent="victory" />
+        <KombatTile
+          label="Sold"
+          value={fmtCount(totals.sold)}
+          accent="victory"
+          sub={{ label: "Close %", value: fmtPct(totals.closePct), accent: "neon" }}
+        />
+        <KombatTile
+          label="Reload"
+          value={fmtCount(totals.reloads)}
+          accent="victory"
+          sub={{ label: "Reload %", value: fmtPct(totals.reloadPct), accent: "victory" }}
+        />
         <KombatTile label="PM" value={fmtCount(totals.pm)} accent="warning" />
-        <KombatTile label="Reset" value={fmtCount(totals.reset)} accent="accent" />
+        <KombatTile
+          label="Reset"
+          value={fmtCount(totals.reset)}
+          accent="accent"
+          sub={{ label: "RS %", value: fmtPct(totals.rsPct), accent: "accent" }}
+        />
         <KombatTile label="No Show" value={fmtCount(totals.noShow)} accent="destructive" />
         <KombatTile label="No Demo" value={fmtCount(totals.noDemo)} accent="destructive" />
         <KombatTile label="WCC" value={fmtCount(totals.wcc)} accent="destructive" />
         <KombatTile label="FTD" value={fmtCount(totals.ftd)} accent="destructive" />
         <KombatTile label="Sit %" value={fmtPct(totals.sitPct)} accent="accent" />
-        <KombatTile label="Close %" value={fmtPct(totals.closePct)} accent="neon" />
-        <KombatTile label="RS %" value={fmtPct(totals.rsPct)} accent="accent" />
-        <KombatTile label="Reload %" value={fmtPct(totals.reloadPct)} accent="victory" />
         <KombatTile label="Revenue" value={fmtMoney(totals.revenue)} accent="victory" />
       </div>
 
@@ -638,29 +650,41 @@ function FlawlessBadge({ r }: { r: RepStats }) {
   );
 }
 
+type TileAccent = "neon" | "victory" | "accent" | "warning" | "destructive" | "muted";
+
+const TILE_ACCENT: Record<TileAccent, string> = {
+  neon: "text-neon",
+  victory: "text-victory",
+  accent: "text-accent",
+  warning: "text-warning",
+  destructive: "text-destructive",
+  muted: "text-muted-foreground",
+};
+
 function KombatTile({
   label,
   value,
   accent,
+  sub,
 }: {
   label: string;
   value: number | string;
-  accent: "neon" | "victory" | "accent" | "warning" | "destructive" | "muted";
+  accent: TileAccent;
+  /** Companion stat sharing the tile (e.g. Sold + Close %), right-aligned. */
+  sub?: { label: string; value: number | string; accent: TileAccent };
 }) {
-  const color = {
-    neon: "text-neon",
-    victory: "text-victory",
-    accent: "text-accent",
-    warning: "text-warning",
-    destructive: "text-destructive",
-    muted: "text-muted-foreground",
-  }[accent];
   return (
     <div className="arcade-card p-4">
-      <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-        {label}
+      <div className="flex items-baseline justify-between gap-2 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+        <span>{label}</span>
+        {sub && <span className="text-right">{sub.label}</span>}
       </div>
-      <div className={`font-display text-2xl mt-1 ${color}`}>{value}</div>
+      <div className="mt-1 flex items-baseline justify-between gap-2">
+        <span className={`font-display text-2xl ${TILE_ACCENT[accent]}`}>{value}</span>
+        {sub && (
+          <span className={`font-display text-lg ${TILE_ACCENT[sub.accent]}`}>{sub.value}</span>
+        )}
+      </div>
     </div>
   );
 }
