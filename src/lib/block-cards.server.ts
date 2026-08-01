@@ -134,6 +134,10 @@ export function buildBlockCardRow(
     sale_price: parseMoney(priceCol?.text || priceCol?.display_value || ""),
     products: colText(cols, "products"),
     canvass_stats: colText(cols, "canvass stats"),
+    // Can/Save support (owner, 2026-08-01): comments carry the "Can/Save"
+    // marker; phone links a save card to the original sale's card.
+    comments: colText(cols, "comments"),
+    phone: colText(cols, "phone"),
   };
 }
 
