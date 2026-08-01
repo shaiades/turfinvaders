@@ -656,7 +656,12 @@ function CloseKombatInner() {
         shown as a number, not a percentage. Those are all lead metrics, so reloads are outside
         every one of them; Reload % = Reload ÷ (Sold + Reload) is the one that counts both, being
         the share of all sales that were reloads. A ratio with nothing in its denominator shows
-        &quot;—&quot;, not 0%.
+        &quot;—&quot;, not 0%. Can/Save: when a sold job cancels and a rep saves it (the office
+        writes &quot;Can/Save&quot; in the save card&apos;s Comments), the save&apos;s Sale Price
+        replaces the original volume and the saver shares the split evenly with the original rep(s)
+        — half with one seller, thirds with two. The saver earns volume, not a Sold. A Can/Save card
+        with no price is a failed save and changes nothing. Saves match their original sale by
+        office + phone within the loaded range.
       </p>
     </div>
   );

@@ -44,6 +44,19 @@
 //   reloads — and reload money still counts in Revenue.
 // - OL (owner, 2026-07-30): dropped from Close Kombat entirely. The column
 //   still lands in block_cards, it just isn't a stat here any more.
+// - Can/Save (owner, 2026-08-01): a sold job cancels, the office sends a rep
+//   to save it, and the office writes "Can/Save" in the save card's
+//   Comments. A save WITH a Sale Price landed: that renegotiated price
+//   replaces the original sale's volume ("that trumps out the original
+//   price") and the saver joins the volume split evenly — half with one
+//   seller, thirds with two. The saver earns volume only, not a Sold; the
+//   save card itself is folded into the original, never counted twice. A
+//   save with NO price failed — the job stays cancelled and nothing links.
+//   Save → original matching: same office + phone digits (name-key fallback
+//   when the save card has no phone), nearest card on/before the save date.
+//   Verified on July 2026: 4 saves, 1 landed (Leon — Josh OConnor sold
+//   $37,884, wife killed it, Bergan Lundak saved at $27,583 → $13,791.50
+//   each, matching the Shark Tank dashboard exactly).
 //
 // Pure module: no imports, unit-testable like funnel.ts.
 
@@ -67,6 +80,10 @@ export type BlockCard = {
   canvass_stats: string | null;
   /** Raw WCC label from the monthly Sales Report, matched on by the sync. */
   wcc: string | null;
+  /** Confirmer/office notes — carries the "Can/Save" marker (owner, 2026-08-01). */
+  comments: string | null;
+  /** Customer phone — links a Can/Save card to the original sale's card. */
+  phone: string | null;
 };
 
 /** Sale-column values that mean sold — keep in sync with SOLD_VALUES in
@@ -132,6 +149,34 @@ export function isOfficeAppt(c: Pick<BlockCard, "iss">): boolean {
 export function isExcludedCard(c: Pick<BlockCard, "iss">): boolean {
   const v = (c.iss ?? "").trim().toLowerCase();
   return v === "ctc" || v === "not issued" || v === "add rep";
+}
+
+/** A Can/Save card (owner, 2026-08-01): a sold job cancelled and the office
+ *  sent a rep to save it. The office writes "Can/Save" (verified verbatim on
+ *  all four July 2026 saves) in Comments; tolerate spacing/punctuation. */
+export function isCanSave(c: Pick<BlockCard, "comments">): boolean {
+  return /can\W{0,3}save/i.test(c.comments ?? "");
+}
+
+/** Phone → bare 10 digits ("+1 (562) 380-5392" and "15623805392" both →
+ *  "5623805392"); "" when there's nothing usable to match on. */
+export function phoneKey(p: string | null | undefined): string {
+  const d = (p ?? "").replace(/\D/g, "");
+  return d.length === 11 && d.startsWith("1") ? d.slice(1) : d;
+}
+
+/** Order-insensitive customer-name key, for save→original linking when a
+ *  card has no phone: "Darren and Angela Leon (copy)" and "Leon, Darren &
+ *  Angela" both → "angela darren leon". */
+export function customerKey(s: string | null | undefined): string {
+  const NOISE = new Set(["and", "the", "mr", "mrs", "ms", "dr", "sho", "copy", "wife", "husband"]);
+  return (s ?? "")
+    .toLowerCase()
+    .replace(/[^a-z]+/g, " ")
+    .split(" ")
+    .filter((t) => t.length > 1 && !NOISE.has(t))
+    .sort()
+    .join(" ");
 }
 
 export type RepStats = {
@@ -227,16 +272,84 @@ const OUTCOME_KEY: Record<Exclude<CardOutcome, "unmarked">, keyof KombatTotals> 
   no_demo: "noDemo",
 };
 
+/** A landed save's effect on the original sale (owner, 2026-08-01):
+ *  the renegotiated price REPLACES the original volume, and the saver joins
+ *  the volume split — half with one seller, thirds with two. */
+type SaveEffect = { price: number; saverReps: string[]; saveDate: string };
+
+/** Link each landed Can/Save card to the original sale it rescued.
+ *  Match by office + phone (name-key fallback when the save has no phone),
+ *  preferring the nearest card dated on/before the save. A save with no
+ *  price FAILED — the job stayed dead, nothing links, nothing changes. */
+function linkSaves(cards: BlockCard[]): {
+  effects: Map<string, SaveEffect>;
+  consumed: Set<string>;
+} {
+  const effects = new Map<string, SaveEffect>();
+  const consumed = new Set<string>();
+  for (const s of cards) {
+    if (!isCanSave(s)) continue;
+    if (!(s.sale_price != null && s.sale_price > 0)) continue; // failed save
+    const sPhone = phoneKey(s.phone);
+    const sName = customerKey(s.lead_name);
+    const cands = cards.filter((o) => {
+      if (o === s || isCanSave(o)) return false;
+      if (o.office_location !== s.office_location) return false;
+      // Only originals the stats can actually see — linking to an excluded
+      // (Not Issued / CTC / Add Rep) card would sink the money with it.
+      if (isExcludedCard(o) && !isCancelLabel(o.wcc) && !isFtdLabel(o.wcc)) return false;
+      const oc = cardOutcome(o);
+      if (oc !== "sold" && oc !== "cancelled") return false;
+      const key = sPhone !== "" ? phoneKey(o.phone) : null;
+      return key !== null ? key === sPhone : sName !== "" && customerKey(o.lead_name) === sName;
+    });
+    if (cands.length === 0) continue; // original outside this range: the deal
+    // already counts (corrected) in ITS OWN range — never double it here.
+    const dist = (o: BlockCard) => {
+      if (!o.card_date || !s.card_date) return Number.MAX_SAFE_INTEGER / 2;
+      const d = Date.parse(s.card_date) - Date.parse(o.card_date);
+      // The sale precedes the save — a later-dated "original" is suspect,
+      // so it only wins when nothing sits on/before the save date.
+      return d >= 0 ? d : Number.MAX_SAFE_INTEGER / 2 - d;
+    };
+    const original = cands.reduce((b, o) => (dist(o) < dist(b) ? o : b));
+    const prev = effects.get(original.monday_item_id);
+    // Several saves for one job: the latest landed save is the live contract.
+    if (!prev || (s.card_date ?? "") >= prev.saveDate) {
+      effects.set(original.monday_item_id, {
+        price: s.sale_price,
+        saverReps: s.reps.map((r) => r.trim()).filter(Boolean),
+        saveDate: s.card_date ?? "",
+      });
+    }
+    consumed.add(s.monday_item_id);
+  }
+  return { effects, consumed };
+}
+
 export function aggregateCloseKombat(cards: BlockCard[]): {
   reps: RepStats[];
   totals: KombatTotals;
 } {
   const byRep = new Map<string, RepStats>();
   const totals: KombatTotals = emptyStats();
+  const repRow = (name: string): RepStats => {
+    let s = byRep.get(name);
+    if (!s) {
+      s = { rep: name, ...emptyStats() };
+      byRep.set(name, s);
+    }
+    return s;
+  };
 
-  /** countWeight: 1 for rep rows AND totals (full credit each, owner rule).
-   *  revenueShare: rep rows get price ÷ rep-count; totals pass 1 (whole card). */
-  const bump = (s: Omit<RepStats, "rep">, c: BlockCard, revenueShare: number) => {
+  // Can/Save pre-pass (owner, 2026-08-01): a landed save re-prices the
+  // original sale and adds the saver to the volume split.
+  const saves = linkSaves(cards);
+
+  /** Result counts only — volume is handled in the loop below, because a
+   *  landed save changes both the price and WHO shares it. Full result
+   *  credit to each rep on the card (owner rule). */
+  const bump = (s: Omit<RepStats, "rep">, c: BlockCard) => {
     const outcome = cardOutcome(c);
     if (outcome === "sold" && isReload(c)) {
       // Reload = its own sales channel (owner, 2026-07-30). Re-selling an
@@ -265,30 +378,42 @@ export function aggregateCloseKombat(cards: BlockCard[]): {
       // report how many written sales died.
       if (outcome === "cancelled") s.cancels += 1;
     }
-    // Money is money — an office-appt upsale still pays. A blank Sale Price
-    // on the Block board is $0, full stop (owner, 2026-07-30): never infer a
-    // price from another source, never guess. Nothing else may write
-    // sale_price either — see the Sales-Report pass in block-cards.server.ts.
-    if (outcome === "sold") s.revenue += (c.sale_price ?? 0) * revenueShare;
   };
 
-  for (const card of cards) {
+  for (let card of cards) {
+    // A landed save card is folded into its original below — counting it
+    // here too would double the deal.
+    if (saves.consumed.has(card.monday_item_id)) continue;
+    const save = saves.effects.get(card.monday_item_id);
+    // A landed save supersedes a stale Cancelled stamp: the deal is alive
+    // again, so the original counts as the sale it is. (The Sales-Report
+    // sync heals the stamp on its next pass; this covers the gap.)
+    if (save && cardOutcome(card) === "cancelled") card = { ...card, wcc: null };
     // CTC / Not Issued / Add Rep never reach the stats at all — UNLESS the
     // monthly report stamped the card dead (Cancelled/CTC/FTD): the office
     // often flips a dead sale's Iss cell to "CTC" too, and the report proves
     // an issued lead ran and sold, so it must count as an appt.
     if (isExcludedCard(card) && !isCancelLabel(card.wcc) && !isFtdLabel(card.wcc)) continue;
     // Totals count every card exactly once — reps.length never inflates them.
-    bump(totals, card, 1);
+    bump(totals, card);
     const names = card.reps.map((r) => r.trim()).filter(Boolean);
-    const share = names.length > 0 ? 1 / names.length : 1;
-    for (const name of names) {
-      let s = byRep.get(name);
-      if (!s) {
-        s = { rep: name, ...emptyStats() };
-        byRep.set(name, s);
-      }
-      bump(s, card, share);
+    for (const name of names) bump(repRow(name), card);
+
+    // --- Volume. Money is money — an office-appt upsale still pays. A blank
+    // Sale Price on the Block board is $0, full stop (owner, 2026-07-30):
+    // never infer a price from another source, never guess. Nothing else may
+    // write sale_price either — see the Sales-Report pass in
+    // block-cards.server.ts. A landed save is the ONE lawful override
+    // (owner, 2026-08-01): its renegotiated price replaces the original —
+    // "that trumps out the original price" — and the saver joins the reps in
+    // an even split (half with one seller, thirds with two). Result credit
+    // stays with the card's own reps: the saver earns volume, not a Sold.
+    if (cardOutcome(card) === "sold") {
+      const price = save ? save.price : (card.sale_price ?? 0);
+      const volumeReps = [...new Set([...names, ...(save ? save.saverReps : [])])];
+      totals.revenue += price;
+      const share = volumeReps.length > 0 ? price / volumeReps.length : price;
+      for (const name of volumeReps) repRow(name).revenue += share;
     }
   }
 

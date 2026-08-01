@@ -20,6 +20,7 @@ export type Database = {
           bo: string | null
           canvass_stats: string | null
           card_date: string | null
+          comments: string | null
           created_at: string
           group_title: string | null
           iss: string | null
@@ -27,6 +28,7 @@ export type Database = {
           monday_item_id: string
           office_location: string
           ol: string | null
+          phone: string | null
           pm: string | null
           products: string | null
           reps: string[]
@@ -41,6 +43,7 @@ export type Database = {
           bo?: string | null
           canvass_stats?: string | null
           card_date?: string | null
+          comments?: string | null
           created_at?: string
           group_title?: string | null
           iss?: string | null
@@ -48,6 +51,7 @@ export type Database = {
           monday_item_id: string
           office_location?: string
           ol?: string | null
+          phone?: string | null
           pm?: string | null
           products?: string | null
           reps?: string[]
@@ -62,6 +66,7 @@ export type Database = {
           bo?: string | null
           canvass_stats?: string | null
           card_date?: string | null
+          comments?: string | null
           created_at?: string
           group_title?: string | null
           iss?: string | null
@@ -69,6 +74,7 @@ export type Database = {
           monday_item_id?: string
           office_location?: string
           ol?: string | null
+          phone?: string | null
           pm?: string | null
           products?: string | null
           reps?: string[]
