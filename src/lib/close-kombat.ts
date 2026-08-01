@@ -48,10 +48,12 @@
 //   to save it, and the office writes "Can/Save" in the save card's
 //   Comments. A save WITH a Sale Price landed: that renegotiated price
 //   replaces the original sale's volume ("that trumps out the original
-//   price") and the saver joins the volume split evenly — half with one
-//   seller, thirds with two. The saver earns volume only, not a Sold; the
-//   save card itself is folded into the original, never counted twice. A
-//   save with NO price failed — the job stays cancelled and nothing links.
+//   price") and the saver takes 50% off the top, the original rep(s)
+//   splitting the other 50% evenly — 1 seller + saver = 50/50, 2 sellers +
+//   saver = 50/25/25 (owner, 2026-08-01). The saver earns volume only, not
+//   a Sold; the save card itself is folded into the original, never counted
+//   twice. A save with NO price failed — the job stays cancelled, nothing
+//   links.
 //   Save → original matching: same office + phone digits (name-key fallback
 //   when the save card has no phone), nearest card on/before the save date.
 //   Verified on July 2026: 4 saves, 1 landed (Leon — Josh OConnor sold
@@ -273,8 +275,8 @@ const OUTCOME_KEY: Record<Exclude<CardOutcome, "unmarked">, keyof KombatTotals> 
 };
 
 /** A landed save's effect on the original sale (owner, 2026-08-01):
- *  the renegotiated price REPLACES the original volume, and the saver joins
- *  the volume split — half with one seller, thirds with two. */
+ *  the renegotiated price REPLACES the original volume; the saver takes 50%
+ *  and the original rep(s) split the other 50% evenly. */
 type SaveEffect = { price: number; saverReps: string[]; saveDate: string };
 
 /** Link each landed Can/Save card to the original sale it rescued.
@@ -405,15 +407,28 @@ export function aggregateCloseKombat(cards: BlockCard[]): {
     // write sale_price either — see the Sales-Report pass in
     // block-cards.server.ts. A landed save is the ONE lawful override
     // (owner, 2026-08-01): its renegotiated price replaces the original —
-    // "that trumps out the original price" — and the saver joins the reps in
-    // an even split (half with one seller, thirds with two). Result credit
-    // stays with the card's own reps: the saver earns volume, not a Sold.
+    // "that trumps out the original price". The SAVER'S HALF comes off the
+    // top (owner, 2026-08-01): 50% to whoever saved it, the other 50% split
+    // evenly among the original rep(s) — so 1 seller + saver = 50/50, and
+    // 2 sellers + saver = 50/25/25. A rep on both cards earns both shares.
+    // Result credit stays with the card's own reps: the saver earns volume,
+    // not a Sold.
     if (cardOutcome(card) === "sold") {
-      const price = save ? save.price : (card.sale_price ?? 0);
-      const volumeReps = [...new Set([...names, ...(save ? save.saverReps : [])])];
-      totals.revenue += price;
-      const share = volumeReps.length > 0 ? price / volumeReps.length : price;
-      for (const name of volumeReps) repRow(name).revenue += share;
+      totals.revenue += save ? save.price : (card.sale_price ?? 0);
+      if (save) {
+        const savers = [...new Set(save.saverReps)];
+        // No saver names on the save card: nobody to pay the save half to —
+        // the originals split the whole re-priced deal instead.
+        const saverPool = savers.length > 0 ? save.price / 2 : 0;
+        const originalPool = save.price - saverPool;
+        for (const name of savers) repRow(name).revenue += saverPool / savers.length;
+        // No original reps recorded: their half stays uncredited (company
+        // totals keep the whole price) — never invent a recipient.
+        for (const name of names) repRow(name).revenue += originalPool / names.length;
+      } else {
+        const price = card.sale_price ?? 0;
+        for (const name of names) repRow(name).revenue += price / names.length;
+      }
     }
   }
 
