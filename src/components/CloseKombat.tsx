@@ -36,7 +36,7 @@ import { CalendarRange, ChevronLeft, ChevronRight, Crown, RefreshCw, Swords } fr
 
 /**
  * Close Kombat — sales-rep standings straight from the Monday.com Block
- * boards, in Monday's own column language (Iss / BO / RS / PM / Sale).
+ * boards, in Monday's own column language (Iss / BO / OL / RS / PM / Sale).
  * Day / Week / Month ranges are all LA-calendar (card_date is the physical
  * appointment date — no 7 PM report lock here). Standings are ranked by sale
  * volume in every range (owner, 2026-07-30). Shared cards: each rep gets
@@ -393,6 +393,12 @@ function CloseKombatInner() {
           sub={{ label: "ND %", value: fmtPct(totals.noDemoPct), accent: "destructive" }}
         />
         <KombatTile
+          label="OL"
+          value={fmtCount(totals.ol)}
+          accent="warning"
+          sub={{ label: "OL %", value: fmtPct(totals.olPct), accent: "warning" }}
+        />
+        <KombatTile
           label="Reset"
           value={fmtCount(totals.reset)}
           accent="accent"
@@ -488,6 +494,7 @@ function CloseKombatInner() {
                     <th className="text-right py-2 px-2 font-normal">Appts</th>
                     <th className="text-right py-2 px-2 font-normal">No Show</th>
                     <th className="text-right py-2 px-2 font-normal">No Demo</th>
+                    <th className="text-right py-2 px-2 font-normal">OL</th>
                     <th className="text-right py-2 px-2 font-normal">Reset</th>
                     <th className="text-right py-2 px-2 font-normal">PM</th>
                     <th className="text-right py-2 px-2 font-normal">Sold</th>
@@ -498,6 +505,7 @@ function CloseKombatInner() {
                     </th>
                     <th className="text-right py-2 px-2 font-normal">NS %</th>
                     <th className="text-right py-2 px-2 font-normal">ND %</th>
+                    <th className="text-right py-2 px-2 font-normal">OL %</th>
                     <th className="text-right py-2 px-2 font-normal">Reset %</th>
                     <th className="text-right py-2 px-2 font-normal">Close %</th>
                     <th className="text-right py-2 px-2 font-normal">Reload %</th>
@@ -532,6 +540,9 @@ function CloseKombatInner() {
                       <td className="py-2.5 px-2 text-right tabular-nums text-destructive">
                         {fmtCount(r.noDemo)}
                       </td>
+                      <td className="py-2.5 px-2 text-right tabular-nums text-warning">
+                        {fmtCount(r.ol)}
+                      </td>
                       <td className="py-2.5 px-2 text-right tabular-nums text-accent">
                         {fmtCount(r.reset)}
                       </td>
@@ -555,6 +566,9 @@ function CloseKombatInner() {
                       </td>
                       <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-destructive">
                         {fmtPct(r.noDemoPct)}
+                      </td>
+                      <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-warning">
+                        {fmtPct(r.olPct)}
                       </td>
                       <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-accent">
                         {fmtPct(r.resetPct)}
@@ -592,6 +606,7 @@ function CloseKombatInner() {
                     <td className="py-2.5 px-2 text-right tabular-nums">
                       {fmtCount(totals.noDemo)}
                     </td>
+                    <td className="py-2.5 px-2 text-right tabular-nums">{fmtCount(totals.ol)}</td>
                     <td className="py-2.5 px-2 text-right tabular-nums">
                       {fmtCount(totals.reset)}
                     </td>
@@ -611,6 +626,9 @@ function CloseKombatInner() {
                     </td>
                     <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
                       {fmtPct(totals.noDemoPct)}
+                    </td>
+                    <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                      {fmtPct(totals.olPct)}
                     </td>
                     <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
                       {fmtPct(totals.resetPct)}
@@ -677,7 +695,8 @@ function CloseKombatInner() {
 
       <p className="text-[10px] text-muted-foreground">
         Columns mirror the Monday.com Block boards — Iss = issued lead · BO splits into No Show / No
-        Demo · RS = Reset · Sale = Sold. Office Appointments (job visit, upsale, check pickup) are
+        Demo · OL = one-leg (the lead ran but didn&apos;t get demoed — a result of its own, never a
+        demo) · RS = Reset · Sale = Sold. Office Appointments (job visit, upsale, check pickup) are
         not leads and aren&apos;t tracked here, though upsale money still counts in Revenue. CTC,
         Not Issued, and Add Rep cards don&apos;t count anywhere. A Reload is a re-sale to an
         existing customer and stands as its own channel: it&apos;s counted whatever the Iss cell
@@ -689,22 +708,22 @@ function CloseKombatInner() {
         sale, still 7 sits. The Cancels column tallies those alongside rather than as a result of
         their own. An FTD (financial turn down) is a PM the same way — the demo ran, the money
         didn&apos;t. Both update when a sync runs. One result per card (Cancel &gt; FTD &gt; Sold
-        &gt; PM &gt; Reset &gt; BO). An appointment with nothing marked on the board yet
+        &gt; PM &gt; Reset &gt; BO &gt; OL). An appointment with nothing marked on the board yet
         doesn&apos;t count anywhere — it joins Appts and the stats the moment a result lands, so No
-        Show + No Demo + Reset + PM + Sold always adds up to Appts. Reps are ranked by sale volume,
-        highest first, in every range. On a shared card each rep gets full result credit but the
-        sale volume splits evenly; the All-cards row counts each card once. Sit % = (PM + Sold) ÷
-        Appts · NS % = No Show ÷ Appts · ND % = No Demo ÷ Appts · Reset % = Reset ÷ Appts · Close %
-        = Sold ÷ (PM + Sold) · Cancel % = Cancels ÷ (Sold + Cancels) · Leads / Sale = Appts ÷ Sold,
-        shown as a number, not a percentage. Those are all lead metrics, so reloads are outside
-        every one of them; Reload % = Reload ÷ (Sold + Reload) is the one that counts both, being
-        the share of all sales that were reloads. A ratio with nothing in its denominator shows
-        &quot;—&quot;, not 0%. Can/Save: when a sold job cancels and a rep saves it (the office
-        writes &quot;Can/Save&quot; in the save card&apos;s Comments), the save&apos;s Sale Price
-        replaces the original volume; the saver takes 50% and the original rep(s) split the other
-        50% evenly — one seller makes it 50/50, two sellers 50/25/25. The saver earns volume, not a
-        Sold. A Can/Save card with no price is a failed save and changes nothing. Saves match their
-        original sale by office + phone within the loaded range.
+        Show + No Demo + OL + Reset + PM + Sold always adds up to Appts. Reps are ranked by sale
+        volume, highest first, in every range. On a shared card each rep gets full result credit but
+        the sale volume splits evenly; the All-cards row counts each card once. Sit % = (PM + Sold)
+        ÷ Appts · NS % = No Show ÷ Appts · ND % = No Demo ÷ Appts · OL % = OL ÷ Appts · Reset % =
+        Reset ÷ Appts · Close % = Sold ÷ (PM + Sold) · Cancel % = Cancels ÷ (Sold + Cancels) · Leads
+        / Sale = Appts ÷ Sold, shown as a number, not a percentage. Those are all lead metrics, so
+        reloads are outside every one of them; Reload % = Reload ÷ (Sold + Reload) is the one that
+        counts both, being the share of all sales that were reloads. A ratio with nothing in its
+        denominator shows &quot;—&quot;, not 0%. Can/Save: when a sold job cancels and a rep saves
+        it (the office writes &quot;Can/Save&quot; in the save card&apos;s Comments), the
+        save&apos;s Sale Price replaces the original volume; the saver takes 50% and the original
+        rep(s) split the other 50% evenly — one seller makes it 50/50, two sellers 50/25/25. The
+        saver earns volume, not a Sold. A Can/Save card with no price is a failed save and changes
+        nothing. Saves match their original sale by office + phone within the loaded range.
       </p>
     </div>
   );
@@ -717,6 +736,7 @@ function StatLine({ s }: { s: KombatTotals }) {
     { label: "Appts", value: fmtCount(s.appts) },
     { label: "No Show", value: fmtCount(s.noShow), className: "text-destructive" },
     { label: "No Demo", value: fmtCount(s.noDemo), className: "text-destructive" },
+    { label: "OL", value: fmtCount(s.ol), className: "text-warning" },
     { label: "Reset", value: fmtCount(s.reset), className: "text-accent" },
     { label: "PM", value: fmtCount(s.pm), className: "text-warning" },
     { label: "Sold", value: fmtCount(s.sold), className: "text-victory" },
@@ -725,6 +745,7 @@ function StatLine({ s }: { s: KombatTotals }) {
     { label: "Sit", value: fmtPct(s.sitPct) },
     { label: "NS %", value: fmtPct(s.noShowPct), className: "text-destructive" },
     { label: "ND %", value: fmtPct(s.noDemoPct), className: "text-destructive" },
+    { label: "OL %", value: fmtPct(s.olPct), className: "text-warning" },
     { label: "Reset %", value: fmtPct(s.resetPct), className: "text-accent" },
     { label: "Close", value: fmtPct(s.closePct) },
     { label: "Reload %", value: fmtPct(s.reloadPct), className: "text-victory" },

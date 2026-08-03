@@ -42,8 +42,14 @@
 //   issued) and so is absent from Sit %, Close %, Reset % and Leads / Sale.
 //   Reload % = Reload ÷ (Sold + Reload) — the share of all sales that were
 //   reloads — and reload money still counts in Revenue.
-// - OL (owner, 2026-07-30): dropped from Close Kombat entirely. The column
-//   still lands in block_cards, it just isn't a stat here any more.
+// - OL (owner, 2026-08-03, superseding the 2026-07-30 "drop OL" call): a
+//   one-leg is a lead that RAN but didn't get demoed — on the boards OL is
+//   the card's result, not a side-flag (verified: all 34 of July's OL marks
+//   sit on cards with nothing else marked; dropping OL had orphaned every
+//   one of them out of Appts). OL counts toward lead count with its own OL
+//   result column; it is NOT a demo, so Sit % and Close % exclude it.
+//   Precedence: last (Cancel > FTD > Sold > PM > Reset > BO > OL) — OL only
+//   speaks when nothing else does. OL % = OL ÷ Appts.
 // - Can/Save (owner, 2026-08-01): a sold job cancels, the office sends a rep
 //   to save it, and the office writes "Can/Save" in the save card's
 //   Comments. A save WITH a Sale Price landed: that renegotiated price
@@ -93,7 +99,7 @@ export type BlockCard = {
 export const SOLD_VALUES = ["sold", "reload", "upsell", "sale"] as const;
 
 export type CardOutcome =
-  "sold" | "cancelled" | "pm" | "reset" | "no_show" | "no_demo" | "unmarked";
+  "sold" | "cancelled" | "pm" | "reset" | "no_show" | "no_demo" | "ol" | "unmarked";
 
 /** WCC label tests — "Cancelled"/"CTC" and "FTD" (financial turn down) all
  *  kill the sale's volume; CTC counts inside the WCC column while FTD gets
@@ -110,14 +116,17 @@ const marked = (v: string | null | undefined): boolean => {
   return t !== "" && t !== "none";
 };
 
-/** ONE outcome per card: Cancelled/CTC > FTD > Sold > PM > Reset > BO. A WCC
+/** ONE outcome per card: Cancelled/CTC > FTD > Sold > PM > Reset > BO > OL. A WCC
  *  cancel wins even when the card's Sale cell is empty — when a sale cancels the
  *  office usually reverts the Block board's Sale column too, but the Sales
  *  Report row proves the sale happened and died. FTD keeps its slot in the
  *  order (it must outrank a leftover "Sold" cell) but resolves to a PM. The BO
  *  column's own label splits No Show vs No Demo ("No Show" text → no_show,
- *  anything else marked → no_demo). Unmarked = hasn't resolved yet. */
-export function cardOutcome(c: Pick<BlockCard, "bo" | "rs" | "pm" | "sale" | "wcc">): CardOutcome {
+ *  anything else marked → no_demo). OL (one-leg: ran, not demoed) speaks only
+ *  when nothing else does. Unmarked = hasn't resolved yet. */
+export function cardOutcome(
+  c: Pick<BlockCard, "bo" | "rs" | "pm" | "sale" | "wcc" | "ol">,
+): CardOutcome {
   if (isCancelLabel(c.wcc)) return "cancelled";
   if (isFtdLabel(c.wcc)) return "pm";
   const sale = (c.sale ?? "").trim().toLowerCase();
@@ -125,6 +134,7 @@ export function cardOutcome(c: Pick<BlockCard, "bo" | "rs" | "pm" | "sale" | "wc
   if (marked(c.pm)) return "pm";
   if (marked(c.rs)) return "reset";
   if (marked(c.bo)) return /no\s*show/i.test(c.bo as string) ? "no_show" : "no_demo";
+  if (marked(c.ol)) return "ol";
   return "unmarked";
 }
 
@@ -133,7 +143,7 @@ export function cardOutcome(c: Pick<BlockCard, "bo" | "rs" | "pm" | "sale" | "wc
  *  lead percentage). A cancelled reload is a Cancel, not a reload. */
 export function isReload(c: Pick<BlockCard, "sale" | "wcc">): boolean {
   return (
-    cardOutcome({ bo: null, rs: null, pm: null, sale: c.sale, wcc: c.wcc }) === "sold" &&
+    cardOutcome({ bo: null, rs: null, pm: null, ol: null, sale: c.sale, wcc: c.wcc }) === "sold" &&
     (c.sale ?? "").trim().toLowerCase() === "reload"
   );
 }
@@ -185,10 +195,13 @@ export type RepStats = {
   rep: string;
   /** RESULTED leads only — a card with nothing marked yet isn't an appt, and
    *  neither Office Appointments nor reloads count here (owner, 2026-07-30).
-   *  noShow + noDemo + reset + pm + sold always equals this. */
+   *  noShow + noDemo + ol + reset + pm + sold always equals this. */
   appts: number;
   noShow: number;
   noDemo: number;
+  /** One-legs — the lead ran but didn't get demoed (owner, 2026-08-03):
+   *  an Appt with its own result, never a demo. */
+  ol: number;
   reset: number;
   /** Demos that didn't end in a kept sale — includes FTDs and cancelled
    *  sales, since the rep sat those too (owner, 2026-07-30). */
@@ -226,6 +239,8 @@ export type RepStats = {
   noDemoPct: number | null;
   /** No Show ÷ Appts — completes the BO split alongside No Demo %. */
   noShowPct: number | null;
+  /** OL ÷ Appts — share of resulted leads that ran one-legged. */
+  olPct: number | null;
   /** Cancels ÷ (Sold + Cancels) — share of written LEAD sales that later
    *  died on the Sales Report; null until a sale was written. */
   cancelPct: number | null;
@@ -244,6 +259,7 @@ const emptyStats = (): Omit<RepStats, "rep"> => ({
   appts: 0,
   noShow: 0,
   noDemo: 0,
+  ol: 0,
   reset: 0,
   pm: 0,
   sold: 0,
@@ -257,6 +273,7 @@ const emptyStats = (): Omit<RepStats, "rep"> => ({
   reloadPct: null,
   noDemoPct: null,
   noShowPct: null,
+  olPct: null,
   cancelPct: null,
   leadsToSale: null,
   revenue: 0,
@@ -272,6 +289,7 @@ const OUTCOME_KEY: Record<Exclude<CardOutcome, "unmarked">, keyof KombatTotals> 
   reset: "reset",
   no_show: "noShow",
   no_demo: "noDemo",
+  ol: "ol",
 };
 
 /** A landed save's effect on the original sale (owner, 2026-08-01):
@@ -450,6 +468,7 @@ export function aggregateCloseKombat(cards: BlockCard[]): {
     s.resetPct = s.appts > 0 ? s.reset / s.appts : null;
     s.noDemoPct = s.appts > 0 ? s.noDemo / s.appts : null;
     s.noShowPct = s.appts > 0 ? s.noShow / s.appts : null;
+    s.olPct = s.appts > 0 ? s.ol / s.appts : null;
     s.reloadPct = sales > 0 ? s.reloads / sales : null;
     s.cancelPct = written > 0 ? s.cancels / written : null;
     s.leadsToSale = s.sold > 0 ? s.appts / s.sold : null;
