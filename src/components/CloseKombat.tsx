@@ -23,6 +23,9 @@ import {
 } from "@/lib/dates";
 import {
   aggregateCloseKombat,
+  auditBlockCards,
+  type AttentionItem,
+  type AttentionKind,
   type BlockCard,
   type KombatTotals,
   type RepStats,
@@ -178,6 +181,15 @@ function CloseKombatInner() {
     [cardsQuery.data, matches],
   );
   const { reps, totals } = useMemo(() => aggregateCloseKombat(visible), [visible]);
+
+  // Board-hygiene callouts for the office (ADMIN tier — realRole, so "View
+  // as" previews don't hide it from the owner). Same cards the stats read,
+  // so the list always describes exactly the range and office on screen.
+  const attention = useMemo(
+    () => (isAdmin ? auditBlockCards(visible, todayISO) : []),
+    [isAdmin, visible, todayISO],
+  );
+  const [showAllAttention, setShowAllAttention] = useState(false);
 
   // --- Admin sync: pull the boards from Monday on demand ---
   const sync = useMutation({
@@ -409,6 +421,37 @@ function CloseKombatInner() {
         <KombatTile label="Leads / Sale" value={fmtRatio(totals.leadsToSale)} accent="neon" />
         <KombatTile label="Revenue" value={fmtMoney(totals.revenue)} accent="victory" />
       </div>
+
+      {attention.length > 0 && (
+        <ArcadePanel
+          title={`Needs Attention · ${attention.length}`}
+          action={
+            <span className="text-[10px] font-display uppercase tracking-widest text-warning">
+              Fix on Monday, then sync
+            </span>
+          }
+        >
+          {/* Capped so a backfilled past month can't bury the standings —
+              items are sorted worst-first, so the cut only hides the tail. */}
+          <ul className="space-y-2">
+            {(showAllAttention ? attention : attention.slice(0, ATTENTION_CAP)).map((it) => (
+              <AttentionRow key={it.monday_item_id} it={it} />
+            ))}
+          </ul>
+          {attention.length > ATTENTION_CAP && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="mt-2"
+              onClick={() => setShowAllAttention((v) => !v)}
+            >
+              {showAllAttention
+                ? "Show fewer"
+                : `Show all ${attention.length} (${attention.length - ATTENTION_CAP} more)`}
+            </Button>
+          )}
+        </ArcadePanel>
+      )}
 
       <ArcadePanel
         title={`Kombat Standings · ${range.label}`}
@@ -708,6 +751,38 @@ function FlawlessBadge({ r }: { r: RepStats }) {
     <span className="ml-1.5 inline-block align-middle rounded border border-victory/40 px-1.5 py-0.5 text-[9px] font-display uppercase tracking-widest text-victory whitespace-nowrap">
       Flawless Victory
     </span>
+  );
+}
+
+/** Rows shown before the "Show all" toggle kicks in — enough for a normal
+ *  day's issues, small enough that a backfilled month can't bury the page. */
+const ATTENTION_CAP = 12;
+
+/** Money-impacting issues read red; bookkeeping drift reads amber. */
+const ATTENTION_META: Record<AttentionKind, { label: string; className: string }> = {
+  excluded_sale: { label: "Hidden Sale", className: "text-destructive" },
+  no_reps: { label: "No Reps", className: "text-destructive" },
+  blank_price: { label: "Blank Price", className: "text-destructive" },
+  unresolved: { label: "No Result", className: "text-warning" },
+  no_weekday_group: { label: "Wrong Group", className: "text-warning" },
+};
+
+function AttentionRow({ it }: { it: AttentionItem }) {
+  const meta = ATTENTION_META[it.kind];
+  return (
+    <li className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm border-b border-border/40 pb-2 last:border-b-0 last:pb-0">
+      <span
+        className={`font-display text-[10px] uppercase tracking-widest whitespace-nowrap ${meta.className}`}
+      >
+        {meta.label}
+      </span>
+      <span className="font-medium">{it.lead_name ?? "(unnamed card)"}</span>
+      <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+        {it.card_date ?? "no date"} · {it.office_location}
+        {it.reps.length > 0 ? ` · ${it.reps.join(", ")}` : ""}
+      </span>
+      <span className="text-xs text-muted-foreground">{it.detail}</span>
+    </li>
   );
 }
 

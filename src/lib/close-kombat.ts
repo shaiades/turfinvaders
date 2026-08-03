@@ -474,3 +474,138 @@ export function aggregateCloseKombat(cards: BlockCard[]): {
   );
   return { reps, totals };
 }
+
+// ── Needs Attention ────────────────────────────────────────────────────────
+// Board-hygiene audit (owner, 2026-08-03), born from the July reconciliation
+// against the Shark Tank dashboard: every dollar of daylight between the two
+// traced to a Block card with a blank price, a sale trapped on a Not Issued
+// card, a sale with no reps, or a card in the wrong group. Each of those
+// failure modes is silent — the card just quietly counts wrong or not at
+// all — so this surfaces them on the dashboard instead of waiting for a
+// month-end audit. Detection only: the numbers stay exactly what the board
+// says (see the never-invent rule); fixing happens on Monday, then a sync.
+
+export type AttentionKind =
+  "excluded_sale" | "no_reps" | "blank_price" | "unresolved" | "no_weekday_group";
+
+export type AttentionItem = {
+  kind: AttentionKind;
+  monday_item_id: string;
+  lead_name: string | null;
+  office_location: string;
+  card_date: string | null;
+  reps: string[];
+  /** What's wrong and what fixing it on Monday looks like. */
+  detail: string;
+};
+
+const WEEKDAY_NAMES = [
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+];
+
+/** Group titles that aren't weekday-named get a drifting fallback date at
+ *  sync time (active boards stamp "today") — mirror of deriveCardDate. */
+const isWeekdayGroup = (title: string | null): boolean => {
+  const t = (title ?? "").trim().toLowerCase();
+  return WEEKDAY_NAMES.some((w) => t === w || t.startsWith(w + " "));
+};
+
+/** ONE issue per card, worst first — a Not Issued card carrying a sale also
+ *  has a blank price half the time, and the Iss fix has to come first anyway
+ *  (the price only starts counting once the card counts at all). Save-aware:
+ *  the audit must never contradict how aggregateCloseKombat counts the same
+ *  card, so landed-save cards (consumed into their original) are exempt from
+ *  the money checks, and an original that a landed save re-priced is not
+ *  "counting as $0" — the save price replaced it. */
+export function auditBlockCards(cards: BlockCard[], todayISO: string): AttentionItem[] {
+  const saves = linkSaves(cards);
+  const items: AttentionItem[] = [];
+  for (const c of cards) {
+    const outcome = cardOutcome(c);
+    const saleLabel = (c.sale ?? "").trim();
+    const carriesSale = (SOLD_VALUES as readonly string[]).includes(saleLabel.toLowerCase());
+    const reps = c.reps.map((r) => r.trim()).filter(Boolean);
+    const excluded = isExcludedCard(c);
+    const dead = isCancelLabel(c.wcc) || isFtdLabel(c.wcc);
+    // A landed save card is folded into its original — the aggregate already
+    // counts its price there, whatever its own Iss/reps/price cells look like.
+    const consumedSave = saves.consumed.has(c.monday_item_id);
+    // A landed save's price replaces the original's, so a blank cell on the
+    // original no longer means $0.
+    const savePriced = saves.effects.has(c.monday_item_id);
+    const inWeekdayGroup = isWeekdayGroup(c.group_title);
+
+    let kind: AttentionKind | null = null;
+    let detail = "";
+    if (!consumedSave && excluded && carriesSale && !dead) {
+      // The Garcia/Nielsen/Vroom reloads, the Nguyen $41,000, Maddalena.
+      kind = "excluded_sale";
+      detail = `"${saleLabel}" on a "${c.iss}" card — counts NOWHERE until the Iss cell is fixed`;
+    } else if (!consumedSave && !excluded && outcome === "sold" && reps.length === 0) {
+      kind = "no_reps";
+      detail = `${saleLabel || "Sale"} with no reps — the money counts for the company, nobody gets credit`;
+    } else if (
+      !consumedSave &&
+      !excluded &&
+      outcome === "sold" &&
+      c.sale_price === null &&
+      !savePriced
+    ) {
+      // The Adams $27,500 and Washington $780 — blank counts as $0.
+      kind = "blank_price";
+      detail = `${saleLabel || "Sale"} with a blank Sale Price — counting as $0`;
+    } else if (
+      !excluded &&
+      !isOfficeAppt(c) &&
+      outcome === "unmarked" &&
+      !isCanSave(c) &&
+      inWeekdayGroup &&
+      c.card_date !== null &&
+      c.card_date < todayISO
+    ) {
+      // Yesterday-or-older appointment with nothing marked: counts nowhere.
+      // Today's cards get a pass (reps are still out running them), and so
+      // do Can/Save cards — an unpriced save is a FAILED save, not a gap.
+      // Non-weekday-group cards fall through to the group flag instead: their
+      // card_date is a drifting sync-time guess, so "yesterday" proves
+      // nothing and the real fix is filing the card, not marking a result.
+      kind = "unresolved";
+      detail = "no result marked yet — not counting anywhere";
+    } else if (!inWeekdayGroup && c.group_title !== null) {
+      // "Needs Assignment" and friends: the card's date is a guess that
+      // drifts to "today" on every sync until it gets a weekday group.
+      kind = "no_weekday_group";
+      detail = `group "${c.group_title}" isn't a weekday — its date drifts until the card is filed`;
+    }
+    if (!kind) continue;
+    items.push({
+      kind,
+      monday_item_id: c.monday_item_id,
+      lead_name: c.lead_name,
+      office_location: c.office_location,
+      card_date: c.card_date,
+      reps,
+      detail,
+    });
+  }
+  const rank: Record<AttentionKind, number> = {
+    excluded_sale: 0,
+    no_reps: 1,
+    blank_price: 2,
+    unresolved: 3,
+    no_weekday_group: 4,
+  };
+  items.sort(
+    (a, b) =>
+      rank[a.kind] - rank[b.kind] ||
+      (a.card_date ?? "").localeCompare(b.card_date ?? "") ||
+      (a.lead_name ?? "").localeCompare(b.lead_name ?? ""),
+  );
+  return items;
+}
