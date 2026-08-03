@@ -47,6 +47,7 @@ import { useWeekSelector } from "@/hooks/useWeekSelector";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { useAuth } from "@/hooks/useAuth";
 import { isManagerRole } from "@/lib/roles";
+import { isRecentlyActive, lastActiveMap } from "@/lib/suspension";
 import { formatCurrency, normalizeName } from "@/lib/utils";
 import { DEFAULT_OFFICE, OFFICE_LOCATIONS } from "@/lib/offices";
 import { getDispatchProduction } from "@/lib/dispatch.functions";
@@ -394,6 +395,16 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
     return acc;
   }, [windowMetrics]);
 
+  // Last credited day per canvasser_id, from row PRESENCE — genOn() reads 0
+  // for both "no row" and "0-lead row", so recency needs its own map. Funnel
+  // rows (`metrics`) are unioned in: on the today view they cover today, so a
+  // rep who returns after a long gap counts as active as soon as their first
+  // event lands (workedDays excludes today).
+  const lastActiveBy = useMemo(
+    () => lastActiveMap([...windowMetrics, ...metrics]),
+    [windowMetrics, metrics],
+  );
+
   const visible = useMemo(
     () => canvassers.filter((c) => matches(c.office_location ?? c.team_office)),
     [canvassers, matches],
@@ -492,8 +503,10 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
   // (Mon–Sat; Sundays never count) with zero leads generated = donut. Only
   // completed days count — today-in-progress never flags anyone, so the list
   // is stable all day and rolls at 7 PM with the report date. Excluded:
-  // profiles with suspension_tracked=false (pseudo-agents, staff) and reps
-  // whose profile didn't exist for both days yet.
+  // profiles with suspension_tracked=false (pseudo-agents, staff), reps
+  // whose profile didn't exist for both days yet, and anyone with no credited
+  // activity in over 7 calendar days (presumed off the team; auto-archive
+  // finishes the job at 14).
   const suspensionRows = useMemo(() => {
     if (tab !== "day" || dayPreset !== "today" || workedDays.length < 2) return [];
     const genOn = (ids: string[], day: string) =>
@@ -502,6 +515,7 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
     return rows.flatMap((r) => {
       if (!r.g.tracked || dismissed.has(r.g.key)) return [];
       if (r.g.oldestCreated > d2) return [];
+      if (!isRecentlyActive(today, r.g.ids, lastActiveBy, r.g.oldestCreated)) return [];
       if (genOn(r.g.ids, d1) !== 0 || genOn(r.g.ids, d2) !== 0) return [];
       // Consecutive zero worked days, newest backward, only days the profile existed.
       let streak = 0;
@@ -519,7 +533,7 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
       }
       return [{ g: r.g, d1, d2, streak, streakLabel: `${streak}${capped ? "+" : ""}` }];
     });
-  }, [rows, genByDay, workedDays, tab, dayPreset, dismissed]);
+  }, [rows, genByDay, workedDays, tab, dayPreset, dismissed, lastActiveBy, today]);
 
   const canManage = !readOnly && isManagerRole(realRole);
 
@@ -1009,7 +1023,8 @@ function SuspensionBanner({
         </div>
       </div>
       <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground mb-3">
-        2 consecutive worked days without a lead · Sundays excluded · completed days only
+        2 consecutive worked days without a lead · Sundays excluded · completed days only · active
+        within 7 days
       </div>
       <div className="flex flex-wrap gap-2">
         {rows.map((r) => (

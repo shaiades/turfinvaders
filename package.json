@@ -13,7 +13,8 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "verify:kombat": "npx tsx scripts/verify-close-kombat.ts"
+    "verify:kombat": "npx tsx scripts/verify-close-kombat.ts",
+    "verify:suspension": "npx tsx scripts/verify-suspension.ts"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",
