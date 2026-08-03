@@ -2,7 +2,7 @@ import { Link, useRouter, useRouterState } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth, setDevRoleOverride, type AppRole } from "@/hooks/useAuth";
-import { CLOSE_KOMBAT_ROLES, isAdminRole, isManagerRole } from "@/lib/roles";
+import { CLOSE_KOMBAT_ROLES, canPreviewRole, isAdminRole, isManagerRole } from "@/lib/roles";
 import {
   LogOut,
   LayoutDashboard,
@@ -17,6 +17,7 @@ import {
   Sparkles,
   Truck,
   Swords,
+  Users,
 } from "lucide-react";
 const turfInvadersWordmark = { url: "/turf-invaders-wordmark.png" };
 
@@ -81,15 +82,26 @@ export function AppShell({ children }: { children: ReactNode }) {
         { to: "/daily-wrap", label: "Wrap", icon: Sparkles },
       ];
     }
-    // Leadership: owner, captain, office_staff (manager suite). Close Kombat
-    // only for roles its route guard admits — captains are excluded, so
-    // don't show them a nav item that silently bounces.
+    // Leadership: owner, captain, office_staff (manager suite). Items whose
+    // routes/tabs are admin-only (Payroll, Desk, Close Kombat) are hidden from
+    // captains — never show a nav item that silently bounces. Captains get
+    // Players (/users) in their mobile 5-slice; admins reach it after Desk.
     return [
       { to: "/dashboard", search: { tab: "executive" }, label: "Command", icon: LayoutDashboard },
       { to: "/my-territory", label: "Territory", icon: MapPin },
       { to: "/dashboard", search: { tab: "dispatch" }, label: "Fleet Dispatch", icon: Truck },
-      { to: "/dashboard", search: { tab: "payroll" }, label: "Payroll", icon: DollarSign },
-      { to: "/confirmation-desk", label: "Desk", icon: PhoneCall },
+      ...(role && isAdminRole(role)
+        ? [
+            {
+              to: "/dashboard",
+              search: { tab: "payroll" },
+              label: "Payroll",
+              icon: DollarSign,
+            } as NavItem,
+            { to: "/confirmation-desk", label: "Desk", icon: PhoneCall } as NavItem,
+          ]
+        : []),
+      { to: "/users", label: "Players", icon: Users },
       ...(role && CLOSE_KOMBAT_ROLES.includes(role)
         ? [{ to: "/close-kombat", label: "Close Kombat", icon: Swords } as NavItem]
         : []),
@@ -122,13 +134,19 @@ export function AppShell({ children }: { children: ReactNode }) {
               }}
               className="bg-surface border border-border rounded px-2 py-1.5 min-h-9 text-base md:text-xs font-medium focus:outline-none focus:ring-1 focus:ring-[var(--neon-magenta)]"
             >
-              <option value="owner">Owner</option>
+              {/* Option list mirrors canPreviewRole, which useAuth also
+                  applies to stored overrides — a captain must never get an
+                  owner-skinned client, and Sales Rep preview needs real
+                  /close-kombat access (admins only). */}
+              {canPreviewRole(realRole, "owner") && <option value="owner">Owner</option>}
               <option value="captain">Captain</option>
               <option value="canvasser">Canvasser</option>
-              {/* Sales Rep preview needs real /close-kombat access — admins
-                  only, captains would just bounce off the route guard. */}
-              {isAdminRole(realRole) && <option value="sales_rep">Sales Rep</option>}
-              <option value="office_staff">Office Staff</option>
+              {canPreviewRole(realRole, "sales_rep") && (
+                <option value="sales_rep">Sales Rep</option>
+              )}
+              {canPreviewRole(realRole, "office_staff") && (
+                <option value="office_staff">Office Staff</option>
+              )}
             </select>
             {isOverridden && (
               <button

@@ -37,7 +37,7 @@ import {
 import { deleteProfile, deleteVan } from "@/lib/fleet.functions";
 import { addTeamMember } from "@/lib/users.functions";
 import { useAuth } from "@/hooks/useAuth";
-import { isManagerRole } from "@/lib/roles";
+import { canManageTarget, isManagerRole } from "@/lib/roles";
 import { formatCurrency, normalizeName } from "@/lib/utils";
 import { DEFAULT_OFFICE, OFFICE_LOCATIONS, type OfficeLocation } from "@/lib/offices";
 import type { RosterProfile, Van } from "@/components/FleetDispatch";
@@ -78,7 +78,7 @@ export function FleetDispatchManage({
   volumeByUser: Map<string, number>;
 }) {
   const qc = useQueryClient();
-  const { realRole } = useAuth();
+  const { realRole, user } = useAuth();
   const canManage = isManagerRole(realRole);
   const isOwnerRole = realRole === "owner";
   const [newVanName, setNewVanName] = useState("");
@@ -249,8 +249,9 @@ export function FleetDispatchManage({
         </div>
       )}
 
-      {/* Create New Van — managers only */}
-      {canManage && (
+      {/* Create New Van — Owner only ("Owners manage teams" RLS; don't show
+          Captains/Admins a form that fails at the database). */}
+      {isOwnerRole && (
         <ArcadePanel title="Create New Van">
           <div className="grid gap-3 md:grid-cols-[1fr_180px_140px_auto] items-end">
             <div>
@@ -437,7 +438,7 @@ export function FleetDispatchManage({
                                 <Building2 className="w-3 h-3" />{" "}
                                 {v.office_location ?? DEFAULT_OFFICE}
                               </span>
-                              {canManage && (
+                              {isOwnerRole && (
                                 <button
                                   onClick={() => startEditVan(v)}
                                   className="p-2 md:p-1 min-h-9 min-w-9 md:min-h-0 md:min-w-0 inline-flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground"
@@ -474,8 +475,12 @@ export function FleetDispatchManage({
                           </div>
                           <div className="space-y-1.5 min-h-[40px]">
                             {roster.map((r) => {
-                              const targetIsOwner = (rolesByUser.get(r.id) ?? []).includes("owner");
-                              const canModify = canManage && (isOwnerRole || !targetIsOwner);
+                              // Captains/Admins may not move or delete
+                              // Owner/Admin accounts; non-owners never
+                              // delete themselves (server enforces both).
+                              const targetRoles = rolesByUser.get(r.id) ?? [];
+                              const canModify = canManage && canManageTarget(realRole, targetRoles);
+                              const canDelete = canModify && (isOwnerRole || r.id !== user?.id);
                               // Sum points and sale volume across every profile with the same display name in this van.
                               const nameKey = normalizeName(r.display_name);
                               const sameNameProfiles = rosterRaw.filter(
@@ -507,7 +512,7 @@ export function FleetDispatchManage({
                                       : undefined
                                   }
                                   onDelete={
-                                    isOwnerRole
+                                    canDelete
                                       ? () => {
                                           if (
                                             confirm(
@@ -582,8 +587,9 @@ export function FleetDispatchManage({
               </div>
             ) : (
               unassigned.map((p) => {
-                const targetIsOwner = (rolesByUser.get(p.id) ?? []).includes("owner");
-                const canModify = canManage && (isOwnerRole || !targetIsOwner);
+                const targetRoles = rolesByUser.get(p.id) ?? [];
+                const canModify = canManage && canManageTarget(realRole, targetRoles);
+                const canDelete = canModify && (isOwnerRole || p.id !== user?.id);
                 return (
                   <RosterRow
                     key={p.id}
@@ -603,7 +609,7 @@ export function FleetDispatchManage({
                         : undefined
                     }
                     onDelete={
-                      isOwnerRole
+                      canDelete
                         ? () => {
                             if (
                               confirm(

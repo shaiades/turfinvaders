@@ -1,11 +1,15 @@
 import { createServerFn } from "@tanstack/react-start";
 import { DEFAULT_OFFICE } from "@/lib/offices";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { canManageTarget, isManagerRole, primaryRole } from "@/lib/role-policy";
 
 /**
- * Owner-only profile deletion. Removes the auth user (cascades to profile,
- * user_roles, daily_logs FK, etc.) so ghost CSV-imported profiles can be
- * cleared from Fleet Manager.
+ * Manager-tier profile deletion: prepare_profile_deletion (last-owner guard +
+ * role rows, serialized with set_user_role), then the auth user (if any),
+ * then the profile row — explicit deletes, since the auth.users FKs were
+ * dropped in 20260702175542 and nothing cascades from auth anymore. Owners
+ * delete anyone but the last Owner; Captains and Admins delete only
+ * non-privileged accounts (no Owner/Admin targets) and never themselves.
  */
 export const deleteProfile = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -16,21 +20,45 @@ export const deleteProfile = createServerFn({ method: "POST" })
     return { id };
   })
   .handler(async ({ data, context }) => {
-    // Verify caller is an owner
     const { data: roles, error: rolesErr } = await context.supabase
       .from("user_roles")
       .select("role")
       .eq("user_id", context.userId);
     if (rolesErr) throw rolesErr;
-    const isOwner = (roles ?? []).some((r) => r.role === "owner");
-    if (!isOwner) throw new Error("Only owners can delete profiles");
+    const callerRole = primaryRole((roles ?? []).map((r) => r.role));
+    if (!isManagerRole(callerRole)) {
+      throw new Error("Only Owners, Captains, or Admins can delete profiles");
+    }
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { error } = await supabaseAdmin.auth.admin.deleteUser(data.id);
-    if (error) {
-      // Fallback: hard-delete profile row even if auth user is missing
-      await supabaseAdmin.from("profiles").delete().eq("id", data.id);
+    const { data: targetRoleRows, error: targetErr } = await supabaseAdmin
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", data.id);
+    if (targetErr) throw new Error(targetErr.message);
+    const targetRoles = (targetRoleRows ?? []).map((r) => r.role as string);
+
+    if (callerRole !== "owner") {
+      if (!canManageTarget(callerRole, targetRoles)) {
+        throw new Error("Only Owners can delete Owner or Admin accounts");
+      }
+      if (data.id === context.userId) {
+        throw new Error("You cannot delete your own account");
+      }
     }
+
+    // Serialized last-owner check + role-row cleanup, under the same advisory
+    // lock as set_user_role. The auth.users FKs were dropped (20260702175542),
+    // so nothing cascades anymore — every row is removed explicitly.
+    const { error: prepErr } = await supabaseAdmin.rpc("prepare_profile_deletion", {
+      _target: data.id,
+    });
+    if (prepErr) throw new Error(prepErr.message);
+
+    // Best effort: placeholder profiles have no auth user to delete.
+    await supabaseAdmin.auth.admin.deleteUser(data.id).catch(() => undefined);
+    const { error: profDelErr } = await supabaseAdmin.from("profiles").delete().eq("id", data.id);
+    if (profDelErr) throw new Error(profDelErr.message);
     return { ok: true };
   });
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { User } from "@supabase/supabase-js";
-import { isAppRole, isManagerRole, primaryRole, type AppRole } from "@/lib/roles";
+import { canPreviewRole, isAppRole, primaryRole, type AppRole } from "@/lib/roles";
 
 export type { AppRole };
 
@@ -41,9 +41,11 @@ export function useAuth(): AuthState {
       ]);
       const r = roles?.map((x) => x.role as AppRole) ?? [];
       const realRole = primaryRole(r);
-      // View As is a manager tool: a stale dev_role_override left in this
-      // browser's localStorage must never re-skin a canvasser or sales rep.
-      const override = isManagerRole(realRole) ? readDevRole() : null;
+      // View As is a manager tool, clamped per tier: a stale
+      // dev_role_override left in this browser's localStorage must never
+      // re-skin a canvasser/sales rep, nor give a captain an owner skin.
+      const stored = readDevRole();
+      const override = stored && canPreviewRole(realRole, stored) ? stored : null;
       if (active) {
         setState({
           loading: false,
@@ -63,10 +65,11 @@ export function useAuth(): AuthState {
 
     // Listen for dev-role override changes from this tab or others.
     function onOverride() {
-      setState((s) => ({
-        ...s,
-        role: (isManagerRole(s.realRole) ? readDevRole() : null) ?? s.realRole,
-      }));
+      setState((s) => {
+        const stored = readDevRole();
+        const override = stored && canPreviewRole(s.realRole, stored) ? stored : null;
+        return { ...s, role: override ?? s.realRole };
+      });
     }
     window.addEventListener("dev-role-changed", onOverride);
     window.addEventListener("storage", (e) => {

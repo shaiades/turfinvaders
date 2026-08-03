@@ -6,11 +6,17 @@ import { Button } from "@/components/ui/button";
 import { deleteProfile, deleteVan } from "@/lib/fleet.functions";
 import { toast } from "sonner";
 import { Trash2, Truck, User } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
+import { canManageTarget } from "@/lib/roles";
 
-/** Destructive van/user purge tools — lives on the Manage Players screen
- *  (was embedded in the Executive Dashboard). Owner only by placement. */
+/** Destructive van/user purge tools — lives on the Manage Players screen.
+ *  Van deletion is Owner-only; user deletion follows canManageTarget
+ *  (Captains/Admins may delete non-privileged accounts, never themselves —
+ *  the deleteProfile server fn enforces the same rules). */
 export function DatabaseCleanup() {
   const qc = useQueryClient();
+  const { realRole, user } = useAuth();
+  const isOwnerActor = realRole === "owner";
   const deleteProfileFn = useServerFn(deleteProfile);
   const deleteVanFn = useServerFn(deleteVan);
 
@@ -36,7 +42,9 @@ export function DatabaseCleanup() {
   });
 
   const delVan = useMutation({
-    mutationFn: async (id: string) => { await deleteVanFn({ data: { id } }); },
+    mutationFn: async (id: string) => {
+      await deleteVanFn({ data: { id } });
+    },
     onSuccess: () => {
       toast.success("Van deleted");
       qc.invalidateQueries({ queryKey: ["cleanup_inventory"] });
@@ -48,7 +56,9 @@ export function DatabaseCleanup() {
   });
 
   const delUser = useMutation({
-    mutationFn: async (id: string) => { await deleteProfileFn({ data: { id } }); },
+    mutationFn: async (id: string) => {
+      await deleteProfileFn({ data: { id } });
+    },
     onSuccess: () => {
       toast.success("User deleted");
       qc.invalidateQueries({ queryKey: ["cleanup_inventory"] });
@@ -61,41 +71,56 @@ export function DatabaseCleanup() {
   return (
     <ArcadePanel
       title="Database Cleanup · Purge Mode"
-      action={<span className="text-[10px] font-display uppercase tracking-widest text-destructive">Destructive · Owner Only</span>}
+      action={
+        <span className="text-[10px] font-display uppercase tracking-widest text-destructive">
+          Destructive
+        </span>
+      }
     >
       {q.isLoading || !q.data ? (
         <div className="text-sm text-muted-foreground">Loading…</div>
       ) : (
         <div className="grid gap-6 lg:grid-cols-2">
-          {/* Vans */}
-          <div>
-            <h3 className="text-[10px] font-display uppercase tracking-widest text-muted-foreground mb-2">
-              All Vans ({q.data.vans.length})
-            </h3>
-            <div className="space-y-1.5">
-              {q.data.vans.length === 0 ? (
-                <div className="text-xs text-muted-foreground italic">No vans.</div>
-              ) : q.data.vans.map((v) => (
-                <div key={v.id} className="flex items-center justify-between gap-3 px-3 py-2 rounded border border-border bg-surface">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <Truck className="w-4 h-4 shrink-0" style={{ color: v.color }} />
-                    <TeamBadge name={v.name} color={v.color} />
-                  </div>
-                  <Button
-                    variant="destructive"
-                    disabled={delVan.isPending}
-                    onClick={() => {
-                      if (confirm(`Permanently delete Van "${v.name}"? Members will become Unassigned.`)) {
-                        delVan.mutate(v.id);
-                      }
-                    }}
-                  >
-                    <Trash2 className="w-3.5 h-3.5 mr-1" /> Delete
-                  </Button>
-                </div>
-              ))}
+          {/* Vans — deletion is Owner-only, so don't render dead buttons. */}
+          {isOwnerActor && (
+            <div>
+              <h3 className="text-[10px] font-display uppercase tracking-widest text-muted-foreground mb-2">
+                All Vans ({q.data.vans.length})
+              </h3>
+              <div className="space-y-1.5">
+                {q.data.vans.length === 0 ? (
+                  <div className="text-xs text-muted-foreground italic">No vans.</div>
+                ) : (
+                  q.data.vans.map((v) => (
+                    <div
+                      key={v.id}
+                      className="flex items-center justify-between gap-3 px-3 py-2 rounded border border-border bg-surface"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Truck className="w-4 h-4 shrink-0" style={{ color: v.color }} />
+                        <TeamBadge name={v.name} color={v.color} />
+                      </div>
+                      <Button
+                        variant="destructive"
+                        disabled={delVan.isPending}
+                        onClick={() => {
+                          if (
+                            confirm(
+                              `Permanently delete Van "${v.name}"? Members will become Unassigned.`,
+                            )
+                          ) {
+                            delVan.mutate(v.id);
+                          }
+                        }}
+                      >
+                        <Trash2 className="w-3.5 h-3.5 mr-1" /> Delete
+                      </Button>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Users */}
           <div>
@@ -105,35 +130,54 @@ export function DatabaseCleanup() {
             <div className="space-y-1.5 max-h-[480px] overflow-y-auto pr-1">
               {q.data.profiles.length === 0 ? (
                 <div className="text-xs text-muted-foreground italic">No users.</div>
-              ) : q.data.profiles.map((p) => {
-                const roles = q.data.rolesByUser.get(p.id) ?? [];
-                const isOwner = roles.includes("owner");
-                return (
-                  <div key={p.id} className="flex items-center justify-between gap-3 px-3 py-2 rounded border border-border bg-surface">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <User className="w-4 h-4 shrink-0 text-muted-foreground" />
-                      <span className="text-sm truncate">{p.display_name ?? "Unknown"}</span>
-                      {roles.length > 0 && (
-                        <span className="text-[9px] font-display uppercase tracking-widest text-muted-foreground">
-                          · {roles.join(", ")}
-                        </span>
-                      )}
-                    </div>
-                    <Button
-                      variant="destructive"
-                      disabled={delUser.isPending || isOwner}
-                      title={isOwner ? "Cannot delete an Owner here" : "Permanently delete user"}
-                      onClick={() => {
-                        if (confirm(`Permanently delete user "${p.display_name}"? This removes their account and data.`)) {
-                          delUser.mutate(p.id);
-                        }
-                      }}
+              ) : (
+                q.data.profiles.map((p) => {
+                  const roles = q.data.rolesByUser.get(p.id) ?? [];
+                  const isOwnerTarget = roles.includes("owner");
+                  const isSelfTarget = !isOwnerActor && p.id === user?.id;
+                  const blocked =
+                    isOwnerTarget || isSelfTarget || !canManageTarget(realRole, roles);
+                  const blockedTitle = isOwnerTarget
+                    ? "Cannot delete an Owner here"
+                    : isSelfTarget
+                      ? "You cannot delete your own account"
+                      : !canManageTarget(realRole, roles)
+                        ? "Only Owners can delete Admin accounts"
+                        : "Permanently delete user";
+                  return (
+                    <div
+                      key={p.id}
+                      className="flex items-center justify-between gap-3 px-3 py-2 rounded border border-border bg-surface"
                     >
-                      <Trash2 className="w-3.5 h-3.5 mr-1" /> Delete
-                    </Button>
-                  </div>
-                );
-              })}
+                      <div className="flex items-center gap-2 min-w-0">
+                        <User className="w-4 h-4 shrink-0 text-muted-foreground" />
+                        <span className="text-sm truncate">{p.display_name ?? "Unknown"}</span>
+                        {roles.length > 0 && (
+                          <span className="text-[9px] font-display uppercase tracking-widest text-muted-foreground">
+                            · {roles.join(", ")}
+                          </span>
+                        )}
+                      </div>
+                      <Button
+                        variant="destructive"
+                        disabled={delUser.isPending || blocked}
+                        title={blockedTitle}
+                        onClick={() => {
+                          if (
+                            confirm(
+                              `Permanently delete user "${p.display_name}"? This removes their account and data.`,
+                            )
+                          ) {
+                            delUser.mutate(p.id);
+                          }
+                        }}
+                      >
+                        <Trash2 className="w-3.5 h-3.5 mr-1" /> Delete
+                      </Button>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
         </div>

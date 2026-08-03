@@ -1,26 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { listRoster, type RosterRow } from "@/lib/users.functions";
-import { isManagerRole } from "@/lib/roles";
+import { ROLE_LABEL, ROLE_TONE, isAppRole, isManagerRole } from "@/lib/roles";
 import { ArcadePanel, MobileCardList, MobileCard, MobileCardHeader } from "@/components/arcade";
 import { AddTeamMemberDialog } from "@/components/AddTeamMemberDialog";
 import { Users } from "lucide-react";
 
-const ROLE_LABEL: Record<string, string> = {
-  owner: "Owner",
-  office_staff: "Admin",
-  captain: "Captain",
-  sales_rep: "Sales Rep",
-  canvasser: "Canvasser",
-};
+function roleTone(role: string): string {
+  return isAppRole(role) ? ROLE_TONE[role] : ROLE_TONE.canvasser;
+}
 
-const ROLE_TONE: Record<string, string> = {
-  owner: "text-victory border-victory/40",
-  office_staff: "text-accent border-accent/40",
-  captain: "text-neon border-neon/40",
-  sales_rep: "text-warning border-warning/40",
-  canvasser: "text-muted-foreground border-border",
-};
+function roleLabel(role: string): string {
+  return isAppRole(role) ? ROLE_LABEL[role] : role;
+}
 
 export function RosterPanel() {
   const fetchRoster = useServerFn(listRoster);
@@ -68,8 +60,8 @@ function RosterTable({ rows }: { rows: RosterRow[] }) {
                   </span>
                 }
                 right={
-                  <span className={`text-[10px] font-display uppercase tracking-widest px-2 py-1 rounded border ${ROLE_TONE[r.role] ?? ROLE_TONE.canvasser}`}>
-                    {ROLE_LABEL[r.role] ?? r.role}
+                  <span className={`text-[10px] font-display uppercase tracking-widest px-2 py-1 rounded border ${roleTone(r.role)}`}>
+                    {roleLabel(r.role)}
                   </span>
                 }
               />
@@ -112,8 +104,8 @@ function RosterTable({ rows }: { rows: RosterRow[] }) {
                 </td>
                 <td className="py-2.5 text-muted-foreground">{r.office_location}</td>
                 <td className="py-2.5">
-                  <span className={`text-[10px] font-display uppercase tracking-widest px-2 py-1 rounded border ${ROLE_TONE[r.role] ?? ROLE_TONE.canvasser}`}>
-                    {ROLE_LABEL[r.role] ?? r.role}
+                  <span className={`text-[10px] font-display uppercase tracking-widest px-2 py-1 rounded border ${roleTone(r.role)}`}>
+                    {roleLabel(r.role)}
                   </span>
                 </td>
                 <td className="py-2.5">

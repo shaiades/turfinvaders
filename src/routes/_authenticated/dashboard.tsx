@@ -15,6 +15,7 @@ import { TimesheetEditor } from "@/components/TimesheetEditor";
 import { FleetDispatch } from "@/components/FleetDispatch";
 import { WeeklyScheduleSettings } from "@/components/WeeklyScheduleSettings";
 import { CompanySettingsPanel } from "@/components/CompanySettingsPanel";
+import { PermissionsPanel } from "@/components/PermissionsPanel";
 import { AddTeamMemberDialog } from "@/components/AddTeamMemberDialog";
 import { RosterPanel } from "@/components/RosterPanel";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -29,9 +30,9 @@ import {
 import { useTodayLeads } from "@/hooks/useTodayLeads";
 import { formatCurrency } from "@/lib/utils";
 import { weekStartMonday, toISODate, laMidnightUtcISO } from "@/lib/dates";
-import { Zap, DoorOpen, Truck, FileSpreadsheet } from "lucide-react";
+import { DoorOpen, Truck, FileSpreadsheet } from "lucide-react";
 
-type OwnerTab = "dispatch" | "executive" | "timesheets" | "payroll" | "settings";
+type OwnerTab = "dispatch" | "executive" | "timesheets" | "payroll" | "permissions" | "settings";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — Knockout" }] }),
@@ -40,7 +41,7 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
     const t = s.tab === "fleet" ? "dispatch" : s.tab;
     return {
       tab:
-        t === "payroll" || t === "timesheets" || t === "dispatch" || t === "settings"
+        t === "payroll" || t === "timesheets" || t === "dispatch" || t === "permissions" || t === "settings"
           ? t
           : "executive",
     };
@@ -51,6 +52,7 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
 
 function Dashboard() {
   const { role, loading, teamId, displayName, user } = useAuth();
+  const { tab } = Route.useSearch();
 
   const { data: settings } = useQuery({
     queryKey: ["company_settings"],
@@ -65,8 +67,23 @@ function Dashboard() {
 
   // Owners and Office Staff (Admins) both get the full Command view.
   if (isAdminRole(role)) return <OwnerDashboard visibility={!!settings?.global_visibility} />;
-  if (role === "captain") return <CaptainDashboard teamId={teamId} visibility={!!settings?.global_visibility} />;
+  if (role === "captain") {
+    // Captains manage van assignments on the real Fleet Dispatch board
+    // (2026-08-03: captains are canvassing managers). Every other tab value
+    // renders their team view.
+    if (tab === "dispatch") return <CaptainFleetDispatch />;
+    return <CaptainDashboard teamId={teamId} visibility={!!settings?.global_visibility} />;
+  }
   return <CanvasserDashboard displayName={displayName} teamId={teamId} userId={user?.id} visibility={!!settings?.global_visibility} />;
+}
+
+function CaptainFleetDispatch() {
+  return (
+    <div className="space-y-4">
+      <h1 className="font-display text-lg md:text-2xl text-foreground">FLEET DISPATCH</h1>
+      <FleetDispatch />
+    </div>
+  );
 }
 
 function Loading() { return <div className="text-muted-foreground text-sm">Loading dashboard…</div>; }
@@ -143,6 +160,7 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
             <TabsTrigger value="executive">Executive Dashboard</TabsTrigger>
             <TabsTrigger value="timesheets">Timesheets</TabsTrigger>
             <TabsTrigger value="payroll">Payroll</TabsTrigger>
+            <TabsTrigger value="permissions">Permissions</TabsTrigger>
             <TabsTrigger value="settings">Settings</TabsTrigger>
           </TabsList>
         </div>
@@ -151,13 +169,15 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
         <TabsContent value="executive" className="mt-0"><ExecutiveDashboard /></TabsContent>
         <TabsContent value="timesheets" className="mt-0"><TimesheetEditor /></TabsContent>
         <TabsContent value="payroll" className="mt-0"><PayrollLedger /></TabsContent>
+        <TabsContent value="permissions" className="mt-0"><PermissionsPanel /></TabsContent>
         <TabsContent value="settings" className="mt-0 space-y-6">
           <WeeklyScheduleSettings />
           <RosterPanel />
           <CompanySettingsPanel />
           <div className="arcade-card p-4 flex items-center justify-between gap-3 flex-wrap">
             <div className="text-sm text-muted-foreground">
-              Roles, teams, and account cleanup live on the Manage Players screen.
+              Teams, suspensions, and account cleanup live on Manage Players. Role access lives on
+              the Permissions tab.
             </div>
             <Link
               to="/users"
@@ -261,10 +281,10 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
     },
   });
 
-  // Cross-van cards read daily_metrics (the leaderboard pipeline) because
-  // captains cannot read other teams' daily_logs/leads under RLS by design.
+  // Cross-van cards read daily_metrics (the leaderboard pipeline) — cheap
+  // aggregates. Captains see every van regardless of the global visibility
+  // toggle (2026-08-03: captains are all-teams canvassing managers).
   const otherVansQuery = useQuery({
-    enabled: visibility,
     queryKey: ["captain_other_vans"],
     queryFn: async () => {
       const since = toISODate(weekStartMonday());
@@ -319,6 +339,12 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
         <div className="flex items-center gap-3">
           <VisibilityChip on={visibility} />
           <AddTeamMemberDialog />
+          <Link
+            to="/users"
+            className="inline-flex items-center min-h-10 md:min-h-9 px-4 rounded-md border border-neon/50 text-neon font-display text-[10px] uppercase tracking-widest hover:bg-neon/10"
+          >
+            Manage Players
+          </Link>
         </div>
       </div>
 
@@ -401,38 +427,32 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
         </>
       )}
 
-      {visibility ? (
-        <ArcadePanel title="Other Vans">
-          <div className="grid sm:grid-cols-2 gap-4">
-            {(otherVansQuery.data?.teams ?? [])
-              .filter((t) => t.id !== teamId)
-              .map((t) => {
-                const tt = otherVansQuery.data?.perTeam.get(t.id) ?? {
-                  submits: 0,
-                  confirmed: 0,
-                  sales: 0,
-                };
-                return (
-                  <Link key={t.id} to="/teams/$teamId" params={{ teamId: t.id }} className="arcade-card p-4 hover:arcade-card-glow">
-                    <div className="flex items-center justify-between mb-3">
-                      <TeamBadge name={t.name} color={t.color ?? "#10b981"} />
-                      <LiveLeadCounter value={leads.byTeam[t.id] ?? 0} size="sm" label="LEADS" />
-                    </div>
-                    <div className="grid grid-cols-3 gap-2">
-                      <Mini label="Submits" value={tt.submits.toLocaleString()} />
-                      <Mini label="Confirmed" value={tt.confirmed.toLocaleString()} />
-                      <Mini label="Sales" value={tt.sales.toLocaleString()} />
-                    </div>
-                  </Link>
-                );
-              })}
-          </div>
-        </ArcadePanel>
-      ) : (
-        <div className="arcade-card p-5 text-sm text-muted-foreground flex items-center gap-2">
-          <Zap className="w-4 h-4" /> Global Visibility is off. Only your van is visible. Ask the Owner to flip it on for cross-team views.
+      <ArcadePanel title="Other Vans">
+        <div className="grid sm:grid-cols-2 gap-4">
+          {(otherVansQuery.data?.teams ?? [])
+            .filter((t) => t.id !== teamId)
+            .map((t) => {
+              const tt = otherVansQuery.data?.perTeam.get(t.id) ?? {
+                submits: 0,
+                confirmed: 0,
+                sales: 0,
+              };
+              return (
+                <Link key={t.id} to="/teams/$teamId" params={{ teamId: t.id }} className="arcade-card p-4 hover:arcade-card-glow">
+                  <div className="flex items-center justify-between mb-3">
+                    <TeamBadge name={t.name} color={t.color ?? "#10b981"} />
+                    <LiveLeadCounter value={leads.byTeam[t.id] ?? 0} size="sm" label="LEADS" />
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <Mini label="Submits" value={tt.submits.toLocaleString()} />
+                    <Mini label="Confirmed" value={tt.confirmed.toLocaleString()} />
+                    <Mini label="Sales" value={tt.sales.toLocaleString()} />
+                  </div>
+                </Link>
+              );
+            })}
         </div>
-      )}
+      </ArcadePanel>
     </div>
   );
 }

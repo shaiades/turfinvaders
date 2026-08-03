@@ -46,7 +46,7 @@ import {
 import { useWeekSelector } from "@/hooks/useWeekSelector";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { useAuth } from "@/hooks/useAuth";
-import { isManagerRole } from "@/lib/roles";
+import { isAdminRole, isManagerRole } from "@/lib/roles";
 import { formatCurrency, normalizeName } from "@/lib/utils";
 import { DEFAULT_OFFICE, OFFICE_LOCATIONS } from "@/lib/offices";
 import { getDispatchProduction } from "@/lib/dispatch.functions";
@@ -551,7 +551,7 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
         </div>
         {!readOnly && (
           <div className="flex items-center gap-2">
-            <WebhookLogsButton />
+            {isAdminRole(realRole) && <WebhookLogsButton />}
             <OfficeFilterToggle />
           </div>
         )}
@@ -667,8 +667,11 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
         </span>
       </div>
 
-      {!readOnly && <WebhookUrlBanner />}
-      {!readOnly && <MondayTokenCard />}
+      {/* Monday config chrome is admin-only — captains reach this board for
+          van assignment (2026-08-03) but the token/webhook plumbing is not
+          theirs (system_settings RLS would silently read as unconfigured). */}
+      {!readOnly && isAdminRole(realRole) && <WebhookUrlBanner />}
+      {!readOnly && isAdminRole(realRole) && <MondayTokenCard />}
 
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
         <TotalTile label="Submitted" value={totals.sub} accent="neon" />

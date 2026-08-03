@@ -1,9 +1,10 @@
 import { createServerFn } from "@tanstack/react-start";
 import { OFFICE_LOCATIONS } from "@/lib/offices";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { APP_ROLES, LIMITED_ASSIGNABLE_ROLES } from "@/lib/role-policy";
 import { z } from "zod";
 
-const ROLES = ["owner", "office_staff", "captain", "sales_rep", "canvasser"] as const;
+const ROLES = APP_ROLES;
 
 const createCanvasserSchema = z.object({
   email: z.string().trim().email().max(255),
@@ -31,7 +32,7 @@ export const createCanvasser = createServerFn({ method: "POST" })
     if (!isManager) {
       throw new Error("Only Owners, Captains, or Admins can add new users.");
     }
-    if (!isOwner && !["canvasser", "captain", "sales_rep"].includes(data.role)) {
+    if (!isOwner && !LIMITED_ASSIGNABLE_ROLES.includes(data.role)) {
       throw new Error("Only Owners can create Owners or Admins.");
     }
 
@@ -79,7 +80,7 @@ export const createCanvasser = createServerFn({ method: "POST" })
 const addTeamMemberSchema = z.object({
   full_name: z.string().trim().min(1).max(100),
   office_location: z.enum(OFFICE_LOCATIONS),
-  role: z.enum(["owner", "office_staff", "captain", "sales_rep", "canvasser"]),
+  role: z.enum(ROLES),
 });
 
 async function assertManager(context: { supabase: any; userId: string }) {
@@ -101,7 +102,7 @@ export const addTeamMember = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { isOwner, isManager } = await assertManager(context);
     if (!isManager) throw new Error("Only Owners, Captains, or Admins can add team members.");
-    if (!isOwner && !["canvasser", "captain", "sales_rep"].includes(data.role)) {
+    if (!isOwner && !LIMITED_ASSIGNABLE_ROLES.includes(data.role)) {
       throw new Error("Only Owners can add Owners or Admins.");
     }
 
