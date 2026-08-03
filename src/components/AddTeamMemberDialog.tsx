@@ -3,7 +3,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { addTeamMember } from "@/lib/users.functions";
 import { DEFAULT_OFFICE, OFFICE_LOCATIONS, type OfficeLocation } from "@/lib/offices";
-import type { AppRole } from "@/lib/roles";
+import { ROLE_LABEL, assignableRolesFor, type AppRole } from "@/lib/roles";
+import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,6 +26,9 @@ import { UserPlus } from "lucide-react";
 export function AddTeamMemberDialog({ variant = "default" }: { variant?: "default" | "neon" } = {}) {
   const qc = useQueryClient();
   const addFn = useServerFn(addTeamMember);
+  // realRole, not role: the server rejects Owner/Admin from non-owners, so
+  // never offer options a View As preview couldn't actually use.
+  const { realRole } = useAuth();
   const [open, setOpen] = useState(false);
   const [fullName, setFullName] = useState("");
   const [office, setOffice] = useState<OfficeLocation>(DEFAULT_OFFICE);
@@ -126,11 +130,11 @@ export function AddTeamMemberDialog({ variant = "default" }: { variant?: "defaul
               onChange={(e) => setRole(e.target.value as AppRole)}
               className="w-full bg-input border border-border rounded-md px-3 py-2 text-sm"
             >
-              <option value="canvasser">Canvasser</option>
-              <option value="sales_rep">Sales Rep</option>
-              <option value="captain">Captain</option>
-              <option value="office_staff">Admin</option>
-              <option value="owner">Owner</option>
+              {assignableRolesFor(realRole).map((r) => (
+                <option key={r} value={r}>
+                  {ROLE_LABEL[r]}
+                </option>
+              ))}
             </select>
           </div>
 

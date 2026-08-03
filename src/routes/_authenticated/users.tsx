@@ -6,9 +6,20 @@ import { supabase } from "@/integrations/supabase/client";
 import { OFFICE_LOCATIONS, type OfficeLocation } from "@/lib/offices";
 import { ArcadePanel } from "@/components/arcade";
 import { DatabaseCleanup } from "@/components/DatabaseCleanup";
+import { AccessMatrix } from "@/components/PermissionsPanel";
 import { createCanvasser } from "@/lib/users.functions";
 import { toast } from "sonner";
-import { APP_ROLES, MANAGER_ROLES, primaryRole, requireRoleBeforeLoad, type AppRole } from "@/lib/roles";
+import { useAuth } from "@/hooks/useAuth";
+import { useSetUserRole } from "@/hooks/useSetUserRole";
+import {
+  MANAGER_ROLES,
+  ROLE_LABEL,
+  assignableRolesFor,
+  canManageTarget,
+  primaryRole,
+  requireRoleBeforeLoad,
+  type AppRole,
+} from "@/lib/roles";
 
 export const Route = createFileRoute("/_authenticated/users")({
   head: () => ({ meta: [{ title: "Manage Users — Knockout" }] }),
@@ -22,6 +33,9 @@ export const Route = createFileRoute("/_authenticated/users")({
 
 function UsersPage() {
   const qc = useQueryClient();
+  // realRole, not role: management affordances must ignore View As previews.
+  const { realRole } = useAuth();
+  const assignableRoles = assignableRolesFor(realRole);
 
   const { data, isLoading } = useQuery({
     queryKey: ["manage_users"],
@@ -48,20 +62,10 @@ function UsersPage() {
     },
   });
 
-  const setRole = useMutation({
-    mutationFn: async ({ userId, role }: { userId: string; role: AppRole }) => {
-      // Replace all roles with the single chosen role (equal-Owners model).
-      const { error: delErr } = await supabase.from("user_roles").delete().eq("user_id", userId);
-      if (delErr) throw delErr;
-      const { error: insErr } = await supabase.from("user_roles").insert({ user_id: userId, role });
-      if (insErr) throw insErr;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["manage_users"] });
-      toast.success("Role updated");
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
+  // Atomic swap via the set_user_role RPC (equal-Owners model) — the old
+  // client-side delete-then-insert could strand a user role-less and only
+  // worked for Owners under RLS.
+  const setRole = useSetUserRole();
 
   const setSuspensionTracked = useMutation({
     mutationFn: async ({ userId, tracked }: { userId: string; tracked: boolean }) => {
@@ -125,10 +129,12 @@ function UsersPage() {
   return (
     <div className="space-y-8">
       <div>
-        <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Owner Only</div>
+        <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Leadership</div>
         <h1 className="font-display text-2xl text-neon mt-1">MANAGE PLAYERS</h1>
         <p className="text-sm text-muted-foreground mt-2">
-          Assign roles and teams. Multiple Owners are allowed — all Owners have equal, full access.
+          Assign roles and teams. Captains and Admins can assign Canvasser, Sales Rep, and Captain;
+          only Owners can grant Owner or Admin. Multiple Owners are allowed — all Owners have equal,
+          full access.
         </p>
       </div>
 
@@ -149,6 +155,10 @@ function UsersPage() {
                 const roles = data.rolesByUser.get(p.id) ?? [];
                 const currentRole: AppRole = primaryRole(roles) ?? "canvasser";
                 const lastOwner = currentRole === "owner" && ownerCount <= 1;
+                // targetLocked: non-owners can't touch Owner/Admin rows at
+                // all (RLS would match 0 rows and toast a false success).
+                const targetLocked = !canManageTarget(realRole, roles);
+                const locked = lastOwner || targetLocked;
                 return (
                   <tr key={p.id} className="border-t border-border">
                     <td className="px-4 py-3 font-medium">{p.display_name ?? "—"}</td>
@@ -156,16 +166,30 @@ function UsersPage() {
                     <td className="px-4 py-3">
                       <select
                         value={currentRole}
-                        disabled={setRole.isPending || lastOwner}
+                        disabled={setRole.isPending || locked}
                         onChange={(e) =>
                           setRole.mutate({ userId: p.id, role: e.target.value as AppRole })
                         }
                         className="bg-input border border-border rounded-md px-2 py-2 text-base md:text-sm disabled:opacity-50"
-                        title={lastOwner ? "Cannot demote the last Owner" : undefined}
+                        title={
+                          lastOwner
+                            ? "Cannot demote the last Owner"
+                            : targetLocked
+                              ? "Only Owners can change Owner or Admin accounts"
+                              : undefined
+                        }
                       >
-                        {APP_ROLES.map((r) => (
+                        {/* Show the true current role even when it is outside
+                            the actor's assignable set (e.g. captain viewing
+                            an Owner row). */}
+                        {!assignableRoles.includes(currentRole) && (
+                          <option value={currentRole} disabled>
+                            {ROLE_LABEL[currentRole]}
+                          </option>
+                        )}
+                        {assignableRoles.map((r) => (
                           <option key={r} value={r}>
-                            {r}
+                            {ROLE_LABEL[r]}
                           </option>
                         ))}
                       </select>
@@ -173,11 +197,16 @@ function UsersPage() {
                     <td className="px-4 py-3">
                       <select
                         value={p.team_id ?? ""}
-                        disabled={setTeam.isPending}
+                        disabled={setTeam.isPending || targetLocked}
                         onChange={(e) =>
                           setTeam.mutate({ userId: p.id, teamId: e.target.value || null })
                         }
-                        className="bg-input border border-border rounded-md px-2 py-2 text-base md:text-sm"
+                        className="bg-input border border-border rounded-md px-2 py-2 text-base md:text-sm disabled:opacity-50"
+                        title={
+                          targetLocked
+                            ? "Only Owners can change Owner or Admin accounts"
+                            : undefined
+                        }
                       >
                         <option value="">— unassigned —</option>
                         {data.teams.map((t) => (
@@ -188,11 +217,18 @@ function UsersPage() {
                       </select>
                     </td>
                     <td className="px-4 py-3">
-                      <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+                      <label
+                        className="inline-flex items-center gap-2 cursor-pointer select-none"
+                        title={
+                          targetLocked
+                            ? "Only Owners can change Owner or Admin accounts"
+                            : undefined
+                        }
+                      >
                         <input
                           type="checkbox"
                           checked={(p as { suspension_tracked?: boolean }).suspension_tracked ?? true}
-                          disabled={setSuspensionTracked.isPending}
+                          disabled={setSuspensionTracked.isPending || targetLocked}
                           onChange={(e) =>
                             setSuspensionTracked.mutate({ userId: p.id, tracked: e.target.checked })
                           }
@@ -257,8 +293,8 @@ function UsersPage() {
               onChange={(e) => setForm({ ...form, role: e.target.value as AppRole })}
               className="bg-input border border-border rounded-md px-2 py-2 text-base md:text-sm"
             >
-              {APP_ROLES.map((r) => (
-                <option key={r} value={r}>{r}</option>
+              {assignableRoles.map((r) => (
+                <option key={r} value={r}>{ROLE_LABEL[r]}</option>
               ))}
             </select>
           </label>
@@ -302,6 +338,8 @@ function UsersPage() {
           The player can sign in immediately with the email + temp password. Ask them to change it after first login.
         </p>
       </ArcadePanel>
+
+      <AccessMatrix />
 
       <DatabaseCleanup />
     </div>
