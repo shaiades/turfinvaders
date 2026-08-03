@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel } from "@/components/arcade";
 import { AlertTriangle, Trophy } from "lucide-react";
-import { reportDates } from "@/lib/dates";
+import { addDaysISO, reportDates } from "@/lib/dates";
+import { isRecentlyActive, lastActiveMap, SUSPENSION_RECENCY_DAYS } from "@/lib/suspension";
 
 export const Route = createFileRoute("/_authenticated/daily-wrap")({
   head: () => ({ meta: [{ title: "Daily Wrap-Up — Turf Invaders" }] }),
@@ -17,6 +18,7 @@ type Row = {
   todayLeads: number;
   ydayLeads: number;
   weekPoints: number;
+  recent: boolean;
 };
 
 function DailyWrap() {
@@ -25,12 +27,19 @@ function DailyWrap() {
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ["daily_wrap", today],
     queryFn: async (): Promise<Row[]> => {
+      // Fetch back far enough to judge 7-day recency even on a Monday/Tuesday,
+      // when wkStart is only 0–1 days back.
+      const cutoff = addDaysISO(today, -SUSPENSION_RECENCY_DAYS);
+      const metricsStart = cutoff < wkStart ? cutoff : wkStart;
       const [profilesR, metricsR] = await Promise.all([
-        supabase.from("profiles").select("id, display_name, status").neq("status", "inactive"),
+        supabase
+          .from("profiles")
+          .select("id, display_name, status, created_at")
+          .neq("status", "inactive"),
         supabase
           .from("daily_metrics")
           .select("canvasser_id, metric_date, leads_confirmed, leads_submitted, pitch_missed, sales")
-          .gte("metric_date", wkStart),
+          .gte("metric_date", metricsStart),
       ]);
       const profiles = profilesR.data ?? [];
       const metrics = metricsR.data ?? [];
@@ -41,9 +50,11 @@ function DailyWrap() {
         const leads = (m.leads_confirmed ?? 0) + (m.leads_submitted ?? 0);
         if (m.metric_date === today) rec.today += leads;
         if (m.metric_date === yday) rec.yday += leads;
-        rec.pts += (m.pitch_missed ?? 0) * 1 + (m.sales ?? 0) * 2;
+        // Points stay week-scoped even though the fetch may reach further back.
+        if (m.metric_date >= wkStart) rec.pts += (m.pitch_missed ?? 0) * 1 + (m.sales ?? 0) * 2;
         byUser.set(m.canvasser_id, rec);
       }
+      const lastMap = lastActiveMap(metrics);
       return profiles.map((p) => {
         const r = byUser.get(p.id) ?? { today: 0, yday: 0, pts: 0 };
         return {
@@ -52,13 +63,15 @@ function DailyWrap() {
           todayLeads: r.today,
           ydayLeads: r.yday,
           weekPoints: r.pts,
+          recent: isRecentlyActive(today, [p.id], lastMap, (p.created_at ?? "").slice(0, 10)),
         };
       });
     },
   });
 
   const { suspension, doughnuts, winners, club3, bosses7 } = useMemo(() => {
-    const suspension = rows.filter((r) => r.todayLeads === 0 && r.ydayLeads === 0);
+    // `recent` keeps week-gone reps out of the freezer (see src/lib/suspension.ts).
+    const suspension = rows.filter((r) => r.todayLeads === 0 && r.ydayLeads === 0 && r.recent);
     const doughnuts = rows.filter((r) => r.todayLeads === 0 && r.ydayLeads > 0);
     const winners = rows
       .filter((r) => r.todayLeads >= 1)
