@@ -12,7 +12,8 @@
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "verify:kombat": "npx tsx scripts/verify-close-kombat.ts"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",
