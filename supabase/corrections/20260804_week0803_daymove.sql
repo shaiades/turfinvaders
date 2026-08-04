@@ -240,6 +240,92 @@ SET data = jsonb_set(wl.data, '{metric_date}', to_jsonb(c.true_date::text))
 FROM _credit_moves c
 WHERE wl.id = c.marker_id;
 
+-- ── Part B: burst-race top-up ──────────────────────────────────────────────
+-- The 2026-08-04 replay pushed ~40 deliveries through the edge function at
+-- once, and its daily_logs/daily_metrics writes are read-modify-write — two
+-- concurrent deliveries for the SAME canvasser read the same row and one
+-- increment was lost (observed live: 1 blowout, 1 CTC, 5 leads_called_in
+-- short of the 36 recorded markers). The markers ARE atomic, so re-derive
+-- the expected counters from them and ADD whatever is missing. GREATEST(0,…)
+-- means rows padded by manual entry are never reduced, and a re-run is a
+-- no-op. Runs after the day-move above so marker days are already true days.
+
+CREATE TEMP TABLE _exp AS
+WITH latest AS (
+  SELECT DISTINCT ON (wl.data ->> 'pulseId')
+         (wl.data ->> 'canvasser_id')::uuid AS canvasser_id,
+         wl.data ->> 'office_location' AS office_location,
+         (wl.data ->> 'metric_date')::date AS day,
+         wl.data ->> 'bucket' AS bucket,
+         COALESCE((wl.data ->> 'nonCore')::boolean, false) AS non_core
+  FROM public.webhook_logs wl
+  WHERE wl.step = 'Card_Outcome_Recorded'
+    AND (wl.data ->> 'metric_date')::date >= '2026-08-03'
+  ORDER BY wl.data ->> 'pulseId', wl.created_at DESC
+),
+credits AS (
+  SELECT (wl.data ->> 'canvasser_id')::uuid AS canvasser_id,
+         COALESCE(
+           (wl.data ->> 'metric_date')::date,
+           (wl.created_at AT TIME ZONE 'America/Los_Angeles')::date
+         ) AS day
+  FROM public.webhook_logs wl
+  WHERE wl.step = 'Lead_Credit_Applied'
+    AND wl.created_at >= '2026-08-03T07:00:00Z'
+)
+SELECT canvasser_id, office_location, day,
+       SUM(sits) AS sits, SUM(sales) AS sales, SUM(no_demo) AS no_demo,
+       SUM(future_leads) AS future_leads, SUM(ctc) AS ctc,
+       SUM(non_core) AS non_core, SUM(called_in) AS called_in
+FROM (
+  SELECT canvasser_id, office_location, day,
+         CASE WHEN bucket IN ('sit', 'sales') THEN 1 ELSE 0 END AS sits,
+         CASE WHEN bucket = 'sales' THEN 1 ELSE 0 END AS sales,
+         CASE WHEN bucket = 'blowouts' THEN 1 ELSE 0 END AS no_demo,
+         CASE WHEN bucket = 'resets' THEN 1 ELSE 0 END AS future_leads,
+         CASE WHEN bucket = 'ctc' THEN 1 ELSE 0 END AS ctc,
+         CASE WHEN non_core THEN 1 ELSE 0 END AS non_core,
+         0 AS called_in
+  FROM latest
+  UNION ALL
+  -- Credits carry no office; attribute them to the canvasser's outcome
+  -- office that day (every credited card also recorded an outcome).
+  SELECT c.canvasser_id,
+         (SELECT l.office_location FROM latest l
+          WHERE l.canvasser_id = c.canvasser_id LIMIT 1),
+         c.day, 0, 0, 0, 0, 0, 0, 1
+  FROM credits c
+) u
+WHERE office_location IS NOT NULL
+GROUP BY canvasser_id, office_location, day;
+
+-- daily_logs: add only the missing units.
+UPDATE public.daily_logs dl SET
+  demos_sits      = dl.demos_sits      + GREATEST(0, e.sits - dl.demos_sits),
+  sales           = dl.sales           + GREATEST(0, e.sales - dl.sales),
+  no_demo         = dl.no_demo         + GREATEST(0, e.no_demo - dl.no_demo),
+  future_leads    = dl.future_leads    + GREATEST(0, e.future_leads - dl.future_leads),
+  ctc             = dl.ctc             + GREATEST(0, e.ctc - dl.ctc),
+  non_core        = dl.non_core        + GREATEST(0, e.non_core - dl.non_core),
+  leads_called_in = dl.leads_called_in + GREATEST(0, e.called_in - dl.leads_called_in)
+FROM _exp e
+WHERE dl.canvasser_id = e.canvasser_id
+  AND dl.log_date = e.day
+  AND dl.office_location = e.office_location;
+
+-- daily_metrics: same top-up for the Block mirrors + leads_submitted.
+UPDATE public.daily_metrics dm SET
+  pitch_missed    = dm.pitch_missed    + GREATEST(0, (e.sits - e.sales) - dm.pitch_missed),
+  sales           = dm.sales           + GREATEST(0, e.sales - dm.sales),
+  resets          = dm.resets          + GREATEST(0, e.future_leads - dm.resets),
+  blowouts        = dm.blowouts        + GREATEST(0, e.no_demo - dm.blowouts),
+  leads_submitted = dm.leads_submitted + GREATEST(0, e.called_in - dm.leads_submitted)
+FROM _exp e
+WHERE dm.canvasser_id = e.canvasser_id
+  AND dm.metric_date = e.day;
+
+DROP TABLE _exp;
+
 COMMIT;
 
 -- Post-apply spot check (all 33 marked outcomes, minus the agent-less Kolt
