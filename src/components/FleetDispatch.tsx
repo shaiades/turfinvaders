@@ -52,6 +52,7 @@ import { formatCurrency, normalizeName } from "@/lib/utils";
 import { DEFAULT_OFFICE, OFFICE_LOCATIONS } from "@/lib/offices";
 import { getDispatchProduction, type DispatchResults } from "@/lib/dispatch.functions";
 import { FleetDispatchManage } from "@/components/FleetDispatchManage";
+import { ExecutiveSection } from "@/components/ExecutiveDashboard";
 
 /** One profile row as the board consumes it (dispatch membership). */
 export type RosterProfile = {
@@ -766,6 +767,12 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
       ) : (
         <DispatchFleet rows={rows} vans={vans} />
       )}
+
+      {/* Former Executive Dashboard tab (merged 2026-08-04): Results Week +
+          Manual Entry + Weekly Results (Pay) + Live Daily Action + raw
+          daily_logs — shares this board's office filter. Managers only;
+          the read-only leaderboard copy shows just the fleet board. */}
+      {!readOnly && <ExecutiveSection />}
 
       {canManage && (
         <div className="space-y-4">

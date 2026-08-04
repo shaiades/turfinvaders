@@ -13,7 +13,7 @@ import { upsertManualWeekly } from "@/lib/fleet.functions";
 import { fetchWeeklyPaychecksChunked } from "@/lib/paychecks";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
-import { OfficeFilterProvider, OfficeFilterToggle, useOfficeFilter } from "@/components/OfficeFilterContext";
+import { useOfficeFilter } from "@/components/OfficeFilterContext";
 import { weekStartMonday, toISODate, addDays, laTodayISO, laWeekStartISO, weekStartOfISO, formatWeekRange } from "@/lib/dates";
 import { useWeekSelector } from "@/hooks/useWeekSelector";
 import { DEFAULT_OFFICE } from "@/lib/offices";
@@ -35,8 +35,11 @@ function leadsSum(r: { demos_sits?: number | null; no_demo?: number | null; ctc?
 
 // Slimmed 2026-07-22: Payroll lives only in the Payroll tab, fleet status in
 // the Fleet tab, CSV import in the header dialog, and DatabaseCleanup on the
-// Manage Players screen — the Executive tab no longer restates them.
-export function ExecutiveDashboard() {
+// Manage Players screen — the Executive tab no longer restated them.
+// Merged 2026-08-04: the Executive tab itself is gone; these panels now render
+// inside Fleet Dispatch, under ITS OfficeFilterProvider — no provider or
+// office toggle of their own.
+export function ExecutiveSection() {
   // Week selector drives Weekly Results. Defaults to last completed week
   // (the historical behavior); Mon–Sat pay week, Pacific time.
   const { weekStart, weekEnd, isCurrentWeek, shiftWeek, setWeekStart } = useWeekSelector({
@@ -45,53 +48,47 @@ export function ExecutiveDashboard() {
   const isLastWeek = toISODate(weekStart) === toISODate(addDays(weekStartMonday(), -7));
 
   return (
-    <OfficeFilterProvider>
-      <div className="space-y-6">
-        <div className="flex items-center justify-center">
-          <OfficeFilterToggle compact className="w-full max-w-md" />
-        </div>
-
-        {/* Week selector */}
-        <ArcadePanel
-          title="Results Week"
-          action={
-            <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-              {isCurrentWeek ? "Current Week · In Progress" : isLastWeek ? "Last Week" : "Past Week"}
-            </span>
-          }
-        >
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div className="flex items-center gap-2 min-w-0 flex-1">
-              <Button size="sm" variant="outline" onClick={() => shiftWeek(-1)} aria-label="Previous week">
-                ‹
-              </Button>
-              <div className="min-w-0 flex-1 text-center font-display text-xs sm:text-sm text-neon truncate">
-                {formatWeekRange(weekStart, weekEnd)}
-              </div>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => shiftWeek(1)}
-                disabled={isCurrentWeek}
-                aria-label="Next week"
-              >
-                ›
-              </Button>
+    <div className="space-y-6">
+      {/* Week selector */}
+      <ArcadePanel
+        title="Results Week"
+        action={
+          <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            {isCurrentWeek ? "Current Week · In Progress" : isLastWeek ? "Last Week" : "Past Week"}
+          </span>
+        }
+      >
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <Button size="sm" variant="outline" onClick={() => shiftWeek(-1)} aria-label="Previous week">
+              ‹
+            </Button>
+            <div className="min-w-0 flex-1 text-center font-display text-xs sm:text-sm text-neon truncate">
+              {formatWeekRange(weekStart, weekEnd)}
             </div>
-            {!isLastWeek && (
-              <Button size="sm" variant="ghost" onClick={() => setWeekStart(addDays(weekStartMonday(), -7))}>
-                Jump to last week
-              </Button>
-            )}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => shiftWeek(1)}
+              disabled={isCurrentWeek}
+              aria-label="Next week"
+            >
+              ›
+            </Button>
           </div>
-        </ArcadePanel>
+          {!isLastWeek && (
+            <Button size="sm" variant="ghost" onClick={() => setWeekStart(addDays(weekStartMonday(), -7))}>
+              Jump to last week
+            </Button>
+          )}
+        </div>
+      </ArcadePanel>
 
-        <ManualEntryBar />
-        <WeeklyResults weekStart={weekStart} />
-        <LiveDailyAction />
-        <RawDataTable />
-      </div>
-    </OfficeFilterProvider>
+      <ManualEntryBar />
+      <WeeklyResults weekStart={weekStart} />
+      <LiveDailyAction />
+      <RawDataTable />
+    </div>
   );
 }
 

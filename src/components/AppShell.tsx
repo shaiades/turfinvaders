@@ -75,7 +75,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         { to: "/field", label: "Active Run", icon: Zap },
         { to: "/my-territory", label: "Territory", icon: MapPin },
         { to: "/log", label: "Log", icon: Inbox },
-        { to: "/dashboard", search: { tab: "executive" }, label: "Stats", icon: LayoutDashboard },
+        { to: "/dashboard", search: { tab: "dispatch" }, label: "Stats", icon: LayoutDashboard },
         { to: "/leaderboard", label: "Leaders", icon: Trophy },
         { to: "/playbook", label: "Playbook", icon: Target },
         { to: "/daily-wrap", label: "Wrap", icon: Sparkles },
@@ -85,7 +85,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     // only for roles its route guard admits — captains are excluded, so
     // don't show them a nav item that silently bounces.
     return [
-      { to: "/dashboard", search: { tab: "executive" }, label: "Command", icon: LayoutDashboard },
+      { to: "/dashboard", search: { tab: "dispatch" }, label: "Command", icon: LayoutDashboard },
       { to: "/my-territory", label: "Territory", icon: MapPin },
       { to: "/dashboard", search: { tab: "dispatch" }, label: "Fleet Dispatch", icon: Truck },
       { to: "/dashboard", search: { tab: "payroll" }, label: "Payroll", icon: DollarSign },
@@ -145,7 +145,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         {/* Mobile header: centered logo only */}
         <div className="md:hidden flex items-center justify-between px-4 py-2">
           <div className="w-10" />
-          <Link to="/dashboard" search={{ tab: "executive" }} aria-label="Turf Invaders home" className="flex items-center justify-center">
+          <Link to="/dashboard" search={{ tab: "dispatch" }} aria-label="Turf Invaders home" className="flex items-center justify-center">
             <img
               src={turfInvadersWordmark.url}
               alt="Turf Invaders"
@@ -185,7 +185,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               </Link>
             ))}
           </nav>
-          <Link to="/dashboard" search={{ tab: "executive" }} className="flex items-center justify-center shrink-0" aria-label="Turf Invaders home">
+          <Link to="/dashboard" search={{ tab: "dispatch" }} className="flex items-center justify-center shrink-0" aria-label="Turf Invaders home">
             <img
               src={turfInvadersWordmark.url}
               alt="Turf Invaders"
