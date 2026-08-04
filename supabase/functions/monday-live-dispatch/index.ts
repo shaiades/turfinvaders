@@ -3,8 +3,10 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { fetchItemBatched } from './monday.ts'
 import {
   buildBlockCardRow,
+  copyBaseName,
   findSaleOutcomeCol,
   findSalePriceCol,
+  isCopyName,
   mondayOfISO,
   parseBoardWeekStart,
   parseMoney,
@@ -27,6 +29,25 @@ function todayLA(): string {
     year: 'numeric', month: '2-digit', day: '2-digit',
   })
   return fmt.format(new Date())
+}
+
+/** LA calendar date of a timestamp — the metric day an old marker counted
+ *  on. Markers written before 2026-08 don't carry metric_date in data, but
+ *  their created_at IS the moment their counters were written. */
+function laDateOf(ts: string | null | undefined): string | null {
+  if (!ts) return null
+  const d = new Date(ts)
+  if (Number.isNaN(d.getTime())) return null
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(d)
+}
+
+/** A Card_Outcome_Recorded / Card_OL_Recorded row, as read back. */
+type MarkerRow = {
+  data: Record<string, unknown> | null
+  created_at: string | null
 }
 
 /**
@@ -399,15 +420,103 @@ serve(async (req) => {
       }
     }
 
-    // Duplicated Monday items ("Endy and Rebecca Kuo (copy)") get fresh
-    // pulseIds, so the triggerUuid/pulseId dedupe can't catch them — they
-    // double-credit sits/points (seen live 2026-07-21). Log and skip.
-    if (/\(copy(\s+\d+)?\)\s*$/i.test(String(item.name ?? ''))) {
-      await supabaseAdmin.from('webhook_logs').insert({
-        step: 'Ignored_Copy_Item',
-        data: { pulseId, itemName: item.name, canvasserName },
-      })
-      return new Response('Copy item ignored', { status: 200, headers: corsHeaders })
+    // The card's CURRENT canvasser state, derived once from the re-fetched
+    // column set — used by the copy gate below and the outcome diff further
+    // down (dedicated columns only; Setter Report parity).
+    const { bucket, nonCore, ol } = deriveCanvassState(cols)
+
+    // ── Copy gate ── Duplicated Monday items ("Endy and Rebecca Kuo (copy)")
+    // get fresh pulseIds, so the triggerUuid/pulseId dedupe can't catch them —
+    // they double-credit sits/points (seen live 2026-07-21). But a blanket
+    // name-based skip also drops real production (OC audit 2026-07-27..08-01):
+    // cards ENTERED with a "(copy)" name that have no counted original, and
+    // outcome flips that happen on the copy card instead of the original. So
+    // the skip now requires a counted same-board sibling in the SAME state:
+    //   - sibling card (same board, same base customer name) already recorded
+    //     this exact state → true duplicate → skip;
+    //   - sibling recorded a DIFFERENT state → the outcome moved on the copy —
+    //     process it as a transition seeded from the sibling's markers;
+    //   - no counted sibling → the copy IS the card — process it normally.
+    // A copy card that already recorded its own outcome is never re-gated
+    // (later events on it — e.g. Sale Price edits — must keep flowing).
+    let siblingPulseIds: string[] = []
+    let siblingOutcome: MarkerRow | null = null
+    let siblingOl: MarkerRow | null = null
+    if (isCopyName(item.name)) {
+      const { data: ownMarkers } = await supabaseAdmin
+        .from('webhook_logs')
+        .select('id')
+        .eq('step', 'Card_Outcome_Recorded')
+        .eq('data->>pulseId', String(pulseId))
+        .limit(1)
+      const ownRecorded = (ownMarkers?.length ?? 0) > 0
+      if (!ownRecorded && !boardId) {
+        // Without a board there is no sibling scan — keep the legacy skip
+        // rather than risk a double-credit we can't rule out.
+        await supabaseAdmin.from('webhook_logs').insert({
+          step: 'Ignored_Copy_Item',
+          data: { pulseId, itemName: item.name, canvasserName, note: 'No boardId — sibling scan impossible, legacy skip' },
+        })
+        return new Response('Copy item ignored', { status: 200, headers: corsHeaders })
+      }
+      if (!ownRecorded) {
+        const base = copyBaseName(item.name)
+        if (base) {
+          const { data: boardCards } = await supabaseAdmin
+            .from('block_cards')
+            .select('monday_item_id, lead_name')
+            .eq('board_id', boardId)
+          siblingPulseIds = (boardCards ?? [])
+            .filter((c) =>
+              String(c.monday_item_id) !== String(pulseId) &&
+              copyBaseName(c.lead_name ?? '') === base)
+            .map((c) => String(c.monday_item_id))
+        }
+        if (siblingPulseIds.length > 0) {
+          const latestSiblingMarker = async (step: string): Promise<MarkerRow | null> => {
+            const per = await Promise.all(siblingPulseIds.map((sid) =>
+              supabaseAdmin.from('webhook_logs')
+                .select('data, created_at')
+                .eq('step', step)
+                .eq('data->>pulseId', sid)
+                .order('created_at', { ascending: false })
+                .limit(1)))
+            const rows = per.flatMap((r) => (r.data ?? []) as MarkerRow[])
+            rows.sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')))
+            return rows[0] ?? null
+          }
+          ;[siblingOutcome, siblingOl] = await Promise.all([
+            latestSiblingMarker('Card_Outcome_Recorded'),
+            latestSiblingMarker('Card_OL_Recorded'),
+          ])
+        }
+        const sibData = (siblingOutcome?.data ?? null) as { bucket?: string | null; nonCore?: boolean } | null
+        const sibBucket = (sibData?.bucket ?? null) as ScheduleBucket
+        const sibNonCore = !!sibBucket && !!sibData?.nonCore
+        if (siblingOutcome && sibBucket === bucket && sibNonCore === nonCore) {
+          await supabaseAdmin.from('webhook_logs').insert({
+            step: 'Ignored_Copy_Item',
+            data: {
+              pulseId, itemName: item.name, canvasserName, siblingPulseIds,
+              bucket: bucket ?? null,
+              note: 'Same-board sibling already recorded this state',
+            },
+          })
+          return new Response('Copy item ignored', { status: 200, headers: corsHeaders })
+        }
+        await supabaseAdmin.from('webhook_logs').insert({
+          step: 'Copy_Item_Credited',
+          data: {
+            pulseId, itemName: item.name, canvasserName, siblingPulseIds,
+            siblingBucket: siblingOutcome ? sibBucket : null,
+            note: siblingPulseIds.length === 0
+              ? 'No same-board sibling card — the copy is the card'
+              : siblingOutcome
+                ? 'Sibling recorded a different state — processing as a transition'
+                : 'Sibling cards exist but none recorded an outcome',
+          },
+        })
+      }
     }
 
     if (!canvasserName) {
@@ -634,10 +743,25 @@ serve(async (req) => {
         })
         return new Response('Already credited', { status: 200, headers: corsHeaders })
       }
-      const { data: claim } = await supabaseAdmin.from('webhook_logs').insert({
+      const { data: claim, error: genClaimErr } = await supabaseAdmin.from('webhook_logs').insert({
         step: 'Lead_Generated_Credited',
         data: { pulseId: pid, canvasser_id: match.id, itemName: item.name },
       }).select('id').single()
+      if (genClaimErr) {
+        // The partial unique index on this step (20260804 migration) makes
+        // the insert itself the claim: 23505 = a concurrent delivery already
+        // credited this item. Anything else is transient — 502 so Monday's
+        // retry loop redelivers.
+        const genCode = (genClaimErr as { code?: string }).code ?? null
+        await supabaseAdmin.from('webhook_logs').insert({
+          step: 'Lead_Generated_Claim_Rejected',
+          data: { pulseId: pid, canvasser_id: match.id, code: genCode, error: genClaimErr.message },
+        })
+        if (genCode === '23505') {
+          return new Response('Already credited', { status: 200, headers: corsHeaders })
+        }
+        return new Response('Claim insert failed', { status: 502, headers: corsHeaders })
+      }
 
       const genDate = todayLA()
       const genOffice = boardOffice ?? match.office_location ?? 'San Diego'
@@ -669,50 +793,101 @@ serve(async (req) => {
       return new Response('Lead generated credited', { status: 200, headers: corsHeaders })
     }
 
-    // Step 5: One card = one outcome. Derive the card's CURRENT outcome from
-    // its full (re-fetched) column set — dedicated columns only, Sale > PM >
-    // Canvass Stats column (Setter Report parity), diffed against the last
+    // Step 5: One card = one outcome. The card's CURRENT state (bucket /
+    // nonCore / ol) was derived above the copy gate; diff it against the last
     // state recorded for this card (Card_Outcome_Recorded / Card_OL_Recorded
     // markers). Marks on any other column re-derive the same state and no-op.
-    const { bucket, nonCore, ol } = deriveCanvassState(cols)
-    const [{ data: lastOutcome }, { data: lastOl }] = await Promise.all([
-      supabaseAdmin.from('webhook_logs').select('data')
-        .eq('step', 'Card_Outcome_Recorded')
-        .contains('data', { pulseId: String(pulseId) })
-        .order('created_at', { ascending: false }).limit(1),
-      supabaseAdmin.from('webhook_logs').select('data')
-        .eq('step', 'Card_OL_Recorded')
-        .contains('data', { pulseId: String(pulseId) })
-        .order('created_at', { ascending: false }).limit(1),
-    ])
-    const prevRec = (lastOutcome?.[0]?.data ?? {}) as { bucket?: string; nonCore?: boolean }
-    const prevBucket: ScheduleBucket = (prevRec.bucket as ScheduleBucket) ?? null
-    const prevNonCore = !!prevBucket && !!prevRec.nonCore
-    const prevOl = !!((lastOl?.[0]?.data as { ol?: boolean } | null)?.ol)
-    const outcomeChanged = bucket !== prevBucket || nonCore !== prevNonCore
-    const olChanged = ol !== prevOl
+    // A copy card with no history of its own inherits the counted state of
+    // its same-board sibling (the card it was duplicated from), so outcome
+    // flips on a copy apply as transitions instead of double-counts.
     const metric_date = todayLA()
     const office_location = boardOffice ?? match.office_location ?? 'San Diego'
+    const [{ data: lastOutcomeRows }, { data: lastOlRows }] = await Promise.all([
+      supabaseAdmin.from('webhook_logs').select('data, created_at')
+        .eq('step', 'Card_Outcome_Recorded')
+        .eq('data->>pulseId', String(pulseId))
+        .order('created_at', { ascending: false }).limit(1),
+      supabaseAdmin.from('webhook_logs').select('data, created_at')
+        .eq('step', 'Card_OL_Recorded')
+        .eq('data->>pulseId', String(pulseId))
+        .order('created_at', { ascending: false }).limit(1),
+    ])
+    let ownOutcome: MarkerRow | null = (lastOutcomeRows?.[0] as MarkerRow | undefined) ?? null
+    let ownOl: MarkerRow | null = (lastOlRows?.[0] as MarkerRow | undefined) ?? null
+    // Previous state + the day/office it was counted on. Decrements must hit
+    // THAT row, not today's — a next-day revert used to strand the original
+    // +1 on the old day and burn a floored −1 on the new one (OC audit
+    // 2026-07-27..08-01). New markers carry metric_date/office_location in
+    // data; older ones date by created_at (written in the same breath as
+    // their counters).
+    let prevBucket: ScheduleBucket = null
+    let prevNonCore = false
+    let prevOl = false
+    let prevOutcomeDate = metric_date
+    let prevOutcomeOffice = office_location
+    let prevOlDate = metric_date
+    let prevOlOffice = office_location
+    let outcomeChanged = false
+    let olChanged = false
+    const computeTransition = () => {
+      const effOutcome = ownOutcome ?? siblingOutcome
+      const effOl = ownOl ?? siblingOl
+      const rec = (effOutcome?.data ?? {}) as {
+        bucket?: string | null; nonCore?: boolean; metric_date?: string; office_location?: string
+      }
+      prevBucket = (rec.bucket as ScheduleBucket) ?? null
+      prevNonCore = !!prevBucket && !!rec.nonCore
+      prevOutcomeDate = rec.metric_date ?? laDateOf(effOutcome?.created_at) ?? metric_date
+      prevOutcomeOffice = rec.office_location ?? office_location
+      const olRec = (effOl?.data ?? {}) as { ol?: boolean; metric_date?: string; office_location?: string }
+      prevOl = !!olRec.ol
+      prevOlDate = olRec.metric_date ?? laDateOf(effOl?.created_at) ?? metric_date
+      prevOlOffice = olRec.office_location ?? office_location
+      outcomeChanged = bucket !== prevBucket || nonCore !== prevNonCore
+      olChanged = ol !== prevOl
+    }
+    computeTransition()
 
     // ── New-lead credit ── exactly once per Monday item, whether the first
     // signal is the item's creation or its first mapped outcome change.
     // Claim-first via a webhook_logs marker; the legacy v2 marker
     // (Schedule_Outcome_Processed) still counts so pre-v3 items are not
-    // re-credited. Credits: daily_metrics.leads_submitted +1 and
-    // daily_logs.leads_called_in +1, applied in the counter writes below.
+    // re-credited, and a copy card shares its customer's credit with the
+    // same-board cards it was duplicated from. The partial unique index on
+    // Lead_Credit_Applied (20260804 migration) makes the insert itself the
+    // claim — a 23505 means a concurrent delivery credited first. Credits:
+    // daily_metrics.leads_submitted +1 and daily_logs.leads_called_in +1,
+    // applied in the counter writes below.
+    let creditMarkerId: string | null = null
     const applyLeadCredit = async (): Promise<boolean> => {
       const pid = String(pulseId)
-      const [creditSeen, legacySeen] = await Promise.all([
+      const family = [pid, ...siblingPulseIds]
+      const seen = await Promise.all(family.flatMap((fid) => [
         supabaseAdmin.from('webhook_logs').select('id')
-          .eq('step', 'Lead_Credit_Applied').contains('data', { pulseId: pid }).limit(1),
+          .eq('step', 'Lead_Credit_Applied').eq('data->>pulseId', fid).limit(1),
         supabaseAdmin.from('webhook_logs').select('id')
-          .eq('step', 'Schedule_Outcome_Processed').contains('data', { pulseId: pid }).limit(1),
-      ])
-      if ((creditSeen.data?.length ?? 0) > 0 || (legacySeen.data?.length ?? 0) > 0) return false
-      await supabaseAdmin.from('webhook_logs').insert({
-        step: 'Lead_Credit_Applied',
-        data: { pulseId: pid, canvasser_id: match.id, source: isCreateEvent ? 'create_item' : 'first_outcome' },
-      })
+          .eq('step', 'Schedule_Outcome_Processed').eq('data->>pulseId', fid).limit(1),
+      ]))
+      if (seen.some((r) => (r.data?.length ?? 0) > 0)) return false
+      const { data: creditRow, error: creditErr } = await supabaseAdmin
+        .from('webhook_logs')
+        .insert({
+          step: 'Lead_Credit_Applied',
+          data: { pulseId: pid, canvasser_id: match.id, source: isCreateEvent ? 'create_item' : 'first_outcome' },
+        })
+        .select('id')
+        .single()
+      if (creditErr || !creditRow) {
+        // 23505 = lost the once-ever claim to a concurrent delivery. Any
+        // other failure also fails closed — a missed credit surfaces in
+        // audits, a double credit silently inflates payroll.
+        await supabaseAdmin.from('webhook_logs').insert({
+          step: 'Lead_Credit_Claim_Rejected',
+          data: { pulseId: pid, code: (creditErr as { code?: string } | null)?.code ?? null, error: creditErr?.message ?? null },
+        })
+        return false
+      }
+      creditMarkerId = creditRow.id
       return true
     }
     const creditNew = (isCreateEvent || bucket) ? await applyLeadCredit() : false
@@ -829,8 +1004,9 @@ serve(async (req) => {
         } else {
           await syncExistingLead(existingLead as LeadRow)
         }
-      } else if (prevBucket === 'sales' && bucket !== 'sales') {
-        // Sale reverted in Monday → drop the commission but keep the audit row.
+      } else if (prevBucket === 'sales') {
+        // Sale reverted in Monday (bucket is not 'sales' on this branch) →
+        // drop the commission but keep the audit row.
         const { data: voided } = await supabaseAdmin
           .from('leads')
           .update({ status: 'denied', deny_reason: REVERT_REASON })
@@ -889,139 +1065,279 @@ serve(async (req) => {
       return new Response('No-op (same state)', { status: 200, headers: corsHeaders })
     }
 
-    // Claim the state transitions BEFORE writing counters so a burst of
-    // near-simultaneous events can't double-apply (same claim-first pattern
-    // as lead credits). Released below if the counter write fails.
-    const { data: outcomeClaim } = outcomeChanged
-      ? await supabaseAdmin.from('webhook_logs').insert({
-          step: 'Card_Outcome_Recorded',
-          data: { pulseId: String(pulseId), bucket, nonCore, prev: prevBucket, canvasser_id: match.id },
-        }).select('id').single()
-      : { data: null }
-    const { data: olClaim } = olChanged
-      ? await supabaseAdmin.from('webhook_logs').insert({
-          step: 'Card_OL_Recorded',
-          data: { pulseId: String(pulseId), ol, canvasser_id: match.id },
-        }).select('id').single()
-      : { data: null }
-
-    const { data: existing } = await supabaseAdmin
-      .from('daily_metrics')
-      .select('id, leads_submitted, blowouts, outside_leads, resets, pitch_missed, sales')
-      .eq('canvasser_id', match.id)
-      .eq('metric_date', metric_date)
-      .maybeSingle()
-
-
-    const cur: Record<string, number> = existing ?? {
-      leads_submitted: 0, blowouts: 0, outside_leads: 0, resets: 0, pitch_missed: 0, sales: 0,
+    // Claim the state transitions BEFORE writing counters. The old claim was
+    // read-then-insert across separate requests, so two same-second Monday
+    // deliveries both passed the read and double-counted (seen live
+    // 2026-07-29/30: one sale and one blowout each counted twice). The
+    // claim_block_card_transition RPC (20260804 migration) re-verifies the
+    // expected previous markers and inserts the new ones atomically under a
+    // per-pulse advisory lock — all-or-nothing. Lost claim → adopt the actual
+    // recorded state and re-diff once (a pure duplicate becomes a no-op, a
+    // genuinely newer state re-claims); still contested → 502 so Monday's
+    // retry loop redelivers against settled state. RPC not deployed yet →
+    // legacy racy insert, flagged, so ingestion never stops.
+    let outcomeMarkerId: string | null = null
+    let olMarkerId: string | null = null
+    const releaseCreditClaim = async () => {
+      if (creditMarkerId) {
+        await supabaseAdmin.from('webhook_logs').delete().eq('id', creditMarkerId)
+        creditMarkerId = null
+      }
+    }
+    const outcomeMarkerData = () => ({
+      pulseId: String(pulseId), bucket, nonCore, prev: prevBucket,
+      canvasser_id: match.id, metric_date, office_location,
+      itemName: item.name ?? null,
+      ...(ownOutcome == null && siblingOutcome != null ? { seededFromSiblings: siblingPulseIds } : {}),
+    })
+    const olMarkerData = () => ({
+      pulseId: String(pulseId), ol, canvasser_id: match.id, metric_date, office_location,
+    })
+    if (outcomeChanged || olChanged) {
+      const isMissingRpc = (e: { code?: string; message?: string }) =>
+        e.code === 'PGRST202' || e.code === '42883' ||
+        /could not find the function/i.test(e.message ?? '')
+      let attempt = 0
+      while (true) {
+        attempt++
+        const { data: claimData, error: claimErr } = await supabaseAdmin.rpc('claim_block_card_transition', {
+          _pulse_id: String(pulseId),
+          _claim_outcome: outcomeChanged,
+          _expected_outcome: ownOutcome
+            ? {
+                exists: true,
+                bucket: (ownOutcome.data as { bucket?: string | null } | null)?.bucket ?? null,
+                nonCore: !!(ownOutcome.data as { nonCore?: boolean } | null)?.nonCore,
+              }
+            : { exists: false },
+          _outcome_data: outcomeChanged ? outcomeMarkerData() : null,
+          _claim_ol: olChanged,
+          _expected_ol: ownOl
+            ? { exists: true, ol: !!(ownOl.data as { ol?: boolean } | null)?.ol }
+            : { exists: false },
+          _ol_data: olChanged ? olMarkerData() : null,
+        })
+        if (claimErr) {
+          if (isMissingRpc(claimErr)) {
+            // Pre-migration fallback: the legacy inserts (racy — the gap
+            // stays visible in the logs until the migration is applied).
+            await supabaseAdmin.from('webhook_logs').insert({
+              step: 'Claim_RPC_Missing',
+              data: { pulseId: String(pulseId), note: 'Run 20260804010000_webhook_claim_gates.sql to close the double-count race' },
+            })
+            if (outcomeChanged) {
+              const { data: legacyOutcome } = await supabaseAdmin.from('webhook_logs').insert({
+                step: 'Card_Outcome_Recorded', data: outcomeMarkerData(),
+              }).select('id').single()
+              outcomeMarkerId = legacyOutcome?.id ?? null
+            }
+            if (olChanged) {
+              const { data: legacyOl } = await supabaseAdmin.from('webhook_logs').insert({
+                step: 'Card_OL_Recorded', data: olMarkerData(),
+              }).select('id').single()
+              olMarkerId = legacyOl?.id ?? null
+            }
+            break
+          }
+          await supabaseAdmin.from('webhook_logs').insert({
+            step: 'Outcome_Claim_Error',
+            data: { pulseId: String(pulseId), error: claimErr.message },
+          })
+          await releaseCreditClaim()
+          // 5xx so Monday's retry loop redelivers — no counters were written.
+          return new Response('Claim failed', { status: 502, headers: corsHeaders })
+        }
+        const res = (claimData ?? {}) as {
+          claimed?: boolean
+          outcome_marker_id?: string | null
+          ol_marker_id?: string | null
+          actual_outcome?: MarkerRow | null
+          actual_ol?: MarkerRow | null
+        }
+        if (res.claimed) {
+          outcomeMarkerId = res.outcome_marker_id ?? null
+          olMarkerId = res.ol_marker_id ?? null
+          break
+        }
+        // Lost to a concurrent delivery — adopt the actually-recorded own
+        // state for the claims we asked about, then re-diff.
+        if (outcomeChanged) ownOutcome = (res.actual_outcome as MarkerRow | null) ?? null
+        if (olChanged) ownOl = (res.actual_ol as MarkerRow | null) ?? null
+        computeTransition()
+        if (!outcomeChanged && !olChanged) {
+          await supabaseAdmin.from('webhook_logs').insert({
+            step: 'Outcome_Claim_Superseded',
+            data: {
+              pulseId: String(pulseId), bucket: bucket ?? null, ol,
+              note: 'A concurrent delivery already recorded this state.',
+            },
+          })
+          if (!creditNew) {
+            return new Response('No-op (state already recorded)', { status: 200, headers: corsHeaders })
+          }
+          break // still owe the new-lead credit counters below
+        }
+        if (attempt >= 2) {
+          await supabaseAdmin.from('webhook_logs').insert({
+            step: 'Outcome_Claim_Lost',
+            data: { pulseId: String(pulseId), bucket: bucket ?? null, prev: prevBucket },
+          })
+          await releaseCreditClaim()
+          // Contested twice — let Monday redeliver against settled state.
+          return new Response('Claim contested', { status: 502, headers: corsHeaders })
+        }
+      }
     }
 
     // Funnel buckets (leads_confirmed / no_answers / killed / pending / future)
     // belong exclusively to the Incoming Leads board's Lead Status column —
     // Block events only move the Canvass Stats mirrors + outside_leads here.
-    const next: Record<string, number> = { ...cur }
-    const decCol = (col?: string) => { if (col) next[col] = Math.max(0, (next[col] ?? 0) - 1) }
-    const incCol = (col?: string) => { if (col) next[col] = (next[col] ?? 0) + 1 }
+    // Deltas are grouped per metric day: the undo half of a transition lands
+    // on the day the previous state was counted, the new state (and the
+    // new-lead credit) lands on today. One row per day, one atomic upsert.
+    const metricDeltas = new Map<string, Record<string, number>>()
+    const metricOffice = new Map<string, string>()
+    const addMetricDelta = (date: string, office: string, col: string, d: number) => {
+      const m = metricDeltas.get(date) ?? {}
+      m[col] = (m[col] ?? 0) + d
+      metricDeltas.set(date, m)
+      if (!metricOffice.has(date)) metricOffice.set(date, office)
+    }
     if (outcomeChanged) {
-      decCol(prevBucket ? METRIC_COL[prevBucket] : undefined)
-      incCol(bucket ? METRIC_COL[bucket] : undefined)
+      const decC = prevBucket ? METRIC_COL[prevBucket] : undefined
+      if (decC) addMetricDelta(prevOutcomeDate, prevOutcomeOffice, decC, -1)
+      const incC = bucket ? METRIC_COL[bucket] : undefined
+      if (incC) addMetricDelta(metric_date, office_location, incC, +1)
     }
     if (olChanged) {
-      if (ol) incCol('outside_leads')
-      else decCol('outside_leads')
+      if (ol) addMetricDelta(metric_date, office_location, 'outside_leads', +1)
+      else addMetricDelta(prevOlDate, prevOlOffice, 'outside_leads', -1)
     }
+    if (creditNew) addMetricDelta(metric_date, office_location, 'leads_submitted', +1)
 
-    const payload = {
-      canvasser_id: match.id,
-      metric_date,
-      office_location,
-      leads_submitted: (cur.leads_submitted ?? 0) + (creditNew ? 1 : 0),
-      blowouts: next.blowouts ?? 0,
-      outside_leads: next.outside_leads ?? 0,
-      resets: next.resets ?? 0,
-      pitch_missed: next.pitch_missed ?? 0,
-      sales: next.sales ?? 0,
-    }
-
-    const { error: upErr } = await supabaseAdmin
-      .from('daily_metrics')
-      .upsert(payload, { onConflict: 'canvasser_id,metric_date' })
-
-    if (upErr) {
-      // Release the claims so a Monday redelivery can re-apply.
-      if (outcomeClaim?.id) {
-        await supabaseAdmin.from('webhook_logs').delete().eq('id', outcomeClaim.id)
+    if (metricDeltas.size > 0) {
+      const rows: Record<string, unknown>[] = []
+      for (const [date, deltas] of metricDeltas) {
+        const { data: existing } = await supabaseAdmin
+          .from('daily_metrics')
+          .select('id, office_location, leads_submitted, blowouts, outside_leads, resets, pitch_missed, sales')
+          .eq('canvasser_id', match.id)
+          .eq('metric_date', date)
+          .maybeSingle()
+        const cur = (existing as Record<string, number | string | null> | null) ?? null
+        const num = (k: string) => Number(cur?.[k] ?? 0)
+        const next: Record<string, number> = {
+          leads_submitted: num('leads_submitted'),
+          blowouts: num('blowouts'),
+          outside_leads: num('outside_leads'),
+          resets: num('resets'),
+          pitch_missed: num('pitch_missed'),
+          sales: num('sales'),
+        }
+        for (const [col, d] of Object.entries(deltas)) {
+          next[col] = Math.max(0, (next[col] ?? 0) + d)
+        }
+        rows.push({
+          canvasser_id: match.id,
+          metric_date: date,
+          // Never re-home an existing day-row; only new rows take our guess.
+          office_location: (cur?.office_location as string | null | undefined)
+            ?? metricOffice.get(date) ?? office_location,
+          ...next,
+        })
       }
-      if (olClaim?.id) {
-        await supabaseAdmin.from('webhook_logs').delete().eq('id', olClaim.id)
+      const { error: upErr } = await supabaseAdmin
+        .from('daily_metrics')
+        .upsert(rows, { onConflict: 'canvasser_id,metric_date' })
+
+      if (upErr) {
+        // Release every claim so a later delivery can re-apply cleanly.
+        if (outcomeMarkerId) {
+          await supabaseAdmin.from('webhook_logs').delete().eq('id', outcomeMarkerId)
+        }
+        if (olMarkerId) {
+          await supabaseAdmin.from('webhook_logs').delete().eq('id', olMarkerId)
+        }
+        await releaseCreditClaim()
+        await supabaseAdmin.from('webhook_logs').insert({
+          step: '5_Upsert_Error',
+          data: { error: upErr.message },
+        })
+        return new Response('Upsert failed', { status: 200, headers: corsHeaders })
       }
-      await supabaseAdmin.from('webhook_logs').insert({
-        step: '5_Upsert_Error',
-        data: { error: upErr.message },
-      })
-      return new Response('Upsert failed', { status: 200, headers: corsHeaders })
     }
 
     // ── Payroll feed: mirror the outcome transition into daily_logs ─────────
     // calc_weekly_paycheck reads points/sits/activity from daily_logs, not
-    // daily_metrics, so live Monday events must land there too. Same transition
-    // semantics as the counters above: undo the previous bucket, apply the new
-    // one, floor at 0. leads_called_in is credited once per Monday item.
+    // daily_metrics, so live Monday events must land there too. Same split as
+    // the counters above: the undo half targets the (day, office) row the
+    // previous state was counted on; the new state and the once-per-item
+    // leads_called_in credit target today's board-office row. Floor at 0.
     try {
-      const delta: Record<string, number> = {}
-      const applyVec = (b: ScheduleBucket, nc: boolean, sign: number) => {
-        for (const [k, v] of Object.entries((b && DAILY_LOG_VECS[b]) || {})) {
-          delta[k] = (delta[k] ?? 0) + sign * v
-        }
-        if (b && nc) delta.non_core = (delta.non_core ?? 0) + sign
+      const logDeltas = new Map<string, Record<string, number>>()
+      const addLogVec = (date: string, office: string, vec: Record<string, number>, sign: number) => {
+        const key = `${date}|${office}`
+        const m = logDeltas.get(key) ?? {}
+        for (const [k, v] of Object.entries(vec)) m[k] = (m[k] ?? 0) + sign * v
+        logDeltas.set(key, m)
       }
+      const bucketVec = (b: ScheduleBucket, nc: boolean): Record<string, number> => ({
+        ...((b && DAILY_LOG_VECS[b]) || {}),
+        ...(b && nc ? { non_core: 1 } : {}),
+      })
       if (outcomeChanged) {
-        applyVec(prevBucket, prevNonCore, -1)
-        applyVec(bucket, nonCore, +1)
+        addLogVec(prevOutcomeDate, prevOutcomeOffice, bucketVec(prevBucket, prevNonCore), -1)
+        addLogVec(metric_date, office_location, bucketVec(bucket, nonCore), +1)
       }
-      if (olChanged) delta.one_legs = (delta.one_legs ?? 0) + (ol ? 1 : -1)
+      if (olChanged) {
+        if (ol) addLogVec(metric_date, office_location, { one_legs: 1 }, +1)
+        else addLogVec(prevOlDate, prevOlOffice, { one_legs: 1 }, -1)
+      }
       // Credit "leads called in" once per Monday item — claimed above by
       // applyLeadCredit at creation or first mapped outcome, whichever first.
-      if (creditNew) delta.leads_called_in = (delta.leads_called_in ?? 0) + 1
+      if (creditNew) addLogVec(metric_date, office_location, { leads_called_in: 1 }, +1)
 
-      if (Object.values(delta).some((v) => v !== 0)) {
+      for (const [key, delta] of logDeltas) {
+        if (!Object.values(delta).some((v) => v !== 0)) continue
+        const sep = key.indexOf('|')
+        const log_date = key.slice(0, sep)
+        const log_office = key.slice(sep + 1)
         // Ensure the row exists without clobbering fields on existing rows,
         // then read-modify-write only the counters we touch (legacy pattern).
         // Rows are per (canvasser, day, OFFICE) — the board's office — so a
         // rep working both blocks gets separate SD and OC rows.
         await supabaseAdmin.from('daily_logs').upsert(
-          { canvasser_id: match.id, team_id: match.team_id ?? null, log_date: metric_date, office_location },
+          { canvasser_id: match.id, team_id: match.team_id ?? null, log_date, office_location: log_office },
           { onConflict: 'canvasser_id,log_date,office_location', ignoreDuplicates: true },
         )
         const { data: logRow, error: logReadErr } = await supabaseAdmin
           .from('daily_logs')
           .select('id, ' + DAILY_LOG_KEYS.join(', '))
           .eq('canvasser_id', match.id)
-          .eq('log_date', metric_date)
-          .eq('office_location', office_location)
+          .eq('log_date', log_date)
+          .eq('office_location', log_office)
           .maybeSingle()
         if (logReadErr || !logRow) {
           await supabaseAdmin.from('webhook_logs').insert({
             step: 'Daily_Log_Feed_Error',
-            data: { pulseId: String(pulseId), error: logReadErr?.message ?? 'daily_logs row missing after upsert' },
+            data: { pulseId: String(pulseId), log_date, error: logReadErr?.message ?? 'daily_logs row missing after upsert' },
           })
-        } else {
-          const row = logRow as unknown as Record<string, unknown> & { id: string }
-          const logUpdate: Record<string, number> = {}
-          for (const [k, v] of Object.entries(delta)) {
-            if (v !== 0) logUpdate[k] = Math.max(0, Number(row[k] ?? 0) + v)
-          }
-          const { error: logWriteErr } = await supabaseAdmin
-            .from('daily_logs')
-            .update(logUpdate as never)
-            .eq('id', row.id)
-          if (logWriteErr) {
-            await supabaseAdmin.from('webhook_logs').insert({
-              step: 'Daily_Log_Feed_Error',
-              data: { pulseId: String(pulseId), error: logWriteErr.message },
-            })
-          }
+          continue
+        }
+        const row = logRow as unknown as Record<string, unknown> & { id: string }
+        const logUpdate: Record<string, number> = {}
+        for (const [k, v] of Object.entries(delta)) {
+          if (v !== 0) logUpdate[k] = Math.max(0, Number(row[k] ?? 0) + v)
+        }
+        const { error: logWriteErr } = await supabaseAdmin
+          .from('daily_logs')
+          .update(logUpdate as never)
+          .eq('id', row.id)
+        if (logWriteErr) {
+          await supabaseAdmin.from('webhook_logs').insert({
+            step: 'Daily_Log_Feed_Error',
+            data: { pulseId: String(pulseId), log_date, error: logWriteErr.message },
+          })
         }
       }
     } catch (feedErr) {
@@ -1061,6 +1377,7 @@ serve(async (req) => {
         changedValue,
         previousValue: previousStatusFromEvent ?? null,
         previousBucket: prevBucket ?? null,
+        previousMetricDate: outcomeChanged ? prevOutcomeDate : null,
         recordedAs: bucket ?? 'unmapped',
         nonCore,
         ol,

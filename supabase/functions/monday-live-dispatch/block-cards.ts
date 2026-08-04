@@ -20,6 +20,26 @@ export type MondayCol = {
 /** Sale-column values that mean the item is sold. */
 export const SOLD_VALUES = ['sold', 'reload', 'upsell', 'sale']
 
+/** Trailing "(copy)" / "(copy 2)" marker Monday appends when an item is
+ *  duplicated — possibly stacked ("Linda Fitzle & Mr. (copy) (copy)"). */
+const COPY_SUFFIX_RE = /(\s*\(copy(\s+\d+)?\))+\s*$/i
+
+/** True when the item name ends in a Monday duplicate marker. */
+export function isCopyName(name: unknown): boolean {
+  return COPY_SUFFIX_RE.test(String(name ?? ''))
+}
+
+/** Item name with every trailing "(copy)"/"(copy N)" marker removed. */
+export function stripCopySuffix(name: unknown): string {
+  return String(name ?? '').replace(COPY_SUFFIX_RE, '').trim()
+}
+
+/** Canonical customer key a card shares with the card it was copied from:
+ *  copy markers stripped, case- and whitespace-insensitive. */
+export function copyBaseName(name: unknown): string {
+  return stripCopySuffix(name).toLowerCase().replace(/\s+/g, ' ')
+}
+
 /** Parse Monday money text ("$1,234.56") → number, else null. Rejects
  *  negatives and values beyond the numeric(12,2) range. */
 export function parseMoney(v: unknown): number | null {
