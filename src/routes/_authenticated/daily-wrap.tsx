@@ -19,6 +19,7 @@ type Row = {
   ydayLeads: number;
   weekPoints: number;
   recent: boolean;
+  tracked: boolean;
 };
 
 function DailyWrap() {
@@ -34,7 +35,7 @@ function DailyWrap() {
       const [profilesR, metricsR] = await Promise.all([
         supabase
           .from("profiles")
-          .select("id, display_name, status, created_at")
+          .select("id, display_name, status, created_at, suspension_tracked")
           .neq("status", "inactive"),
         supabase
           .from("daily_metrics")
@@ -64,14 +65,19 @@ function DailyWrap() {
           ydayLeads: r.yday,
           weekPoints: r.pts,
           recent: isRecentlyActive(today, [p.id], lastMap, (p.created_at ?? "").slice(0, 10)),
+          tracked: p.suspension_tracked !== false,
         };
       });
     },
   });
 
   const { suspension, doughnuts, winners, club3, bosses7 } = useMemo(() => {
-    // `recent` keeps week-gone reps out of the freezer (see src/lib/suspension.ts).
-    const suspension = rows.filter((r) => r.todayLeads === 0 && r.ydayLeads === 0 && r.recent);
+    // `recent` keeps week-gone reps out of the freezer (see src/lib/suspension.ts);
+    // `tracked` honors the same X-dismissals (suspension_tracked=false) as the
+    // Fleet Dispatch banner. Both gate only this list, never the award lists.
+    const suspension = rows.filter(
+      (r) => r.todayLeads === 0 && r.ydayLeads === 0 && r.recent && r.tracked,
+    );
     const doughnuts = rows.filter((r) => r.todayLeads === 0 && r.ydayLeads > 0);
     const winners = rows
       .filter((r) => r.todayLeads >= 1)
