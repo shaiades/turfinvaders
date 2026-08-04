@@ -50,8 +50,9 @@ import { isManagerRole } from "@/lib/roles";
 import { isRecentlyActive, lastActiveMap } from "@/lib/suspension";
 import { formatCurrency, normalizeName } from "@/lib/utils";
 import { DEFAULT_OFFICE, OFFICE_LOCATIONS } from "@/lib/offices";
-import { getDispatchProduction } from "@/lib/dispatch.functions";
+import { getDispatchProduction, type DispatchResults } from "@/lib/dispatch.functions";
 import { FleetDispatchManage } from "@/components/FleetDispatchManage";
+import { ExecutiveSection } from "@/components/ExecutiveDashboard";
 
 /** One profile row as the board consumes it (dispatch membership). */
 export type RosterProfile = {
@@ -340,6 +341,10 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
     () => new Map(Object.entries(production.data?.volume ?? {})),
     [production.data],
   );
+  const resultsByUser = useMemo(
+    () => new Map<string, DispatchResults>(Object.entries(production.data?.results ?? {})),
+    [production.data],
+  );
 
   // Suspension window: the last 14 completed worked days (Sundays excluded).
   // Feeds the donut check (first two days) and the zero-streak display.
@@ -458,6 +463,7 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
         fut = 0,
         pts = 0,
         vol = 0;
+      const res: DispatchResults = { lds: 0, sit: 0, rs: 0, bo: 0, ctc: 0, nc: 0, ol: 0, sal: 0 };
       for (const id of g.ids) {
         const m = metricByCanvasser.get(id);
         if (m) {
@@ -468,18 +474,29 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
         }
         pts += pointsByUser.get(id) ?? 0;
         vol += volumeByUser.get(id) ?? 0;
+        const rr = resultsByUser.get(id);
+        if (rr) {
+          res.lds += rr.lds;
+          res.sit += rr.sit;
+          res.rs += rr.rs;
+          res.bo += rr.bo;
+          res.ctc += rr.ctc;
+          res.nc += rr.nc;
+          res.ol += rr.ol;
+          res.sal += rr.sal;
+        }
       }
       // Submitted = the sum of actioned results (owner, 2026-07-28):
       // Submitted ≡ Confirmed + Future + Blowout by construction.
       const sub = conf + fut + kil;
-      return { g, conf, kil, fut, sub, pts, vol };
+      return { g, conf, kil, fut, sub, pts, vol, res };
     });
     return enriched.sort((a, b) => {
       if (b.sub !== a.sub) return b.sub - a.sub;
       if (b.conf !== a.conf) return b.conf - a.conf;
       return (a.g.display_name ?? "").localeCompare(b.g.display_name ?? "");
     });
-  }, [visible, metricByCanvasser, pointsByUser, volumeByUser]);
+  }, [visible, metricByCanvasser, pointsByUser, volumeByUser, resultsByUser]);
 
   const totals = useMemo(() => {
     let sub = 0,
@@ -751,6 +768,12 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
         <DispatchFleet rows={rows} vans={vans} />
       )}
 
+      {/* Former Executive Dashboard tab (merged 2026-08-04): Results Week +
+          Manual Entry + Weekly Results (Pay) + Live Daily Action + raw
+          daily_logs — shares this board's office filter. Managers only;
+          the read-only leaderboard copy shows just the fleet board. */}
+      {!readOnly && <ExecutiveSection />}
+
       {canManage && (
         <div className="space-y-4">
           <button
@@ -797,6 +820,7 @@ type FunnelRow = {
   kil: number;
   pts: number;
   vol: number;
+  res: DispatchResults;
 };
 
 const FUNNEL_COLS: Array<{
@@ -808,13 +832,44 @@ const FUNNEL_COLS: Array<{
   { short: "Sub", full: "Submitted", key: "sub", color: "neon" },
   { short: "Con", full: "Confirmed", key: "conf", color: "victory" },
   { short: "Fut", full: "Future", key: "fut", color: "accent" },
-  { short: "BO", full: "Blowout", key: "kil", color: "destructive" },
+  { short: "BO", full: "Blowout — dead-end at confirmation", key: "kil", color: "destructive" },
 ];
 
-/** One rep's funnel line — Fleet Manager roster-row styling. */
+/** The lead-results half of the continuous row — Weekly Results columns in
+ *  dispatch clothing. Points renders as its own trailing cell (row.pts). */
+const RESULT_COLS: Array<{
+  short: string;
+  full: string;
+  key: keyof DispatchResults;
+  color: keyof typeof metricColorClass;
+}> = [
+  { short: "Lds", full: "Total Leads run", key: "lds", color: "neon" },
+  { short: "Sit", full: "Sits (demos, sales split out)", key: "sit", color: "victory" },
+  { short: "RS", full: "Resets", key: "rs", color: "accent" },
+  { short: "BO", full: "Blowout at the door — no demo", key: "bo", color: "destructive" },
+  { short: "CTC", full: "CTC — couldn't contact", key: "ctc", color: "muted-foreground" },
+  { short: "NC", full: "Non-Core product", key: "nc", color: "warning" },
+  { short: "OL", full: "One Legs / Outside Leads", key: "ol", color: "warning" },
+  { short: "Sal", full: "Sales", key: "sal", color: "victory" },
+];
+
+/** One shared grid template: name · 4 funnel cols · divider · 8 result cols ·
+ *  Points. Every board row (captions, headers, van totals, reps) uses it so
+ *  the whole van card reads as one continuous chart. */
+const ROW_GRID =
+  "grid grid-cols-[minmax(7.5rem,1fr)_repeat(4,2.3rem)_0.75rem_repeat(9,2.3rem)] items-center gap-1";
+
+/** Board rows need ~42rem; the van card scrolls horizontally below that. */
+const ROW_MIN_W = "min-w-[42rem]";
+
+function RowDivider() {
+  return <span className="h-4 w-px bg-border justify-self-center" aria-hidden />;
+}
+
+/** One rep's continuous line — field funnel first, then what the leads became. */
 function DispatchRow({ r }: { r: FunnelRow }) {
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_repeat(4,2.4rem)] items-center gap-1 px-2 py-1.5 rounded border border-border bg-surface hover:border-neon/60">
+    <div className={`${ROW_GRID} px-2 py-1.5 rounded border border-border bg-surface hover:border-neon/60`}>
       <span className="text-sm truncate flex items-center gap-1.5 min-w-0">
         <span aria-hidden>{r.sub > 0 ? "🔥" : "🍩"}</span>
         <span className="truncate">{r.g.display_name ?? "—"}</span>
@@ -833,14 +888,46 @@ function DispatchRow({ r }: { r: FunnelRow }) {
           {r[c.key]}
         </span>
       ))}
+      <RowDivider />
+      {RESULT_COLS.map((c) => (
+        <span
+          key={c.key}
+          title={c.full}
+          className={`text-right font-display text-sm ${metricClass(r.res[c.key], c.color)}`}
+        >
+          {r.res[c.key]}
+        </span>
+      ))}
+      <span
+        title="Points (PM = 1 pt, Sale = 2 pts)"
+        className={`text-right font-display text-sm ${metricClass(r.pts, "neon")}`}
+      >
+        {r.pts}
+      </span>
     </div>
   );
 }
 
-/** Funnel mini-table column headers, aligned to DispatchRow's grid. */
+/** Section captions over the two halves of the continuous row. */
+function DispatchGroupCaption() {
+  return (
+    <div className={`${ROW_GRID} px-2`}>
+      <span />
+      <span className="col-span-4 text-center text-[8px] font-display uppercase tracking-widest text-muted-foreground/70 border-b border-border/60 pb-0.5">
+        In the Field
+      </span>
+      <span />
+      <span className="col-span-9 text-center text-[8px] font-display uppercase tracking-widest text-muted-foreground/70 border-b border-border/60 pb-0.5">
+        As Leads
+      </span>
+    </div>
+  );
+}
+
+/** Column headers, aligned to DispatchRow's grid. */
 function DispatchColHeader() {
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_repeat(4,2.4rem)] items-center gap-1 px-2">
+    <div className={`${ROW_GRID} px-2`}>
       <span />
       {FUNNEL_COLS.map((c) => (
         <span
@@ -851,6 +938,22 @@ function DispatchColHeader() {
           {c.short}
         </span>
       ))}
+      <span />
+      {RESULT_COLS.map((c) => (
+        <span
+          key={c.key}
+          title={c.full}
+          className="text-right text-[9px] font-display uppercase tracking-widest text-muted-foreground"
+        >
+          {c.short}
+        </span>
+      ))}
+      <span
+        title="Points (PM = 1 pt, Sale = 2 pts)"
+        className="text-right text-[9px] font-display uppercase tracking-widest text-muted-foreground"
+      >
+        Pts
+      </span>
     </div>
   );
 }
@@ -872,7 +975,9 @@ function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
       freeAgents.push(r);
     }
   }
-  const looseActive = freeAgents.filter((r) => r.sub + r.conf + r.fut + r.kil + r.pts + r.vol > 0);
+  const looseActive = freeAgents.filter(
+    (r) => r.sub + r.conf + r.fut + r.kil + r.pts + r.vol + r.res.lds + r.res.ol + r.res.sal > 0,
+  );
   const vanTotals = (id: string) =>
     (rowsByVan.get(id) ?? []).reduce(
       (a, r) => ({
@@ -882,8 +987,26 @@ function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
         kil: a.kil + r.kil,
         pts: a.pts + r.pts,
         vol: a.vol + r.vol,
+        res: {
+          lds: a.res.lds + r.res.lds,
+          sit: a.res.sit + r.res.sit,
+          rs: a.res.rs + r.res.rs,
+          bo: a.res.bo + r.res.bo,
+          ctc: a.res.ctc + r.res.ctc,
+          nc: a.res.nc + r.res.nc,
+          ol: a.res.ol + r.res.ol,
+          sal: a.res.sal + r.res.sal,
+        },
       }),
-      { sub: 0, conf: 0, fut: 0, kil: 0, pts: 0, vol: 0 },
+      {
+        sub: 0,
+        conf: 0,
+        fut: 0,
+        kil: 0,
+        pts: 0,
+        vol: 0,
+        res: { lds: 0, sit: 0, rs: 0, bo: 0, ctc: 0, nc: 0, ol: 0, sal: 0 },
+      },
     );
   const vanSub = (id: string) => vanTotals(id).sub;
   const captainName = (v: Van) =>
@@ -905,7 +1028,9 @@ function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
             key={office}
             title={`${office} · ${list.length} ${list.length === 1 ? "Van" : "Vans"}`}
           >
-            <div className="grid gap-4 md:grid-cols-2">
+            {/* One card per row — the continuous field→leads line needs the
+                full panel width (scrolls horizontally on small screens). */}
+            <div className="grid gap-4">
               {list.map((v) => {
                 const roster = (rowsByVan.get(v.id) ?? []).sort(
                   (a, b) => b.sub - a.sub || b.conf - a.conf,
@@ -944,27 +1069,46 @@ function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
                         No active agents on this van.
                       </div>
                     ) : (
-                      <div className="space-y-1.5">
-                        <DispatchColHeader />
-                        {/* The whole van at a glance — every funnel stat the
-                            canvassers below sum into. */}
-                        <div className="grid grid-cols-[minmax(0,1fr)_repeat(4,2.4rem)] items-center gap-1 px-2 py-1.5 rounded border border-neon/40 bg-neon/5">
-                          <span className="text-[10px] font-display uppercase tracking-widest text-neon truncate">
-                            Van Total
-                          </span>
-                          {FUNNEL_COLS.map((c) => (
-                            <span
-                              key={c.key}
-                              title={c.full}
-                              className={`text-right font-display text-sm font-bold ${metricClass(t[c.key], c.color)}`}
-                            >
-                              {t[c.key]}
+                      <div className="overflow-x-auto">
+                        <div className={`space-y-1.5 ${ROW_MIN_W}`}>
+                          <DispatchGroupCaption />
+                          <DispatchColHeader />
+                          {/* The whole van at a glance — every stat the
+                              canvassers below sum into. */}
+                          <div className={`${ROW_GRID} px-2 py-1.5 rounded border border-neon/40 bg-neon/5`}>
+                            <span className="text-[10px] font-display uppercase tracking-widest text-neon truncate">
+                              Van Total
                             </span>
+                            {FUNNEL_COLS.map((c) => (
+                              <span
+                                key={c.key}
+                                title={c.full}
+                                className={`text-right font-display text-sm font-bold ${metricClass(t[c.key], c.color)}`}
+                              >
+                                {t[c.key]}
+                              </span>
+                            ))}
+                            <RowDivider />
+                            {RESULT_COLS.map((c) => (
+                              <span
+                                key={c.key}
+                                title={c.full}
+                                className={`text-right font-display text-sm font-bold ${metricClass(t.res[c.key], c.color)}`}
+                              >
+                                {t.res[c.key]}
+                              </span>
+                            ))}
+                            <span
+                              title="Points (PM = 1 pt, Sale = 2 pts)"
+                              className={`text-right font-display text-sm font-bold ${metricClass(t.pts, "neon")}`}
+                            >
+                              {t.pts}
+                            </span>
+                          </div>
+                          {roster.map((r) => (
+                            <DispatchRow key={r.g.key} r={r} />
                           ))}
                         </div>
-                        {roster.map((r) => (
-                          <DispatchRow key={r.g.key} r={r} />
-                        ))}
                       </div>
                     )}
                   </div>
@@ -984,16 +1128,19 @@ function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
           <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
             Lead Sources · Unassigned ({looseActive.length})
           </div>
-          <div className="space-y-1.5">
-            <DispatchColHeader />
-            {looseActive
-              .sort(
-                (a, b) =>
-                  b.sub - a.sub || (a.g.display_name ?? "").localeCompare(b.g.display_name ?? ""),
-              )
-              .map((r) => (
-                <DispatchRow key={r.g.key} r={r} />
-              ))}
+          <div className="overflow-x-auto">
+            <div className={`space-y-1.5 ${ROW_MIN_W}`}>
+              <DispatchGroupCaption />
+              <DispatchColHeader />
+              {looseActive
+                .sort(
+                  (a, b) =>
+                    b.sub - a.sub || (a.g.display_name ?? "").localeCompare(b.g.display_name ?? ""),
+                )
+                .map((r) => (
+                  <DispatchRow key={r.g.key} r={r} />
+                ))}
+            </div>
           </div>
         </div>
       )}

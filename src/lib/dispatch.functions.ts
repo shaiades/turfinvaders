@@ -14,6 +14,20 @@ import { EMPTY_AGGREGATE, type FunnelAggregate } from "@/lib/funnel";
  * app layer"; this function IS that app layer). Only aggregate totals per
  * canvasser leave the server — never raw rows, addresses, or lead details.
  */
+/** Per-canvasser lead-result cells for the dispatch board's continuous row —
+ *  same math as the Executive Weekly Results table (leadsSum / sits-minus-sales /
+ *  future_leads-as-resets), summed over the selected log window. */
+export type DispatchResults = {
+  lds: number;
+  sit: number;
+  rs: number;
+  bo: number;
+  ctc: number;
+  nc: number;
+  ol: number;
+  sal: number;
+};
+
 export const getDispatchProduction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => {
@@ -35,7 +49,9 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
     const [logsR, leadsR] = await Promise.all([
       supabaseAdmin
         .from("daily_logs")
-        .select("canvasser_id, demos_sits, sales, log_date")
+        .select(
+          "canvasser_id, demos_sits, sales, no_demo, future_leads, ctc, non_core, one_legs, unmarked, log_date",
+        )
         .gte("log_date", data.log_start)
         .lte("log_date", data.log_end),
       // Two-sided superset fetch; the COALESCE(reviewed_at, created_at)
@@ -52,10 +68,35 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
     if (leadsR.error) throw leadsR.error;
 
     const points: Record<string, number> = {};
+    const results: Record<string, DispatchResults> = {};
     for (const l of logsR.data ?? []) {
       if (!l.canvasser_id) continue;
       const pts = weeklyPoints(l.demos_sits ?? 0, l.sales ?? 0);
       if (pts > 0) points[l.canvasser_id] = (points[l.canvasser_id] ?? 0) + pts;
+      const r = (results[l.canvasser_id] ??= {
+        lds: 0,
+        sit: 0,
+        rs: 0,
+        bo: 0,
+        ctc: 0,
+        nc: 0,
+        ol: 0,
+        sal: 0,
+      });
+      r.lds +=
+        (l.demos_sits ?? 0) +
+        (l.no_demo ?? 0) +
+        (l.ctc ?? 0) +
+        (l.future_leads ?? 0) +
+        (l.unmarked ?? 0);
+      // demos_sits includes sold sits; the board splits them (Weekly Results parity).
+      r.sit += Math.max(0, (l.demos_sits ?? 0) - (l.sales ?? 0));
+      r.sal += l.sales ?? 0;
+      r.rs += l.future_leads ?? 0;
+      r.bo += l.no_demo ?? 0;
+      r.ctc += l.ctc ?? 0;
+      r.nc += l.non_core ?? 0;
+      r.ol += l.one_legs ?? 0;
     }
 
     const volStartMs = Date.parse(data.vol_start);
@@ -68,7 +109,7 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
       volume[l.canvasser_id] = (volume[l.canvasser_id] ?? 0) + Number(l.sale_amount ?? 0);
     }
 
-    return { points, volume };
+    return { points, volume, results };
   });
 
 /**
