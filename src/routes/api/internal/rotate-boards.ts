@@ -1,17 +1,25 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { laWeekStartISO } from "@/lib/dates";
 
 /**
  * Monday.com board rotation + webhook self-heal (Vercel Cron).
  *
  * Default mode — weekly rotation (Mondays 13:00 UTC = 6am PT):
- * For each office (SD, OC), this week's Block board is found by name — or
+ * For each office (SD, OC), this week's Block board is found by PARSED
+ * week-start date (the crews hand-name boards — "8/3/26", "8/03/26", double
+ * spaces — so raw-string matching is never trusted; the 8/3/26 zero-padding
+ * mismatch sent a whole week of webhooks to an empty duplicate board) — or
  * created by duplicating the structure-only template board — then the
  * create_item + change_column_value webhooks are registered on it (skipped if
  * the registry already has them), system_settings.active_monday_board_* is
  * updated, and webhooks for prior weeks' boards are deregistered. Idempotent:
  * safe to re-run any number of times in a week.
  *
- * ?mode=check — daily webhook self-heal (13:30 UTC): webhooks created with a
+ * ?mode=check — daily webhook self-heal (13:30 UTC): first it re-runs board
+ * discovery for the current week — if the best board for either office is not
+ * the one system_settings points at (the crews created their own board before
+ * or after the rotation ran), the whole rotation re-runs and adopts it, moving
+ * webhooks and settings. Then: webhooks created with a
  * personal API token can be toggled off by any board user in Monday's
  * Integrations Center, and Monday never turns them back on. This mode compares
  * the live webhooks(board_id:) list on both active boards against the expected
@@ -236,6 +244,37 @@ async function monday(
   throw new Error(`${lastError} (after ${MAX_ATTEMPTS} attempts)`);
 }
 
+/** This week's Block board for an office: any "<office> Block …" board whose
+ *  name PARSES to the given week's Monday (parseBoardWeekStart normalizes any
+ *  M/D/YY spelling — "8/3/26", "8/03/26" — to its Monday, exactly like the
+ *  Close Kombat sync). When several boards name the same week (a rotation
+ *  duplicate racing the crews' hand-made board), the one with the most items
+ *  wins — the board actually being worked is the board — and ties go to the
+ *  newest (`boards` arrives newest-first). */
+async function findWeekBoard(
+  token: string,
+  boards: Array<{ id: string; name: string }>,
+  office: "SD" | "OC",
+  weekStartISO: string,
+  parseWeek: (name: string) => string | null,
+): Promise<{ id: string; name: string } | null> {
+  const rx = new RegExp(`^${office}\\s+Block`, "i");
+  const cands = boards.filter((b) => rx.test(b.name.trim()) && parseWeek(b.name) === weekStartISO);
+  if (cands.length <= 1) return cands[0] ?? null;
+  const counts = await monday(
+    token,
+    `query ($ids: [ID!]) { boards(ids: $ids) { id items_count } }`,
+    { ids: cands.map((c) => c.id) },
+  );
+  const byId = new Map(
+    ((counts.boards as Array<{ id: string; items_count: number | null }>) ?? []).map((b) => [
+      String(b.id),
+      b.items_count ?? 0,
+    ]),
+  );
+  return cands.reduce((best, c) => ((byId.get(c.id) ?? 0) > (byId.get(best.id) ?? 0) ? c : best));
+}
+
 export const Route = createFileRoute("/api/internal/rotate-boards")({
   server: {
     handlers: {
@@ -295,12 +334,21 @@ async function rotate(): Promise<Response> {
       token,
       "query { boards(limit: 50, order_by: created_at) { id name } }",
     );
-    const boards = (boardsData.boards as Array<{ id: string; name: string }>) ?? [];
+    const boards = ((boardsData.boards as Array<{ id: string; name: string }>) ?? []).map((b) => ({
+      id: String(b.id),
+      name: b.name,
+    }));
+    const { parseBoardWeekStart } = await import("@/lib/block-cards.server");
+    const weekStartISO = laWeekStartISO();
 
     const newIds: Record<string, string> = {};
     for (const office of ["SD", "OC"] as const) {
-      const existing = boards.find(
-        (b) => new RegExp(`^${office}\\s+Block`, "i").test(b.name) && b.name.includes(start),
+      const existing = await findWeekBoard(
+        token,
+        boards,
+        office,
+        weekStartISO,
+        parseBoardWeekStart,
       );
       let boardId = existing?.id;
       if (!boardId) {
@@ -416,6 +464,50 @@ async function check(): Promise<Response> {
     if (settings?.incoming_leads_board_id)
       active.push(["Leads", String(settings.incoming_leads_board_id), ["create_item", LEAD_STATUS_EVENT]]);
     const activeIds = new Set(active.map(([, id]) => id));
+
+    // ── Active-board drift ── the crews hand-create week boards, sometimes
+    // before the Monday rotation runs, sometimes after. If the best board for
+    // the CURRENT week (parsed-date match, most items wins) is not the one
+    // system_settings points at, the webhooks are listening to the wrong
+    // board — every outcome silently vanishes (week of 8/3/26). Re-run the
+    // full rotation: it adopts the real board, moves the webhooks, updates
+    // settings, and deregisters the orphan's hooks.
+    {
+      const { parseBoardWeekStart } = await import("@/lib/block-cards.server");
+      const weekStartISO = laWeekStartISO();
+      const boardsData = await monday(
+        token,
+        "query { boards(limit: 50, order_by: created_at) { id name } }",
+      );
+      const allBoards = ((boardsData.boards as Array<{ id: string; name: string }>) ?? []).map(
+        (b) => ({ id: String(b.id), name: b.name }),
+      );
+      for (const office of ["SD", "OC"] as const) {
+        const activeId = String(
+          (office === "SD" ? settings?.active_monday_board_sd : settings?.active_monday_board_oc) ??
+            "",
+        );
+        const best = await findWeekBoard(
+          token,
+          allBoards,
+          office,
+          weekStartISO,
+          parseBoardWeekStart,
+        );
+        if (best && best.id !== activeId) {
+          await log({
+            drift: {
+              office,
+              week_start: weekStartISO,
+              active_board: activeId || null,
+              real_board: { id: best.id, name: best.name },
+              action: "re-running rotation to adopt the board actually in use",
+            },
+          });
+          return rotate();
+        }
+      }
+    }
 
     let registry: RegistryEntry[] = Array.isArray(settings?.monday_webhooks)
       ? [...(settings!.monday_webhooks as RegistryEntry[])]
