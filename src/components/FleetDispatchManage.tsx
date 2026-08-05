@@ -800,12 +800,6 @@ function RosterRow({
       >
         {points}p
       </span>
-      <span
-        className={`shrink-0 text-[10px] font-display ${volume > 0 ? "text-victory" : "text-muted-foreground"} px-1.5`}
-        title="Sale volume in the selected range"
-      >
-        {formatCurrency(volume)}
-      </span>
 
       {vans && onAssign && (
         <Select
@@ -850,6 +844,15 @@ function RosterRow({
           <Trash2 className="w-3.5 h-3.5" />
         </button>
       )}
+      {/* Far right (owner, 2026-08-04): the person's sale volume — the
+          Mon–Sat week in progress on Day/Week, the calendar month in
+          Month view (follows the board's selected range). */}
+      <span
+        className={`shrink-0 min-w-[4.5rem] text-right text-[10px] font-display ${volume > 0 ? "text-victory" : "text-muted-foreground"} px-1.5`}
+        title="Sale volume — Mon–Sat week in progress (calendar month in Month view)"
+      >
+        {formatCurrency(volume)}
+      </span>
     </div>
   );
 }
