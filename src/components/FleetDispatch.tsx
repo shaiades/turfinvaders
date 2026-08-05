@@ -538,6 +538,9 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
     const [d1, d2] = workedDays;
     return rows.flatMap((r) => {
       if (!r.g.tracked || dismissed.has(r.g.key)) return [];
+      // Sales reps never appear on the suspension list (owner, 2026-08-04) —
+      // even when a dual-role profile also puts them on the board.
+      if (r.g.ids.some((id) => (rolesByUser.get(id) ?? []).includes("sales_rep"))) return [];
       if (r.g.oldestCreated > d2) return [];
       if (!isRecentlyActive(today, r.g.ids, lastActiveBy, r.g.oldestCreated)) return [];
       if (genOn(r.g.ids, d1) !== 0 || genOn(r.g.ids, d2) !== 0) return [];
@@ -557,7 +560,7 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
       }
       return [{ g: r.g, d1, d2, streak, streakLabel: `${streak}${capped ? "+" : ""}` }];
     });
-  }, [rows, genByDay, workedDays, tab, dayPreset, dismissed, lastActiveBy, today]);
+  }, [rows, genByDay, workedDays, tab, dayPreset, dismissed, lastActiveBy, today, rolesByUser]);
 
   const canManage = !readOnly && isManagerRole(realRole);
 

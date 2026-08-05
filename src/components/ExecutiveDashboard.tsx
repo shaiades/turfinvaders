@@ -101,17 +101,25 @@ function LiveDailyAction() {
   const q = useQuery({
     queryKey: ["live_daily_action", today],
     queryFn: async () => {
-      const [logsR, profilesR, vansR] = await Promise.all([
+      const [logsR, profilesR, vansR, rolesR] = await Promise.all([
         supabase
           .from("daily_logs")
           .select("canvasser_id, team_id, leads_called_in, next_days, future_leads, no_demo, confirmed_leads")
           .eq("log_date", today),
-        supabase.from("profiles").select("id, display_name, team_id"),
+        supabase.from("profiles").select("id, display_name, team_id, suspension_tracked"),
         supabase.from("teams").select("id, name, color"),
+        supabase.from("user_roles").select("user_id, role"),
       ]);
       if (logsR.error) throw logsR.error;
       if (profilesR.error) throw profilesR.error;
       if (vansR.error) throw vansR.error;
+      if (rolesR.error) throw rolesR.error;
+      const rolesByUser = new Map<string, string[]>();
+      for (const r of rolesR.data ?? []) {
+        const arr = rolesByUser.get(r.user_id) ?? [];
+        arr.push(r.role);
+        rolesByUser.set(r.user_id, arr);
+      }
 
       const logs = logsR.data ?? [];
       const totals = logs.reduce(
@@ -124,8 +132,10 @@ function LiveDailyAction() {
         { called: 0, nextDay: 0, future: 0, blowout: 0 },
       );
 
-      // Donut List: every canvasser on a Van who has NOT logged a
-      // Confirmed_Next_Day or Confirmed_Future ping today.
+      // Donut List: every CANVASSER (or captain) on a Van who has NOT logged
+      // a Confirmed_Next_Day or Confirmed_Future ping today. Sales reps never
+      // appear — suspension is canvassers-only (owner, 2026-08-04) — and
+      // suspension-exempt profiles (confirmers, lead sources) are skipped.
       const confirmedToday = new Set(
         logs
           .filter((r) => (r.next_days ?? 0) > 0 || (r.future_leads ?? 0) > 0)
@@ -133,7 +143,13 @@ function LiveDailyAction() {
       );
       const vanById = new Map((vansR.data ?? []).map((v) => [v.id, v]));
       const donut = (profilesR.data ?? [])
-        .filter((p) => p.team_id && !confirmedToday.has(p.id))
+        .filter((p) => {
+          if (!p.team_id || confirmedToday.has(p.id)) return false;
+          if (p.suspension_tracked === false) return false;
+          const roles = rolesByUser.get(p.id) ?? [];
+          if (roles.includes("sales_rep")) return false;
+          return roles.includes("canvasser") || roles.includes("captain");
+        })
         .map((p) => ({
           id: p.id,
           name: p.display_name ?? "Unknown",
