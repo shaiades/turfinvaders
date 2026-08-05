@@ -38,7 +38,7 @@ import { deleteProfile, deleteVan } from "@/lib/fleet.functions";
 import { addTeamMember } from "@/lib/users.functions";
 import { useAuth } from "@/hooks/useAuth";
 import { isManagerRole } from "@/lib/roles";
-import { formatCurrency, normalizeName } from "@/lib/utils";
+import { normalizeName } from "@/lib/utils";
 import { DEFAULT_OFFICE, OFFICE_LOCATIONS, type OfficeLocation } from "@/lib/offices";
 import type { RosterProfile, Van } from "@/components/FleetDispatch";
 
@@ -795,12 +795,6 @@ function RosterRow({
           </span>
         )}
       </span>
-      <span
-        className={`text-[10px] font-display ${isGhost ? "text-muted-foreground px-1.5" : "points-badge-glow"}`}
-      >
-        {points}p
-      </span>
-
       {vans && onAssign && (
         <Select
           value={currentVanId ?? "none"}
@@ -844,15 +838,6 @@ function RosterRow({
           <Trash2 className="w-3.5 h-3.5" />
         </button>
       )}
-      {/* Far right (owner, 2026-08-04): the person's sale volume — the
-          Mon–Sat week in progress on Day/Week, the calendar month in
-          Month view (follows the board's selected range). */}
-      <span
-        className={`shrink-0 min-w-[4.5rem] text-right text-[10px] font-display ${volume > 0 ? "text-victory" : "text-muted-foreground"} px-1.5`}
-        title="Sale volume — Mon–Sat week in progress (calendar month in Month view)"
-      >
-        {formatCurrency(volume)}
-      </span>
     </div>
   );
 }
