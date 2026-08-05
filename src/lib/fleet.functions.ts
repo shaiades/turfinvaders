@@ -26,12 +26,48 @@ export const deleteProfile = createServerFn({ method: "POST" })
     if (!isOwner) throw new Error("Only owners can delete profiles");
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { error } = await supabaseAdmin.auth.admin.deleteUser(data.id);
-    if (error) {
-      // Fallback: hard-delete profile row even if auth user is missing
-      await supabaseAdmin.from("profiles").delete().eq("id", data.id);
+
+    // Anyone with production history is ARCHIVED, never hard-deleted —
+    // deleting them would orphan payroll/lead rows behind FK constraints
+    // (the old bare delete simply failed on those, so the trash can looked
+    // broken). Archiving removes them from every roster surface.
+    const [logsR, metricsR, leadsR] = await Promise.all([
+      supabaseAdmin
+        .from("daily_logs")
+        .select("id", { count: "exact", head: true })
+        .eq("canvasser_id", data.id),
+      supabaseAdmin
+        .from("daily_metrics")
+        .select("id", { count: "exact", head: true })
+        .eq("canvasser_id", data.id),
+      supabaseAdmin
+        .from("leads")
+        .select("id", { count: "exact", head: true })
+        .eq("canvasser_id", data.id),
+    ]);
+    const hasData = (logsR.count ?? 0) + (metricsR.count ?? 0) + (leadsR.count ?? 0) > 0;
+
+    const archive = async () => {
+      const { error } = await supabaseAdmin
+        .from("profiles")
+        .update({ is_active: false, team_id: null, suspension_tracked: false })
+        .eq("id", data.id);
+      if (error) throw error;
+      return { ok: true, archived: true };
+    };
+    if (hasData) return archive();
+
+    // True ghost: clear role rows first (they FK the profile), then the auth
+    // user (cascades to the profile) — placeholder profiles have no auth
+    // user, so fall back to deleting the bare row; any stray FK left means
+    // it wasn't a ghost after all, so archive rather than fail.
+    await supabaseAdmin.from("user_roles").delete().eq("user_id", data.id);
+    const { error: authErr } = await supabaseAdmin.auth.admin.deleteUser(data.id);
+    if (authErr) {
+      const { error } = await supabaseAdmin.from("profiles").delete().eq("id", data.id);
+      if (error) return archive();
     }
-    return { ok: true };
+    return { ok: true, archived: false };
   });
 
 /**

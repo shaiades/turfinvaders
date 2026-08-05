@@ -146,11 +146,14 @@ export function FleetDispatchManage({
   });
 
   const removeProfile = useMutation({
-    mutationFn: async (id: string) => {
-      await deleteProfileFn({ data: { id } });
-    },
-    onSuccess: () => {
-      toast.success("Ghost profile deleted");
+    mutationFn: async (id: string) =>
+      (await deleteProfileFn({ data: { id } })) as { ok: boolean; archived?: boolean },
+    onSuccess: (res) => {
+      toast.success(
+        res?.archived
+          ? "Profile archived — they have production history, so records are kept"
+          : "Ghost profile deleted",
+      );
       qc.invalidateQueries({ queryKey: ["fleet_dispatch"] });
     },
     onError: (e: Error) => toast.error(e.message ?? "Failed to delete"),
@@ -227,9 +230,13 @@ export function FleetDispatchManage({
   const profiles = allProfiles.filter((p) => p.is_active !== false);
   const archivedProfiles = allProfiles.filter((p) => p.is_active === false);
   const captains = profiles.filter((p) => (rolesByUser.get(p.id) ?? []).includes("captain"));
-  const unassigned = profiles.filter(
-    (p) => !p.team_id && !(rolesByUser.get(p.id) ?? []).includes("owner"),
-  );
+  // Sales reps never need vans (owner, 2026-08-04) — the Free Agents pen is
+  // for canvassers/captains awaiting assignment only.
+  const unassigned = profiles.filter((p) => {
+    if (p.team_id) return false;
+    const roles = rolesByUser.get(p.id) ?? [];
+    return !roles.includes("owner") && !roles.includes("sales_rep");
+  });
 
   // Group vans by office location.
   const vansByOffice = new Map<string, Van[]>();
@@ -511,7 +518,7 @@ export function FleetDispatchManage({
                                       ? () => {
                                           if (
                                             confirm(
-                                              `Delete profile "${r.display_name}"? This removes the user permanently.`,
+                                              `Delete profile "${r.display_name}"? Ghosts are deleted permanently; anyone with production history is archived instead.`,
                                             )
                                           ) {
                                             removeProfile.mutate(r.id);
@@ -607,7 +614,7 @@ export function FleetDispatchManage({
                         ? () => {
                             if (
                               confirm(
-                                `Delete profile "${p.display_name}"? This removes the user permanently.`,
+                                `Delete profile "${p.display_name}"? Ghosts are deleted permanently; anyone with production history is archived instead.`,
                               )
                             ) {
                               removeProfile.mutate(p.id);
