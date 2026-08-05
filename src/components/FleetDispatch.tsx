@@ -861,13 +861,13 @@ const RESULT_COLS: Array<{
 ];
 
 /** One shared grid template: name · 4 funnel cols · divider · 8 result cols ·
- *  Points. Every board row (captions, headers, van totals, reps) uses it so
- *  the whole van card reads as one continuous chart. */
+ *  Points · Volume. Every board row (captions, headers, van totals, reps)
+ *  uses it so the whole van card reads as one continuous chart. */
 const ROW_GRID =
-  "grid grid-cols-[minmax(7.5rem,1fr)_repeat(4,2.3rem)_0.75rem_repeat(9,2.3rem)] items-center gap-1";
+  "grid grid-cols-[minmax(7.5rem,1fr)_repeat(4,2.3rem)_0.75rem_repeat(9,2.3rem)_4.5rem] items-center gap-1";
 
-/** Board rows need ~42rem; the van card scrolls horizontally below that. */
-const ROW_MIN_W = "min-w-[42rem]";
+/** Board rows need ~47rem; the van card scrolls horizontally below that. */
+const ROW_MIN_W = "min-w-[47rem]";
 
 function RowDivider() {
   return <span className="h-4 w-px bg-border justify-self-center" aria-hidden />;
@@ -911,6 +911,12 @@ function DispatchRow({ r }: { r: FunnelRow }) {
       >
         {r.pts}
       </span>
+      <span
+        title="Volume — confirmed sale dollars in the selected range"
+        className={`text-right font-display text-sm ${metricClass(r.vol, "victory")}`}
+      >
+        {formatCurrency(r.vol)}
+      </span>
     </div>
   );
 }
@@ -924,7 +930,7 @@ function DispatchGroupCaption() {
         In the Field
       </span>
       <span />
-      <span className="col-span-9 text-center text-[8px] font-display uppercase tracking-widest text-muted-foreground/70 border-b border-border/60 pb-0.5">
+      <span className="col-span-10 text-center text-[8px] font-display uppercase tracking-widest text-muted-foreground/70 border-b border-border/60 pb-0.5">
         As Leads
       </span>
     </div>
@@ -960,6 +966,12 @@ function DispatchColHeader() {
         className="text-right text-[9px] font-display uppercase tracking-widest text-muted-foreground"
       >
         Pts
+      </span>
+      <span
+        title="Volume — confirmed sale dollars in the selected range"
+        className="text-right text-[9px] font-display uppercase tracking-widest text-muted-foreground"
+      >
+        Vol
       </span>
     </div>
   );
@@ -1110,6 +1122,12 @@ function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
                               className={`text-right font-display text-sm font-bold ${metricClass(t.pts, "neon")}`}
                             >
                               {t.pts}
+                            </span>
+                            <span
+                              title="Volume — confirmed sale dollars in the selected range"
+                              className={`text-right font-display text-sm font-bold ${metricClass(t.vol, "victory")}`}
+                            >
+                              {formatCurrency(t.vol)}
                             </span>
                           </div>
                           {roster.map((r) => (
