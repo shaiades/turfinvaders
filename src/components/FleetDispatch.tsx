@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -20,7 +20,6 @@ import {
   Eye,
   EyeOff,
   AlertTriangle,
-  Lock,
   Truck,
   ChevronLeft,
   ChevronRight,
@@ -30,7 +29,6 @@ import {
   ChevronUp,
 } from "lucide-react";
 import { toast } from "sonner";
-import confetti from "canvas-confetti";
 import {
   addDaysISO,
   dateFromISO,
@@ -38,10 +36,10 @@ import {
   formatWeekRange,
   laMidnightUtcISO,
   laMonthStartISO,
+  laTodayISO,
   lastWorkedDaysBefore,
   monthStartISO,
   nextMonthStartISO,
-  reportDates,
   weekStartOfISO,
 } from "@/lib/dates";
 import { useWeekSelector } from "@/hooks/useWeekSelector";
@@ -122,32 +120,26 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
   // --- Range engine: Day (report-date clock) / Week (Mon–Sat) / Month ---
   const [tab, setTab] = useState<RangeTab>("day");
   const [dayPreset, setDayPreset] = useState<DayPreset>("today");
-  const [{ today, yday, locked }, setDates] = useState(reportDates);
+  // Full calendar days (owner, 2026-08-04): "Today" is the LA calendar day,
+  // midnight to 11:59 PM PT — today's results stay under Today all day. The
+  // old 7 PM report-day roll (lock chip + confetti) is gone from this board;
+  // the Daily Wrap page keeps its own 7 PM clock.
+  const [today, setToday] = useState(laTodayISO);
+  const yday = addDaysISO(today, -1);
   // Chips removed via the X vanish instantly (optimistic) while the
   // suspension_tracked flag persists server-side.
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
   const [manageOpen, setManageOpen] = useState(false);
   const { matches } = useOfficeFilter();
-  const confettiFired = useRef(false);
-  // The 30s tick closure must see the CURRENT view, not the mount-time one.
-  const liveDayView = useRef(false);
-  liveDayView.current = tab === "day" && dayPreset === "today";
 
-  // Re-evaluate report date every 30s; fire confetti once when we cross 7 PM
-  // PT while actually watching the live day.
+  // Roll to the new calendar day at midnight PT.
   useEffect(() => {
-    const tick = () => {
-      const next = reportDates();
-      setDates((prev) => {
-        if (!prev.locked && next.locked && !confettiFired.current && liveDayView.current) {
-          confettiFired.current = true;
-          fireEndOfDayConfetti();
-        }
-        if (prev.today === next.today && prev.locked === next.locked) return prev;
-        return next;
+    const id = window.setInterval(() => {
+      setToday((prev) => {
+        const next = laTodayISO();
+        return next === prev ? prev : next;
       });
-    };
-    const id = window.setInterval(tick, 30_000);
+    }, 30_000);
     return () => window.clearInterval(id);
   }, []);
 
@@ -579,11 +571,6 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
           <div>
             <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground flex items-center gap-2">
               Fleet Dispatch · {range.label}
-              {locked && tab === "day" && dayPreset === "today" && (
-                <span className="inline-flex items-center gap-1 text-warning">
-                  <Lock className="w-3 h-3" /> 7PM LOCK
-                </span>
-              )}
             </div>
             <div className="font-display text-sm text-neon mt-0.5">
               {readOnly ? "LEADERBOARD · LIVE" : "READ-ONLY · MONDAY.COM FEED"}
@@ -1232,17 +1219,6 @@ function SuspensionBanner({
       </div>
     </div>
   );
-}
-
-function fireEndOfDayConfetti() {
-  const duration = 3000;
-  const end = Date.now() + duration;
-  const colors = ["#39FF14", "#00E5FF", "#FF7A00", "#FF3366"];
-  (function frame() {
-    confetti({ particleCount: 4, angle: 60, spread: 55, origin: { x: 0 }, colors });
-    confetti({ particleCount: 4, angle: 120, spread: 55, origin: { x: 1 }, colors });
-    if (Date.now() < end) requestAnimationFrame(frame);
-  })();
 }
 
 const metricColorClass = {

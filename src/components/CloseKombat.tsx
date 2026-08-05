@@ -20,6 +20,7 @@ import {
   laTodayISO,
   monthStartISO,
   nextMonthStartISO,
+  weekStartOfISO,
 } from "@/lib/dates";
 import {
   aggregateCloseKombat,
@@ -59,6 +60,11 @@ type DayPreset = "today" | "yesterday";
 type ResolvedRange = {
   start: string;
   end: string;
+  /** Volume window for the standings' far-right money (owner, 2026-08-04,
+   *  same convention as the dispatch board): the Mon–Sun week containing
+   *  the day on the Day view; the selected range on Week/Month. */
+  volStart: string;
+  volEnd: string;
   label: string;
   sub: string;
   isLive: boolean;
@@ -105,9 +111,12 @@ function CloseKombatInner() {
   const range: ResolvedRange = useMemo(() => {
     if (tab === "day") {
       const d = dayPreset === "yesterday" ? addDaysISO(todayISO, -1) : todayISO;
+      const wk = weekStartOfISO(d);
       return {
         start: d,
         end: d,
+        volStart: wk,
+        volEnd: addDaysISO(wk, 6),
         label: dayPreset === "yesterday" ? "Yesterday" : "Today",
         sub: d,
         isLive: dayPreset === "today",
@@ -117,6 +126,8 @@ function CloseKombatInner() {
       return {
         start: week.weekStartISO,
         end: week.weekEndISO,
+        volStart: week.weekStartISO,
+        volEnd: week.weekEndISO,
         label: formatWeekRange(week.weekStart, week.weekEnd),
         sub: `${week.weekStartISO} → ${week.weekEndISO}`,
         isLive: week.isCurrentWeek,
@@ -126,6 +137,8 @@ function CloseKombatInner() {
     return {
       start: monthStart,
       end: monthEnd,
+      volStart: monthStart,
+      volEnd: monthEnd,
       label: monthLabel,
       sub: `${monthStart} → ${monthEnd}`,
       isLive: isCurrentMonth,
@@ -148,8 +161,12 @@ function CloseKombatInner() {
   // Paged: PostgREST silently caps un-ranged selects at 1000 rows, and a
   // backfilled month (2 offices × ~4-5 boards) can exceed that — truncation
   // here would silently understate every stat. Walk until a short page.
+  // One walk spans BOTH windows (stats range + volume window); the two
+  // views filter client-side below.
+  const fetchStart = range.volStart < range.start ? range.volStart : range.start;
+  const fetchEnd = range.volEnd > range.end ? range.volEnd : range.end;
   const cardsQuery = useQuery({
-    queryKey: ["block_cards", range.start, range.end],
+    queryKey: ["block_cards", fetchStart, fetchEnd],
     queryFn: async () => {
       const PAGE = 1000;
       const all: BlockCard[] = [];
@@ -157,8 +174,8 @@ function CloseKombatInner() {
         const { data, error } = await supabase
           .from("block_cards")
           .select("*")
-          .gte("card_date", range.start)
-          .lte("card_date", range.end)
+          .gte("card_date", fetchStart)
+          .lte("card_date", fetchEnd)
           .order("monday_item_id")
           .range(from, from + PAGE - 1);
         if (error) throw error;
@@ -176,11 +193,31 @@ function CloseKombatInner() {
     invalidateKeys: [["block_cards"]],
   });
 
-  const visible = useMemo(
+  const officeCards = useMemo(
     () => (cardsQuery.data ?? []).filter((c) => matches(c.office_location)),
     [cardsQuery.data, matches],
   );
+  const visible = useMemo(
+    () =>
+      officeCards.filter(
+        (c) => (c.card_date ?? "") >= range.start && (c.card_date ?? "") <= range.end,
+      ),
+    [officeCards, range.start, range.end],
+  );
   const { reps, totals } = useMemo(() => aggregateCloseKombat(visible), [visible]);
+  // The standings' far-right money: sale volume over the week in progress on
+  // the Day view (the selected range on Week/Month) — owner, 2026-08-04,
+  // matching the dispatch board's convention.
+  const vol = useMemo(() => {
+    const cards = officeCards.filter(
+      (c) => (c.card_date ?? "") >= range.volStart && (c.card_date ?? "") <= range.volEnd,
+    );
+    const agg = aggregateCloseKombat(cards);
+    return {
+      byRep: new Map(agg.reps.map((r) => [r.rep, r.revenue])),
+      total: agg.totals.revenue,
+    };
+  }, [officeCards, range.volStart, range.volEnd]);
 
   // Board-hygiene callouts for the office (ADMIN tier — realRole, so "View
   // as" previews don't hide it from the owner). Same cards the stats read,
@@ -511,7 +548,12 @@ function CloseKombatInner() {
                     <th className="text-right py-2 px-2 font-normal">Reload %</th>
                     <th className="text-right py-2 px-2 font-normal">Cancel %</th>
                     <th className="text-right py-2 px-2 font-normal">Leads / Sale</th>
-                    <th className="text-right py-2 pl-2 font-normal">Revenue</th>
+                    <th
+                      className="text-right py-2 pl-2 font-normal"
+                      title="Sale volume — Mon–Sun week in progress on the Day view; the selected range on Week/Month"
+                    >
+                      Volume
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -586,7 +628,7 @@ function CloseKombatInner() {
                         {fmtRatio(r.leadsToSale)}
                       </td>
                       <td className="py-2.5 pl-2 text-right tabular-nums text-victory">
-                        {fmtMoney(r.revenue)}
+                        {fmtMoney(vol.byRep.get(r.rep) ?? 0)}
                       </td>
                     </tr>
                   ))}
@@ -645,9 +687,7 @@ function CloseKombatInner() {
                     <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
                       {fmtRatio(totals.leadsToSale)}
                     </td>
-                    <td className="py-2.5 pl-2 text-right tabular-nums">
-                      {fmtMoney(totals.revenue)}
-                    </td>
+                    <td className="py-2.5 pl-2 text-right tabular-nums">{fmtMoney(vol.total)}</td>
                   </tr>
                 </tfoot>
               </table>
@@ -672,7 +712,9 @@ function CloseKombatInner() {
                         <FlawlessBadge r={r} />
                       </span>
                     }
-                    right={<span className="text-victory">{fmtMoney(r.revenue)}</span>}
+                    right={
+                      <span className="text-victory">{fmtMoney(vol.byRep.get(r.rep) ?? 0)}</span>
+                    }
                   />
                   <StatLine s={r} />
                 </MobileCard>
@@ -684,7 +726,7 @@ function CloseKombatInner() {
                       All cards
                     </span>
                   }
-                  right={<span className="text-victory">{fmtMoney(totals.revenue)}</span>}
+                  right={<span className="text-victory">{fmtMoney(vol.total)}</span>}
                 />
                 <StatLine s={totals} />
               </MobileCard>
