@@ -1054,18 +1054,6 @@ function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
                         <span className="min-w-0 truncate">
                           <TeamBadge name={v.name} color={v.color ?? "#888"} />
                         </span>
-                        <span
-                          className="shrink-0 text-[10px] font-display px-1.5 py-0.5 rounded border border-neon/40 text-neon"
-                          title="Van Points for the selected range (PM = 1 pt, Sale = 2 pts)"
-                        >
-                          {t.pts}p
-                        </span>
-                        <span
-                          className="shrink-0 text-[10px] font-display px-1.5 py-0.5 rounded border border-victory/40 text-victory"
-                          title="Van Volume — confirmed sale dollars in the selected range"
-                        >
-                          {formatCurrency(t.vol)}
-                        </span>
                         {cap && (
                           <span className="hidden sm:inline text-[10px] text-muted-foreground truncate min-w-0">
                             · {cap}
