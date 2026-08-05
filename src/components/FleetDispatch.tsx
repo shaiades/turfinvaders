@@ -42,6 +42,7 @@ import {
   monthStartISO,
   nextMonthStartISO,
   reportDates,
+  weekStartOfISO,
 } from "@/lib/dates";
 import { useWeekSelector } from "@/hooks/useWeekSelector";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
@@ -162,13 +163,19 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
   const range: ResolvedRange = useMemo(() => {
     if (tab === "day") {
       const d = dayPreset === "yesterday" ? yday : today;
+      // Owner directive (2026-08-04): the "As Leads" half of the board reads
+      // as THIS WEEK'S RESULTS IN PROGRESS — results, Points, and Volume
+      // always cover the full Mon–Sat week containing the selected day
+      // (matching the Weekly Results table), while "In the Field" keeps the
+      // day's own funnel numbers.
+      const wk = weekStartOfISO(d);
       return {
         funnelStart: d,
         funnelEnd: d,
-        logStart: d,
-        logEnd: d,
-        volStartISO: laMidnightUtcISO(d),
-        volEndISO: laMidnightUtcISO(addDaysISO(d, 1)),
+        logStart: wk,
+        logEnd: addDaysISO(wk, 5),
+        volStartISO: laMidnightUtcISO(wk),
+        volEndISO: laMidnightUtcISO(addDaysISO(wk, 7)),
         label: dayPreset === "yesterday" ? "Yesterday" : "Today",
         sub: d,
         isLive: dayPreset === "today",
@@ -556,7 +563,7 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
 
   const footnote =
     tab === "day"
-      ? "Points = Sits + Sales from daily logs (PM = 1 pt, Sale = 2 pts) for the selected report day. Volume = confirmed sale dollars, midnight–midnight Pacific."
+      ? "Funnel columns show the selected day. Lead results, Points, and Volume are this week's results in progress — the full Mon–Sat week containing that day, Pacific time (PM = 1 pt, Sale = 2 pts)."
       : tab === "week"
         ? "Points reflect Mon–Sat of the selected week, Pacific time (PM = 1 pt, Sale = 2 pts; BO/RS = 0). Volume runs Mon 12:00 AM → next Mon 12:00 AM Pacific."
         : "Points cover the calendar month, Pacific time (PM = 1 pt, Sale = 2 pts). Volume resets on the 1st, 12:00 AM Pacific.";
