@@ -356,7 +356,32 @@ serve(async (req) => {
         const t = (c.column?.title || '').toLowerCase()
         return t === 'agent' || t.includes('agent') || t.includes('canvasser')
       })
-    const canvasserName = (nameCol?.text || '').trim()
+    let canvasserName = (nameCol?.text || '').trim()
+
+    // A blank Agent is BY DESIGN on channel cards (owner, 2026-08-10): the
+    // Source column names the channel instead ("self gen" etc.), and the
+    // matching lead-source profile takes the credit — never a person.
+    if (!canvasserName) {
+      const sourceCol =
+        cols.find((c) => c.id === 'text' || c.column?.id === 'text') ??
+        cols.find((c) => (c.column?.title || '').trim().toLowerCase() === 'source')
+      const sourceText = (sourceCol?.text || '').trim().toLowerCase().replace(/\s+/g, ' ')
+      const SOURCE_FALLBACKS: Record<string, string> = {
+        'self gen': 'Self Gen',
+        'selfgen': 'Self Gen',
+        'job walk': 'Job Walk',
+        'reload': 'Reload',
+        'upsell': 'Upsell',
+      }
+      const fallback = SOURCE_FALLBACKS[sourceText]
+      if (fallback) {
+        canvasserName = fallback
+        await supabaseAdmin.from('webhook_logs').insert({
+          step: 'Agent_From_Source',
+          data: { pulseId: String(pulseId), source: sourceText, creditedAs: fallback },
+        })
+      }
+    }
 
     // Incoming Leads items carry their own Office status column — use it so
     // credits and Bouncer-provisioned profiles land in the right office.
