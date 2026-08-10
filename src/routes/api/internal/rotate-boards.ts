@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { laWeekStartISO } from "@/lib/dates";
+import { addDaysISO, laWeekStartISO } from "@/lib/dates";
 
 /**
  * Monday.com board rotation + webhook self-heal (Vercel Cron).
@@ -388,13 +388,20 @@ async function rotate(): Promise<Response> {
 
     // Deregister webhooks for boards that are no longer active. The static
     // Incoming Leads board never rotates — its hook must survive Mondays.
+    // LAST week's boards keep their hooks for one more rotation: the office
+    // finalizes Saturday's results through Sunday and Monday morning, and
+    // pulling the hooks at 6 AM Monday silently dropped those late marks
+    // (week of 8/3: eight sales, $102,809, recovered by hand).
+    const prevWeekISO = addDaysISO(weekStartISO, -7);
+    const weekByBoardId = new Map(boards.map((b) => [b.id, parseBoardWeekStart(b.name)]));
     const keep: RegistryEntry[] = [];
     const removed: string[] = [];
     for (const entry of registry) {
       if (
         entry.board_id === newIds.SD ||
         entry.board_id === newIds.OC ||
-        (incomingLeadsBoardId && entry.board_id === incomingLeadsBoardId)
+        (incomingLeadsBoardId && entry.board_id === incomingLeadsBoardId) ||
+        weekByBoardId.get(entry.board_id) === prevWeekISO
       ) {
         keep.push(entry);
         continue;
@@ -472,9 +479,10 @@ async function check(): Promise<Response> {
     // board — every outcome silently vanishes (week of 8/3/26). Re-run the
     // full rotation: it adopts the real board, moves the webhooks, updates
     // settings, and deregisters the orphan's hooks.
+    const { parseBoardWeekStart } = await import("@/lib/block-cards.server");
+    const weekStartISO = laWeekStartISO();
+    const prevWeekISO = addDaysISO(weekStartISO, -7);
     {
-      const { parseBoardWeekStart } = await import("@/lib/block-cards.server");
-      const weekStartISO = laWeekStartISO();
       const boardsData = await monday(
         token,
         "query { boards(limit: 50, order_by: created_at) { id name } }",
@@ -704,6 +712,10 @@ async function check(): Promise<Response> {
     for (const b of boards) {
       const boardId = String(b.id);
       if (activeIds.has(boardId) || !/^(SD|OC)\s+Block/i.test(b.name)) continue;
+      // Current and previous week's boards keep their hooks — the office
+      // finalizes Saturday's results through Monday morning.
+      const bw = parseBoardWeekStart(b.name);
+      if (bw === weekStartISO || bw === prevWeekISO) continue;
       let live: Array<{ id: string; event: string }>;
       try {
         live = await liveWebhooks(boardId);
