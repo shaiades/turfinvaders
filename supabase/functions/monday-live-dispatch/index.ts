@@ -494,6 +494,71 @@ serve(async (req) => {
         const sibBucket = (sibData?.bucket ?? null) as ScheduleBucket
         const sibNonCore = !!sibBucket && !!sibData?.nonCore
         if (siblingOutcome && sibBucket === bucket && sibNonCore === nonCore) {
+          // The duplicate still carries the family's MONEY: the office
+          // copies-then-deletes cards, so a Sale Price entered on the copy
+          // is the only copy of that number — returning without syncing it
+          // left $34,736 invisible in the week of 8/3. Update (or create)
+          // the family's one lead before skipping the counters.
+          try {
+            const salePriceCol = findSalePriceCol(cols)
+            const salePrice = parseMoney(salePriceCol?.text || salePriceCol?.display_value || '')
+            const saleCol = findSaleOutcomeCol(cols)
+            const isSold = SOLD_VALUES.includes((saleCol?.text ?? '').trim().toLowerCase())
+            if (isSold && salePrice !== null) {
+              const family = [String(pulseId), ...siblingPulseIds]
+              const { data: famLeads } = await supabaseAdmin
+                .from('leads')
+                .select('id, sale_amount, status, deny_reason')
+                .in('monday_item_id', family)
+              const lead =
+                (famLeads ?? []).find((l) => l.status === 'confirmed') ??
+                (famLeads ?? []).find((l) => l.deny_reason === REVERT_REASON) ??
+                null
+              if (lead && (lead.sale_amount !== salePrice || lead.status !== 'confirmed')) {
+                const { error: upErr } = await supabaseAdmin
+                  .from('leads')
+                  .update({ sale_amount: salePrice, status: 'confirmed', deny_reason: null })
+                  .eq('id', lead.id)
+                await supabaseAdmin.from('webhook_logs').insert({
+                  step: upErr ? 'Sale_Lead_Update_Error' : 'Sale_Lead_Updated',
+                  data: {
+                    pulseId: String(pulseId), leadId: lead.id, salePrice,
+                    via: 'copy-gate family sync', error: upErr?.message ?? null,
+                  },
+                })
+              } else if (!lead) {
+                const sibCanvasser =
+                  (siblingOutcome.data as { canvasser_id?: string } | null)?.canvasser_id ?? null
+                if (sibCanvasser) {
+                  const pinned = `${todayLA()}T20:00:00.000Z`
+                  const { data: createdLead, error: leadErr } = await supabaseAdmin
+                    .from('leads')
+                    .insert({
+                      canvasser_id: sibCanvasser,
+                      team_id: null,
+                      status: 'confirmed',
+                      is_sale: true,
+                      customer_name: item.name ?? null,
+                      sale_amount: salePrice,
+                      created_at: pinned,
+                      reviewed_at: pinned,
+                      notes: 'Monday live sale',
+                      monday_item_id: String(pulseId),
+                    })
+                    .select('id')
+                    .maybeSingle()
+                  await supabaseAdmin.from('webhook_logs').insert({
+                    step: leadErr ? 'Sale_Lead_Insert_Error' : 'Sale_Lead_Created',
+                    data: {
+                      pulseId: String(pulseId), leadId: createdLead?.id ?? null, salePrice,
+                      canvasser_id: sibCanvasser, via: 'copy-gate family sync',
+                      error: leadErr?.message ?? null,
+                    },
+                  })
+                }
+              }
+            }
+          } catch (_) { /* the family money sync must never break the gate */ }
           await supabaseAdmin.from('webhook_logs').insert({
             step: 'Ignored_Copy_Item',
             data: {
