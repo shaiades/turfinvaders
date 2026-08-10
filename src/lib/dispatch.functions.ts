@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { COMMISSION_BASE, weeklyPoints } from "@/lib/pay";
 import { addDaysISO, laMidnightUtcISO, laTodayISO } from "@/lib/dates";
+import { DEFAULT_OFFICE } from "@/lib/offices";
 import { EMPTY_AGGREGATE, type FunnelAggregate } from "@/lib/funnel";
 
 /**
@@ -50,7 +51,7 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
       supabaseAdmin
         .from("daily_logs")
         .select(
-          "canvasser_id, demos_sits, sales, no_demo, future_leads, ctc, non_core, one_legs, unmarked, log_date",
+          "canvasser_id, demos_sits, sales, no_demo, future_leads, ctc, non_core, one_legs, unmarked, office_location, log_date",
         )
         .gte("log_date", data.log_start)
         .lte("log_date", data.log_end),
@@ -58,7 +59,7 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
       // re-window below is the authoritative filter (pay-engine parity).
       supabaseAdmin
         .from("leads")
-        .select("canvasser_id, sale_amount, created_at, reviewed_at")
+        .select("canvasser_id, sale_amount, created_at, reviewed_at, monday_item_id")
         .eq("status", "confirmed")
         .or(
           `and(created_at.gte.${data.vol_start},created_at.lt.${data.vol_end}),and(reviewed_at.gte.${data.vol_start},reviewed_at.lt.${data.vol_end})`,
@@ -69,47 +70,106 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
 
     const points: Record<string, number> = {};
     const results: Record<string, DispatchResults> = {};
+    // Office-sliced mirrors of the same aggregates, for the cross-office
+    // Confirmation van (owner, 2026-08-10): each office tab shows only that
+    // office's share. daily_logs rows carry the office they were counted
+    // for, so the slice is exact, never inferred.
+    const officePoints: Record<string, Record<string, number>> = {};
+    const officeResults: Record<string, Record<string, DispatchResults>> = {};
+    const emptyResults = (): DispatchResults => ({
+      lds: 0,
+      sit: 0,
+      rs: 0,
+      bo: 0,
+      ctc: 0,
+      nc: 0,
+      ol: 0,
+      sal: 0,
+    });
     for (const l of logsR.data ?? []) {
       if (!l.canvasser_id) continue;
+      const office = l.office_location ?? DEFAULT_OFFICE;
       const pts = weeklyPoints(l.demos_sits ?? 0, l.sales ?? 0);
-      if (pts > 0) points[l.canvasser_id] = (points[l.canvasser_id] ?? 0) + pts;
-      const r = (results[l.canvasser_id] ??= {
-        lds: 0,
-        sit: 0,
-        rs: 0,
-        bo: 0,
-        ctc: 0,
-        nc: 0,
-        ol: 0,
-        sal: 0,
-      });
-      r.lds +=
-        (l.demos_sits ?? 0) +
-        (l.no_demo ?? 0) +
-        (l.ctc ?? 0) +
-        (l.future_leads ?? 0) +
-        (l.unmarked ?? 0);
-      // demos_sits includes sold sits; the board splits them (Weekly Results parity).
-      r.sit += Math.max(0, (l.demos_sits ?? 0) - (l.sales ?? 0));
-      r.sal += l.sales ?? 0;
-      r.rs += l.future_leads ?? 0;
-      r.bo += l.no_demo ?? 0;
-      r.ctc += l.ctc ?? 0;
-      r.nc += l.non_core ?? 0;
-      r.ol += l.one_legs ?? 0;
+      if (pts > 0) {
+        points[l.canvasser_id] = (points[l.canvasser_id] ?? 0) + pts;
+        const po = (officePoints[office] ??= {});
+        po[l.canvasser_id] = (po[l.canvasser_id] ?? 0) + pts;
+      }
+      const r = (results[l.canvasser_id] ??= emptyResults());
+      const ro = ((officeResults[office] ??= {})[l.canvasser_id] ??= emptyResults());
+      for (const t of [r, ro]) {
+        t.lds +=
+          (l.demos_sits ?? 0) +
+          (l.no_demo ?? 0) +
+          (l.ctc ?? 0) +
+          (l.future_leads ?? 0) +
+          (l.unmarked ?? 0);
+        // demos_sits includes sold sits; the board splits them (Weekly Results parity).
+        t.sit += Math.max(0, (l.demos_sits ?? 0) - (l.sales ?? 0));
+        t.sal += l.sales ?? 0;
+        t.rs += l.future_leads ?? 0;
+        t.bo += l.no_demo ?? 0;
+        t.ctc += l.ctc ?? 0;
+        t.nc += l.non_core ?? 0;
+        t.ol += l.one_legs ?? 0;
+      }
     }
 
     const volStartMs = Date.parse(data.vol_start);
     const volEndMs = Date.parse(data.vol_end);
     const volume: Record<string, number> = {};
+    const counted: Array<{ cid: string; amt: number; mid: string | null }> = [];
     for (const l of leadsR.data ?? []) {
       if (!l.canvasser_id) continue;
       const at = Date.parse(l.reviewed_at ?? l.created_at ?? "");
       if (Number.isNaN(at) || at < volStartMs || at >= volEndMs) continue;
-      volume[l.canvasser_id] = (volume[l.canvasser_id] ?? 0) + Number(l.sale_amount ?? 0);
+      const amt = Number(l.sale_amount ?? 0);
+      volume[l.canvasser_id] = (volume[l.canvasser_id] ?? 0) + amt;
+      counted.push({
+        cid: l.canvasser_id,
+        amt,
+        mid: l.monday_item_id ? String(l.monday_item_id) : null,
+      });
     }
 
-    return { points, volume, results };
+    // Volume office resolution for the office slices: block_cards knows
+    // current-week cards; rotated-away pulses fall back to their
+    // Card_Outcome_Recorded marker; manual leads bucket under the default
+    // office. Only the Confirmation van reads the slices, so a fallback miss
+    // can never move numbers on a regular van.
+    const officeByMid = new Map<string, string>();
+    const mids = [...new Set(counted.map((c) => c.mid).filter((m): m is string => !!m))];
+    if (mids.length > 0) {
+      const cardsR = await supabaseAdmin
+        .from("block_cards")
+        .select("monday_item_id, office_location")
+        .in("monday_item_id", mids);
+      for (const c of cardsR.data ?? []) {
+        if (c.office_location) officeByMid.set(String(c.monday_item_id), c.office_location);
+      }
+      const missing = mids.filter((m) => !officeByMid.has(m));
+      if (missing.length > 0) {
+        const markersR = await supabaseAdmin
+          .from("webhook_logs")
+          .select("data, created_at")
+          .eq("step", "Card_Outcome_Recorded")
+          .in("data->>pulseId", missing)
+          .order("created_at", { ascending: true });
+        for (const m of markersR.data ?? []) {
+          const d = m.data as { pulseId?: string; office_location?: string | null } | null;
+          if (d?.pulseId && d.office_location)
+            officeByMid.set(String(d.pulseId), d.office_location);
+        }
+      }
+    }
+    const officeVolume: Record<string, Record<string, number>> = {};
+    for (const c of counted) {
+      const office = (c.mid && officeByMid.get(c.mid)) || DEFAULT_OFFICE;
+      const vo = (officeVolume[office] ??= {});
+      vo[c.cid] = (vo[c.cid] ?? 0) + c.amt;
+    }
+
+    return { points, volume, results, officePoints, officeVolume, officeResults };
   });
 
 /**

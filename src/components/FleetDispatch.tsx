@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -84,6 +84,7 @@ export type Van = {
 type Metric = {
   canvasser_id: string;
   metric_date: string;
+  office_location: string | null;
   leads_confirmed: number;
   no_answers: number;
   killed: number;
@@ -130,7 +131,7 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
   // suspension_tracked flag persists server-side.
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
   const [manageOpen, setManageOpen] = useState(false);
-  const { matches } = useOfficeFilter();
+  const { office: officeTab, matches } = useOfficeFilter();
 
   // Roll to the new calendar day at midnight PT.
   useEffect(() => {
@@ -297,12 +298,24 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
     },
   });
 
+  // The Confirmation van (Cynthia's) confirms for BOTH offices, so it renders
+  // on every office tab showing that office's slice of its members' production
+  // (owner, 2026-08-10). Keyed by name: rename the van and it goes back to
+  // being a normal single-office van.
+  const crossOfficeVanIds = useMemo(
+    () =>
+      new Set(vans.filter((v) => v.name.trim().toLowerCase() === "confirmation").map((v) => v.id)),
+    [vans],
+  );
+
   const { data: metrics = [] } = useQuery({
     queryKey: ["fleet_dispatch", "funnel", range.funnelStart, range.funnelEnd],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("daily_metrics")
-        .select("canvasser_id, metric_date, leads_confirmed, no_answers, killed, future")
+        .select(
+          "canvasser_id, metric_date, office_location, leads_confirmed, no_answers, killed, future",
+        )
         .gte("metric_date", range.funnelStart)
         .lte("metric_date", range.funnelEnd);
       if (error) throw error;
@@ -388,6 +401,71 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
     return acc;
   }, [metrics]);
 
+  // The same funnel sums keyed by the office each row was counted for —
+  // feeds the Confirmation van's per-office slices.
+  const officeMetricByCanvasser = useMemo(() => {
+    const acc = new Map<
+      string,
+      Map<string, { conf: number; na: number; kil: number; fut: number }>
+    >();
+    for (const m of metrics) {
+      const office = m.office_location ?? DEFAULT_OFFICE;
+      const inner =
+        acc.get(office) ??
+        new Map<string, { conf: number; na: number; kil: number; fut: number }>();
+      const prev = inner.get(m.canvasser_id) ?? { conf: 0, na: 0, kil: 0, fut: 0 };
+      prev.conf += m.leads_confirmed ?? 0;
+      prev.na += m.no_answers ?? 0;
+      prev.kil += m.killed ?? 0;
+      prev.fut += m.future ?? 0;
+      inner.set(m.canvasser_id, prev);
+      acc.set(office, inner);
+    }
+    return acc;
+  }, [metrics]);
+
+  // One office's share of a row's cells — same math as the combined row
+  // assembly below, read from the office-dimensioned maps.
+  const productionData = production.data;
+  const sliceValues = useCallback(
+    (ids: string[], office: string) => {
+      let conf = 0,
+        kil = 0,
+        fut = 0,
+        pts = 0,
+        vol = 0;
+      const res: DispatchResults = { lds: 0, sit: 0, rs: 0, bo: 0, ctc: 0, nc: 0, ol: 0, sal: 0 };
+      const om = officeMetricByCanvasser.get(office);
+      const op = productionData?.officePoints?.[office] ?? {};
+      const ov = productionData?.officeVolume?.[office] ?? {};
+      const orr = productionData?.officeResults?.[office] ?? {};
+      for (const id of ids) {
+        const m = om?.get(id);
+        if (m) {
+          conf += m.conf;
+          // Blowout absorbs N/A: every dead-end button result counts here.
+          kil += m.kil + m.na;
+          fut += m.fut;
+        }
+        pts += op[id] ?? 0;
+        vol += ov[id] ?? 0;
+        const rr = orr[id];
+        if (rr) {
+          res.lds += rr.lds;
+          res.sit += rr.sit;
+          res.rs += rr.rs;
+          res.bo += rr.bo;
+          res.ctc += rr.ctc;
+          res.nc += rr.nc;
+          res.ol += rr.ol;
+          res.sal += rr.sal;
+        }
+      }
+      return { conf, kil, fut, sub: conf + fut + kil, pts, vol, res };
+    },
+    [officeMetricByCanvasser, productionData],
+  );
+
   // gen[canvasser_id][date] = leads generated that worked day.
   const genByDay = useMemo(() => {
     const acc = new Map<string, Map<string, number>>();
@@ -410,8 +488,13 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
   );
 
   const visible = useMemo(
-    () => canvassers.filter((c) => matches(c.office_location ?? c.team_office)),
-    [canvassers, matches],
+    () =>
+      canvassers.filter(
+        (c) =>
+          matches(c.office_location ?? c.team_office) ||
+          (c.team_id !== null && crossOfficeVanIds.has(c.team_id)),
+      ),
+    [canvassers, matches, crossOfficeVanIds],
   );
 
   // De-duplicate by normalized display_name. If any duplicate is a captain,
@@ -457,6 +540,11 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
       }
     }
     const enriched = Array.from(groups.values()).map((g) => {
+      // Confirmation-van members show only the active office's share on a
+      // specific office tab (the per-office panels re-slice for "All").
+      if (officeTab !== "All" && g.team_id && crossOfficeVanIds.has(g.team_id)) {
+        return { g, ...sliceValues(g.ids, officeTab) };
+      }
       let conf = 0,
         kil = 0,
         fut = 0,
@@ -495,7 +583,16 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
       if (b.conf !== a.conf) return b.conf - a.conf;
       return (a.g.display_name ?? "").localeCompare(b.g.display_name ?? "");
     });
-  }, [visible, metricByCanvasser, pointsByUser, volumeByUser, resultsByUser]);
+  }, [
+    visible,
+    metricByCanvasser,
+    pointsByUser,
+    volumeByUser,
+    resultsByUser,
+    officeTab,
+    crossOfficeVanIds,
+    sliceValues,
+  ]);
 
   const totals = useMemo(() => {
     let sub = 0,
@@ -762,7 +859,12 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
           No canvassers in this office yet.
         </div>
       ) : (
-        <DispatchFleet rows={rows} vans={vans} />
+        <DispatchFleet
+          rows={rows}
+          vans={vans}
+          sliceValues={sliceValues}
+          crossOfficeVanIds={crossOfficeVanIds}
+        />
       )}
 
       {/* Former Executive Dashboard tab (merged 2026-08-04): Results Week +
@@ -866,7 +968,9 @@ function RowDivider() {
 /** One rep's continuous line — field funnel first, then what the leads became. */
 function DispatchRow({ r }: { r: FunnelRow }) {
   return (
-    <div className={`${ROW_GRID} px-2 py-1.5 rounded border border-border bg-surface hover:border-neon/60`}>
+    <div
+      className={`${ROW_GRID} px-2 py-1.5 rounded border border-border bg-surface hover:border-neon/60`}
+    >
       <span className="text-sm truncate flex items-center gap-1.5 min-w-0">
         <span aria-hidden>{r.sub > 0 ? "🔥" : "🍩"}</span>
         <span className="truncate">{r.g.display_name ?? "—"}</span>
@@ -969,7 +1073,20 @@ function DispatchColHeader() {
 
 /** The board: office panels → van cards → per-rep funnel rows, with per-van
  *  Points and Volume pills, plus the unassigned lead-source pen. */
-function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
+function DispatchFleet({
+  rows,
+  vans,
+  sliceValues,
+  crossOfficeVanIds,
+}: {
+  rows: FunnelRow[];
+  vans: Van[];
+  sliceValues: (
+    ids: string[],
+    office: string,
+  ) => Pick<FunnelRow, "sub" | "conf" | "fut" | "kil" | "pts" | "vol" | "res">;
+  crossOfficeVanIds: Set<string>;
+}) {
   const { matches } = useOfficeFilter();
 
   const rowsByVan = new Map<string, FunnelRow[]>();
@@ -987,8 +1104,8 @@ function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
   const looseActive = freeAgents.filter(
     (r) => r.sub + r.conf + r.fut + r.kil + r.pts + r.vol + r.res.lds + r.res.ol + r.res.sal > 0,
   );
-  const vanTotals = (id: string) =>
-    (rowsByVan.get(id) ?? []).reduce(
+  const totalsOfRows = (list: FunnelRow[]) =>
+    list.reduce(
       (a, r) => ({
         sub: a.sub + r.sub,
         conf: a.conf + r.conf,
@@ -1017,6 +1134,7 @@ function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
         res: { lds: 0, sit: 0, rs: 0, bo: 0, ctc: 0, nc: 0, ol: 0, sal: 0 },
       },
     );
+  const vanTotals = (id: string) => totalsOfRows(rowsByVan.get(id) ?? []);
   const vanSub = (id: string) => vanTotals(id).sub;
   const captainName = (v: Van) =>
     v.captain_id
@@ -1029,7 +1147,9 @@ function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
     <div className="space-y-4">
       {offices.map((office) => {
         const list = vans
-          .filter((v) => (v.office_location ?? DEFAULT_OFFICE) === office)
+          .filter(
+            (v) => (v.office_location ?? DEFAULT_OFFICE) === office || crossOfficeVanIds.has(v.id),
+          )
           .sort((a, b) => vanSub(b.id) - vanSub(a.id) || a.name.localeCompare(b.name));
         if (list.length === 0) return null;
         return (
@@ -1041,11 +1161,14 @@ function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
                 full panel width (scrolls horizontally on small screens). */}
             <div className="grid gap-4">
               {list.map((v) => {
-                const roster = (rowsByVan.get(v.id) ?? []).sort(
-                  (a, b) => b.sub - a.sub || b.conf - a.conf,
-                );
+                // A cross-office van renders on every office panel showing
+                // only that office's slice of each member's production.
+                const cross = crossOfficeVanIds.has(v.id);
+                const roster = (rowsByVan.get(v.id) ?? [])
+                  .map((r) => (cross ? { ...r, ...sliceValues(r.g.ids, office) } : r))
+                  .sort((a, b) => b.sub - a.sub || b.conf - a.conf);
                 const cap = captainName(v);
-                const t = vanTotals(v.id);
+                const t = cross ? totalsOfRows(roster) : vanTotals(v.id);
                 return (
                   <div key={v.id} className="van-card p-4 space-y-3">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -1072,7 +1195,9 @@ function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
                           <DispatchColHeader />
                           {/* The whole van at a glance — every stat the
                               canvassers below sum into. */}
-                          <div className={`${ROW_GRID} px-2 py-1.5 rounded border border-neon/40 bg-neon/5`}>
+                          <div
+                            className={`${ROW_GRID} px-2 py-1.5 rounded border border-neon/40 bg-neon/5`}
+                          >
                             <span className="text-[10px] font-display uppercase tracking-widest text-neon truncate">
                               Van Total
                             </span>
