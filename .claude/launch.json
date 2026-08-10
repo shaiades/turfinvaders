@@ -3,6 +3,10 @@
   "configurations": [
     {
       "name": "turf-invaders",
+      "url": "https://turfinvaders.com"
+    },
+    {
+      "name": "local-dev-no-server-keys",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
       "port": 8080,
