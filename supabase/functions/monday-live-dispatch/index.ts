@@ -372,6 +372,9 @@ serve(async (req) => {
         'job walk': 'Job Walk',
         'reload': 'Reload',
         'upsell': 'Upsell',
+        // Rehash is Cynthia's channel (the confirmer) — owner, 2026-08-10.
+        'rehash': 'Rehash / Cynthia King',
+        'rehash / cynthia king': 'Rehash / Cynthia King',
       }
       const fallback = SOURCE_FALLBACKS[sourceText]
       if (fallback) {
@@ -496,6 +499,32 @@ serve(async (req) => {
               String(c.monday_item_id) !== String(pulseId) &&
               copyBaseName(c.lead_name ?? '') === base)
             .map((c) => String(c.monday_item_id))
+        }
+        if (siblingPulseIds.length === 0 && base) {
+          // The office copies-then-DELETES originals, and the next full sync
+          // purges the deleted card from block_cards — but its outcome markers
+          // survive. Without this fallback the surviving copy looks
+          // sibling-less and re-records the family's outcome (seen live
+          // 2026-08-07: Miguel Munoz's Denardo CTC counted on the original
+          // Thu and again on the copy Fri). Two board generations of markers
+          // bound the name match; older same-name families are new cards.
+          const since = new Date(Date.now() - 14 * 86400000).toISOString()
+          const [exact, copies] = await Promise.all([
+            supabaseAdmin.from('webhook_logs').select('data')
+              .eq('step', 'Card_Outcome_Recorded')
+              .eq('data->>itemName', base)
+              .gte('created_at', since)
+              .order('created_at', { ascending: false }).limit(5),
+            supabaseAdmin.from('webhook_logs').select('data')
+              .eq('step', 'Card_Outcome_Recorded')
+              .like('data->>itemName', `${base} (copy%`)
+              .gte('created_at', since)
+              .order('created_at', { ascending: false }).limit(5),
+          ])
+          const ghostIds = [...(exact.data ?? []), ...(copies.data ?? [])]
+            .map((r) => String((r.data as { pulseId?: string } | null)?.pulseId ?? ''))
+            .filter((sid) => sid && sid !== String(pulseId))
+          siblingPulseIds = [...new Set(ghostIds)]
         }
         if (siblingPulseIds.length > 0) {
           const latestSiblingMarker = async (step: string): Promise<MarkerRow | null> => {
