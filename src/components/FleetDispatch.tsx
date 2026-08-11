@@ -367,12 +367,14 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
     queryFn: async () => {
       const { data } = await supabase
         .from("daily_metrics")
-        .select("canvasser_id, metric_date, leads_generated")
+        .select("canvasser_id, metric_date, leads_generated, leads_submitted, leads_confirmed")
         .in("metric_date", workedDays);
       return (data ?? []) as Array<{
         canvasser_id: string;
         metric_date: string;
         leads_generated: number;
+        leads_submitted: number;
+        leads_confirmed: number;
       }>;
     },
   });
@@ -471,7 +473,17 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
     const acc = new Map<string, Map<string, number>>();
     for (const m of windowMetrics) {
       const inner = acc.get(m.canvasser_id) ?? new Map<string, number>();
-      inner.set(m.metric_date, (inner.get(m.metric_date) ?? 0) + (m.leads_generated ?? 0));
+      // Any lead activity clears the day: generated (Block-board card),
+      // submitted, or confirmed (Incoming Leads pipeline). Bobby's Friday
+      // lead was confirmed-only and still tripped the donut (owner,
+      // 2026-08-10: "we can't make these type of mistakes").
+      inner.set(
+        m.metric_date,
+        (inner.get(m.metric_date) ?? 0) +
+          (m.leads_generated ?? 0) +
+          (m.leads_submitted ?? 0) +
+          (m.leads_confirmed ?? 0),
+      );
       acc.set(m.canvasser_id, inner);
     }
     return acc;

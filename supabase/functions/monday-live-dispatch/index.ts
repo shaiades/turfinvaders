@@ -661,6 +661,18 @@ serve(async (req) => {
     // tiers below would credit one person's leads to another. No exact match
     // → the Bouncer provisions a separate profile, which is correct.
     let match = candidates.find((p) => p._norm === wanted)
+    // A bare first name from the office ("Bobby") must not spawn a shadow
+    // profile when exactly ONE profile carries that first name (owner,
+    // 2026-08-10: Bobby's Friday lead credited a "Bobby" placeholder and
+    // tripped the suspension list; six such shadows were merged by hand).
+    // Ambiguous tokens (two Jonathans) still fall through to the Bouncer —
+    // that provisioning stays the deliberate Incoming Leads behavior.
+    if (!match && isIncomingLeadsBoard && !wanted.includes(' ')) {
+      const byFirst = candidates.filter(
+        (p) => p._norm !== wanted && p._norm.split(' ')[0] === wanted,
+      )
+      if (byFirst.length === 1) match = byFirst[0]
+    }
     if (!match && !isIncomingLeadsBoard) {
       match = candidates.find((p) => p._norm.includes(wanted))
       if (!match) match = candidates.find((p) => wanted.includes(p._norm))
