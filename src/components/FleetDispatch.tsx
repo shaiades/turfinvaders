@@ -611,17 +611,17 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
       conf = 0,
       fut = 0,
       kil = 0,
-      pts = 0,
+      sal = 0,
       vol = 0;
     rows.forEach((r) => {
       sub += r.sub;
       conf += r.conf;
       fut += r.fut;
       kil += r.kil;
-      pts += r.pts;
+      sal += r.res.sal;
       vol += r.vol;
     });
-    return { sub, conf, fut, kil, pts, vol };
+    return { sub, conf, fut, kil, sal, vol };
   }, [rows]);
 
   // Suspension rule (owner, 2026-07-28): any TWO consecutive WORKED days
@@ -667,7 +667,7 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
 
   const footnote =
     tab === "day"
-      ? "Funnel columns show the selected day. Lead results, Points, and Volume are this week's results in progress — the full Mon–Sat week containing that day, Pacific time (PM = 1 pt, Sale = 2 pts)."
+      ? "Funnel columns show the selected day. Lead results, Sales, and Volume are this week's results in progress — the full Mon–Sat week containing that day, Pacific time."
       : tab === "week"
         ? "Points reflect Mon–Sat of the selected week, Pacific time (PM = 1 pt, Sale = 2 pts; BO/RS = 0). Volume runs Mon 12:00 AM → next Mon 12:00 AM Pacific."
         : "Points cover the calendar month, Pacific time (PM = 1 pt, Sale = 2 pts). Volume resets on the 1st, 12:00 AM Pacific.";
@@ -812,7 +812,7 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
         <TotalTile label="Confirmed" value={totals.conf} accent="victory" />
         <TotalTile label="Future" value={totals.fut} accent="accent" />
         <TotalTile label="Blowout" value={totals.kil} accent="danger" />
-        <TotalTile label="Points" value={totals.pts} accent="warning" />
+        <TotalTile label="Sales" value={totals.sal} accent="victory" />
         <TotalTile label="Volume" value={formatCurrency(totals.vol)} accent="victory" />
       </div>
       <p className="text-[10px] text-muted-foreground -mt-2">{footnote}</p>
