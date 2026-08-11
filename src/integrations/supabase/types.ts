@@ -887,6 +887,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      archive_agent: { Args: { _user_id: string }; Returns: undefined }
       auto_archive_agents: { Args: never; Returns: number }
       auto_clock_out_expired: { Args: never; Returns: number }
       calc_monthly_paycheck: {
@@ -940,10 +941,19 @@ export type Database = {
         Args: { _canvasser_id: string; _metric_date: string; _office: string }
         Returns: undefined
       }
+      prepare_profile_deletion: { Args: { _target: string }; Returns: undefined }
       reactivate_agent: { Args: { _user_id: string }; Returns: undefined }
+      real_owner_count: { Args: never; Returns: number }
       refresh_canvasser_rank: {
         Args: { _canvasser_id: string }
         Returns: string
+      }
+      set_user_role: {
+        Args: {
+          _new_role: Database["public"]["Enums"]["app_role"]
+          _target_user: string
+        }
+        Returns: undefined
       }
     }
     Enums: {

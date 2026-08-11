@@ -27,7 +27,7 @@ import {
   Plus,
   Building2,
   Trash2,
-  UserMinus,
+  Archive,
   Pencil,
   Check,
   X,
@@ -38,6 +38,7 @@ import { deleteProfile, deleteVan } from "@/lib/fleet.functions";
 import { addTeamMember } from "@/lib/users.functions";
 import { useAuth } from "@/hooks/useAuth";
 import { isManagerRole } from "@/lib/roles";
+import { canManageTarget } from "@/lib/role-policy";
 import { normalizeName } from "@/lib/utils";
 import { DEFAULT_OFFICE, OFFICE_LOCATIONS, type OfficeLocation } from "@/lib/offices";
 import type { RosterProfile, Van } from "@/components/FleetDispatch";
@@ -92,6 +93,7 @@ export function FleetDispatchManage({
   const [editVanColor, setEditVanColor] = useState(VAN_COLORS[0]);
   const [editVanLoc, setEditVanLoc] = useState<OfficeLocation>(DEFAULT_OFFICE);
   const [addAgentOpen, setAddAgentOpen] = useState(false);
+  const [addAgentVanId, setAddAgentVanId] = useState<string | null>(null);
   const [newAgentName, setNewAgentName] = useState("");
   const [newAgentOffice, setNewAgentOffice] = useState<OfficeLocation>(DEFAULT_OFFICE);
   const [archivedOpen, setArchivedOpen] = useState(false);
@@ -133,16 +135,42 @@ export function FleetDispatchManage({
         const van = vans.find((v) => v.id === vanId);
         if (van?.office_location) patch.office_location = van.office_location;
       }
-      const { error } = await supabase.from("profiles").update(patch).eq("id", canvasserId);
+      // .select() so an RLS-blocked update (0 rows) errors instead of
+      // silently toasting success.
+      const { data, error } = await supabase
+        .from("profiles")
+        .update(patch)
+        .eq("id", canvasserId)
+        .select("id");
       if (error) throw error;
+      if (!data?.length) throw new Error("Move failed — you don't have permission for this agent");
     },
     onSuccess: (_d, vars) => {
-      toast.success(vars.vanId ? "Assigned to van" : "Moved to Unassigned");
+      const van = vars.vanId ? vans.find((v) => v.id === vars.vanId) : null;
+      toast.success(van ? `Moved to ${van.name}` : "Moved to Free Agents");
       qc.invalidateQueries({ queryKey: ["fleet_dispatch"] });
       qc.invalidateQueries({ queryKey: ["weekly_results"] });
       qc.invalidateQueries({ queryKey: ["payroll-ledger"] });
+      qc.invalidateQueries({ queryKey: ["manage_users"] });
     },
     onError: (e: Error) => toast.error(e.message),
+  });
+
+  const archiveAgent = useMutation({
+    mutationFn: async ({ id }: { id: string; name: string }) => {
+      const { error } = await supabase.rpc("archive_agent", { _user_id: id });
+      if (error) throw error;
+    },
+    onSuccess: (_d, vars) => {
+      toast.success(
+        `${vars.name} removed from roster — history kept. Reactivate from Archived Agents.`,
+      );
+      qc.invalidateQueries({ queryKey: ["fleet_dispatch"] });
+      qc.invalidateQueries({ queryKey: ["weekly_results"] });
+      qc.invalidateQueries({ queryKey: ["payroll-ledger"] });
+      qc.invalidateQueries({ queryKey: ["manage_users"] });
+    },
+    onError: (e: Error) => toast.error(e.message ?? "Failed to remove"),
   });
 
   const removeProfile = useMutation({
@@ -206,13 +234,20 @@ export function FleetDispatchManage({
       const name = newAgentName.trim();
       if (!name) throw new Error("Full Name required");
       await addTeamMemberFn({
-        data: { full_name: name, office_location: newAgentOffice, role: "canvasser" },
+        data: {
+          full_name: name,
+          office_location: newAgentOffice,
+          role: "canvasser",
+          team_id: addAgentVanId,
+        },
       });
     },
     onSuccess: () => {
-      toast.success(`${newAgentName.trim()} added to Free Agents`);
+      const van = addAgentVanId ? vans.find((v) => v.id === addAgentVanId) : null;
+      toast.success(`${newAgentName.trim()} added to ${van ? van.name : "Free Agents"}`);
       setNewAgentName("");
       setAddAgentOpen(false);
+      setAddAgentVanId(null);
       qc.invalidateQueries({ queryKey: ["fleet_dispatch"] });
       qc.invalidateQueries({ queryKey: ["manage_users"] });
     },
@@ -238,6 +273,8 @@ export function FleetDispatchManage({
     return !roles.includes("owner") && !roles.includes("sales_rep");
   });
 
+  const vanOptions = vans.map((v) => ({ id: v.id, name: v.name, color: v.color ?? "#888" }));
+
   // Group vans by office location.
   const vansByOffice = new Map<string, Van[]>();
   for (const loc of OFFICE_LOCATIONS) vansByOffice.set(loc, []);
@@ -256,8 +293,9 @@ export function FleetDispatchManage({
         </div>
       )}
 
-      {/* Create New Van — managers only */}
-      {canManage && (
+      {/* Create New Van — owners only (teams RLS is owner-write; showing
+          this to captains would silently no-op) */}
+      {isOwnerRole && (
         <ArcadePanel title="Create New Van">
           <div className="grid gap-3 md:grid-cols-[1fr_180px_140px_auto] items-end">
             <div>
@@ -446,9 +484,27 @@ export function FleetDispatchManage({
                               </span>
                               {canManage && (
                                 <button
+                                  onClick={() => {
+                                    setAddAgentVanId(v.id);
+                                    setNewAgentOffice(
+                                      (v.office_location as OfficeLocation) ?? DEFAULT_OFFICE,
+                                    );
+                                    setAddAgentOpen(true);
+                                  }}
+                                  className="p-2 md:p-1 min-h-9 min-w-9 md:min-h-0 md:min-w-0 inline-flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                                  title="Add agent to this van"
+                                >
+                                  <UserPlus className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                              {/* Van edit is owner-only: teams RLS is owner-write, and a
+                                  captain's edit would no-op on the van yet still cascade
+                                  office_location onto the roster. */}
+                              {isOwnerRole && (
+                                <button
                                   onClick={() => startEditVan(v)}
                                   className="p-2 md:p-1 min-h-9 min-w-9 md:min-h-0 md:min-w-0 inline-flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-                                  title="Edit van"
+                                  title="Edit van (Owner only)"
                                 >
                                   <Pencil className="w-3.5 h-3.5" />
                                 </button>
@@ -477,12 +533,13 @@ export function FleetDispatchManage({
                         <div>
                           <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground mb-1">
                             Roster ({roster.length}){" "}
-                            <span className="opacity-60">· drop agents here</span>
+                            <span className="opacity-60">· use Move to reassign</span>
                           </div>
                           <div className="space-y-1.5 min-h-[40px]">
                             {roster.map((r) => {
-                              const targetIsOwner = (rolesByUser.get(r.id) ?? []).includes("owner");
-                              const canModify = canManage && (isOwnerRole || !targetIsOwner);
+                              const targetRoles = rolesByUser.get(r.id) ?? [];
+                              const canModify = canManage && canManageTarget(realRole, targetRoles);
+                              const canArchive = canModify && !targetRoles.includes("owner");
                               // Sum points and sale volume across every profile with the same display name in this van.
                               const nameKey = normalizeName(r.display_name);
                               const sameNameProfiles = rosterRaw.filter(
@@ -507,10 +564,28 @@ export function FleetDispatchManage({
                                   points={aggregatedPoints}
                                   volume={aggregatedVolume}
                                   isCaptain={rIsCaptain}
-                                  onUnassign={
+                                  vans={canModify ? vanOptions : undefined}
+                                  currentVanId={v.id}
+                                  onMove={
                                     canModify
-                                      ? () =>
-                                          assignCanvasser.mutate({ canvasserId: r.id, vanId: null })
+                                      ? (vanId) =>
+                                          assignCanvasser.mutate({ canvasserId: r.id, vanId })
+                                      : undefined
+                                  }
+                                  onArchive={
+                                    canArchive
+                                      ? () => {
+                                          if (
+                                            confirm(
+                                              `Remove "${r.display_name}" from the roster? Their history and data are kept — reactivate anytime from Archived Agents.`,
+                                            )
+                                          ) {
+                                            archiveAgent.mutate({
+                                              id: r.id,
+                                              name: r.display_name ?? "Agent",
+                                            });
+                                          }
+                                        }
                                       : undefined
                                   }
                                   onDelete={
@@ -532,7 +607,7 @@ export function FleetDispatchManage({
 
                             {roster.length === 0 && (
                               <div className="text-xs text-muted-foreground italic px-2 py-3 border border-dashed border-border rounded">
-                                Drop agents here
+                                No agents yet — use “+ Add” or a row's Move menu.
                               </div>
                             )}
                           </div>
@@ -570,7 +645,10 @@ export function FleetDispatchManage({
             {canManage && (
               <Button
                 size="sm"
-                onClick={() => setAddAgentOpen(true)}
+                onClick={() => {
+                  setAddAgentVanId(null);
+                  setAddAgentOpen(true);
+                }}
                 className="gap-1 font-display uppercase tracking-widest text-[10px] bg-background border text-foreground hover:bg-[color:var(--neon-blue)]/10"
                 style={{
                   borderColor: "var(--neon-blue)",
@@ -589,8 +667,9 @@ export function FleetDispatchManage({
               </div>
             ) : (
               unassigned.map((p) => {
-                const targetIsOwner = (rolesByUser.get(p.id) ?? []).includes("owner");
-                const canModify = canManage && (isOwnerRole || !targetIsOwner);
+                const targetRoles = rolesByUser.get(p.id) ?? [];
+                const canModify = canManage && canManageTarget(realRole, targetRoles);
+                const canArchive = canModify && !targetRoles.includes("owner");
                 return (
                   <RosterRow
                     key={p.id}
@@ -598,15 +677,24 @@ export function FleetDispatchManage({
                     name={p.display_name ?? "Unknown"}
                     points={pointsByUser.get(p.id) ?? 0}
                     volume={volumeByUser.get(p.id) ?? 0}
-                    vans={
-                      canModify
-                        ? vans.map((v) => ({ id: v.id, name: v.name, color: v.color ?? "#888" }))
-                        : undefined
-                    }
+                    vans={canModify ? vanOptions : undefined}
                     currentVanId={p.team_id}
-                    onAssign={
+                    onMove={
                       canModify
                         ? (vanId) => assignCanvasser.mutate({ canvasserId: p.id, vanId })
+                        : undefined
+                    }
+                    onArchive={
+                      canArchive
+                        ? () => {
+                            if (
+                              confirm(
+                                `Remove "${p.display_name}" from the roster? Their history and data are kept — reactivate anytime from Archived Agents.`,
+                              )
+                            ) {
+                              archiveAgent.mutate({ id: p.id, name: p.display_name ?? "Agent" });
+                            }
+                          }
                         : undefined
                     }
                     onDelete={
@@ -629,7 +717,7 @@ export function FleetDispatchManage({
           </div>
           <p className="text-[10px] text-muted-foreground">
             {canManage
-              ? "Tap “Assign Van” to place an agent on a roster. Auto-created from Monday.com webhooks."
+              ? "Use a row's Move menu to place an agent on a roster. Auto-created from Monday.com webhooks."
               : "Free Agents auto-populate from Monday.com webhooks."}
           </p>
         </div>
@@ -701,8 +789,11 @@ export function FleetDispatchManage({
           <DialogHeader>
             <DialogTitle className="font-display uppercase tracking-widest">Add Agent</DialogTitle>
             <DialogDescription>
-              Creates a placeholder Canvasser in Free Agents. They can be assigned to a van right
-              after.
+              Creates a placeholder Canvasser in{" "}
+              {addAgentVanId
+                ? (vans.find((v) => v.id === addAgentVanId)?.name ?? "the selected van")
+                : "Free Agents"}
+              .
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-2">
@@ -723,6 +814,41 @@ export function FleetDispatchManage({
                   if (e.key === "Enter") addAgent.mutate();
                 }}
               />
+            </div>
+            <div>
+              <Label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                Van
+              </Label>
+              <Select
+                value={addAgentVanId ?? "free"}
+                onValueChange={(val) => {
+                  const vanId = val === "free" ? null : val;
+                  setAddAgentVanId(vanId);
+                  if (vanId) {
+                    const van = vans.find((v) => v.id === vanId);
+                    if (van?.office_location)
+                      setNewAgentOffice(van.office_location as OfficeLocation);
+                  }
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="free">Free Agents</SelectItem>
+                  {vans.map((v) => (
+                    <SelectItem key={v.id} value={v.id}>
+                      <span className="inline-flex items-center gap-2">
+                        <span
+                          className="w-2 h-2 rounded-full"
+                          style={{ background: v.color ?? "#888" }}
+                        />
+                        {v.name}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div>
               <Label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
@@ -754,7 +880,10 @@ export function FleetDispatchManage({
               disabled={addAgent.isPending || !newAgentName.trim()}
               className="bg-neon text-background hover:bg-neon/90"
             >
-              <UserPlus className="w-4 h-4 mr-1" /> Add to Free Agents
+              <UserPlus className="w-4 h-4 mr-1" /> Add to{" "}
+              {addAgentVanId
+                ? (vans.find((v) => v.id === addAgentVanId)?.name ?? "Van")
+                : "Free Agents"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -772,8 +901,8 @@ function RosterRow({
   volume = 0,
   vans,
   currentVanId,
-  onAssign,
-  onUnassign,
+  onMove,
+  onArchive,
   onDelete,
   isCaptain = false,
 }: {
@@ -783,8 +912,8 @@ function RosterRow({
   volume?: number;
   vans?: VanOption[];
   currentVanId?: string | null;
-  onAssign?: (vanId: string) => void;
-  onUnassign?: () => void;
+  onMove?: (vanId: string | null) => void;
+  onArchive?: () => void;
   onDelete?: () => void;
   isCaptain?: boolean;
 }) {
@@ -802,22 +931,27 @@ function RosterRow({
           </span>
         )}
       </span>
-      {vans && onAssign && (
+      {vans && onMove && (
+        // Sentinel-value Select: the trigger always reads "Move to…"/"Assign
+        // Van…"; picking a destination fires onMove and the roster refetch
+        // re-renders the row wherever it landed.
         <Select
-          value={currentVanId ?? "none"}
+          value="current"
           onValueChange={(val) => {
-            if (val && val !== "none") onAssign(val);
+            if (val === "current") return;
+            onMove(val === "free" ? null : val);
           }}
         >
           <SelectTrigger className="h-9 md:h-7 w-full sm:w-auto sm:min-w-[120px] text-[11px] font-display uppercase tracking-wider bg-background border-[color:var(--neon-blue)]/50 hover:border-[color:var(--neon-blue)]">
-            <SelectValue placeholder="Assign Van…" />
+            <SelectValue />
           </SelectTrigger>
           <SelectContent className="bg-background border-[color:var(--neon-blue)]/50">
-            <SelectItem value="none" disabled>
-              — Assign Van —
+            <SelectItem value="current" disabled>
+              {currentVanId ? "Move to…" : "Assign Van…"}
             </SelectItem>
+            {currentVanId && <SelectItem value="free">Free Agents</SelectItem>}
             {vans.map((v) => (
-              <SelectItem key={v.id} value={v.id}>
+              <SelectItem key={v.id} value={v.id} disabled={v.id === currentVanId}>
                 <span className="inline-flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full" style={{ background: v.color }} />
                   {v.name}
@@ -827,20 +961,24 @@ function RosterRow({
           </SelectContent>
         </Select>
       )}
-      {onUnassign && (
+      {onArchive && (
         <button
-          onClick={onUnassign}
+          onClick={onArchive}
           className="p-2 md:p-1 min-h-9 min-w-9 md:min-h-0 md:min-w-0 inline-flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-          title="Move to Free Agents"
+          title="Remove from roster (keeps history)"
         >
-          <UserMinus className="w-3.5 h-3.5" />
+          <Archive className="w-3.5 h-3.5" />
         </button>
       )}
       {onDelete && (
         <button
           onClick={onDelete}
           className="p-2 md:p-1 min-h-9 min-w-9 md:min-h-0 md:min-w-0 inline-flex items-center justify-center rounded hover:bg-destructive/20 text-destructive"
-          title={isGhost ? "Delete ghost profile" : "Delete profile (has data)"}
+          title={
+            isGhost
+              ? "Delete ghost profile permanently (Owner only)"
+              : "Delete profile — has data, will archive (Owner only)"
+          }
         >
           <Trash2 className="w-3.5 h-3.5" />
         </button>

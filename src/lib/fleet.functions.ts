@@ -61,7 +61,12 @@ export const deleteProfile = createServerFn({ method: "POST" })
     // user (cascades to the profile) — placeholder profiles have no auth
     // user, so fall back to deleting the bare row; any stray FK left means
     // it wasn't a ghost after all, so archive rather than fail.
-    await supabaseAdmin.from("user_roles").delete().eq("user_id", data.id);
+    // prepare_profile_deletion removes the role rows under the same advisory
+    // lock as set_user_role and refuses to delete the last Owner.
+    const { error: prepErr } = await supabaseAdmin.rpc("prepare_profile_deletion", {
+      _target: data.id,
+    });
+    if (prepErr) throw new Error(prepErr.message);
     const { error: authErr } = await supabaseAdmin.auth.admin.deleteUser(data.id);
     if (authErr) {
       const { error } = await supabaseAdmin.from("profiles").delete().eq("id", data.id);

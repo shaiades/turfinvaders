@@ -80,6 +80,7 @@ const addTeamMemberSchema = z.object({
   full_name: z.string().trim().min(1).max(100),
   office_location: z.enum(OFFICE_LOCATIONS),
   role: z.enum(["owner", "office_staff", "captain", "sales_rep", "canvasser"]),
+  team_id: z.string().uuid().nullable().optional(),
 });
 
 async function assertManager(context: { supabase: any; userId: string }) {
@@ -113,6 +114,7 @@ export const addTeamMember = createServerFn({ method: "POST" })
       display_name: data.full_name,
       office_location: data.office_location,
       is_placeholder: true,
+      team_id: data.team_id ?? null,
     });
     if (profErr) throw new Error(profErr.message);
 
