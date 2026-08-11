@@ -859,12 +859,7 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
           No canvassers in this office yet.
         </div>
       ) : (
-        <DispatchFleet
-          rows={rows}
-          vans={vans}
-          sliceValues={sliceValues}
-          crossOfficeVanIds={crossOfficeVanIds}
-        />
+        <DispatchFleet rows={rows} vans={vans} crossOfficeVanIds={crossOfficeVanIds} />
       )}
 
       {/* Former Executive Dashboard tab (merged 2026-08-04): Results Week +
@@ -1076,18 +1071,13 @@ function DispatchColHeader() {
 function DispatchFleet({
   rows,
   vans,
-  sliceValues,
   crossOfficeVanIds,
 }: {
   rows: FunnelRow[];
   vans: Van[];
-  sliceValues: (
-    ids: string[],
-    office: string,
-  ) => Pick<FunnelRow, "sub" | "conf" | "fut" | "kil" | "pts" | "vol" | "res">;
   crossOfficeVanIds: Set<string>;
 }) {
-  const { matches } = useOfficeFilter();
+  const { office: activeOffice, matches } = useOfficeFilter();
 
   const rowsByVan = new Map<string, FunnelRow[]>();
   const freeAgents: FunnelRow[] = [];
@@ -1146,9 +1136,15 @@ function DispatchFleet({
   return (
     <div className="space-y-4">
       {offices.map((office) => {
+        // A cross-office van appears in its home panel on "All Offices"
+        // (combined numbers, owner: Cynthia reads 10 lds / 6 sit / 2 sal
+        // there) and in the single visible panel on a specific office tab,
+        // where the rows upstream are already sliced to that office.
         const list = vans
           .filter(
-            (v) => (v.office_location ?? DEFAULT_OFFICE) === office || crossOfficeVanIds.has(v.id),
+            (v) =>
+              (v.office_location ?? DEFAULT_OFFICE) === office ||
+              (activeOffice !== "All" && crossOfficeVanIds.has(v.id)),
           )
           .sort((a, b) => vanSub(b.id) - vanSub(a.id) || a.name.localeCompare(b.name));
         if (list.length === 0) return null;
@@ -1161,14 +1157,11 @@ function DispatchFleet({
                 full panel width (scrolls horizontally on small screens). */}
             <div className="grid gap-4">
               {list.map((v) => {
-                // A cross-office van renders on every office panel showing
-                // only that office's slice of each member's production.
-                const cross = crossOfficeVanIds.has(v.id);
-                const roster = (rowsByVan.get(v.id) ?? [])
-                  .map((r) => (cross ? { ...r, ...sliceValues(r.g.ids, office) } : r))
-                  .sort((a, b) => b.sub - a.sub || b.conf - a.conf);
+                const roster = (rowsByVan.get(v.id) ?? []).sort(
+                  (a, b) => b.sub - a.sub || b.conf - a.conf,
+                );
                 const cap = captainName(v);
-                const t = cross ? totalsOfRows(roster) : vanTotals(v.id);
+                const t = vanTotals(v.id);
                 return (
                   <div key={v.id} className="van-card p-4 space-y-3">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
