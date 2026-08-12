@@ -3,7 +3,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { addTeamMember } from "@/lib/users.functions";
 import { DEFAULT_OFFICE, OFFICE_LOCATIONS, type OfficeLocation } from "@/lib/offices";
-import type { AppRole } from "@/lib/roles";
+import { creatableRolesFor, ROLE_LABEL, type AppRole } from "@/lib/roles";
+import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,15 +25,26 @@ import { UserPlus } from "lucide-react";
 
 export function AddTeamMemberDialog({ variant = "default" }: { variant?: "default" | "neon" } = {}) {
   const qc = useQueryClient();
+  const { realRole } = useAuth();
   const addFn = useServerFn(addTeamMember);
   const [open, setOpen] = useState(false);
   const [fullName, setFullName] = useState("");
   const [office, setOffice] = useState<OfficeLocation>(DEFAULT_OFFICE);
   const [role, setRole] = useState<AppRole>("canvasser");
+  // Owners may create any role; captains/Admins only the canvasser tier —
+  // mirrors the addTeamMember server rule.
+  const creatable = creatableRolesFor(realRole);
 
   const create = useMutation({
     mutationFn: async () =>
-      addFn({ data: { full_name: fullName.trim(), office_location: office, role } }),
+      addFn({
+        data: {
+          full_name: fullName.trim(),
+          office_location: office,
+          // Clamp so stale state can never submit a role outside the list.
+          role: creatable.includes(role) ? role : "canvasser",
+        },
+      }),
     onSuccess: () => {
       toast.success(`${fullName} added to roster`, {
         style: { background: "hsl(142 76% 36%)", color: "white" },
@@ -64,7 +76,7 @@ export function AddTeamMemberDialog({ variant = "default" }: { variant?: "defaul
           >
             <UserPlus className="h-4 w-4" />
             <span className="sm:hidden">+ Add</span>
-            <span className="hidden sm:inline">+ Add New Team Member / Captain</span>
+            <span className="hidden sm:inline">+ Add New Team Member</span>
           </Button>
         ) : (
           <Button variant="outline" className="gap-2">
@@ -118,21 +130,23 @@ export function AddTeamMemberDialog({ variant = "default" }: { variant?: "defaul
             </select>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="tm-role">System Role</Label>
-            <select
-              id="tm-role"
-              value={role}
-              onChange={(e) => setRole(e.target.value as AppRole)}
-              className="w-full bg-input border border-border rounded-md px-3 py-2 text-sm"
-            >
-              <option value="canvasser">Canvasser</option>
-              <option value="sales_rep">Sales Rep</option>
-              <option value="captain">Captain</option>
-              <option value="office_staff">Admin</option>
-              <option value="owner">Owner</option>
-            </select>
-          </div>
+          {creatable.length > 0 && (
+            <div className="space-y-2">
+              <Label htmlFor="tm-role">System Role</Label>
+              <select
+                id="tm-role"
+                value={creatable.includes(role) ? role : "canvasser"}
+                onChange={(e) => setRole(e.target.value as AppRole)}
+                className="w-full bg-input border border-border rounded-md px-3 py-2 text-sm"
+              >
+                {creatable.map((r) => (
+                  <option key={r} value={r}>
+                    {ROLE_LABEL[r]}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => setOpen(false)}>

@@ -2,9 +2,13 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel, TeamBadge } from "@/components/arcade";
+import { MANAGER_ROLES, requireRoleBeforeLoad } from "@/lib/roles";
 
 export const Route = createFileRoute("/_authenticated/teams/")({
   head: () => ({ meta: [{ title: "Vans — Knockout" }] }),
+  // Leadership-only: canvassers/sales reps bounce in beforeLoad (real DB
+  // roles), before the page mounts or fires any queries.
+  beforeLoad: requireRoleBeforeLoad(MANAGER_ROLES),
   component: TeamsIndex,
 });
 

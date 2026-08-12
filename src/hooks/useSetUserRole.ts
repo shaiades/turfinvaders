@@ -3,10 +3,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import type { AppRole } from "@/lib/roles";
 
-/** Atomic role swap via the set_user_role RPC. The function enforces the
- *  real guardrails server-side: manager-tier caller, captains/admins limited
- *  to canvasser/sales_rep/captain and blocked from Owner/Admin targets,
- *  last-owner protection. Shared by Manage Players and the Permissions tab. */
+/** Atomic role swap via the set_user_role RPC. The RPC is the authoritative
+ *  gate: owner-only caller (owner decision 2026-08-12) plus last-owner
+ *  protection; a non-owner call fails and surfaces the RPC's error as a
+ *  toast. Shared by Manage Players and the New Signups panel. */
 export function useSetUserRole() {
   const qc = useQueryClient();
   return useMutation({

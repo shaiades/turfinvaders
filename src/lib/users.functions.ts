@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { OFFICE_LOCATIONS } from "@/lib/offices";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { LIMITED_CREATABLE_ROLES } from "@/lib/role-policy";
 import { z } from "zod";
 
 const ROLES = ["owner", "office_staff", "captain", "sales_rep", "canvasser"] as const;
@@ -18,8 +19,10 @@ export const createCanvasser = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => createCanvasserSchema.parse(data))
   .handler(async ({ data, context }) => {
-    // Owners, Captains, and Office Staff (Admin) can add new players.
-    // Captains and Office Staff can only create Canvassers or other Captains.
+    // Owners, Captains, and Office Staff (Admin) can add new players, but
+    // non-owners only at the canvasser tier — creating Captain/Admin/Owner
+    // accounts is owner-only (owner decision 2026-08-12, matching the
+    // owner-only set_user_role RPC).
     const { data: roleRows, error: roleErr } = await context.supabase
       .from("user_roles")
       .select("role")
@@ -31,8 +34,8 @@ export const createCanvasser = createServerFn({ method: "POST" })
     if (!isManager) {
       throw new Error("Only Owners, Captains, or Admins can add new users.");
     }
-    if (!isOwner && !["canvasser", "captain", "sales_rep"].includes(data.role)) {
-      throw new Error("Only Owners can create Owners or Admins.");
+    if (!isOwner && !LIMITED_CREATABLE_ROLES.includes(data.role)) {
+      throw new Error("Only Owners can create Captain, Admin, or Owner accounts.");
     }
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -95,15 +98,16 @@ async function assertManager(context: { supabase: any; userId: string }) {
   return { roles, isOwner, isManager };
 }
 
-/** Managers (Owner / Captain / Admin) can add a placeholder profile with a generated UUID. */
+/** Managers (Owner / Captain / Admin) can add a placeholder profile with a
+ *  generated UUID — non-owners only as Canvasser or Sales Rep. */
 export const addTeamMember = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => addTeamMemberSchema.parse(data))
   .handler(async ({ data, context }) => {
     const { isOwner, isManager } = await assertManager(context);
     if (!isManager) throw new Error("Only Owners, Captains, or Admins can add team members.");
-    if (!isOwner && !["canvasser", "captain", "sales_rep"].includes(data.role)) {
-      throw new Error("Only Owners can add Owners or Admins.");
+    if (!isOwner && !LIMITED_CREATABLE_ROLES.includes(data.role)) {
+      throw new Error("Only Owners can add Captain, Admin, or Owner accounts.");
     }
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
