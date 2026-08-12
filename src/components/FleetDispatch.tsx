@@ -27,7 +27,11 @@ import {
   Wrench,
   ChevronDown,
   ChevronUp,
+  UserPlus,
+  Archive,
+  ArrowRightLeft,
 } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { toast } from "sonner";
 import {
   addDaysISO,
@@ -51,6 +55,8 @@ import { formatCurrency, normalizeName } from "@/lib/utils";
 import { DEFAULT_OFFICE, OFFICE_LOCATIONS } from "@/lib/offices";
 import { getDispatchProduction, type DispatchResults } from "@/lib/dispatch.functions";
 import { FleetDispatchManage } from "@/components/FleetDispatchManage";
+import { AddAgentDialog } from "@/components/AddAgentDialog";
+import { useMoveAgents, useArchiveAgents } from "@/hooks/useRosterActions";
 import { ExecutiveSection } from "@/components/ExecutiveDashboard";
 
 /** One profile row as the board consumes it (dispatch membership). */
@@ -872,7 +878,12 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
           No canvassers in this office yet.
         </div>
       ) : (
-        <DispatchFleet rows={rows} vans={vans} crossOfficeVanIds={crossOfficeVanIds} />
+        <DispatchFleet
+          rows={rows}
+          vans={vans}
+          crossOfficeVanIds={crossOfficeVanIds}
+          canManage={canManage}
+        />
       )}
 
       {/* Former Executive Dashboard tab (merged 2026-08-04): Results Week +
@@ -962,22 +973,39 @@ const RESULT_COLS: Array<{
 
 /** One shared grid template: name · 4 funnel cols · divider · 8 result cols ·
  *  Points · Volume. Every board row (captions, headers, van totals, reps)
- *  uses it so the whole van card reads as one continuous chart. */
+ *  uses it so the whole van card reads as one continuous chart. Manage mode
+ *  (managers on the dashboard, never the read-only leaderboard) appends a
+ *  trailing actions column — every row variant appends a cell so the columns
+ *  stay aligned. */
 const ROW_GRID =
   "grid grid-cols-[minmax(7.5rem,1fr)_repeat(4,2.3rem)_0.75rem_repeat(9,2.3rem)_4.5rem] items-center gap-1";
+const ROW_GRID_MANAGE =
+  "grid grid-cols-[minmax(7.5rem,1fr)_repeat(4,2.3rem)_0.75rem_repeat(9,2.3rem)_4.5rem_5rem] items-center gap-1";
+const rowGrid = (manage: boolean) => (manage ? ROW_GRID_MANAGE : ROW_GRID);
 
-/** Board rows need ~47rem; the van card scrolls horizontally below that. */
+/** Board rows need ~47rem (~52rem with the actions column); the van card
+ *  scrolls horizontally below that. */
 const ROW_MIN_W = "min-w-[47rem]";
+const rowMinW = (manage: boolean) => (manage ? "min-w-[52rem]" : ROW_MIN_W);
 
 function RowDivider() {
   return <span className="h-4 w-px bg-border justify-self-center" aria-hidden />;
 }
 
+/** Per-row roster controls shown to managers on the dashboard board. */
+type RowManage = {
+  vans: Van[];
+  currentVanId: string;
+  busy: boolean;
+  onMove: (vanId: string | null) => void;
+  onArchive: () => void;
+};
+
 /** One rep's continuous line — field funnel first, then what the leads became. */
-function DispatchRow({ r }: { r: FunnelRow }) {
+function DispatchRow({ r, manage }: { r: FunnelRow; manage?: RowManage }) {
   return (
     <div
-      className={`${ROW_GRID} px-2 py-1.5 rounded border border-border bg-surface hover:border-neon/60`}
+      className={`${rowGrid(!!manage)} px-2 py-1.5 rounded border border-border bg-surface hover:border-neon/60`}
     >
       <span className="text-sm truncate flex items-center gap-1.5 min-w-0">
         <span aria-hidden>{r.sub > 0 ? "🔥" : "🍩"}</span>
@@ -1019,14 +1047,58 @@ function DispatchRow({ r }: { r: FunnelRow }) {
       >
         {formatCurrency(r.vol)}
       </span>
+      {manage && (
+        <span className="flex items-center justify-end gap-0.5">
+          <Select
+            value="current"
+            onValueChange={(val) => {
+              if (val === "current") return;
+              manage.onMove(val === "free" ? null : val);
+            }}
+          >
+            <SelectTrigger
+              disabled={manage.busy}
+              title="Move to another van"
+              className="h-7 w-11 px-1.5 justify-center bg-background border-[color:var(--neon-blue)]/50 hover:border-[color:var(--neon-blue)]"
+            >
+              <ArrowRightLeft className="w-3.5 h-3.5" />
+            </SelectTrigger>
+            <SelectContent className="bg-background border-[color:var(--neon-blue)]/50">
+              <SelectItem value="current" disabled>
+                Move to…
+              </SelectItem>
+              <SelectItem value="free">Free Agents</SelectItem>
+              {manage.vans.map((vn) => (
+                <SelectItem key={vn.id} value={vn.id} disabled={vn.id === manage.currentVanId}>
+                  <span className="inline-flex items-center gap-2">
+                    <span
+                      className="w-2 h-2 rounded-full"
+                      style={{ background: vn.color ?? "#888" }}
+                    />
+                    {vn.name}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <button
+            onClick={manage.onArchive}
+            disabled={manage.busy}
+            className="p-1 h-7 w-7 inline-flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-50"
+            title="Remove from roster (keeps history)"
+          >
+            <Archive className="w-3.5 h-3.5" />
+          </button>
+        </span>
+      )}
     </div>
   );
 }
 
 /** Section captions over the two halves of the continuous row. */
-function DispatchGroupCaption() {
+function DispatchGroupCaption({ manage = false }: { manage?: boolean }) {
   return (
-    <div className={`${ROW_GRID} px-2`}>
+    <div className={`${rowGrid(manage)} px-2`}>
       <span />
       <span className="col-span-4 text-center text-[8px] font-display uppercase tracking-widest text-muted-foreground/70 border-b border-border/60 pb-0.5">
         In the Field
@@ -1035,14 +1107,15 @@ function DispatchGroupCaption() {
       <span className="col-span-10 text-center text-[8px] font-display uppercase tracking-widest text-muted-foreground/70 border-b border-border/60 pb-0.5">
         As Leads
       </span>
+      {manage && <span />}
     </div>
   );
 }
 
 /** Column headers, aligned to DispatchRow's grid. */
-function DispatchColHeader() {
+function DispatchColHeader({ manage = false }: { manage?: boolean }) {
   return (
-    <div className={`${ROW_GRID} px-2`}>
+    <div className={`${rowGrid(manage)} px-2`}>
       <span />
       {FUNNEL_COLS.map((c) => (
         <span
@@ -1075,22 +1148,33 @@ function DispatchColHeader() {
       >
         Vol
       </span>
+      {manage && <span />}
     </div>
   );
 }
 
 /** The board: office panels → van cards → per-rep funnel rows, with per-van
- *  Points and Volume pills, plus the unassigned lead-source pen. */
+ *  Points and Volume pills, plus the unassigned lead-source pen. When
+ *  canManage is set (managers on the dashboard, never the leaderboard), each
+ *  rep row gets Move/Remove controls and each van header a "+" add button —
+ *  the same actions as Manage Fleet, right on the production board. */
 function DispatchFleet({
   rows,
   vans,
   crossOfficeVanIds,
+  canManage = false,
 }: {
   rows: FunnelRow[];
   vans: Van[];
   crossOfficeVanIds: Set<string>;
+  canManage?: boolean;
 }) {
   const { office: activeOffice, matches } = useOfficeFilter();
+  const moveAgents = useMoveAgents(vans);
+  const archiveAgents = useArchiveAgents();
+  const [addOpen, setAddOpen] = useState(false);
+  const [addVanId, setAddVanId] = useState<string | null>(null);
+  const busy = moveAgents.isPending || archiveAgents.isPending;
 
   const rowsByVan = new Map<string, FunnelRow[]>();
   const freeAgents: FunnelRow[] = [];
@@ -1189,6 +1273,18 @@ function DispatchFleet({
                           </span>
                         )}
                       </div>
+                      {canManage && (
+                        <button
+                          onClick={() => {
+                            setAddVanId(v.id);
+                            setAddOpen(true);
+                          }}
+                          className="p-2 md:p-1 min-h-9 min-w-9 md:min-h-0 md:min-w-0 inline-flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                          title="Add agent to this van"
+                        >
+                          <UserPlus className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                     {roster.length === 0 ? (
                       <div className="text-xs text-muted-foreground italic px-2 py-3 border border-dashed border-border rounded">
@@ -1196,13 +1292,13 @@ function DispatchFleet({
                       </div>
                     ) : (
                       <div className="overflow-x-auto">
-                        <div className={`space-y-1.5 ${ROW_MIN_W}`}>
-                          <DispatchGroupCaption />
-                          <DispatchColHeader />
+                        <div className={`space-y-1.5 ${rowMinW(canManage)}`}>
+                          <DispatchGroupCaption manage={canManage} />
+                          <DispatchColHeader manage={canManage} />
                           {/* The whole van at a glance — every stat the
                               canvassers below sum into. */}
                           <div
-                            className={`${ROW_GRID} px-2 py-1.5 rounded border border-neon/40 bg-neon/5`}
+                            className={`${rowGrid(canManage)} px-2 py-1.5 rounded border border-neon/40 bg-neon/5`}
                           >
                             <span className="text-[10px] font-display uppercase tracking-widest text-neon truncate">
                               Van Total
@@ -1238,9 +1334,40 @@ function DispatchFleet({
                             >
                               {formatCurrency(t.vol)}
                             </span>
+                            {canManage && <span />}
                           </div>
                           {roster.map((r) => (
-                            <DispatchRow key={r.g.key} r={r} />
+                            <DispatchRow
+                              key={r.g.key}
+                              r={r}
+                              manage={
+                                canManage
+                                  ? {
+                                      vans,
+                                      currentVanId: v.id,
+                                      busy,
+                                      onMove: (vanId) =>
+                                        moveAgents.mutate({
+                                          ids: r.g.ids,
+                                          vanId,
+                                          name: r.g.display_name ?? "Agent",
+                                        }),
+                                      onArchive: () => {
+                                        if (
+                                          confirm(
+                                            `Remove "${r.g.display_name}" from the roster? Their history and data are kept — reactivate anytime from Archived Agents.`,
+                                          )
+                                        ) {
+                                          archiveAgents.mutate({
+                                            ids: r.g.ids,
+                                            name: r.g.display_name ?? "Agent",
+                                          });
+                                        }
+                                      },
+                                    }
+                                  : undefined
+                              }
+                            />
                           ))}
                         </div>
                       </div>
@@ -1277,6 +1404,18 @@ function DispatchFleet({
             </div>
           </div>
         </div>
+      )}
+
+      {canManage && (
+        <AddAgentDialog
+          open={addOpen}
+          onOpenChange={(o) => {
+            setAddOpen(o);
+            if (!o) setAddVanId(null);
+          }}
+          vans={vans}
+          initialVanId={addVanId}
+        />
       )}
     </div>
   );
