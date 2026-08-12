@@ -381,9 +381,10 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
 
   // Realtime — one channel; prefix invalidation refreshes funnel, production,
   // suspension window, roster, and vans (fixes the old stale-banner gap).
+  // profiles/teams keep one manager's van moves live on another's open board.
   useRealtimeInvalidate({
     channel: "fleet-dispatch-live",
-    tables: ["daily_metrics", "daily_logs", "leads"],
+    tables: ["daily_metrics", "daily_logs", "leads", "profiles", "teams"],
     invalidateKeys: [["fleet_dispatch"]],
   });
 

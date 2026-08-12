@@ -16,6 +16,7 @@ import { WeeklyScheduleSettings } from "@/components/WeeklyScheduleSettings";
 import { CompanySettingsPanel } from "@/components/CompanySettingsPanel";
 import { AddTeamMemberDialog } from "@/components/AddTeamMemberDialog";
 import { RosterPanel } from "@/components/RosterPanel";
+import { NewSignupsPanel } from "@/components/NewSignupsPanel";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -148,6 +149,7 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
         <TabsContent value="payroll" className="mt-0"><PayrollLedger /></TabsContent>
         <TabsContent value="settings" className="mt-0 space-y-6">
           <WeeklyScheduleSettings />
+          <NewSignupsPanel />
           <RosterPanel />
           <CompanySettingsPanel />
           <div className="arcade-card p-4 flex items-center justify-between gap-3 flex-wrap">
