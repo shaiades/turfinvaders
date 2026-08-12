@@ -8,14 +8,22 @@ import { ArcadePanel } from "@/components/arcade";
 import { DatabaseCleanup } from "@/components/DatabaseCleanup";
 import { createCanvasser } from "@/lib/users.functions";
 import { toast } from "sonner";
-import { MANAGER_ROLES, primaryRole, requireRoleBeforeLoad, type AppRole } from "@/lib/roles";
-import { assignableRolesFor, canManageTarget, ROLE_LABEL } from "@/lib/role-policy";
+import { ADMIN_ROLES, primaryRole, requireRoleBeforeLoad, type AppRole } from "@/lib/roles";
+import {
+  assignableRolesFor,
+  canManageTarget,
+  creatableRolesFor,
+  ROLE_LABEL,
+  ROLE_TONE,
+} from "@/lib/role-policy";
 import { useSetUserRole } from "@/hooks/useSetUserRole";
 import { useAuth } from "@/hooks/useAuth";
 
 export const Route = createFileRoute("/_authenticated/users")({
   head: () => ({ meta: [{ title: "Manage Users — Knockout" }] }),
-  beforeLoad: requireRoleBeforeLoad(MANAGER_ROLES),
+  // Owners + Admins only (owner decision 2026-08-12) — captains manage their
+  // rosters from the Fleet Dispatch board instead.
+  beforeLoad: requireRoleBeforeLoad(ADMIN_ROLES),
   component: UsersPage,
   errorComponent: ({ error }) => (
     <div className="text-sm text-destructive">Failed to load users: {error.message}</div>
@@ -26,6 +34,7 @@ export const Route = createFileRoute("/_authenticated/users")({
 function UsersPage() {
   const qc = useQueryClient();
   const { realRole } = useAuth();
+  const isOwner = realRole === "owner";
 
   const { data, isLoading } = useQuery({
     queryKey: ["manage_users"],
@@ -142,8 +151,9 @@ function UsersPage() {
         </div>
         <h1 className="font-display text-2xl text-neon mt-1">MANAGE PLAYERS</h1>
         <p className="text-sm text-muted-foreground mt-2">
-          Assign roles and teams — newest accounts first. Multiple Owners are allowed — all Owners
-          have equal, full access. Captains and Admins can grant Canvasser, Sales Rep, and Captain.
+          Newest accounts first. Multiple Owners are allowed — all Owners have equal, full access.
+          Role changes are owner-only; Admins manage teams and suspension tracking, and can add new
+          players as Canvasser or Sales Rep.
         </p>
       </div>
 
@@ -171,12 +181,6 @@ function UsersPage() {
                   !(p as { is_placeholder?: boolean }).is_placeholder &&
                   !!createdAt &&
                   Date.now() - new Date(createdAt).getTime() < 30 * 86400_000;
-                const assignable = assignableRolesFor(realRole);
-                // Keep the row's current role visible even when the actor
-                // can't grant it (e.g. a captain viewing an Owner row).
-                const roleOptions = assignable.includes(currentRole)
-                  ? assignable
-                  : [currentRole, ...assignable];
                 return (
                   <tr key={p.id} className="border-t border-border">
                     <td className="px-4 py-3 font-medium">
@@ -200,27 +204,30 @@ function UsersPage() {
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">{p.level ?? 1}</td>
                     <td className="px-4 py-3">
-                      <select
-                        value={currentRole}
-                        disabled={setRole.isPending || lastOwner || !canModify}
-                        onChange={(e) =>
-                          setRole.mutate({ userId: p.id, role: e.target.value as AppRole })
-                        }
-                        className="bg-input border border-border rounded-md px-2 py-2 text-base md:text-sm disabled:opacity-50"
-                        title={
-                          lastOwner
-                            ? "Cannot demote the last Owner"
-                            : !canModify
-                              ? "Only Owners can change Owner or Admin accounts"
-                              : undefined
-                        }
-                      >
-                        {roleOptions.map((r) => (
-                          <option key={r} value={r}>
-                            {ROLE_LABEL[r] ?? r}
-                          </option>
-                        ))}
-                      </select>
+                      {isOwner ? (
+                        <select
+                          value={currentRole}
+                          disabled={setRole.isPending || lastOwner}
+                          onChange={(e) =>
+                            setRole.mutate({ userId: p.id, role: e.target.value as AppRole })
+                          }
+                          className="bg-input border border-border rounded-md px-2 py-2 text-base md:text-sm disabled:opacity-50"
+                          title={lastOwner ? "Cannot demote the last Owner" : undefined}
+                        >
+                          {assignableRolesFor(realRole).map((r) => (
+                            <option key={r} value={r}>
+                              {ROLE_LABEL[r] ?? r}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span
+                          className={`inline-flex items-center px-2 py-1 rounded border text-[10px] font-display uppercase tracking-widest ${ROLE_TONE[currentRole]}`}
+                          title="Role changes are owner-only"
+                        >
+                          {ROLE_LABEL[currentRole]}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <select
@@ -313,7 +320,7 @@ function UsersPage() {
               onChange={(e) => setForm({ ...form, role: e.target.value as AppRole })}
               className="bg-input border border-border rounded-md px-2 py-2 text-base md:text-sm"
             >
-              {assignableRolesFor(realRole).map((r) => (
+              {creatableRolesFor(realRole).map((r) => (
                 <option key={r} value={r}>
                   {ROLE_LABEL[r] ?? r}
                 </option>
@@ -361,7 +368,9 @@ function UsersPage() {
         </p>
       </ArcadePanel>
 
-      <DatabaseCleanup />
+      {/* Bulk deletion tools — owner-only (server-side deleteProfile is
+          owner-gated anyway; don't render controls that can only error). */}
+      {isOwner && <DatabaseCleanup />}
     </div>
   );
 }

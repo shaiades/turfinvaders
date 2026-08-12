@@ -153,32 +153,43 @@ export function NewSignupsPanel() {
                     </span>
                   )}
                 </span>
-                <Select
-                  value={current ?? "none"}
-                  disabled={!canModify || setUserRole.isPending}
-                  onValueChange={(val) => {
-                    if (val !== "none" && val !== current) {
-                      setUserRole.mutate({
-                        userId: p.id,
-                        role: val as (typeof assignable)[number],
-                      });
-                    }
-                  }}
-                >
-                  <SelectTrigger className="h-9 md:h-7 w-full sm:w-auto sm:min-w-[110px] text-[11px] font-display uppercase tracking-wider bg-background">
-                    <SelectValue placeholder="No role yet" />
-                  </SelectTrigger>
-                  <SelectContent className="bg-background">
-                    <SelectItem value="none" disabled>
-                      — Role —
-                    </SelectItem>
-                    {assignable.map((r) => (
-                      <SelectItem key={r} value={r}>
-                        {ROLE_LABEL[r]}
+                {assignable.length === 0 ? (
+                  // Role changes are owner-only — show the current role as a
+                  // read-only chip, never an empty dropdown.
+                  <span
+                    className="inline-flex items-center justify-center h-9 md:h-7 px-2.5 rounded border border-border bg-background text-[11px] font-display uppercase tracking-wider text-muted-foreground w-full sm:w-auto sm:min-w-[110px]"
+                    title="Role changes are owner-only"
+                  >
+                    {current ? ROLE_LABEL[current] : "No role yet"}
+                  </span>
+                ) : (
+                  <Select
+                    value={current ?? "none"}
+                    disabled={!canModify || setUserRole.isPending}
+                    onValueChange={(val) => {
+                      if (val !== "none" && val !== current) {
+                        setUserRole.mutate({
+                          userId: p.id,
+                          role: val as (typeof assignable)[number],
+                        });
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="h-9 md:h-7 w-full sm:w-auto sm:min-w-[110px] text-[11px] font-display uppercase tracking-wider bg-background">
+                      <SelectValue placeholder="No role yet" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-background">
+                      <SelectItem value="none" disabled>
+                        — Role —
                       </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                      {assignable.map((r) => (
+                        <SelectItem key={r} value={r}>
+                          {ROLE_LABEL[r]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
                 <Select
                   value={p.team_id ?? "free"}
                   disabled={!canModify || assignVan.isPending}
@@ -211,9 +222,9 @@ export function NewSignupsPanel() {
         </div>
       )}
       <p className="text-[10px] text-muted-foreground mt-3">
-        Login-capable accounts created in the last {WINDOW_DAYS} days, newest first. Assign a role
-        and a van to put them in play — Monday.com placeholder agents live in Fleet Dispatch's Free
-        Agents instead.
+        Login-capable accounts created in the last {WINDOW_DAYS} days, newest first. Assign a van
+        (and a role — Owners only) to put them in play — Monday.com placeholder agents live in
+        Fleet Dispatch's Free Agents instead.
       </p>
     </ArcadePanel>
   );

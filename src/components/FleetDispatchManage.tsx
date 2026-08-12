@@ -721,26 +721,32 @@ export function FleetDispatchManage({
                 No archived agents.
               </div>
             ) : (
-              archivedProfiles.map((p) => (
-                <div
-                  key={p.id}
-                  className="flex items-center gap-2 px-2 py-1.5 rounded border border-border bg-surface"
-                >
-                  <span className="text-sm truncate flex-1">{p.display_name ?? "Unknown"}</span>
-                  <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-                    {p.office_location ?? "—"}
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={reactivateAgent.isPending}
-                    onClick={() => reactivateAgent.mutate(p.id)}
-                    className="h-7 text-[11px] font-display uppercase tracking-wider"
+              archivedProfiles.map((p) => {
+                // Mirrors the reactivate_agent RPC: captains/Admins may not
+                // touch archived Owner/Admin accounts.
+                const canReactivate = canManageTarget(realRole, rolesByUser.get(p.id) ?? []);
+                return (
+                  <div
+                    key={p.id}
+                    className="flex items-center gap-2 px-2 py-1.5 rounded border border-border bg-surface"
                   >
-                    Reactivate
-                  </Button>
-                </div>
-              ))
+                    <span className="text-sm truncate flex-1">{p.display_name ?? "Unknown"}</span>
+                    <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                      {p.office_location ?? "—"}
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={reactivateAgent.isPending || !canReactivate}
+                      title={canReactivate ? undefined : "Only Owners can reactivate Admin accounts"}
+                      onClick={() => reactivateAgent.mutate(p.id)}
+                      className="h-7 text-[11px] font-display uppercase tracking-wider"
+                    >
+                      Reactivate
+                    </Button>
+                  </div>
+                );
+              })
             )}
           </div>
           <DialogFooter>

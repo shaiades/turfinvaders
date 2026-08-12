@@ -2,7 +2,7 @@ import { Link, useRouter, useRouterState } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth, setDevRoleOverride, type AppRole } from "@/hooks/useAuth";
-import { CLOSE_KOMBAT_ROLES, isAdminRole, isManagerRole } from "@/lib/roles";
+import { CLOSE_KOMBAT_ROLES, canUseViewAs } from "@/lib/roles";
 import {
   LogOut,
   LayoutDashboard,
@@ -105,8 +105,10 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen w-full max-w-full overflow-x-hidden flex flex-col bg-background">
-      {/* Manager-only tool: canvassers and sales reps never see it. */}
-      {user && isManagerRole(realRole) && (
+      {/* Owner-only tool (owner decision 2026-08-12): View As never renders
+          for captains, Admins, canvassers, or sales reps — and useAuth
+          ignores the stored override for them too. */}
+      {user && canUseViewAs(realRole) && (
         <div className="border-b border-[var(--neon-magenta)]/30 bg-background text-xs">
           <div className="max-w-7xl mx-auto px-3 sm:px-6 py-1 sm:py-2 flex items-center gap-2 overflow-x-auto scrollbar-hide whitespace-nowrap">
             <FlaskConical className="w-3.5 h-3.5 text-[var(--neon-magenta)] shrink-0" />
@@ -125,9 +127,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <option value="owner">Owner</option>
               <option value="captain">Captain</option>
               <option value="canvasser">Canvasser</option>
-              {/* Sales Rep preview needs real /close-kombat access — admins
-                  only, captains would just bounce off the route guard. */}
-              {isAdminRole(realRole) && <option value="sales_rep">Sales Rep</option>}
+              <option value="sales_rep">Sales Rep</option>
               <option value="office_staff">Office Staff</option>
             </select>
             {isOverridden && (

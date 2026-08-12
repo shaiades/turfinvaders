@@ -1,7 +1,7 @@
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { StatCard, ArcadePanel, TeamBadge } from "@/components/arcade";
 import { useAuth } from "@/hooks/useAuth";
-import { isAdminRole, isManagerRole } from "@/lib/roles";
+import { isAdminRole, isManagerRole, MANAGER_ROLES, requireRoleBeforeLoad } from "@/lib/roles";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { formatCurrency } from "@/lib/utils";
@@ -10,6 +10,9 @@ import { Lock, EyeOff } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/canvassers/$canvasserId")({
   head: () => ({ meta: [{ title: "Player profile — Knockout" }] }),
+  // Leadership-only: canvassers/sales reps bounce in beforeLoad (real DB
+  // roles) before any queries fire. Also gates the /field child route.
+  beforeLoad: requireRoleBeforeLoad(MANAGER_ROLES),
   component: CanvasserProfile,
 });
 
