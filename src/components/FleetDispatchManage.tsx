@@ -5,7 +5,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel, TeamBadge } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -35,7 +34,7 @@ import {
   Lock,
 } from "lucide-react";
 import { deleteProfile, deleteVan } from "@/lib/fleet.functions";
-import { addTeamMember } from "@/lib/users.functions";
+import { AddAgentDialog } from "@/components/AddAgentDialog";
 import { useAuth } from "@/hooks/useAuth";
 import { isManagerRole } from "@/lib/roles";
 import { canManageTarget } from "@/lib/role-policy";
@@ -87,15 +86,12 @@ export function FleetDispatchManage({
   const [newVanColor, setNewVanColor] = useState(VAN_COLORS[0]);
   const deleteProfileFn = useServerFn(deleteProfile);
   const deleteVanFn = useServerFn(deleteVan);
-  const addTeamMemberFn = useServerFn(addTeamMember);
   const [editingVanId, setEditingVanId] = useState<string | null>(null);
   const [editVanName, setEditVanName] = useState("");
   const [editVanColor, setEditVanColor] = useState(VAN_COLORS[0]);
   const [editVanLoc, setEditVanLoc] = useState<OfficeLocation>(DEFAULT_OFFICE);
   const [addAgentOpen, setAddAgentOpen] = useState(false);
   const [addAgentVanId, setAddAgentVanId] = useState<string | null>(null);
-  const [newAgentName, setNewAgentName] = useState("");
-  const [newAgentOffice, setNewAgentOffice] = useState<OfficeLocation>(DEFAULT_OFFICE);
   const [archivedOpen, setArchivedOpen] = useState(false);
 
   const reactivateAgent = useMutation({
@@ -227,31 +223,6 @@ export function FleetDispatchManage({
       qc.invalidateQueries({ queryKey: ["fleet_dispatch"] });
     },
     onError: (e: Error) => toast.error(e.message ?? "Failed to delete van"),
-  });
-
-  const addAgent = useMutation({
-    mutationFn: async () => {
-      const name = newAgentName.trim();
-      if (!name) throw new Error("Full Name required");
-      await addTeamMemberFn({
-        data: {
-          full_name: name,
-          office_location: newAgentOffice,
-          role: "canvasser",
-          team_id: addAgentVanId,
-        },
-      });
-    },
-    onSuccess: () => {
-      const van = addAgentVanId ? vans.find((v) => v.id === addAgentVanId) : null;
-      toast.success(`${newAgentName.trim()} added to ${van ? van.name : "Free Agents"}`);
-      setNewAgentName("");
-      setAddAgentOpen(false);
-      setAddAgentVanId(null);
-      qc.invalidateQueries({ queryKey: ["fleet_dispatch"] });
-      qc.invalidateQueries({ queryKey: ["manage_users"] });
-    },
-    onError: (e: Error) => toast.error(e.message ?? "Failed to add agent"),
   });
 
   function startEditVan(v: Van) {
@@ -486,9 +457,6 @@ export function FleetDispatchManage({
                                 <button
                                   onClick={() => {
                                     setAddAgentVanId(v.id);
-                                    setNewAgentOffice(
-                                      (v.office_location as OfficeLocation) ?? DEFAULT_OFFICE,
-                                    );
                                     setAddAgentOpen(true);
                                   }}
                                   className="p-2 md:p-1 min-h-9 min-w-9 md:min-h-0 md:min-w-0 inline-flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground"
@@ -783,111 +751,16 @@ export function FleetDispatchManage({
         </DialogContent>
       </Dialog>
 
-      {/* Add Agent modal */}
-      <Dialog open={addAgentOpen} onOpenChange={setAddAgentOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="font-display uppercase tracking-widest">Add Agent</DialogTitle>
-            <DialogDescription>
-              Creates a placeholder Canvasser in{" "}
-              {addAgentVanId
-                ? (vans.find((v) => v.id === addAgentVanId)?.name ?? "the selected van")
-                : "Free Agents"}
-              .
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3 py-2">
-            <div>
-              <Label
-                htmlFor="agent-name"
-                className="text-[10px] font-display uppercase tracking-widest text-muted-foreground"
-              >
-                Full Name
-              </Label>
-              <Input
-                id="agent-name"
-                autoFocus
-                value={newAgentName}
-                onChange={(e) => setNewAgentName(e.target.value)}
-                placeholder="e.g. Alex Morgan"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") addAgent.mutate();
-                }}
-              />
-            </div>
-            <div>
-              <Label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-                Van
-              </Label>
-              <Select
-                value={addAgentVanId ?? "free"}
-                onValueChange={(val) => {
-                  const vanId = val === "free" ? null : val;
-                  setAddAgentVanId(vanId);
-                  if (vanId) {
-                    const van = vans.find((v) => v.id === vanId);
-                    if (van?.office_location)
-                      setNewAgentOffice(van.office_location as OfficeLocation);
-                  }
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="free">Free Agents</SelectItem>
-                  {vans.map((v) => (
-                    <SelectItem key={v.id} value={v.id}>
-                      <span className="inline-flex items-center gap-2">
-                        <span
-                          className="w-2 h-2 rounded-full"
-                          style={{ background: v.color ?? "#888" }}
-                        />
-                        {v.name}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-                Office
-              </Label>
-              <Select
-                value={newAgentOffice}
-                onValueChange={(v) => setNewAgentOffice(v as OfficeLocation)}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {OFFICE_LOCATIONS.map((o) => (
-                    <SelectItem key={o} value={o}>
-                      {o}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setAddAgentOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={() => addAgent.mutate()}
-              disabled={addAgent.isPending || !newAgentName.trim()}
-              className="bg-neon text-background hover:bg-neon/90"
-            >
-              <UserPlus className="w-4 h-4 mr-1" /> Add to{" "}
-              {addAgentVanId
-                ? (vans.find((v) => v.id === addAgentVanId)?.name ?? "Van")
-                : "Free Agents"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Add Agent modal — shared with the dispatch board's per-van "+". */}
+      <AddAgentDialog
+        open={addAgentOpen}
+        onOpenChange={(o) => {
+          setAddAgentOpen(o);
+          if (!o) setAddAgentVanId(null);
+        }}
+        vans={vans}
+        initialVanId={addAgentVanId}
+      />
     </div>
   );
 }
