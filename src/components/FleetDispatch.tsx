@@ -827,7 +827,11 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
       <SuspensionBanner
         rows={suspensionRows}
         onRemove={
-          readOnly
+          // Role-gated, not page-gated: captains have no COMMAND tab, so the
+          // read-only leaderboard is where they get the one-click ✕ (owner,
+          // 2026-08-12). Writes persist for the whole manager tier via the
+          // "Managers update non-privileged profiles" policy.
+          !isManagerRole(realRole)
             ? undefined
             : (g) => {
                 const name = g.display_name ?? "this player";
@@ -837,14 +841,17 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
                   .from("profiles")
                   .update({ suspension_tracked: false })
                   .in("id", g.ids)
-                  .then(({ error }) => {
-                    if (error) {
+                  .select("id")
+                  .then(({ data, error }) => {
+                    if (error || !data?.length) {
                       setDismissed((prev) => {
                         const n = new Set(prev);
                         n.delete(g.key);
                         return n;
                       });
-                      toast.error(`Could not remove ${name}: ${error.message}`);
+                      toast.error(
+                        `Could not remove ${name}: ${error?.message ?? "no permission for this agent"}`,
+                      );
                       return;
                     }
                     qc.invalidateQueries({ queryKey: ["fleet_dispatch", "roster"] });
