@@ -89,8 +89,23 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const router = useRouter();
   useEffect(() => {
-    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+    // supabase-js re-emits SIGNED_IN on tab focus / session recovery, not
+    // just at real logins. Re-running every route guard on each focus gave
+    // transient network blips a chance to bounce a signed-in user to /auth,
+    // so only an actual identity change invalidates (react-query's own
+    // refetchOnWindowFocus already keeps data fresh on return). undefined =
+    // no identity known yet; the getSession() seed below fills it so the
+    // first focus re-emit is deduped too.
+    let lastUserId: string | null | undefined;
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (!error && lastUserId === undefined) lastUserId = data.session?.user.id ?? null;
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       if (event !== "SIGNED_IN" && event !== "SIGNED_OUT" && event !== "USER_UPDATED") return;
+      const userId = session?.user.id ?? null;
+      const sameIdentity = lastUserId !== undefined && userId === lastUserId;
+      lastUserId = userId;
+      if (event === "SIGNED_IN" && sameIdentity) return;
       router.invalidate();
       if (event !== "SIGNED_OUT") queryClient.invalidateQueries();
     });
