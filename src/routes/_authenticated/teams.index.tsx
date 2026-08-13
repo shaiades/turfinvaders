@@ -3,6 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel, TeamBadge } from "@/components/arcade";
 import { MANAGER_ROLES, requireRoleBeforeLoad } from "@/lib/roles";
+import { useDateRange } from "@/hooks/useDateRange";
+import { RangeTabs } from "@/components/RangeTabs";
 
 export const Route = createFileRoute("/_authenticated/teams/")({
   head: () => ({ meta: [{ title: "Vans — Knockout" }] }),
@@ -13,13 +15,24 @@ export const Route = createFileRoute("/_authenticated/teams/")({
 });
 
 function TeamsIndex() {
-  const { data: teams = [], isLoading } = useQuery({
-    queryKey: ["teams_with_totals"],
+  // Same Day / Week / Month selector as the van detail page — the cards'
+  // Leads/Sales follow it (Crew stays a headcount). Defaults to the pay week.
+  const rangeControls = useDateRange({ initialTab: "week" });
+  const { range } = rangeControls;
+
+  const { data: teams } = useQuery({
+    queryKey: ["teams_with_totals", range.startISO, range.endISO],
+    // Keep the cards mounted while a new range loads.
+    placeholderData: (prev) => prev,
     queryFn: async () => {
       const [teamsR, profilesR, logsR] = await Promise.all([
         supabase.from("teams").select("id, name, color, captain_id").order("name"),
         supabase.from("profiles").select("id, display_name, team_id"),
-        supabase.from("daily_logs").select("team_id, demos_sits, sales, no_demo, one_legs, future_leads"),
+        supabase
+          .from("daily_logs")
+          .select("team_id, demos_sits, sales, no_demo, one_legs, future_leads")
+          .gte("log_date", range.startISO)
+          .lte("log_date", range.endISO),
       ]);
       const captainName = new Map((profilesR.data ?? []).map((p) => [p.id, p.display_name ?? "—"]));
       const memberCount = new Map<string, number>();
@@ -49,8 +62,16 @@ function TeamsIndex() {
   return (
     <div className="space-y-6">
       <h1 className="font-display text-2xl text-neon">VANS</h1>
-      <ArcadePanel title="All Vans">
-        {isLoading ? (
+      <RangeTabs controls={rangeControls} />
+      <ArcadePanel
+        title="All Vans"
+        action={
+          <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            {range.label}
+          </span>
+        }
+      >
+        {teams === undefined ? (
           <div className="text-sm text-muted-foreground">Loading…</div>
         ) : teams.length === 0 ? (
           <div className="text-sm text-muted-foreground">No Vans yet. Create one in the Fleet Manager.</div>
