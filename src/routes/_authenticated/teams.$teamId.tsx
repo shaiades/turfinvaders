@@ -3,6 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { StatCard, ArcadePanel, TeamBadge } from "@/components/arcade";
 import { MANAGER_ROLES, requireRoleBeforeLoad } from "@/lib/roles";
+import { useDateRange } from "@/hooks/useDateRange";
+import { RangeTabs } from "@/components/RangeTabs";
 
 export const Route = createFileRoute("/_authenticated/teams/$teamId")({
   head: () => ({ meta: [{ title: "Van — Knockout" }] }),
@@ -14,14 +16,25 @@ export const Route = createFileRoute("/_authenticated/teams/$teamId")({
 
 function TeamDetail() {
   const { teamId } = Route.useParams();
+  // Day / Week / Month selector — was an unbounded all-time aggregate before
+  // 2026-08-12; defaults to the pay week like the rest of the manager suite.
+  const rangeControls = useDateRange({ initialTab: "week" });
+  const { range } = rangeControls;
 
-  const { data, isLoading } = useQuery({
-    queryKey: ["team_detail", teamId],
+  const { data } = useQuery({
+    queryKey: ["team_detail", teamId, range.startISO, range.endISO],
+    // Keep the page (and the range selector) mounted while a new range loads.
+    placeholderData: (prev) => prev,
     queryFn: async () => {
       const [teamR, profilesR, logsR] = await Promise.all([
         supabase.from("teams").select("id, name, color, captain_id").eq("id", teamId).maybeSingle(),
         supabase.from("profiles").select("id, display_name, team_id").eq("team_id", teamId),
-        supabase.from("daily_logs").select("canvasser_id, demos_sits, sales, no_demo, one_legs, future_leads").eq("team_id", teamId),
+        supabase
+          .from("daily_logs")
+          .select("canvasser_id, demos_sits, sales, no_demo, one_legs, future_leads")
+          .eq("team_id", teamId)
+          .gte("log_date", range.startISO)
+          .lte("log_date", range.endISO),
       ]);
       const team = teamR.data;
       if (!team) return null;
@@ -50,8 +63,9 @@ function TeamDetail() {
     },
   });
 
-  if (isLoading) return <div className="text-sm text-muted-foreground">Loading…</div>;
-  if (!data) {
+  // undefined = first load (no placeholder yet); null = team really missing.
+  if (data === undefined) return <div className="text-sm text-muted-foreground">Loading…</div>;
+  if (data === null) {
     return (
       <div className="space-y-4">
         <Link to="/teams" className="text-xs text-muted-foreground hover:text-neon">← All Vans</Link>
@@ -71,10 +85,27 @@ function TeamDetail() {
         </div>
       </div>
 
+      <RangeTabs controls={rangeControls} />
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard label="Leads" value={totals.leads.toLocaleString()} accent="neon" />
-        <StatCard label="Sits" value={totals.sits.toLocaleString()} accent="accent" />
-        <StatCard label="Sales" value={totals.sales.toLocaleString()} accent="victory" />
+        <StatCard
+          label="Leads"
+          value={totals.leads.toLocaleString()}
+          sublabel={range.label}
+          accent="neon"
+        />
+        <StatCard
+          label="Sits"
+          value={totals.sits.toLocaleString()}
+          sublabel={range.label}
+          accent="accent"
+        />
+        <StatCard
+          label="Sales"
+          value={totals.sales.toLocaleString()}
+          sublabel={range.label}
+          accent="victory"
+        />
         <StatCard label="Crew" value={String(members.length)} accent="warning" />
       </div>
 
