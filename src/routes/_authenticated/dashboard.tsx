@@ -27,8 +27,9 @@ import {
   isSuspendedStatus,
 } from "@/components/SuspendedBadge";
 import { useTodayLeads } from "@/hooks/useTodayLeads";
+import { useDateRange } from "@/hooks/useDateRange";
+import { RangeTabs } from "@/components/RangeTabs";
 import { formatCurrency } from "@/lib/utils";
-import { weekStartMonday, toISODate, laMidnightUtcISO } from "@/lib/dates";
 import { Zap, DoorOpen, Truck, FileSpreadsheet } from "lucide-react";
 
 type OwnerTab = "dispatch" | "timesheets" | "payroll" | "settings";
@@ -172,6 +173,10 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
 function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visibility: boolean }) {
   const { user } = useAuth();
   const { data: leads } = useTodayLeads();
+  // Day / Week / Month selector — defaults to the pay week, matching the old
+  // week-to-date board, and drives every panel below the live counter.
+  const rangeControls = useDateRange({ initialTab: "week" });
+  const { range } = rangeControls;
 
   const teamQuery = useQuery({
     enabled: !!teamId,
@@ -195,10 +200,8 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
 
   const rosterQuery = useQuery({
     enabled: !!teamId && isVanCaptain,
-    queryKey: ["captain_roster", teamId],
+    queryKey: ["captain_roster", teamId, range.startISO, range.endISO],
     queryFn: async () => {
-      const monday = weekStartMonday();
-      const since = toISODate(monday);
       const [profilesRes, logsRes, salesRes] = await Promise.all([
         supabase
           .from("profiles")
@@ -208,14 +211,16 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
           .from("daily_logs")
           .select("canvasser_id, doors_knocked, sales")
           .eq("team_id", teamId!)
-          .gte("log_date", since),
+          .gte("log_date", range.startISO)
+          .lte("log_date", range.endISO),
         supabase
           .from("leads")
           .select("canvasser_id, sale_amount")
           .eq("team_id", teamId!)
           .eq("status", "confirmed")
           .eq("is_sale", true)
-          .gte("created_at", laMidnightUtcISO(since)),
+          .gte("created_at", range.startUtcISO)
+          .lt("created_at", range.endUtcExclusiveISO),
       ]);
       if (profilesRes.error) throw profilesRes.error;
       if (logsRes.error) throw logsRes.error;
@@ -262,16 +267,16 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
   // captains cannot read other teams' daily_logs/leads under RLS by design.
   const otherVansQuery = useQuery({
     enabled: visibility,
-    queryKey: ["captain_other_vans"],
+    queryKey: ["captain_other_vans", range.startISO, range.endISO],
     queryFn: async () => {
-      const since = toISODate(weekStartMonday());
       const [teamsRes, profilesRes, metricsRes] = await Promise.all([
         supabase.from("teams").select("id, name, color"),
         supabase.from("profiles").select("id, team_id"),
         supabase
           .from("daily_metrics")
           .select("canvasser_id, leads_submitted, leads_confirmed, sales")
-          .gte("metric_date", since),
+          .gte("metric_date", range.startISO)
+          .lte("metric_date", range.endISO),
       ]);
       if (teamsRes.error) throw teamsRes.error;
       if (profilesRes.error) throw profilesRes.error;
@@ -334,9 +339,15 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
         <LiveLeadCounter value={leads.byTeam[myTeam.id] ?? 0} size="md" accent="victory" />
       </div>
 
+      {/* Day / Week / Month — governs the Command Center, team stats, and Other Vans */}
+      <RangeTabs controls={rangeControls} />
+
       {teamId ? (
         isVanCaptain ? (
-          <CommandCenter teamId={teamId} />
+          <CommandCenter
+            teamId={teamId}
+            range={{ startISO: range.startISO, endISO: range.endISO, label: range.label }}
+          />
         ) : teamQuery.isSuccess ? (
           <div className="arcade-card p-8 text-center">
             <h2 className="font-display text-sm text-neon">MEMBER VIEW</h2>
@@ -363,19 +374,19 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
             <StatCard
               label="Team Revenue"
               value={formatCurrency(totals.revenue)}
-              sublabel="Week to date"
+              sublabel={range.label}
               accent="victory"
             />
             <StatCard
               label="Doors"
               value={totals.doors.toLocaleString()}
-              sublabel="Week to date"
+              sublabel={range.label}
               accent="neon"
             />
             <StatCard
               label="Sales"
               value={totals.sales.toLocaleString()}
-              sublabel="Week to date"
+              sublabel={range.label}
               accent="accent"
             />
             <StatCard

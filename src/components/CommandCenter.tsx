@@ -9,6 +9,8 @@ const turfInvadersHero = { url: "/turf-invaders-hero.png" };
 type Props = {
   /** Restrict to a single van (Captain view). Omit for company-wide. */
   teamId?: string | null;
+  /** Inclusive LA calendar-date window. Omit for week-to-date (legacy default). */
+  range?: { startISO: string; endISO: string; label: string };
 };
 
 type WeekTotals = {
@@ -21,16 +23,18 @@ type WeekTotals = {
 };
 
 
-export function CommandCenter({ teamId }: Props) {
+export function CommandCenter({ teamId, range }: Props) {
+  // Week anchor is the LA Monday (midnight PT reset), not viewer-local.
+  const startISO = range?.startISO ?? laWeekStartISO();
+  const endISO = range?.endISO ?? null;
   const totals = useQuery({
-    queryKey: ["command_center", teamId ?? "all"],
+    queryKey: ["command_center", teamId ?? "all", startISO, endISO ?? "wtd"],
     queryFn: async (): Promise<WeekTotals> => {
-      // Week anchor is the LA Monday (midnight PT reset), not viewer-local.
-      const since = laWeekStartISO();
       let q = supabase
         .from("daily_logs")
         .select("canvasser_id, log_date, leads_called_in, confirmed_leads, demos_sits, sales, no_shows")
-        .gte("log_date", since);
+        .gte("log_date", startISO);
+      if (endISO) q = q.lte("log_date", endISO);
       if (teamId) q = q.eq("team_id", teamId);
       const { data, error } = await q;
       if (error) throw error;
@@ -88,7 +92,7 @@ export function CommandCenter({ teamId }: Props) {
         title="Command Center"
         action={
           <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-            Week to Date
+            {range?.label ?? "Week to Date"}
           </span>
         }
       >

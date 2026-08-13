@@ -5,7 +5,8 @@ import { isAdminRole, isManagerRole, MANAGER_ROLES, requireRoleBeforeLoad } from
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { formatCurrency } from "@/lib/utils";
-import { weekStartMonday, toISODate, laMidnightUtcISO, laMonthStartISO } from "@/lib/dates";
+import { useDateRange } from "@/hooks/useDateRange";
+import { RangeTabs } from "@/components/RangeTabs";
 import { Lock, EyeOff } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/canvassers/$canvasserId")({
@@ -24,6 +25,10 @@ function CanvasserProfile() {
   const { canvasserId } = Route.useParams();
   const { role, teamId, user } = useAuth();
   const isRealUser = UUID_RE.test(canvasserId);
+  // Day / Week / Month selector — defaults to the pay week (the old fixed
+  // "week to date" anchor) and drives both production stats and revenue.
+  const rangeControls = useDateRange({ initialTab: "week" });
+  const { range } = rangeControls;
 
   const { data: settings } = useQuery({
     queryKey: ["company_settings"],
@@ -59,33 +64,23 @@ function CanvasserProfile() {
     },
   });
 
-  // Real revenue from confirmed leads (Monday-anchored week, matching the rest of the app)
+  // Real revenue from confirmed leads, scoped to the selected range (leads
+  // are timestamptz, so the window is the range's LA-midnight UTC instants).
   const revenueQuery = useQuery({
     enabled: isRealUser,
-    queryKey: ["canvasser_revenue", canvasserId],
+    queryKey: ["canvasser_revenue", canvasserId, range.startISO, range.endISO],
+    placeholderData: (prev) => prev,
     queryFn: async () => {
-      const monday = laMidnightUtcISO(toISODate(weekStartMonday()));
-      const [weekRes, monthRes] = await Promise.all([
-        supabase
-          .from("leads")
-          .select("sale_amount")
-          .eq("canvasser_id", canvasserId)
-          .eq("status", "confirmed")
-          .eq("is_sale", true)
-          .gte("created_at", monday),
-        supabase
-          .from("leads")
-          .select("sale_amount")
-          .eq("canvasser_id", canvasserId)
-          .eq("status", "confirmed")
-          .eq("is_sale", true)
-          .gte("created_at", laMidnightUtcISO(laMonthStartISO())),
-      ]);
-      if (weekRes.error) throw weekRes.error;
-      if (monthRes.error) throw monthRes.error;
-      const sum = (rows: { sale_amount: number | null }[] | null) =>
-        (rows ?? []).reduce((a, r) => a + Number(r.sale_amount ?? 0), 0);
-      return { weekly: sum(weekRes.data), monthly: sum(monthRes.data) };
+      const { data, error } = await supabase
+        .from("leads")
+        .select("sale_amount")
+        .eq("canvasser_id", canvasserId)
+        .eq("status", "confirmed")
+        .eq("is_sale", true)
+        .gte("created_at", range.startUtcISO)
+        .lt("created_at", range.endUtcExclusiveISO);
+      if (error) throw error;
+      return (data ?? []).reduce((a, r) => a + Number(r.sale_amount ?? 0), 0);
     },
   });
 
@@ -114,16 +109,18 @@ function CanvasserProfile() {
   const canReadLogs = isSelf || isAdminRole(role) || (role === "captain" && isDirectCaptain);
   const canViewRevenue = canReadLogs;
 
-  // Week-to-date production stats from real daily_logs
+  // Production stats from real daily_logs, scoped to the selected range.
   const statsQuery = useQuery({
     enabled: isRealUser && canReadLogs,
-    queryKey: ["canvasser_stats", canvasserId],
+    queryKey: ["canvasser_stats", canvasserId, range.startISO, range.endISO],
+    placeholderData: (prev) => prev,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("daily_logs")
         .select("doors_knocked, people_talked_to, sales")
         .eq("canvasser_id", canvasserId)
-        .gte("log_date", toISODate(weekStartMonday()));
+        .gte("log_date", range.startISO)
+        .lte("log_date", range.endISO);
       if (error) throw error;
       return (data ?? []).reduce(
         (acc, r) => ({
@@ -141,8 +138,7 @@ function CanvasserProfile() {
   const team = teamQuery.data;
   const level = profileQuery.data?.level ?? 0;
   const stats = statsQuery.data;
-  const weekly = revenueQuery.data?.weekly ?? 0;
-  const monthly = revenueQuery.data?.monthly ?? 0;
+  const revenue = revenueQuery.data ?? 0;
 
   return (
     <div className="space-y-8">
@@ -184,49 +180,43 @@ function CanvasserProfile() {
         </div>
       ) : (
         <>
+          <RangeTabs controls={rangeControls} />
+
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <StatCard
               label="Doors Knocked"
               value={canReadLogs && stats ? stats.doors.toLocaleString() : "—"}
-              sublabel="Week to date"
+              sublabel={range.label}
               accent="neon"
             />
             <StatCard
               label="Contacts Made"
               value={canReadLogs && stats ? stats.contacts.toLocaleString() : "—"}
-              sublabel="Week to date"
+              sublabel={range.label}
               accent="warning"
             />
             <StatCard
               label="Sales Closed"
               value={canReadLogs && stats ? stats.sales.toLocaleString() : "—"}
-              sublabel="Week to date"
+              sublabel={range.label}
               accent="accent"
             />
             <StatCard
               label="Revenue Generated"
-              value={canViewRevenue ? formatCurrency(monthly) : "—"}
-              sublabel="Month to date"
+              value={canViewRevenue ? formatCurrency(revenue) : "—"}
+              sublabel={range.label}
               accent="victory"
             />
           </div>
 
           {canViewRevenue ? (
             <ArcadePanel title="Revenue · Confirmed Sales">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <StatCard
-                  label="Weekly Revenue"
-                  value={formatCurrency(weekly)}
-                  accent="victory"
-                  sublabel="Since Monday · confirmed sales only"
-                />
-                <StatCard
-                  label="Monthly Revenue"
-                  value={formatCurrency(monthly)}
-                  accent="victory"
-                  sublabel="Month-to-date · confirmed sales only"
-                />
-              </div>
+              <StatCard
+                label="Revenue"
+                value={formatCurrency(revenue)}
+                accent="victory"
+                sublabel={`${range.label} · confirmed sales only`}
+              />
             </ArcadePanel>
           ) : (
             <ArcadePanel title="Revenue · Confirmed Sales">
