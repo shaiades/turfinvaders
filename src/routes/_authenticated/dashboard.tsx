@@ -124,13 +124,24 @@ function NoRole() {
     return () => clearTimeout(fallback);
   }, [hasRole]);
 
+  // Signup intent (a claim from the auth form, never a grant) personalizes
+  // the wait: canvassers hear about Active Run, closers about Close Kombat.
+  const requested = user?.user_metadata?.requested_role as string | undefined;
+  const destination =
+    requested === "sales_rep"
+      ? "you'll spawn straight into Close Kombat"
+      : requested === "canvasser"
+        ? "you'll spawn straight into your Active Run"
+        : "you'll spawn straight into your screen";
+
   return (
     <ArcadeCard glow className="p-8 text-center max-w-md mx-auto">
       <h1 className="font-display text-base text-neon">PLAYER CREATED</h1>
       <p className="mt-3 text-sm text-muted-foreground">
-        Your account is live — an Owner or Captain now assigns your role and van. This screen
-        unlocks itself the moment that happens, usually within the hour. Nothing to refresh, no need
-        to sign out.
+        Your account is live — an Owner or Captain now confirms your role
+        {requested === "sales_rep" ? " (you asked for Sales Rep)" : ""}
+        {requested === "canvasser" ? " (you asked for Canvasser)" : ""} and van. The moment that
+        happens {destination} — nothing to refresh, no need to sign out.
       </p>
       <p className="mt-3 text-xs text-muted-foreground">
         Starting a shift right now? Ping your Captain to activate you on the spot.

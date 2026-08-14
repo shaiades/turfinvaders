@@ -11,12 +11,19 @@ export const Route = createFileRoute("/auth")({
   component: AuthPage,
 });
 
+/** Signup role INTENT — a claim stored in auth metadata, never a grant.
+ *  Roles carry data access, so they stay Owner/Captain-granted (security
+ *  decision 2026-08-12); this only personalizes the waiting room and shows
+ *  managers a "wants X" chip so activation is one tap. */
+type RequestedRole = "canvasser" | "sales_rep";
+
 function AuthPage() {
   const navigate = useNavigate();
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
+  const [requestedRole, setRequestedRole] = useState<RequestedRole>("canvasser");
   const [busy, setBusy] = useState(false);
 
   async function redirectByRole(userId: string) {
@@ -39,7 +46,10 @@ function AuthPage() {
           email,
           password,
           options: {
-            data: { display_name: name || email.split("@")[0] },
+            data: {
+              display_name: name || email.split("@")[0],
+              requested_role: requestedRole,
+            },
             emailRedirectTo: window.location.origin,
           },
         });
@@ -105,14 +115,33 @@ function AuthPage() {
 
           <form onSubmit={submit} className="space-y-3" method="post" autoComplete="on">
             {mode === "signup" && (
-              <Field
-                label="Player name"
-                value={name}
-                onChange={setName}
-                placeholder="Your name"
-                autoComplete="name"
-                name="name"
-              />
+              <>
+                <Field
+                  label="Player name"
+                  value={name}
+                  onChange={setName}
+                  placeholder="Your name"
+                  autoComplete="name"
+                  name="name"
+                />
+                <label className="block">
+                  <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                    I'm joining as
+                  </span>
+                  {/* text-base keeps iOS from zoom-jumping on focus. */}
+                  <select
+                    value={requestedRole}
+                    onChange={(e) => setRequestedRole(e.target.value as RequestedRole)}
+                    className="mt-1 w-full bg-surface border border-border rounded-md px-3 py-2 min-h-11 text-base focus:outline-none focus:ring-1 focus:ring-ring"
+                  >
+                    <option value="canvasser">Canvasser — I knock doors</option>
+                    <option value="sales_rep">Sales Rep — I close deals</option>
+                  </select>
+                  <span className="mt-1 block text-[10px] text-muted-foreground">
+                    Your manager confirms this when they activate you.
+                  </span>
+                </label>
+              </>
             )}
             <Field
               label="Email"
