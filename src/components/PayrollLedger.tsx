@@ -52,6 +52,69 @@ function emptyAgg(): Agg {
   return { bo: 0, ol: 0, rs: 0, pm: 0, sales: 0, total: 0, sits: 0, points: 0, sale_amount: 0 };
 }
 
+/** Pay Lock states → badge copy. Anything that is neither "active" nor
+ *  "reverted" reads as the softer warning (matches the original ternary). */
+const PAY_LOCK_META = {
+  reverted: {
+    label: "Lock reverted",
+    className: "text-destructive",
+    title:
+      "Starting Pay Lock reverted — paid on weekly point tiers until 3 consecutive 7+ sit weeks",
+  },
+  warning: {
+    label: "Lock warning",
+    className: "text-warning",
+    title: "Pay Lock warning — 4-week sit average below 5",
+  },
+} as const;
+
+/** Shared by the mobile card and the desktop Rank cell — renders null while
+ *  the lock is active so off-state rows carry no extra DOM. */
+function PayLockBadge({ status, className }: { status: string; className?: string }) {
+  if (status === "active") return null;
+  const meta = status === "reverted" ? PAY_LOCK_META.reverted : PAY_LOCK_META.warning;
+  return (
+    <div
+      className={cn(
+        "text-[9px] font-display uppercase tracking-widest",
+        meta.className,
+        className,
+      )}
+      title={meta.title}
+    >
+      {meta.label}
+    </div>
+  );
+}
+
+/** Hourly tier → accent (35 = top tier, 30 = mid, everything else muted). */
+const RATE_TIER_TEXT: Record<number, string> = { 35: "text-victory", 30: "text-neon" };
+const rateTierClass = (rate: number) => RATE_TIER_TEXT[rate] ?? "text-muted-foreground";
+
+/** The colored "X BO, X OL, X RS, X Sit, X Sale" line — mobile and desktop
+ *  render the identical markup (the CSV export keeps its plain-text twin). */
+function ResultsBreakdown({ r }: { r: Agg }) {
+  return (
+    <>
+      {r.bo} BO, {r.ol} OL, {r.rs} RS, <span className="text-neon">{r.pm} Sit</span>,{" "}
+      <span className="text-victory">{r.sales} Sale</span>
+    </>
+  );
+}
+
+/** Total-pay cell: the engine's number, or the ERROR marker the grand-total
+ *  warning refers to — one component so the two tables can't disagree. */
+function PayAmount({ error, amount }: { error: string | null | undefined; amount: number }) {
+  if (error) {
+    return (
+      <span className="text-destructive text-xs" title={error}>
+        ERROR
+      </span>
+    );
+  }
+  return <>${amount.toFixed(2)}</>;
+}
+
 export function PayrollLedger() {
   const { matches, office } = useOfficeFilter();
   // Default to last week; Mon..Sat pay week.
@@ -196,8 +259,13 @@ export function PayrollLedger() {
       .sort((a, b) => b.totalPay - a.totalPay);
   }, [data, matches]);
 
-  const grandTotal = rows.reduce((s, r) => s + r.totalPay, 0);
-  const payErrorCount = rows.filter((r) => r.payError).length;
+  const { grandTotal, payErrorCount } = useMemo(
+    () => ({
+      grandTotal: rows.reduce((s, r) => s + r.totalPay, 0),
+      payErrorCount: rows.filter((r) => r.payError).length,
+    }),
+    [rows],
+  );
 
   function exportCsv() {
     const headers = [
@@ -367,31 +435,16 @@ export function PayrollLedger() {
                   <MobileCardHeader
                     left={r.name}
                     right={
-                      r.payError ? (
-                        <span className="text-destructive text-xs" title={r.payError}>
-                          ERROR
-                        </span>
-                      ) : (
-                        <span className="text-victory">${r.totalPay.toFixed(2)}</span>
-                      )
+                      <span className="text-victory">
+                        <PayAmount error={r.payError} amount={r.totalPay} />
+                      </span>
                     }
                   />
                   <div className="flex flex-wrap items-center gap-1.5">
                     <RankPill rank={r.rank} />
                     {r.team && <TeamBadge name={r.team.name} color={r.team.color} />}
                   </div>
-                  {r.payLock !== "active" && (
-                    <div
-                      className={`text-[9px] font-display uppercase tracking-widest ${r.payLock === "reverted" ? "text-destructive" : "text-warning"}`}
-                      title={
-                        r.payLock === "reverted"
-                          ? "Starting Pay Lock reverted — paid on weekly point tiers until 3 consecutive 7+ sit weeks"
-                          : "Pay Lock warning — 4-week sit average below 5"
-                      }
-                    >
-                      {r.payLock === "reverted" ? "Lock reverted" : "Lock warning"}
-                    </div>
-                  )}
+                  <PayLockBadge status={r.payLock} />
                   <MobileStatGrid cols={3}>
                     <MobileStat label="Leads" value={r.total} className="text-victory" />
                     <MobileStat label="Sits" value={r.sits} />
@@ -399,14 +452,7 @@ export function PayrollLedger() {
                     <MobileStat
                       label="Rate"
                       value={`$${r.rate}`}
-                      className={cn(
-                        "font-display",
-                        r.rate === 35
-                          ? "text-victory"
-                          : r.rate === 30
-                            ? "text-neon"
-                            : "text-muted-foreground",
-                      )}
+                      className={cn("font-display", rateTierClass(r.rate))}
                     />
                     <MobileStat
                       label="Hours"
@@ -429,8 +475,7 @@ export function PayrollLedger() {
                     <MobileStat label="Bonuses" value={`$${r.bonuses.toFixed(2)}`} />
                   </MobileStatGrid>
                   <div className="text-xs text-muted-foreground">
-                    {r.bo} BO, {r.ol} OL, {r.rs} RS, <span className="text-neon">{r.pm} Sit</span>,{" "}
-                    <span className="text-victory">{r.sales} Sale</span>
+                    <ResultsBreakdown r={r} />
                   </div>
                 </MobileCard>
               ))}
@@ -473,18 +518,7 @@ export function PayrollLedger() {
                       <td className="py-2.5 pr-3 font-medium">{r.name}</td>
                       <td className="py-2.5 pr-3">
                         <RankPill rank={r.rank} />
-                        {r.payLock !== "active" && (
-                          <div
-                            className={`mt-1 text-[9px] font-display uppercase tracking-widest ${r.payLock === "reverted" ? "text-destructive" : "text-warning"}`}
-                            title={
-                              r.payLock === "reverted"
-                                ? "Starting Pay Lock reverted — paid on weekly point tiers until 3 consecutive 7+ sit weeks"
-                                : "Pay Lock warning — 4-week sit average below 5"
-                            }
-                          >
-                            {r.payLock === "reverted" ? "Lock reverted" : "Lock warning"}
-                          </div>
-                        )}
+                        <PayLockBadge status={r.payLock} className="mt-1" />
                       </td>
                       <td className="py-2.5 pr-3">
                         {r.team ? (
@@ -495,24 +529,12 @@ export function PayrollLedger() {
                       </td>
                       <td className="py-2.5 pr-3 text-right text-victory">{r.total}</td>
                       <td className="py-2.5 pr-3 text-xs text-muted-foreground whitespace-nowrap">
-                        {r.bo} BO, {r.ol} OL, {r.rs} RS,{" "}
-                        <span className="text-neon">{r.pm} Sit</span>,{" "}
-                        <span className="text-victory">{r.sales} Sale</span>
+                        <ResultsBreakdown r={r} />
                       </td>
                       <td className="py-2.5 pr-3 text-right">{r.sits}</td>
                       <td className="py-2.5 pr-3 text-right font-display text-neon">{r.points}</td>
                       <td className="py-2.5 pr-3 text-right font-display text-xs">
-                        <span
-                          className={
-                            r.rate === 35
-                              ? "text-victory"
-                              : r.rate === 30
-                                ? "text-neon"
-                                : "text-muted-foreground"
-                          }
-                        >
-                          ${r.rate}
-                        </span>
+                        <span className={rateTierClass(r.rate)}>${r.rate}</span>
                       </td>
                       <td className="py-2.5 pr-3 text-right">
                         <div className="font-display text-neon">{r.hours.toFixed(2)}h</div>
@@ -540,13 +562,7 @@ export function PayrollLedger() {
                         )}
                       </td>
                       <td className="py-2.5 pr-1 text-right font-display text-victory">
-                        {r.payError ? (
-                          <span className="text-destructive text-xs" title={r.payError}>
-                            ERROR
-                          </span>
-                        ) : (
-                          <>${r.totalPay.toFixed(2)}</>
-                        )}
+                        <PayAmount error={r.payError} amount={r.totalPay} />
                       </td>
                     </tr>
                   ))}
@@ -606,22 +622,27 @@ function MonthlyVolumeBonusPanel({ monthStart }: { monthStart: string }) {
     },
   });
 
-  const rows = (data?.results ?? [])
-    .map((res) => {
-      const profile = data?.profiles.find((p) => p.id === res.canvasser_id);
-      return {
-        id: res.canvasser_id,
-        name: profile?.display_name ?? "Unknown",
-        office: (profile as { office_location?: string | null } | undefined)?.office_location ?? null,
-        volume: Number(res.paycheck?.sale_price_total ?? 0),
-        bonus: Number(res.paycheck?.volume_bonus ?? 0),
-        error: res.error,
-      };
-    })
-    .filter((r) => (r.volume > 0 || r.error) && matches(r.office))
-    .sort((a, b) => b.volume - a.volume);
-
-  const totalBonus = rows.reduce((s, r) => s + r.bonus, 0);
+  // Memoized with a profile Map — the previous inline build re-ran a
+  // profiles.find per result (O(results × profiles)) on every render.
+  const { rows, totalBonus } = useMemo(() => {
+    const profileById = new Map((data?.profiles ?? []).map((p) => [p.id, p]));
+    const rows = (data?.results ?? [])
+      .map((res) => {
+        const profile = profileById.get(res.canvasser_id);
+        return {
+          id: res.canvasser_id,
+          name: profile?.display_name ?? "Unknown",
+          office:
+            (profile as { office_location?: string | null } | undefined)?.office_location ?? null,
+          volume: Number(res.paycheck?.sale_price_total ?? 0),
+          bonus: Number(res.paycheck?.volume_bonus ?? 0),
+          error: res.error,
+        };
+      })
+      .filter((r) => (r.volume > 0 || r.error) && matches(r.office))
+      .sort((a, b) => b.volume - a.volume);
+    return { rows, totalBonus: rows.reduce((s, r) => s + r.bonus, 0) };
+  }, [data, matches]);
   const monthLabel = format(new Date(`${monthStart}T00:00:00`), "MMMM yyyy");
   const [mYear, mMonth] = monthStart.split("-").map(Number);
   const payableLabel = format(new Date(mYear, mMonth, 1), "MMMM yyyy");
@@ -629,17 +650,20 @@ function MonthlyVolumeBonusPanel({ monthStart }: { monthStart: string }) {
   return (
     <ArcadePanel
       title={`Monthly Volume Bonus · Earned ${monthLabel} — payable ${payableLabel}`}
-      action={<span className="font-display text-xs text-victory">TOTAL · ${totalBonus.toFixed(2)}</span>}
+      action={
+        <span className="font-display text-xs text-victory">TOTAL · ${totalBonus.toFixed(2)}</span>
+      }
     >
       <div className="text-xs text-muted-foreground mb-3">
-        $1,500 per full $100k of confirmed sale volume in the calendar month, per agent.
-        Bonuses are paid out the following month — this table is what goes on the {payableLabel} payroll.
+        $1,500 per full $100k of confirmed sale volume in the calendar month, per agent. Bonuses are
+        paid out the following month — this table is what goes on the {payableLabel} payroll.
       </div>
       {isLoading ? (
         <div className="text-sm text-muted-foreground">Loading volume bonuses…</div>
       ) : isError ? (
         <div className="text-sm text-destructive">
-          Couldn't load volume bonuses — check your connection and reload. Do not treat this as $0 owed.
+          Couldn't load volume bonuses — check your connection and reload. Do not treat this as $0
+          owed.
         </div>
       ) : rows.length === 0 ? (
         <div className="text-sm text-muted-foreground">No confirmed sale volume this month.</div>
@@ -656,7 +680,10 @@ function MonthlyVolumeBonusPanel({ monthStart }: { monthStart: string }) {
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.id} className="border-b border-border/40 transition-colors duration-200 hover:bg-surface-elevated">
+                <tr
+                  key={r.id}
+                  className="border-b border-border/40 transition-colors duration-200 hover:bg-surface-elevated"
+                >
                   <td className="py-2.5 pr-3 font-medium">{r.name}</td>
                   <td className="py-2.5 pr-3 text-right font-display text-victory">
                     {r.error ? "—" : `$${r.volume.toFixed(2)}`}
@@ -666,7 +693,9 @@ function MonthlyVolumeBonusPanel({ monthStart }: { monthStart: string }) {
                   </td>
                   <td className="py-2.5 pr-1 text-right font-display">
                     {r.error ? (
-                      <span className="text-destructive text-xs" title={r.error}>ERROR</span>
+                      <span className="text-destructive text-xs" title={r.error}>
+                        ERROR
+                      </span>
                     ) : r.bonus > 0 ? (
                       <span className="text-victory">${r.bonus.toFixed(2)}</span>
                     ) : (
