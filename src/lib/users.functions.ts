@@ -184,3 +184,32 @@ export const listRoster = createServerFn({ method: "GET" })
       }))
       .sort((a, b) => a.display_name.localeCompare(b.display_name));
   });
+
+const signupRequestsSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(20),
+});
+
+/** Manager-only: the role each new signup ASKED for on the auth form
+ *  (requested_role in auth metadata — a claim, never a grant). Powers the
+ *  "wants Canvasser / Sales Rep" chip on the New Signups panel so
+ *  activation is one tap with no guessing. */
+export const listSignupRequests = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => signupRequestsSchema.parse(data))
+  .handler(async ({ data, context }): Promise<Record<string, string | null>> => {
+    const { isManager } = await assertManager(context);
+    if (!isManager) throw new Error("Only managers can view signup requests.");
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const entries = await Promise.all(
+      data.ids.map(async (id) => {
+        const { data: res } = await supabaseAdmin.auth.admin.getUserById(id);
+        const requested = res?.user?.user_metadata?.requested_role;
+        return [
+          id,
+          requested === "canvasser" || requested === "sales_rep" ? requested : null,
+        ] as const;
+      }),
+    );
+    return Object.fromEntries(entries);
+  });

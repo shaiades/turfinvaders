@@ -12,6 +12,8 @@ import { toast } from "sonner";
 import { UserPlus } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useSetUserRole } from "@/hooks/useSetUserRole";
+import { useServerFn } from "@tanstack/react-start";
+import { listSignupRequests } from "@/lib/users.functions";
 import { assignableRolesFor, canManageTarget, primaryRole, ROLE_LABEL } from "@/lib/role-policy";
 import type { Van } from "@/components/FleetDispatch";
 
@@ -64,6 +66,16 @@ export function NewSignupsPanel() {
       }
       return { signups: (profsR.data ?? []) as Signup[], rolesByUser };
     },
+  });
+
+  // What each signup ASKED to be on the auth form (metadata claim, not a
+  // grant) — renders the "wants …" chip so activation needs no guessing.
+  const listRequests = useServerFn(listSignupRequests);
+  const signupIds = (data?.signups ?? []).map((s) => s.id);
+  const { data: requestedByUser } = useQuery({
+    enabled: signupIds.length > 0,
+    queryKey: ["signup_requests", signupIds.join("|")],
+    queryFn: async () => listRequests({ data: { ids: signupIds } }),
   });
 
   // Same key + queryFn as the Fleet Dispatch board — shared cache.
@@ -152,6 +164,13 @@ export function NewSignupsPanel() {
                       (archived)
                     </span>
                   )}
+                  {targetRoles.length === 0 && requestedByUser?.[p.id] && (
+                    <span className="shrink-0 text-[9px] font-display uppercase tracking-widest px-1.5 py-0.5 rounded border border-turf-cyan/50 text-turf-cyan bg-turf-cyan/10">
+                      wants{" "}
+                      {ROLE_LABEL[requestedByUser[p.id] as keyof typeof ROLE_LABEL] ??
+                        requestedByUser[p.id]}
+                    </span>
+                  )}
                 </span>
                 {assignable.length === 0 ? (
                   // Role changes are owner-only — show the current role as a
@@ -223,8 +242,8 @@ export function NewSignupsPanel() {
       )}
       <p className="text-[10px] text-muted-foreground mt-3">
         Login-capable accounts created in the last {WINDOW_DAYS} days, newest first. Assign a van
-        (and a role — Owners only) to put them in play — Monday.com placeholder agents live in
-        Fleet Dispatch's Free Agents instead.
+        (and a role — Owners only) to put them in play — Monday.com placeholder agents live in Fleet
+        Dispatch's Free Agents instead.
       </p>
     </ArcadePanel>
   );
