@@ -1,5 +1,6 @@
 import { forwardRef, type ButtonHTMLAttributes, type HTMLAttributes, type ReactNode } from "react";
 import { Slot } from "@radix-ui/react-slot";
+import { CalendarRange } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /* ── Faction design system ────────────────────────────────────────────────────
@@ -104,6 +105,61 @@ ArcadeCard.displayName = "ArcadeCard";
  *  FleetDispatch's metricClass — use for every numeric grid cell. */
 export function metricText(value: number | null | undefined, lit: string): string {
   return (value ?? 0) > 0 ? lit : "text-muted-foreground/40";
+}
+
+const PILL_TONE = {
+  neon: {
+    active: "bg-neon text-background border-neon",
+    idle: "hover:border-neon/40",
+  },
+  "kombat-gold": {
+    active: "bg-kombat-gold text-background border-kombat-gold",
+    idle: "hover:border-kombat-gold/40",
+  },
+} as const;
+
+export interface ArcadePillProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  active?: boolean;
+  /** Faction accent for the lit state — turf pages use neon, Close Kombat gold. */
+  tone?: keyof typeof PILL_TONE;
+  /** md = primary range tabs, sm = secondary preset chips. */
+  size?: "md" | "sm";
+}
+
+/** The Day/Week/Month pill — one source for every range strip (RangeTabs,
+ *  Close Kombat) so sizing, 44px mobile targets, and tones can't drift. */
+export function ArcadePill({
+  active = false,
+  tone = "neon",
+  size = "md",
+  className,
+  type,
+  ...props
+}: ArcadePillProps) {
+  return (
+    <button
+      type={type ?? "button"}
+      className={cn(
+        "min-h-11 md:min-h-0 rounded-full text-[10px] font-display uppercase tracking-widest whitespace-nowrap border transition-colors duration-200",
+        size === "md" ? "px-3 py-2" : "px-2.5 py-1.5",
+        active
+          ? PILL_TONE[tone].active
+          : cn("border-border text-muted-foreground hover:text-foreground", PILL_TONE[tone].idle),
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
+/** The pinned range label between pager arrows on Week/Month strips. */
+export function RangeChip({ children }: { children: ReactNode }) {
+  return (
+    <div className="px-3 py-1 rounded border border-neon/40 bg-neon/5 flex items-center gap-2 whitespace-nowrap">
+      <CalendarRange className="w-4 h-4 text-neon shrink-0" />
+      <span className="text-xs font-display">{children}</span>
+    </div>
+  );
 }
 
 export function StatCard({
