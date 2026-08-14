@@ -22,6 +22,100 @@ type Row = {
   tracked: boolean;
 };
 
+/** One doughnut card for both zero lists — the freezer (2+ zeros, red) and
+ *  the fresh doughnuts (1 zero, neutral) rendered the same markup twice. */
+function DoughnutCard({ r, frozen }: { r: Row; frozen?: boolean }) {
+  return (
+    <li
+      className={
+        frozen
+          ? "flex items-center gap-4 p-3 rounded-md border border-[var(--destructive)]/60 bg-background/60"
+          : "flex items-center gap-4 p-3 rounded-md border border-border bg-surface"
+      }
+    >
+      <span className={frozen ? "frozen-doughnut text-5xl leading-none" : "bouncing-doughnut text-4xl leading-none"}>
+        🍩
+      </span>
+      <div className="min-w-0">
+        <div className={frozen ? "font-display text-sm truncate" : "font-medium truncate"}>
+          {r.name}
+        </div>
+        <div
+          className={`text-[10px] font-display uppercase tracking-widest ${
+            frozen ? "text-[var(--destructive)]" : "text-muted-foreground"
+          }`}
+        >
+          0 today · {frozen ? "0" : r.ydayLeads} yesterday
+        </div>
+      </div>
+    </li>
+  );
+}
+
+/** The two weekly award tiers as data — same section shape, different shine.
+ *  Style objects live here (not inline) so chips stop re-creating them per
+ *  render; values are byte-identical to the originals. */
+const AWARD_TIERS: Array<{
+  key: "bosses" | "club";
+  title: string;
+  titleClass: string;
+  empty: string;
+  emoji: string;
+  chipClass: string;
+  chipStyle: React.CSSProperties;
+}> = [
+  {
+    key: "bosses",
+    title: "7+ Point Bosses",
+    titleClass: "text-[var(--neon-blue,#00f0ff)]",
+    empty: "No bosses yet this week.",
+    emoji: "👑",
+    chipClass: "inline-flex items-center gap-2 px-4 py-2 rounded-full font-display text-sm",
+    chipStyle: {
+      color: "var(--victory)",
+      background: "color-mix(in oklab, var(--victory) 14%, transparent)",
+      border: "2px solid var(--victory)",
+      boxShadow: "0 0 20px color-mix(in oklab, var(--victory) 60%, transparent)",
+      textShadow: "0 0 12px color-mix(in oklab, var(--victory) 80%, transparent)",
+    },
+  },
+  {
+    key: "club",
+    title: "3+ Point Club",
+    titleClass: "text-muted-foreground",
+    empty: "No one in the club yet.",
+    emoji: "⭐",
+    chipClass: "inline-flex items-center gap-2 px-3 py-1.5 rounded-full font-display text-xs",
+    chipStyle: {
+      color: "var(--neon-blue, #00f0ff)",
+      background: "color-mix(in oklab, #00f0ff 12%, transparent)",
+      border: "1.5px solid #00f0ff",
+      boxShadow: "0 0 14px color-mix(in oklab, #00f0ff 55%, transparent)",
+    },
+  },
+];
+
+function AwardSection({ tier, rows }: { tier: (typeof AWARD_TIERS)[number]; rows: Row[] }) {
+  return (
+    <div>
+      <h3 className={`font-display text-xs uppercase tracking-widest mb-2 ${tier.titleClass}`}>
+        {tier.title}
+      </h3>
+      {rows.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{tier.empty}</p>
+      ) : (
+        <ul className="flex flex-wrap gap-2">
+          {rows.map((r) => (
+            <li key={r.id} className={tier.chipClass} style={tier.chipStyle}>
+              {tier.emoji} {r.name} · {r.weekPoints}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function DailyWrap() {
   const { today, yday, wkStart, locked } = reportDates();
 
@@ -114,7 +208,6 @@ function DailyWrap() {
         </p>
       </div>
 
-
       {/* Suspension Zone */}
       <section
         className="relative overflow-hidden rounded-lg border-2 p-5"
@@ -135,18 +228,7 @@ function DailyWrap() {
         ) : (
           <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {suspension.map((r) => (
-              <li
-                key={r.id}
-                className="flex items-center gap-4 p-3 rounded-md border border-[var(--destructive)]/60 bg-background/60"
-              >
-                <span className="frozen-doughnut text-5xl leading-none">🍩</span>
-                <div className="min-w-0">
-                  <div className="font-display text-sm truncate">{r.name}</div>
-                  <div className="text-[10px] font-display uppercase tracking-widest text-[var(--destructive)]">
-                    0 today · 0 yesterday
-                  </div>
-                </div>
-              </li>
+              <DoughnutCard key={r.id} r={r} frozen />
             ))}
           </ul>
         )}
@@ -155,19 +237,13 @@ function DailyWrap() {
       {/* Doughnut List */}
       <ArcadePanel title="Doughnuts Today · 1 Zero">
         {doughnuts.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No fresh doughnuts. Everyone got on the board.</p>
+          <p className="text-sm text-muted-foreground">
+            No fresh doughnuts. Everyone got on the board.
+          </p>
         ) : (
           <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {doughnuts.map((r) => (
-              <li key={r.id} className="flex items-center gap-4 p-3 rounded-md border border-border bg-surface">
-                <span className="bouncing-doughnut text-4xl leading-none">🍩</span>
-                <div className="min-w-0">
-                  <div className="font-medium truncate">{r.name}</div>
-                  <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-                    0 today · {r.ydayLeads} yesterday
-                  </div>
-                </div>
-              </li>
+              <DoughnutCard key={r.id} r={r} />
             ))}
           </ul>
         )}
@@ -187,57 +263,8 @@ function DailyWrap() {
         }
       >
         <div className="space-y-6">
-          <div>
-            <h3 className="font-display text-xs uppercase tracking-widest text-[var(--neon-blue,#00f0ff)] mb-2">
-              7+ Point Bosses
-            </h3>
-            {bosses7.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No bosses yet this week.</p>
-            ) : (
-              <ul className="flex flex-wrap gap-2">
-                {bosses7.map((r) => (
-                  <li
-                    key={r.id}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-full font-display text-sm"
-                    style={{
-                      color: "var(--victory)",
-                      background: "color-mix(in oklab, var(--victory) 14%, transparent)",
-                      border: "2px solid var(--victory)",
-                      boxShadow: "0 0 20px color-mix(in oklab, var(--victory) 60%, transparent)",
-                      textShadow: "0 0 12px color-mix(in oklab, var(--victory) 80%, transparent)",
-                    }}
-                  >
-                    👑 {r.name} · {r.weekPoints}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-          <div>
-            <h3 className="font-display text-xs uppercase tracking-widest text-muted-foreground mb-2">
-              3+ Point Club
-            </h3>
-            {club3.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No one in the club yet.</p>
-            ) : (
-              <ul className="flex flex-wrap gap-2">
-                {club3.map((r) => (
-                  <li
-                    key={r.id}
-                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full font-display text-xs"
-                    style={{
-                      color: "var(--neon-blue, #00f0ff)",
-                      background: "color-mix(in oklab, #00f0ff 12%, transparent)",
-                      border: "1.5px solid #00f0ff",
-                      boxShadow: "0 0 14px color-mix(in oklab, #00f0ff 55%, transparent)",
-                    }}
-                  >
-                    ⭐ {r.name} · {r.weekPoints}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+          <AwardSection tier={AWARD_TIERS[0]} rows={bosses7} />
+          <AwardSection tier={AWARD_TIERS[1]} rows={club3} />
         </div>
       </ArcadePanel>
     </div>
