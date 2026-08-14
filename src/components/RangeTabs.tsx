@@ -1,9 +1,12 @@
 import { Button } from "@/components/ui/button";
-import { CalendarRange, ChevronLeft, ChevronRight } from "lucide-react";
+import { ArcadePill, RangeChip } from "@/components/arcade";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { DateRangeControls, DayPreset, RangeTab } from "@/hooks/useDateRange";
 
 /** Day / Week / Month pill row — visual twin of the Fleet Dispatch range bar,
- *  driven by useDateRange so every screen pages dates identically. */
+ *  driven by useDateRange so every screen pages dates identically. Pills and
+ *  the range label render through the shared ArcadePill/RangeChip primitives
+ *  (arcade.tsx) — Close Kombat's strip is the gold-toned twin. */
 export function RangeTabs({ controls }: { controls: DateRangeControls }) {
   const {
     range,
@@ -25,23 +28,11 @@ export function RangeTabs({ controls }: { controls: DateRangeControls }) {
           { id: "week", label: "Week" },
           { id: "month", label: "Month" },
         ] as Array<{ id: RangeTab; label: string }>
-      ).map((p) => {
-        const active = tab === p.id;
-        return (
-          <button
-            key={p.id}
-            type="button"
-            onClick={() => setTab(p.id)}
-            className={`px-3 py-2 min-h-11 md:min-h-0 rounded-full text-[10px] font-display uppercase tracking-widest whitespace-nowrap border transition-colors ${
-              active
-                ? "bg-neon text-background border-neon"
-                : "border-border text-muted-foreground hover:text-foreground hover:border-neon/40"
-            }`}
-          >
-            {p.label}
-          </button>
-        );
-      })}
+      ).map((p) => (
+        <ArcadePill key={p.id} active={tab === p.id} onClick={() => setTab(p.id)}>
+          {p.label}
+        </ArcadePill>
+      ))}
 
       <span className="mx-1 h-5 w-px bg-border shrink-0" aria-hidden />
 
@@ -52,23 +43,16 @@ export function RangeTabs({ controls }: { controls: DateRangeControls }) {
               { id: "today", label: "Today" },
               { id: "yesterday", label: "Yesterday" },
             ] as Array<{ id: DayPreset; label: string }>
-          ).map((p) => {
-            const active = dayPreset === p.id;
-            return (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => setDayPreset(p.id)}
-                className={`px-2.5 py-1.5 min-h-11 md:min-h-0 rounded-full text-[10px] font-display uppercase tracking-widest whitespace-nowrap border transition-colors ${
-                  active
-                    ? "bg-neon text-background border-neon"
-                    : "border-border text-muted-foreground hover:text-foreground hover:border-neon/40"
-                }`}
-              >
-                {p.label}
-              </button>
-            );
-          })}
+          ).map((p) => (
+            <ArcadePill
+              key={p.id}
+              size="sm"
+              active={dayPreset === p.id}
+              onClick={() => setDayPreset(p.id)}
+            >
+              {p.label}
+            </ArcadePill>
+          ))}
         </>
       )}
 
@@ -82,10 +66,7 @@ export function RangeTabs({ controls }: { controls: DateRangeControls }) {
           >
             <ChevronLeft className="w-4 h-4" />
           </Button>
-          <div className="px-3 py-1 rounded border border-neon/40 bg-neon/5 flex items-center gap-2 whitespace-nowrap">
-            <CalendarRange className="w-4 h-4 text-neon shrink-0" />
-            <span className="text-xs font-display">{range.label}</span>
-          </div>
+          <RangeChip>{range.label}</RangeChip>
           <Button size="sm" variant="outline" onClick={() => week.shiftWeek(1)} title="Next week">
             <ChevronRight className="w-4 h-4" />
           </Button>
@@ -102,10 +83,7 @@ export function RangeTabs({ controls }: { controls: DateRangeControls }) {
           <Button size="sm" variant="outline" onClick={() => shiftMonth(-1)} title="Previous month">
             <ChevronLeft className="w-4 h-4" />
           </Button>
-          <div className="px-3 py-1 rounded border border-neon/40 bg-neon/5 flex items-center gap-2 whitespace-nowrap">
-            <CalendarRange className="w-4 h-4 text-neon shrink-0" />
-            <span className="text-xs font-display">{range.label}</span>
-          </div>
+          <RangeChip>{range.label}</RangeChip>
           <Button size="sm" variant="outline" onClick={() => shiftMonth(1)} title="Next month">
             <ChevronRight className="w-4 h-4" />
           </Button>

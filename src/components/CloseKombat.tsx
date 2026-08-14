@@ -11,10 +11,12 @@ import {
 import {
   ArcadeCard,
   ArcadePanel,
+  ArcadePill,
   MobileCard,
   MobileCardHeader,
   MobileCardList,
   NeonButton,
+  RangeChip,
   metricText,
 } from "@/components/arcade";
 import { cn } from "@/lib/utils";
@@ -42,7 +44,7 @@ import {
 } from "@/lib/close-kombat";
 import { syncBlockCards } from "@/lib/close-kombat.functions";
 import { toast } from "sonner";
-import { CalendarRange, ChevronLeft, ChevronRight, Crown, RefreshCw, Swords } from "lucide-react";
+import { ChevronLeft, ChevronRight, Crown, RefreshCw, Swords } from "lucide-react";
 
 /**
  * Close Kombat — sales-rep standings straight from the Monday.com Block
@@ -99,6 +101,64 @@ const fmtPct = (p: number | null) => (p === null ? "—" : `${Math.round(p * 100
 /** Leads / Sale is a rate, not a share — one decimal, no % sign (owner,
  *  2026-07-30: "4.5, not 4.5654"). */
 const fmtRatio = (n: number | null) => (n === null ? "—" : n.toFixed(1));
+
+/** The company-totals tile wall as data (same pattern as StatLine's items):
+ *  label · getter · accent, optional companion stat sharing the tile. */
+type TileDef = {
+  label: string;
+  value: (t: KombatTotals) => string;
+  accent: TileAccent;
+  sub?: { label: string; value: (t: KombatTotals) => string; accent: TileAccent };
+};
+const COMPANY_TILES: TileDef[] = [
+  { label: "Appts", value: (t) => fmtCount(t.appts), accent: "neon" },
+  {
+    label: "No Show",
+    value: (t) => fmtCount(t.noShow),
+    accent: "destructive",
+    sub: { label: "NS %", value: (t) => fmtPct(t.noShowPct), accent: "destructive" },
+  },
+  {
+    label: "No Demo",
+    value: (t) => fmtCount(t.noDemo),
+    accent: "destructive",
+    sub: { label: "ND %", value: (t) => fmtPct(t.noDemoPct), accent: "destructive" },
+  },
+  {
+    label: "OL",
+    value: (t) => fmtCount(t.ol),
+    accent: "warning",
+    sub: { label: "OL %", value: (t) => fmtPct(t.olPct), accent: "warning" },
+  },
+  {
+    label: "Reset",
+    value: (t) => fmtCount(t.reset),
+    accent: "accent",
+    sub: { label: "Reset %", value: (t) => fmtPct(t.resetPct), accent: "accent" },
+  },
+  { label: "PM", value: (t) => fmtCount(t.pm), accent: "warning" },
+  {
+    label: "Sold",
+    value: (t) => fmtCount(t.sold),
+    accent: "victory",
+    sub: { label: "Close %", value: (t) => fmtPct(t.closePct), accent: "neon" },
+  },
+  {
+    label: "Reload",
+    value: (t) => fmtCount(t.reloads),
+    accent: "victory",
+    sub: { label: "Reload %", value: (t) => fmtPct(t.reloadPct), accent: "victory" },
+  },
+  {
+    label: "Cancels",
+    value: (t) => fmtCount(t.cancels),
+    accent: "destructive",
+    sub: { label: "Cancel %", value: (t) => fmtPct(t.cancelPct), accent: "destructive" },
+  },
+  { label: "Sit %", value: (t) => fmtPct(t.sitPct), accent: "accent" },
+  { label: "Leads / Sale", value: (t) => fmtRatio(t.leadsToSale), accent: "neon" },
+  { label: "Revenue", value: (t) => fmtMoney(t.revenue), accent: "victory" },
+];
 
 function CloseKombatInner() {
   const qc = useQueryClient();
@@ -318,23 +378,16 @@ function CloseKombatInner() {
             { id: "week", label: "Week" },
             { id: "month", label: "Month" },
           ] as Array<{ id: RangeTab; label: string }>
-        ).map((p) => {
-          const active = tab === p.id;
-          return (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => setTab(p.id)}
-              className={`px-3 py-2 min-h-11 md:min-h-0 rounded-full text-[10px] font-display uppercase tracking-widest whitespace-nowrap border transition-colors duration-200 ${
-                active
-                  ? "bg-kombat-gold text-background border-kombat-gold"
-                  : "border-border text-muted-foreground hover:text-foreground hover:border-kombat-gold/40"
-              }`}
-            >
-              {p.label}
-            </button>
-          );
-        })}
+        ).map((p) => (
+          <ArcadePill
+            key={p.id}
+            tone="kombat-gold"
+            active={tab === p.id}
+            onClick={() => setTab(p.id)}
+          >
+            {p.label}
+          </ArcadePill>
+        ))}
 
         <span className="mx-1 h-5 w-px bg-border shrink-0" aria-hidden />
 
@@ -345,23 +398,17 @@ function CloseKombatInner() {
                 { id: "today", label: "Today" },
                 { id: "yesterday", label: "Yesterday" },
               ] as Array<{ id: DayPreset; label: string }>
-            ).map((p) => {
-              const active = dayPreset === p.id;
-              return (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => setDayPreset(p.id)}
-                  className={`px-2.5 py-1.5 min-h-11 md:min-h-0 rounded-full text-[10px] font-display uppercase tracking-widest whitespace-nowrap border transition-colors duration-200 ${
-                    active
-                      ? "bg-kombat-gold text-background border-kombat-gold"
-                      : "border-border text-muted-foreground hover:text-foreground hover:border-kombat-gold/40"
-                  }`}
-                >
-                  {p.label}
-                </button>
-              );
-            })}
+            ).map((p) => (
+              <ArcadePill
+                key={p.id}
+                tone="kombat-gold"
+                size="sm"
+                active={dayPreset === p.id}
+                onClick={() => setDayPreset(p.id)}
+              >
+                {p.label}
+              </ArcadePill>
+            ))}
           </>
         )}
 
@@ -375,10 +422,7 @@ function CloseKombatInner() {
             >
               <ChevronLeft className="w-4 h-4" />
             </Button>
-            <div className="px-3 py-1 rounded border border-neon/40 bg-neon/5 flex items-center gap-2 whitespace-nowrap">
-              <CalendarRange className="w-4 h-4 text-neon shrink-0" />
-              <span className="text-xs font-display">{range.label}</span>
-            </div>
+            <RangeChip>{range.label}</RangeChip>
             <Button size="sm" variant="outline" onClick={() => week.shiftWeek(1)} title="Next week">
               <ChevronRight className="w-4 h-4" />
             </Button>
@@ -400,10 +444,7 @@ function CloseKombatInner() {
             >
               <ChevronLeft className="w-4 h-4" />
             </Button>
-            <div className="px-3 py-1 rounded border border-neon/40 bg-neon/5 flex items-center gap-2 whitespace-nowrap">
-              <CalendarRange className="w-4 h-4 text-neon shrink-0" />
-              <span className="text-xs font-display">{range.label}</span>
-            </div>
+            <RangeChip>{range.label}</RangeChip>
             <Button size="sm" variant="outline" onClick={() => shiftMonth(1)} title="Next month">
               <ChevronRight className="w-4 h-4" />
             </Button>
@@ -427,53 +468,15 @@ function CloseKombatInner() {
           Appts entirely, so neither belongs in that sum. Result order follows
           the board's own funnel (owner, 2026-07-30). */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-3">
-        <KombatTile label="Appts" value={fmtCount(totals.appts)} accent="neon" />
-        <KombatTile
-          label="No Show"
-          value={fmtCount(totals.noShow)}
-          accent="destructive"
-          sub={{ label: "NS %", value: fmtPct(totals.noShowPct), accent: "destructive" }}
-        />
-        <KombatTile
-          label="No Demo"
-          value={fmtCount(totals.noDemo)}
-          accent="destructive"
-          sub={{ label: "ND %", value: fmtPct(totals.noDemoPct), accent: "destructive" }}
-        />
-        <KombatTile
-          label="OL"
-          value={fmtCount(totals.ol)}
-          accent="warning"
-          sub={{ label: "OL %", value: fmtPct(totals.olPct), accent: "warning" }}
-        />
-        <KombatTile
-          label="Reset"
-          value={fmtCount(totals.reset)}
-          accent="accent"
-          sub={{ label: "Reset %", value: fmtPct(totals.resetPct), accent: "accent" }}
-        />
-        <KombatTile label="PM" value={fmtCount(totals.pm)} accent="warning" />
-        <KombatTile
-          label="Sold"
-          value={fmtCount(totals.sold)}
-          accent="victory"
-          sub={{ label: "Close %", value: fmtPct(totals.closePct), accent: "neon" }}
-        />
-        <KombatTile
-          label="Reload"
-          value={fmtCount(totals.reloads)}
-          accent="victory"
-          sub={{ label: "Reload %", value: fmtPct(totals.reloadPct), accent: "victory" }}
-        />
-        <KombatTile
-          label="Cancels"
-          value={fmtCount(totals.cancels)}
-          accent="destructive"
-          sub={{ label: "Cancel %", value: fmtPct(totals.cancelPct), accent: "destructive" }}
-        />
-        <KombatTile label="Sit %" value={fmtPct(totals.sitPct)} accent="accent" />
-        <KombatTile label="Leads / Sale" value={fmtRatio(totals.leadsToSale)} accent="neon" />
-        <KombatTile label="Revenue" value={fmtMoney(totals.revenue)} accent="victory" />
+        {COMPANY_TILES.map((d) => (
+          <KombatTile
+            key={d.label}
+            label={d.label}
+            value={d.value(totals)}
+            accent={d.accent}
+            sub={d.sub && { label: d.sub.label, value: d.sub.value(totals), accent: d.sub.accent }}
+          />
+        ))}
       </div>
 
       {attention.length > 0 && (
