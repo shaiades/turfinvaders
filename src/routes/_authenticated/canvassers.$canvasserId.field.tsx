@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import { ArcadePanel, StatCard } from "@/components/arcade";
+import { ArcadePanel, StatCard, ArcadeCard } from "@/components/arcade";
 import { NeonMap, type FieldPin, type Territory, type LatLng } from "@/components/NeonMap";
 import { Home, MessageSquare, Sparkles, DollarSign, AlertTriangle, ArrowLeft } from "lucide-react";
 import { commissionRateForPoints, weeklyPoints } from "@/lib/pay";
@@ -139,7 +139,11 @@ function FieldActivityPage() {
   }));
 
   if (!allowed) {
-    return <div className="arcade-card p-8 text-center text-sm text-muted-foreground">Not authorized to view this player's field activity.</div>;
+    return (
+      <ArcadeCard className="p-8 text-center text-sm text-muted-foreground">
+        Not authorized to view this player's field activity.
+      </ArcadeCard>
+    );
   }
 
   return (

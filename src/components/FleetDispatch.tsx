@@ -880,10 +880,10 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
       />
 
       {rows.length === 0 ? (
-        <div className="arcade-card p-8 text-center text-sm text-muted-foreground flex flex-col items-center gap-2">
+        <ArcadeCard className="p-8 text-center text-sm text-muted-foreground flex flex-col items-center gap-2">
           <Users className="w-5 h-5" />
           No canvassers in this office yet.
-        </div>
+        </ArcadeCard>
       ) : (
         <DispatchFleet
           rows={rows}
@@ -901,21 +901,22 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
 
       {canManage && (
         <div className="space-y-4">
-          <button
-            type="button"
-            onClick={() => setManageOpen((o) => !o)}
-            className="arcade-card w-full px-4 py-3 flex items-center justify-between text-left hover:bg-surface-elevated"
+          <ArcadeCard
+            asChild
+            className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-surface-elevated"
           >
-            <span className="flex items-center gap-2 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-              <Wrench className="w-4 h-4 text-accent" />
-              Manage Fleet · Vans, Agents, Archive
-            </span>
-            {manageOpen ? (
-              <ChevronUp className="w-4 h-4 text-muted-foreground" />
-            ) : (
-              <ChevronDown className="w-4 h-4 text-muted-foreground" />
-            )}
-          </button>
+            <button type="button" onClick={() => setManageOpen((o) => !o)}>
+              <span className="flex items-center gap-2 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                <Wrench className="w-4 h-4 text-accent" />
+                Manage Fleet · Vans, Agents, Archive
+              </span>
+              {manageOpen ? (
+                <ChevronUp className="w-4 h-4 text-muted-foreground" />
+              ) : (
+                <ChevronDown className="w-4 h-4 text-muted-foreground" />
+              )}
+            </button>
+          </ArcadeCard>
           {manageOpen && (
             <FleetDispatchManage
               vans={vans}
@@ -995,6 +996,45 @@ const rowGrid = (manage: boolean) => (manage ? ROW_GRID_MANAGE : ROW_GRID);
 const ROW_MIN_W = "min-w-[47rem]";
 const rowMinW = (manage: boolean) => (manage ? "min-w-[52rem]" : ROW_MIN_W);
 
+/** A row's stats without its identity — what totals and stat-cell runs share. */
+type DispatchStats = Omit<FunnelRow, "g">;
+
+/* Pure, module-level (stable identity — no useCallback needed): the board's
+ * two sort orders and the van-total reducer. */
+const byProduction = (a: FunnelRow, b: FunnelRow) => b.sub - a.sub || b.conf - a.conf;
+const byProductionThenName = (a: FunnelRow, b: FunnelRow) =>
+  b.sub - a.sub || (a.g.display_name ?? "").localeCompare(b.g.display_name ?? "");
+const totalsOfRows = (list: FunnelRow[]): DispatchStats =>
+  list.reduce<DispatchStats>(
+    (a, r) => ({
+      sub: a.sub + r.sub,
+      conf: a.conf + r.conf,
+      fut: a.fut + r.fut,
+      kil: a.kil + r.kil,
+      pts: a.pts + r.pts,
+      vol: a.vol + r.vol,
+      res: {
+        lds: a.res.lds + r.res.lds,
+        sit: a.res.sit + r.res.sit,
+        rs: a.res.rs + r.res.rs,
+        bo: a.res.bo + r.res.bo,
+        ctc: a.res.ctc + r.res.ctc,
+        nc: a.res.nc + r.res.nc,
+        ol: a.res.ol + r.res.ol,
+        sal: a.res.sal + r.res.sal,
+      },
+    }),
+    {
+      sub: 0,
+      conf: 0,
+      fut: 0,
+      kil: 0,
+      pts: 0,
+      vol: 0,
+      res: { lds: 0, sit: 0, rs: 0, bo: 0, ctc: 0, nc: 0, ol: 0, sal: 0 },
+    },
+  );
+
 function RowDivider() {
   return <span className="h-4 w-px bg-border justify-self-center" aria-hidden />;
 }
@@ -1007,6 +1047,46 @@ type RowManage = {
   onMove: (vanId: string | null) => void;
   onArchive: () => void;
 };
+
+/** The shared 15-cell stat run — funnel · divider · results · Pts · Volume.
+ *  Used by every rep line and (bold) by the Van Total line so the two can
+ *  never drift; cells align because both render inside the same rowGrid. */
+function DispatchStatCells({ s, bold = false }: { s: DispatchStats; bold?: boolean }) {
+  const cell = bold
+    ? "text-right font-display text-sm font-bold"
+    : "text-right font-display text-sm";
+  return (
+    <>
+      {FUNNEL_COLS.map((c) => (
+        <span key={c.key} title={c.full} className={`${cell} ${metricClass(s[c.key], c.color)}`}>
+          {s[c.key]}
+        </span>
+      ))}
+      <RowDivider />
+      {RESULT_COLS.map((c) => (
+        <span
+          key={c.key}
+          title={c.full}
+          className={`${cell} ${metricClass(s.res[c.key], c.color)}`}
+        >
+          {s.res[c.key]}
+        </span>
+      ))}
+      <span
+        title="Points (PM = 1 pt, Sale = 2 pts)"
+        className={`${cell} ${metricClass(s.pts, "neon")}`}
+      >
+        {s.pts}
+      </span>
+      <span
+        title="Volume — confirmed sale dollars in the selected range"
+        className={`${cell} ${metricClass(s.vol, "victory")}`}
+      >
+        {formatCurrency(s.vol)}
+      </span>
+    </>
+  );
+}
 
 /** One rep's continuous line — field funnel first, then what the leads became. */
 function DispatchRow({ r, manage }: { r: FunnelRow; manage?: RowManage }) {
@@ -1023,37 +1103,7 @@ function DispatchRow({ r, manage }: { r: FunnelRow; manage?: RowManage }) {
           </span>
         )}
       </span>
-      {FUNNEL_COLS.map((c) => (
-        <span
-          key={c.key}
-          title={c.full}
-          className={`text-right font-display text-sm ${metricClass(r[c.key], c.color)}`}
-        >
-          {r[c.key]}
-        </span>
-      ))}
-      <RowDivider />
-      {RESULT_COLS.map((c) => (
-        <span
-          key={c.key}
-          title={c.full}
-          className={`text-right font-display text-sm ${metricClass(r.res[c.key], c.color)}`}
-        >
-          {r.res[c.key]}
-        </span>
-      ))}
-      <span
-        title="Points (PM = 1 pt, Sale = 2 pts)"
-        className={`text-right font-display text-sm ${metricClass(r.pts, "neon")}`}
-      >
-        {r.pts}
-      </span>
-      <span
-        title="Volume — confirmed sale dollars in the selected range"
-        className={`text-right font-display text-sm ${metricClass(r.vol, "victory")}`}
-      >
-        {formatCurrency(r.vol)}
-      </span>
+      <DispatchStatCells s={r} />
       {manage && (
         <span className="flex items-center justify-end gap-0.5">
           <Select
@@ -1183,57 +1233,43 @@ function DispatchFleet({
   const [addVanId, setAddVanId] = useState<string | null>(null);
   const busy = moveAgents.isPending || archiveAgents.isPending;
 
-  const rowsByVan = new Map<string, FunnelRow[]>();
-  const freeAgents: FunnelRow[] = [];
-  const vanIds = new Set(vans.map((v) => v.id));
-  for (const r of rows) {
-    if (r.g.team_id && vanIds.has(r.g.team_id)) {
-      const list = rowsByVan.get(r.g.team_id) ?? [];
-      list.push(r);
-      rowsByVan.set(r.g.team_id, list);
-    } else {
-      freeAgents.push(r);
+  // One pass over the roster per data change — rosters pre-sorted, totals
+  // and captain names precomputed — instead of rebuilding maps and
+  // re-reducing per-van totals (O(vans × reps), and again inside every sort
+  // comparison) on every render of a board that refetches on realtime pings.
+  const { rowsByVan, looseActive, totalsByVan, nameByProfileId } = useMemo(() => {
+    const rowsByVan = new Map<string, FunnelRow[]>();
+    const freeAgents: FunnelRow[] = [];
+    const vanIds = new Set(vans.map((v) => v.id));
+    for (const r of rows) {
+      if (r.g.team_id && vanIds.has(r.g.team_id)) {
+        const list = rowsByVan.get(r.g.team_id) ?? [];
+        list.push(r);
+        rowsByVan.set(r.g.team_id, list);
+      } else {
+        freeAgents.push(r);
+      }
     }
-  }
-  const looseActive = freeAgents.filter(
-    (r) => r.sub + r.conf + r.fut + r.kil + r.pts + r.vol + r.res.lds + r.res.ol + r.res.sal > 0,
-  );
-  const totalsOfRows = (list: FunnelRow[]) =>
-    list.reduce(
-      (a, r) => ({
-        sub: a.sub + r.sub,
-        conf: a.conf + r.conf,
-        fut: a.fut + r.fut,
-        kil: a.kil + r.kil,
-        pts: a.pts + r.pts,
-        vol: a.vol + r.vol,
-        res: {
-          lds: a.res.lds + r.res.lds,
-          sit: a.res.sit + r.res.sit,
-          rs: a.res.rs + r.res.rs,
-          bo: a.res.bo + r.res.bo,
-          ctc: a.res.ctc + r.res.ctc,
-          nc: a.res.nc + r.res.nc,
-          ol: a.res.ol + r.res.ol,
-          sal: a.res.sal + r.res.sal,
-        },
-      }),
-      {
-        sub: 0,
-        conf: 0,
-        fut: 0,
-        kil: 0,
-        pts: 0,
-        vol: 0,
-        res: { lds: 0, sit: 0, rs: 0, bo: 0, ctc: 0, nc: 0, ol: 0, sal: 0 },
-      },
-    );
-  const vanTotals = (id: string) => totalsOfRows(rowsByVan.get(id) ?? []);
-  const vanSub = (id: string) => vanTotals(id).sub;
+    for (const list of rowsByVan.values()) list.sort(byProduction);
+    const totalsByVan = new Map(vans.map((v) => [v.id, totalsOfRows(rowsByVan.get(v.id) ?? [])]));
+    const nameByProfileId = new Map<string, string | null>();
+    for (const r of rows) {
+      for (const id of r.g.ids) {
+        if (!nameByProfileId.has(id)) nameByProfileId.set(id, r.g.display_name);
+      }
+    }
+    const looseActive = freeAgents
+      .filter(
+        (r) =>
+          r.sub + r.conf + r.fut + r.kil + r.pts + r.vol + r.res.lds + r.res.ol + r.res.sal > 0,
+      )
+      .sort(byProductionThenName);
+    return { rowsByVan, looseActive, totalsByVan, nameByProfileId };
+  }, [rows, vans]);
+
+  const vanSub = (id: string) => totalsByVan.get(id)?.sub ?? 0;
   const captainName = (v: Van) =>
-    v.captain_id
-      ? (rows.find((r) => r.g.ids.includes(v.captain_id!))?.g.display_name ?? null)
-      : null;
+    v.captain_id ? (nameByProfileId.get(v.captain_id) ?? null) : null;
 
   const offices = OFFICE_LOCATIONS.filter((o) => matches(o));
 
@@ -1266,11 +1302,9 @@ function DispatchFleet({
                 and narrow windows. */}
             <div className="grid grid-cols-1 gap-4">
               {list.map((v) => {
-                const roster = (rowsByVan.get(v.id) ?? []).sort(
-                  (a, b) => b.sub - a.sub || b.conf - a.conf,
-                );
+                const roster = rowsByVan.get(v.id) ?? [];
                 const cap = captainName(v);
-                const t = vanTotals(v.id);
+                const t = totalsByVan.get(v.id) ?? totalsOfRows([]);
                 return (
                   <div key={v.id} className="van-card p-4 space-y-3">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -1315,37 +1349,7 @@ function DispatchFleet({
                             <span className="text-[10px] font-display uppercase tracking-widest text-neon truncate">
                               Van Total
                             </span>
-                            {FUNNEL_COLS.map((c) => (
-                              <span
-                                key={c.key}
-                                title={c.full}
-                                className={`text-right font-display text-sm font-bold ${metricClass(t[c.key], c.color)}`}
-                              >
-                                {t[c.key]}
-                              </span>
-                            ))}
-                            <RowDivider />
-                            {RESULT_COLS.map((c) => (
-                              <span
-                                key={c.key}
-                                title={c.full}
-                                className={`text-right font-display text-sm font-bold ${metricClass(t.res[c.key], c.color)}`}
-                              >
-                                {t.res[c.key]}
-                              </span>
-                            ))}
-                            <span
-                              title="Points (PM = 1 pt, Sale = 2 pts)"
-                              className={`text-right font-display text-sm font-bold ${metricClass(t.pts, "neon")}`}
-                            >
-                              {t.pts}
-                            </span>
-                            <span
-                              title="Volume — confirmed sale dollars in the selected range"
-                              className={`text-right font-display text-sm font-bold ${metricClass(t.vol, "victory")}`}
-                            >
-                              {formatCurrency(t.vol)}
-                            </span>
+                            <DispatchStatCells s={t} bold />
                             {canManage && <span />}
                           </div>
                           {roster.map((r) => (
@@ -1405,14 +1409,9 @@ function DispatchFleet({
             <div className={`space-y-1.5 ${ROW_MIN_W}`}>
               <DispatchGroupCaption />
               <DispatchColHeader />
-              {looseActive
-                .sort(
-                  (a, b) =>
-                    b.sub - a.sub || (a.g.display_name ?? "").localeCompare(b.g.display_name ?? ""),
-                )
-                .map((r) => (
-                  <DispatchRow key={r.g.key} r={r} />
-                ))}
+              {looseActive.map((r) => (
+                <DispatchRow key={r.g.key} r={r} />
+              ))}
             </div>
           </div>
         </ArcadeCard>
@@ -1447,7 +1446,7 @@ function SuspensionBanner({
 }) {
   if (rows.length === 0) return null;
   return (
-    <div className="arcade-card p-4 border-destructive/60 bg-destructive/10">
+    <ArcadeCard className="border-destructive/60 bg-destructive/10">
       <div className="flex items-center gap-2 mb-1">
         <AlertTriangle className="w-4 h-4 text-destructive animate-pulse" />
         <div className="font-display text-sm text-destructive uppercase tracking-widest">
@@ -1460,10 +1459,7 @@ function SuspensionBanner({
       </div>
       <div className="flex flex-wrap gap-2">
         {rows.map((r) => (
-          <div
-            key={r.g.key}
-            className="relative arcade-card pl-3 pr-7 py-1.5 border-destructive/40"
-          >
+          <ArcadeCard key={r.g.key} className="relative pl-3 pr-7 py-1.5 border-destructive/40">
             {onRemove && (
               <button
                 type="button"
@@ -1484,10 +1480,10 @@ function SuspensionBanner({
             <div className="text-[10px] font-mono text-muted-foreground mt-0.5">
               0 leads {fmtWorkedDay(r.d2)} + {fmtWorkedDay(r.d1)} · {r.streakLabel}-day streak
             </div>
-          </div>
+          </ArcadeCard>
         ))}
       </div>
-    </div>
+    </ArcadeCard>
   );
 }
 
@@ -1526,7 +1522,7 @@ function WebhookUrlBanner() {
   };
 
   return (
-    <div className="arcade-card p-4 border-accent/40">
+    <ArcadeCard className="border-accent/40">
       <div className="flex items-center gap-2 mb-2">
         <Link2 className="w-4 h-4 text-accent" />
         <div className="text-[10px] font-display uppercase tracking-widest text-accent">
@@ -1551,7 +1547,7 @@ function WebhookUrlBanner() {
           {copied ? "Copied" : "Copy"}
         </NeonButton>
       </div>
-    </div>
+    </ArcadeCard>
   );
 }
 
@@ -1595,7 +1591,7 @@ function MondayTokenCard() {
   };
 
   return (
-    <div className="arcade-card p-4 border-warning/40">
+    <ArcadeCard className="border-warning/40">
       <div className="flex items-center gap-2 mb-2">
         <KeyRound className="w-4 h-4 text-warning" />
         <div className="text-[10px] font-display uppercase tracking-widest text-warning">
@@ -1635,14 +1631,14 @@ function MondayTokenCard() {
             {reveal ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
           </button>
         </div>
-        <button
-          type="button"
-          onClick={save}
-          disabled={saving || !value.trim()}
-          className="arcade-card px-3 py-2 text-[10px] font-display uppercase tracking-widest text-warning hover:bg-surface-elevated disabled:opacity-50"
+        <ArcadeCard
+          asChild
+          className="px-3 py-2 text-[10px] font-display uppercase tracking-widest text-warning hover:bg-surface-elevated disabled:opacity-50"
         >
-          {saving ? "Saving…" : "Save Token"}
-        </button>
+          <button type="button" onClick={save} disabled={saving || !value.trim()}>
+            {saving ? "Saving…" : "Save Token"}
+          </button>
+        </ArcadeCard>
       </div>
       {error && <div className="mt-2 text-[11px] text-destructive font-mono">{error}</div>}
       {savedAt && !error && (
@@ -1650,9 +1646,18 @@ function MondayTokenCard() {
           Saved
         </div>
       )}
-    </div>
+    </ArcadeCard>
   );
 }
+
+const TILE_TEXT = {
+  neon: "text-neon",
+  victory: "text-victory",
+  accent: "text-accent",
+  warning: "text-warning",
+  danger: "text-destructive",
+  muted: "text-muted-foreground",
+} as const;
 
 function TotalTile({
   label,
@@ -1661,27 +1666,15 @@ function TotalTile({
 }: {
   label: string;
   value: number | string;
-  accent: "neon" | "victory" | "accent" | "warning" | "danger" | "muted";
+  accent: keyof typeof TILE_TEXT;
 }) {
-  const color =
-    accent === "victory"
-      ? "text-victory"
-      : accent === "accent"
-        ? "text-accent"
-        : accent === "warning"
-          ? "text-warning"
-          : accent === "danger"
-            ? "text-destructive"
-            : accent === "muted"
-              ? "text-muted-foreground"
-              : "text-neon";
   return (
-    <div className="arcade-card p-4">
+    <ArcadeCard>
       <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
         {label}
       </div>
-      <div className={`font-display text-2xl mt-1 ${color}`}>{value}</div>
-    </div>
+      <div className={`font-display text-2xl mt-1 ${TILE_TEXT[accent]}`}>{value}</div>
+    </ArcadeCard>
   );
 }
 
@@ -1724,8 +1717,8 @@ function WebhookLogsButton() {
           className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4"
           onClick={() => setOpen(false)}
         >
-          <div
-            className="arcade-card w-full max-w-3xl max-h-[85vh] flex flex-col"
+          <ArcadeCard
+            className="p-0 w-full max-w-3xl max-h-[85vh] flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between p-4 border-b border-border">
@@ -1773,7 +1766,7 @@ function WebhookLogsButton() {
                 ))
               )}
             </div>
-          </div>
+          </ArcadeCard>
         </div>
       )}
     </>

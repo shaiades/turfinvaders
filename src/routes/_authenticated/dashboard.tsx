@@ -84,12 +84,12 @@ function Loading() { return <div className="text-muted-foreground text-sm">Loadi
 
 function NoRole() {
   return (
-    <div className="arcade-card p-8 text-center">
+    <ArcadeCard className="p-8 text-center">
       <h1 className="font-display text-base text-neon">AWAITING ROSTER ASSIGNMENT</h1>
       <p className="mt-3 text-sm text-muted-foreground">
         Your account is created. An Owner needs to assign you a role and team before you can play.
       </p>
-    </div>
+    </ArcadeCard>
   );
 }
 
@@ -335,7 +335,7 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
 
 
       {/* Van-level Live Lead Counter */}
-      <div className="arcade-card p-5 flex items-center justify-between gap-4 flex-wrap">
+      <ArcadeCard className="p-5 flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
           <Truck className="w-5 h-5 text-neon" />
           <div>
@@ -346,7 +346,7 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
           </div>
         </div>
         <LiveLeadCounter value={leads.byTeam[myTeam.id] ?? 0} size="md" accent="victory" />
-      </div>
+      </ArcadeCard>
 
       {/* Day / Week / Month — governs the Command Center, team stats, and Other Vans */}
       <RangeTabs controls={rangeControls} />
@@ -358,23 +358,23 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
             range={{ startISO: range.startISO, endISO: range.endISO, label: range.label }}
           />
         ) : teamQuery.isSuccess ? (
-          <div className="arcade-card p-8 text-center">
+          <ArcadeCard className="p-8 text-center">
             <h2 className="font-display text-sm text-neon">MEMBER VIEW</h2>
             <p className="mt-3 text-sm text-muted-foreground">
               You're assigned to this van as a member — live team stats are visible to the van's
               captain. Ask an Owner if you should be set as this van's captain.
             </p>
-          </div>
+          </ArcadeCard>
         ) : (
           <div className="text-sm text-muted-foreground">Loading van…</div>
         )
       ) : (
-        <div className="arcade-card p-8 text-center">
+        <ArcadeCard className="p-8 text-center">
           <h2 className="font-display text-sm text-neon">NO VAN ASSIGNED</h2>
           <p className="mt-3 text-sm text-muted-foreground">
             You are not assigned to a van yet. Ask an Owner to add you to a team to see your roster and stats.
           </p>
-        </div>
+        </ArcadeCard>
       )}
 
       {isVanCaptain && (
@@ -430,25 +430,27 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
                   sales: 0,
                 };
                 return (
-                  <Link key={t.id} to="/teams/$teamId" params={{ teamId: t.id }} className="arcade-card p-4 hover:arcade-card-glow">
-                    <div className="flex items-center justify-between mb-3">
-                      <TeamBadge name={t.name} color={t.color ?? "#10b981"} />
-                      <LiveLeadCounter value={leads.byTeam[t.id] ?? 0} size="sm" label="LEADS" />
-                    </div>
-                    <div className="grid grid-cols-3 gap-2">
-                      <Mini label="Submits" value={tt.submits.toLocaleString()} />
-                      <Mini label="Confirmed" value={tt.confirmed.toLocaleString()} />
-                      <Mini label="Sales" value={tt.sales.toLocaleString()} />
-                    </div>
-                  </Link>
+                  <ArcadeCard key={t.id} asChild className="hover:arcade-card-glow">
+                    <Link to="/teams/$teamId" params={{ teamId: t.id }}>
+                      <div className="flex items-center justify-between mb-3">
+                        <TeamBadge name={t.name} color={t.color ?? "#10b981"} />
+                        <LiveLeadCounter value={leads.byTeam[t.id] ?? 0} size="sm" label="LEADS" />
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <Mini label="Submits" value={tt.submits.toLocaleString()} />
+                        <Mini label="Confirmed" value={tt.confirmed.toLocaleString()} />
+                        <Mini label="Sales" value={tt.sales.toLocaleString()} />
+                      </div>
+                    </Link>
+                  </ArcadeCard>
                 );
               })}
           </div>
         </ArcadePanel>
       ) : (
-        <div className="arcade-card p-5 text-sm text-muted-foreground flex items-center gap-2">
+        <ArcadeCard className="p-5 text-sm text-muted-foreground flex items-center gap-2">
           <Zap className="w-4 h-4" /> Global Visibility is off. Only your van is visible. Ask the Owner to flip it on for cross-team views.
-        </div>
+        </ArcadeCard>
       )}
     </div>
   );

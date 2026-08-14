@@ -13,6 +13,7 @@ import {
   MobileCardHeader,
   MobileStatGrid,
   MobileStat,
+  ArcadeCard,
 } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -260,14 +261,18 @@ export function PayrollLedger() {
 
   return (
     <div className="space-y-6">
-      <div className="arcade-card p-5 flex flex-wrap items-end justify-between gap-4">
+      <ArcadeCard className="p-5 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Weekly Payroll Report</div>
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            Weekly Payroll Report
+          </div>
           <h2 className="font-display text-lg text-neon mt-1">
             {format(weekStart, "MMM d")} → {format(weekEnd, "MMM d, yyyy")}
           </h2>
           <div className="text-xs text-muted-foreground mt-1">
-            Official pay engine · Hours: clocked time only (30-min lunch deducted per shift, no daily caps) — no clock-in, no base pay · Hourly tier by points · Commission by Sale Price · Sit & Monster bonuses included
+            Official pay engine · Hours: clocked time only (30-min lunch deducted per shift, no
+            daily caps) — no clock-in, no base pay · Hourly tier by points · Commission by Sale
+            Price · Sit & Monster bonuses included
           </div>
           {office !== "All" && (
             <div className="mt-3 text-[10px] font-display uppercase tracking-widest text-neon">
@@ -276,7 +281,12 @@ export function PayrollLedger() {
           )}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <Button variant="outline" size="sm" onClick={() => shiftWeek(-1)} className="font-display text-[10px] uppercase tracking-widest">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => shiftWeek(-1)}
+            className="font-display text-[10px] uppercase tracking-widest"
+          >
             ← Prev Week
           </Button>
           <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
@@ -306,7 +316,12 @@ export function PayrollLedger() {
               />
             </PopoverContent>
           </Popover>
-          <Button variant="outline" size="sm" onClick={() => shiftWeek(1)} className="font-display text-[10px] uppercase tracking-widest">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => shiftWeek(1)}
+            className="font-display text-[10px] uppercase tracking-widest"
+          >
             Next Week →
           </Button>
           <Button
@@ -318,191 +333,239 @@ export function PayrollLedger() {
             Export to CSV
           </Button>
         </div>
-      </div>
+      </ArcadeCard>
 
-      <ArcadePanel title={`Payroll Ledger · ${rows.length} agents`} action={
-        <span className="font-display text-xs text-victory">GRAND TOTAL · ${grandTotal.toFixed(2)}</span>
-      }>
+      <ArcadePanel
+        title={`Payroll Ledger · ${rows.length} agents`}
+        action={
+          <span className="font-display text-xs text-victory">
+            GRAND TOTAL · ${grandTotal.toFixed(2)}
+          </span>
+        }
+      >
         {isLoading ? (
           <div className="text-sm text-muted-foreground">Loading payroll…</div>
         ) : isError ? (
           <div className="text-sm text-destructive">
-            Couldn't load payroll for this week — check your connection and reload. Totals shown elsewhere may be incomplete.
+            Couldn't load payroll for this week — check your connection and reload. Totals shown
+            elsewhere may be incomplete.
           </div>
         ) : rows.length === 0 ? (
           <div className="text-sm text-muted-foreground">No activity recorded for this week.</div>
         ) : (
           <>
-          {payErrorCount > 0 && (
-            <div className="mb-3 text-xs text-destructive">
-              ⚠ Pay could not be computed for {payErrorCount} agent{payErrorCount === 1 ? "" : "s"} (marked ERROR below).
-              The grand total and CSV export exclude them — retry or investigate before paying out.
-            </div>
-          )}
-          <MobileCardList>
-            {rows.map((r) => (
-              <MobileCard key={r.id}>
-                <MobileCardHeader
-                  left={r.name}
-                  right={
-                    r.payError ? (
-                      <span className="text-destructive text-xs" title={r.payError}>ERROR</span>
-                    ) : (
-                      <span className="text-victory">${r.totalPay.toFixed(2)}</span>
-                    )
-                  }
-                />
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <RankPill rank={r.rank} />
-                  {r.team && <TeamBadge name={r.team.name} color={r.team.color} />}
-                </div>
-                {r.payLock !== "active" && (
-                  <div
-                    className={`text-[9px] font-display uppercase tracking-widest ${r.payLock === "reverted" ? "text-destructive" : "text-warning"}`}
-                    title={r.payLock === "reverted"
-                      ? "Starting Pay Lock reverted — paid on weekly point tiers until 3 consecutive 7+ sit weeks"
-                      : "Pay Lock warning — 4-week sit average below 5"}
-                  >
-                    {r.payLock === "reverted" ? "Lock reverted" : "Lock warning"}
-                  </div>
-                )}
-                <MobileStatGrid cols={3}>
-                  <MobileStat label="Leads" value={r.total} className="text-victory" />
-                  <MobileStat label="Sits" value={r.sits} />
-                  <MobileStat label="Pts" value={r.points} className="font-display text-neon" />
-                  <MobileStat
-                    label="Rate"
-                    value={`$${r.rate}`}
-                    className={cn(
-                      "font-display",
-                      r.rate === 35 ? "text-victory" : r.rate === 30 ? "text-neon" : "text-muted-foreground",
-                    )}
+            {payErrorCount > 0 && (
+              <div className="mb-3 text-xs text-destructive">
+                ⚠ Pay could not be computed for {payErrorCount} agent
+                {payErrorCount === 1 ? "" : "s"} (marked ERROR below). The grand total and CSV
+                export exclude them — retry or investigate before paying out.
+              </div>
+            )}
+            <MobileCardList>
+              {rows.map((r) => (
+                <MobileCard key={r.id}>
+                  <MobileCardHeader
+                    left={r.name}
+                    right={
+                      r.payError ? (
+                        <span className="text-destructive text-xs" title={r.payError}>
+                          ERROR
+                        </span>
+                      ) : (
+                        <span className="text-victory">${r.totalPay.toFixed(2)}</span>
+                      )
+                    }
                   />
-                  <MobileStat
-                    label="Hours"
-                    value={
-                      <>
-                        {r.hours.toFixed(2)}h
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <RankPill rank={r.rank} />
+                    {r.team && <TeamBadge name={r.team.name} color={r.team.color} />}
+                  </div>
+                  {r.payLock !== "active" && (
+                    <div
+                      className={`text-[9px] font-display uppercase tracking-widest ${r.payLock === "reverted" ? "text-destructive" : "text-warning"}`}
+                      title={
+                        r.payLock === "reverted"
+                          ? "Starting Pay Lock reverted — paid on weekly point tiers until 3 consecutive 7+ sit weeks"
+                          : "Pay Lock warning — 4-week sit average below 5"
+                      }
+                    >
+                      {r.payLock === "reverted" ? "Lock reverted" : "Lock warning"}
+                    </div>
+                  )}
+                  <MobileStatGrid cols={3}>
+                    <MobileStat label="Leads" value={r.total} className="text-victory" />
+                    <MobileStat label="Sits" value={r.sits} />
+                    <MobileStat label="Pts" value={r.points} className="font-display text-neon" />
+                    <MobileStat
+                      label="Rate"
+                      value={`$${r.rate}`}
+                      className={cn(
+                        "font-display",
+                        r.rate === 35
+                          ? "text-victory"
+                          : r.rate === 30
+                            ? "text-neon"
+                            : "text-muted-foreground",
+                      )}
+                    />
+                    <MobileStat
+                      label="Hours"
+                      value={
+                        <>
+                          {r.hours.toFixed(2)}h
+                          <div className="text-[9px] text-muted-foreground">
+                            {r.hoursSource === "clocked" ? "clocked" : "no time clocked"}
+                          </div>
+                        </>
+                      }
+                      className="font-display text-neon"
+                    />
+                    <MobileStat
+                      label="Sales Vol"
+                      value={`$${r.sale_amount.toFixed(2)}`}
+                      className="font-display text-victory"
+                    />
+                    <MobileStat label="Commission" value={`$${r.commission.toFixed(2)}`} />
+                    <MobileStat label="Bonuses" value={`$${r.bonuses.toFixed(2)}`} />
+                  </MobileStatGrid>
+                  <div className="text-xs text-muted-foreground">
+                    {r.bo} BO, {r.ol} OL, {r.rs} RS, <span className="text-neon">{r.pm} Sit</span>,{" "}
+                    <span className="text-victory">{r.sales} Sale</span>
+                  </div>
+                </MobileCard>
+              ))}
+              <MobileCard className="border-neon/40">
+                <MobileCardHeader
+                  left={
+                    <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                      Grand Total · Estimated Pay
+                    </span>
+                  }
+                  right={<span className="text-victory text-base">${grandTotal.toFixed(2)}</span>}
+                />
+              </MobileCard>
+            </MobileCardList>
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border">
+                    <th className="text-left py-2 pr-3">Agent</th>
+                    <th className="text-left py-2 pr-3">Rank</th>
+                    <th className="text-left py-2 pr-3">Van</th>
+                    <th className="text-right py-2 pr-3">Leads</th>
+                    <th className="text-left py-2 pr-3">Breakdown</th>
+                    <th className="text-right py-2 pr-3">Sits</th>
+                    <th className="text-right py-2 pr-3">Pts</th>
+                    <th className="text-right py-2 pr-3">Rate</th>
+                    <th className="text-right py-2 pr-3">Total Hours</th>
+                    <th className="text-right py-2 pr-3">Total Sales Volume ($)</th>
+                    <th className="text-right py-2 pr-3">Commission Earned ($)</th>
+                    <th className="text-right py-2 pr-3">Bonuses</th>
+                    <th className="text-right py-2 pr-1">Total Estimated Pay ($)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r) => (
+                    <tr
+                      key={r.id}
+                      className="border-b border-border/40 transition-colors duration-200 hover:bg-surface-elevated"
+                    >
+                      <td className="py-2.5 pr-3 font-medium">{r.name}</td>
+                      <td className="py-2.5 pr-3">
+                        <RankPill rank={r.rank} />
+                        {r.payLock !== "active" && (
+                          <div
+                            className={`mt-1 text-[9px] font-display uppercase tracking-widest ${r.payLock === "reverted" ? "text-destructive" : "text-warning"}`}
+                            title={
+                              r.payLock === "reverted"
+                                ? "Starting Pay Lock reverted — paid on weekly point tiers until 3 consecutive 7+ sit weeks"
+                                : "Pay Lock warning — 4-week sit average below 5"
+                            }
+                          >
+                            {r.payLock === "reverted" ? "Lock reverted" : "Lock warning"}
+                          </div>
+                        )}
+                      </td>
+                      <td className="py-2.5 pr-3">
+                        {r.team ? (
+                          <TeamBadge name={r.team.name} color={r.team.color} />
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      <td className="py-2.5 pr-3 text-right text-victory">{r.total}</td>
+                      <td className="py-2.5 pr-3 text-xs text-muted-foreground whitespace-nowrap">
+                        {r.bo} BO, {r.ol} OL, {r.rs} RS,{" "}
+                        <span className="text-neon">{r.pm} Sit</span>,{" "}
+                        <span className="text-victory">{r.sales} Sale</span>
+                      </td>
+                      <td className="py-2.5 pr-3 text-right">{r.sits}</td>
+                      <td className="py-2.5 pr-3 text-right font-display text-neon">{r.points}</td>
+                      <td className="py-2.5 pr-3 text-right font-display text-xs">
+                        <span
+                          className={
+                            r.rate === 35
+                              ? "text-victory"
+                              : r.rate === 30
+                                ? "text-neon"
+                                : "text-muted-foreground"
+                          }
+                        >
+                          ${r.rate}
+                        </span>
+                      </td>
+                      <td className="py-2.5 pr-3 text-right">
+                        <div className="font-display text-neon">{r.hours.toFixed(2)}h</div>
                         <div className="text-[9px] text-muted-foreground">
                           {r.hoursSource === "clocked" ? "clocked" : "no time clocked"}
                         </div>
-                      </>
-                    }
-                    className="font-display text-neon"
-                  />
-                  <MobileStat label="Sales Vol" value={`$${r.sale_amount.toFixed(2)}`} className="font-display text-victory" />
-                  <MobileStat label="Commission" value={`$${r.commission.toFixed(2)}`} />
-                  <MobileStat label="Bonuses" value={`$${r.bonuses.toFixed(2)}`} />
-                </MobileStatGrid>
-                <div className="text-xs text-muted-foreground">
-                  {r.bo} BO, {r.ol} OL, {r.rs} RS, <span className="text-neon">{r.pm} Sit</span>, <span className="text-victory">{r.sales} Sale</span>
-                </div>
-              </MobileCard>
-            ))}
-            <MobileCard className="border-neon/40">
-              <MobileCardHeader
-                left={
-                  <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-                    Grand Total · Estimated Pay
-                  </span>
-                }
-                right={<span className="text-victory text-base">${grandTotal.toFixed(2)}</span>}
-              />
-            </MobileCard>
-          </MobileCardList>
-          <div className="hidden md:block overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border">
-                  <th className="text-left py-2 pr-3">Agent</th>
-                  <th className="text-left py-2 pr-3">Rank</th>
-                  <th className="text-left py-2 pr-3">Van</th>
-                  <th className="text-right py-2 pr-3">Leads</th>
-                  <th className="text-left py-2 pr-3">Breakdown</th>
-                  <th className="text-right py-2 pr-3">Sits</th>
-                  <th className="text-right py-2 pr-3">Pts</th>
-                  <th className="text-right py-2 pr-3">Rate</th>
-                  <th className="text-right py-2 pr-3">Total Hours</th>
-                  <th className="text-right py-2 pr-3">Total Sales Volume ($)</th>
-                  <th className="text-right py-2 pr-3">Commission Earned ($)</th>
-                  <th className="text-right py-2 pr-3">Bonuses</th>
-                  <th className="text-right py-2 pr-1">Total Estimated Pay ($)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={r.id} className="border-b border-border/40 transition-colors duration-200 hover:bg-surface-elevated">
-                    <td className="py-2.5 pr-3 font-medium">{r.name}</td>
-                    <td className="py-2.5 pr-3">
-                      <RankPill rank={r.rank} />
-                      {r.payLock !== "active" && (
-                        <div
-                          className={`mt-1 text-[9px] font-display uppercase tracking-widest ${r.payLock === "reverted" ? "text-destructive" : "text-warning"}`}
-                          title={r.payLock === "reverted"
-                            ? "Starting Pay Lock reverted — paid on weekly point tiers until 3 consecutive 7+ sit weeks"
-                            : "Pay Lock warning — 4-week sit average below 5"}
-                        >
-                          {r.payLock === "reverted" ? "Lock reverted" : "Lock warning"}
-                        </div>
-                      )}
-                    </td>
-                    <td className="py-2.5 pr-3">
-                      {r.team ? <TeamBadge name={r.team.name} color={r.team.color} /> : <span className="text-xs text-muted-foreground">—</span>}
-                    </td>
-                    <td className="py-2.5 pr-3 text-right text-victory">{r.total}</td>
-                    <td className="py-2.5 pr-3 text-xs text-muted-foreground whitespace-nowrap">
-                      {r.bo} BO, {r.ol} OL, {r.rs} RS, <span className="text-neon">{r.pm} Sit</span>, <span className="text-victory">{r.sales} Sale</span>
-                    </td>
-                    <td className="py-2.5 pr-3 text-right">{r.sits}</td>
-                    <td className="py-2.5 pr-3 text-right font-display text-neon">{r.points}</td>
-                    <td className="py-2.5 pr-3 text-right font-display text-xs">
-                      <span className={r.rate === 35 ? "text-victory" : r.rate === 30 ? "text-neon" : "text-muted-foreground"}>
-                        ${r.rate}
-                      </span>
-                    </td>
-                    <td className="py-2.5 pr-3 text-right">
-                      <div className="font-display text-neon">{r.hours.toFixed(2)}h</div>
-                      <div className="text-[9px] text-muted-foreground">
-                        {r.hoursSource === "clocked" ? "clocked" : "no time clocked"}
-                      </div>
-                    </td>
-                    <td className="py-2.5 pr-3 text-right font-display text-victory">
-                      ${r.sale_amount.toFixed(2)}
-                    </td>
-                    <td className="py-2.5 pr-3 text-right">
-                      <div>${r.commission.toFixed(2)}</div>
-                      <div className="text-[9px] text-muted-foreground">
-                        {(r.commRate * 100).toFixed(0)}% commission tier
-                      </div>
-                    </td>
-                    <td className="py-2.5 pr-3 text-right">
-                      <div>${r.bonuses.toFixed(2)}</div>
-                      {(r.sitBonus > 0 || r.monster > 0) && (
+                      </td>
+                      <td className="py-2.5 pr-3 text-right font-display text-victory">
+                        ${r.sale_amount.toFixed(2)}
+                      </td>
+                      <td className="py-2.5 pr-3 text-right">
+                        <div>${r.commission.toFixed(2)}</div>
                         <div className="text-[9px] text-muted-foreground">
-                          {r.sitBonus > 0 && `+$${r.sitBonus.toFixed(0)} sits`}
-                          {r.sitBonus > 0 && r.monster > 0 && " · "}
-                          {r.monster > 0 && `+$500 MONSTER`}
+                          {(r.commRate * 100).toFixed(0)}% commission tier
                         </div>
-                      )}
+                      </td>
+                      <td className="py-2.5 pr-3 text-right">
+                        <div>${r.bonuses.toFixed(2)}</div>
+                        {(r.sitBonus > 0 || r.monster > 0) && (
+                          <div className="text-[9px] text-muted-foreground">
+                            {r.sitBonus > 0 && `+$${r.sitBonus.toFixed(0)} sits`}
+                            {r.sitBonus > 0 && r.monster > 0 && " · "}
+                            {r.monster > 0 && `+$500 MONSTER`}
+                          </div>
+                        )}
+                      </td>
+                      <td className="py-2.5 pr-1 text-right font-display text-victory">
+                        {r.payError ? (
+                          <span className="text-destructive text-xs" title={r.payError}>
+                            ERROR
+                          </span>
+                        ) : (
+                          <>${r.totalPay.toFixed(2)}</>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t border-neon/40">
+                    <td
+                      colSpan={12}
+                      className="py-3 text-right text-[10px] font-display uppercase tracking-widest text-muted-foreground"
+                    >
+                      Grand Total · Estimated Pay
                     </td>
-                    <td className="py-2.5 pr-1 text-right font-display text-victory">
-                      {r.payError ? (
-                        <span className="text-destructive text-xs" title={r.payError}>ERROR</span>
-                      ) : (
-                        <>${r.totalPay.toFixed(2)}</>
-                      )}
+                    <td className="py-3 pr-1 text-right font-display text-victory text-base">
+                      ${grandTotal.toFixed(2)}
                     </td>
                   </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr className="border-t border-neon/40">
-                  <td colSpan={12} className="py-3 text-right text-[10px] font-display uppercase tracking-widest text-muted-foreground">Grand Total · Estimated Pay</td>
-                  <td className="py-3 pr-1 text-right font-display text-victory text-base">${grandTotal.toFixed(2)}</td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
+                </tfoot>
+              </table>
+            </div>
           </>
         )}
       </ArcadePanel>

@@ -71,25 +71,31 @@ export interface ArcadeCardProps extends HTMLAttributes<HTMLDivElement> {
   faction?: keyof typeof ARCADE_CARD_FACTION;
   /** Outer neon glow — reserve for the panel that should own the screen. */
   glow?: boolean;
+  /** Render the child element (a <Link> card, a <button> card) with the
+   *  card's styling instead of wrapping it in a div. */
+  asChild?: boolean;
 }
 
 /** Dark rounded container on the arcade-card base (styles.css). NOTE:
  *  arcade-card clips overflow — any horizontal scroller inside needs an
  *  intact width chain (floored grid tracks / min-w-0), see AGENTS.md rule 2. */
 export const ArcadeCard = forwardRef<HTMLDivElement, ArcadeCardProps>(
-  ({ faction, glow = false, className, ...props }, ref) => (
-    <div
-      ref={ref}
-      className={cn(
-        "arcade-card p-4 transition-all duration-200",
-        faction && ARCADE_CARD_FACTION[faction].base,
-        faction && glow && ARCADE_CARD_FACTION[faction].glow,
-        !faction && glow && "arcade-card-glow",
-        className,
-      )}
-      {...props}
-    />
-  ),
+  ({ faction, glow = false, asChild = false, className, ...props }, ref) => {
+    const Comp = asChild ? Slot : "div";
+    return (
+      <Comp
+        ref={ref}
+        className={cn(
+          "arcade-card p-4 transition-all duration-200",
+          faction && ARCADE_CARD_FACTION[faction].base,
+          faction && glow && ARCADE_CARD_FACTION[faction].glow,
+          !faction && glow && "arcade-card-glow",
+          className,
+        )}
+        {...props}
+      />
+    );
+  },
 );
 ArcadeCard.displayName = "ArcadeCard";
 
