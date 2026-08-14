@@ -20,11 +20,14 @@ export function CanvasserHUD({ userId }: { userId: string }) {
   const logs = useTodayLogs(userId);
   const profile = useCanvasserProfile(userId);
 
-  // New pings land on the HUD the moment they hit daily_logs.
+  // New pings land on the HUD the moment they hit daily_logs. Invalidate the
+  // whole self prefix, not just today's key — the 60d cache feeds the Stats
+  // aggregates and Plan-tab funnel rates, and a cross-device write must
+  // reach those too.
   useRealtimeInvalidate({
     channel: "canvasser-hud",
     tables: ["daily_logs"],
-    invalidateKeys: [dailyLogKeys.today(userId, today)],
+    invalidateKeys: [dailyLogKeys.all(userId)],
   });
 
   const totals = sumLogCounters(logs.data);

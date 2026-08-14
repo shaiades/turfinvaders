@@ -16,15 +16,26 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { upsertManualWeekly } from "@/lib/fleet.functions";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 import { useOfficeFilter } from "@/components/OfficeFilterContext";
 import { laTodayISO, laWeekStartISO, weekStartOfISO } from "@/lib/dates";
-import { DEFAULT_OFFICE } from "@/lib/offices";
-
 
 /* ============ Helpers ============ */
 /* All day/week/month buckets are America/Los_Angeles (midnight PT resets). */
@@ -32,15 +43,6 @@ import { DEFAULT_OFFICE } from "@/lib/offices";
 /* Numeric grid cells share one recipe per table so dim-at-zero coloring
  * (metricText) composes without blowing past the print width. */
 const dailyCell = "px-3 py-1.5 text-right font-mono";
-
-
-// One board card = one lead (Setter Report parity). demos_sits already
-// includes sold sits, so sales is not added again. OL is intentionally NOT
-// in the total — outside leads are their own column, and the Monday chart
-// totals don't include them either.
-function leadsSum(r: { demos_sits?: number | null; no_demo?: number | null; ctc?: number | null; future_leads?: number | null; unmarked?: number | null }) {
-  return (r.demos_sits ?? 0) + (r.no_demo ?? 0) + (r.ctc ?? 0) + (r.future_leads ?? 0) + (r.unmarked ?? 0);
-}
 
 /* ============ Main ============ */
 
@@ -63,7 +65,6 @@ export function ExecutiveSection() {
   );
 }
 
-
 /* ============ Live Daily Action (Today) ============ */
 
 function LiveDailyAction() {
@@ -75,7 +76,9 @@ function LiveDailyAction() {
       const [logsR, profilesR, vansR, rolesR] = await Promise.all([
         supabase
           .from("daily_logs")
-          .select("canvasser_id, team_id, leads_called_in, next_days, future_leads, no_demo, confirmed_leads")
+          .select(
+            "canvasser_id, team_id, leads_called_in, next_days, future_leads, no_demo, confirmed_leads",
+          )
           .eq("log_date", today),
         supabase.from("profiles").select("id, display_name, team_id, suspension_tracked"),
         supabase.from("teams").select("id, name, color"),
@@ -124,7 +127,7 @@ function LiveDailyAction() {
         .map((p) => ({
           id: p.id,
           name: p.display_name ?? "Unknown",
-          van: p.team_id ? vanById.get(p.team_id) ?? null : null,
+          van: p.team_id ? (vanById.get(p.team_id) ?? null) : null,
         }))
         .sort((a, b) => a.name.localeCompare(b.name));
 
@@ -147,16 +150,27 @@ function LiveDailyAction() {
     <section className="space-y-4">
       <div className="flex items-baseline justify-between gap-4">
         <div>
-          <h2 className="font-display text-sm uppercase tracking-widest text-foreground">Live Daily Action</h2>
+          <h2 className="font-display text-sm uppercase tracking-widest text-foreground">
+            Live Daily Action
+          </h2>
           <p className="text-xs text-muted-foreground mt-0.5">{today}</p>
         </div>
       </div>
 
       <div className="space-y-1 text-sm text-foreground">
-        <p>Leads Called In: <span className="text-neon font-medium">{t.called}</span></p>
-        <p>Confirmed Tomorrow: <span className="text-victory font-medium">{t.nextDay}</span></p>
-        <p>Confirmed Future: <span className="text-[var(--accent)] font-medium">{t.future}</span></p>
-        <p>Blowouts / Not Good: <span className="text-[var(--warning)] font-medium">{t.blowout}</span></p>
+        <p>
+          Leads Called In: <span className="text-neon font-medium">{t.called}</span>
+        </p>
+        <p>
+          Confirmed Tomorrow: <span className="text-victory font-medium">{t.nextDay}</span>
+        </p>
+        <p>
+          Confirmed Future: <span className="text-[var(--accent)] font-medium">{t.future}</span>
+        </p>
+        <p>
+          Blowouts / Not Good:{" "}
+          <span className="text-[var(--warning)] font-medium">{t.blowout}</span>
+        </p>
       </div>
 
       <div className="space-y-1">
@@ -166,19 +180,14 @@ function LiveDailyAction() {
         {donut.length === 0 ? (
           <p className="text-sm text-victory">Everyone is on the board — no donuts today.</p>
         ) : (
-          <p className="text-sm text-foreground">
-            {donut.map((d) => d.name).join(", ")}
-          </p>
+          <p className="text-sm text-foreground">{donut.map((d) => d.name).join(", ")}</p>
         )}
       </div>
     </section>
   );
 }
 
-
-
 /* ============ Manual Entry ============ */
-
 
 function ManualEntryBar() {
   const qc = useQueryClient();
@@ -193,7 +202,10 @@ function ManualEntryBar() {
   const peopleQ = useQuery({
     queryKey: ["all_canvassers_simple"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("profiles").select("id, display_name").order("display_name");
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, display_name")
+        .order("display_name");
       if (error) throw error;
       return data ?? [];
     },
@@ -201,21 +213,24 @@ function ManualEntryBar() {
 
   const save = useMutation({
     mutationFn: async () => {
-      await upsertFn({ data: {
-        canvasser_id: canvasserId,
-        week_start: weekStart,
-        total_leads: Number(leads),
-        total_sits: Number(sits),
-        total_sales: Number(sales),
-      }});
+      await upsertFn({
+        data: {
+          canvasser_id: canvasserId,
+          week_start: weekStart,
+          total_leads: Number(leads),
+          total_sits: Number(sits),
+          total_sales: Number(sales),
+        },
+      });
     },
     onSuccess: () => {
       toast.success("Saved · Paycheck engine updated");
-      qc.invalidateQueries({ queryKey: ["weekly_results"] });
       qc.invalidateQueries({ queryKey: ["fleet_status"] });
       qc.invalidateQueries({ queryKey: ["raw_daily_logs"] });
       setOpen(false);
-      setLeads("0"); setSits("0"); setSales("0");
+      setLeads("0");
+      setSits("0");
+      setSales("0");
     },
     onError: (e: Error) => toast.error(e.message ?? "Failed to save"),
   });
@@ -223,40 +238,81 @@ function ManualEntryBar() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="lg" className="w-full h-12 md:h-14 py-3 md:py-4 text-sm md:text-base font-display uppercase tracking-widest bg-victory text-background hover:bg-victory/90">
+        <Button
+          size="lg"
+          className="w-full h-12 md:h-14 py-3 md:py-4 text-sm md:text-base font-display uppercase tracking-widest bg-victory text-background hover:bg-victory/90"
+        >
           <Plus className="w-5 h-5 mr-2" /> Manual Data Entry
         </Button>
       </DialogTrigger>
       <DialogContent>
-        <DialogHeader><DialogTitle className="font-display uppercase tracking-widest text-neon">Manual Weekly Entry</DialogTitle></DialogHeader>
+        <DialogHeader>
+          <DialogTitle className="font-display uppercase tracking-widest text-neon">
+            Manual Weekly Entry
+          </DialogTitle>
+        </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-1.5">
             <Label>Canvasser</Label>
             <Select value={canvasserId} onValueChange={setCanvasserId}>
-              <SelectTrigger><SelectValue placeholder="Select canvasser…" /></SelectTrigger>
+              <SelectTrigger>
+                <SelectValue placeholder="Select canvasser…" />
+              </SelectTrigger>
               <SelectContent>
                 {(peopleQ.data ?? []).map((p) => (
-                  <SelectItem key={p.id} value={p.id}>{p.display_name ?? "Unknown"}</SelectItem>
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.display_name ?? "Unknown"}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
           <div className="space-y-1.5">
             <Label>Week (Monday)</Label>
-            <Input type="date" value={weekStart} onChange={(e) => setWeekStart(weekStartOfISO(e.target.value))} />
+            <Input
+              type="date"
+              value={weekStart}
+              onChange={(e) => setWeekStart(weekStartOfISO(e.target.value))}
+            />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="space-y-1.5"><Label>Total Leads</Label><Input type="number" min={0} value={leads} onChange={(e) => setLeads(e.target.value)} /></div>
-            <div className="space-y-1.5"><Label>Total Sits</Label><Input type="number" min={0} value={sits} onChange={(e) => setSits(e.target.value)} /></div>
-            <div className="space-y-1.5"><Label>Total Sales</Label><Input type="number" min={0} value={sales} onChange={(e) => setSales(e.target.value)} /></div>
+            <div className="space-y-1.5">
+              <Label>Total Leads</Label>
+              <Input
+                type="number"
+                min={0}
+                value={leads}
+                onChange={(e) => setLeads(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Total Sits</Label>
+              <Input type="number" min={0} value={sits} onChange={(e) => setSits(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Total Sales</Label>
+              <Input
+                type="number"
+                min={0}
+                value={sales}
+                onChange={(e) => setSales(e.target.value)}
+              />
+            </div>
           </div>
           <p className="text-xs text-muted-foreground">
-            Points = Sits + Sales. Pay auto-calculated by the Paycheck Engine and shown in <em>Last Week's Results</em>.
+            Points = Sits + Sales. Pay auto-calculated by the Paycheck Engine and shown in the{" "}
+            <em>Payroll</em> tab.
           </p>
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button onClick={() => save.mutate()} disabled={!canvasserId || save.isPending} className="bg-victory text-background hover:bg-victory/90">
+          <Button variant="ghost" onClick={() => setOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => save.mutate()}
+            disabled={!canvasserId || save.isPending}
+            className="bg-victory text-background hover:bg-victory/90"
+          >
             {save.isPending ? "Saving…" : "Save"}
           </Button>
         </DialogFooter>
@@ -272,19 +328,29 @@ function RawDataTable() {
     queryKey: ["raw_daily_logs"],
     queryFn: async () => {
       const [logsR, profilesR] = await Promise.all([
-        supabase.from("daily_logs")
-          .select("id, canvasser_id, team_id, log_date, demos_sits, sales, no_demo, one_legs, future_leads, unmarked, people_talked_to, leads_called_in, confirmed_leads")
+        supabase
+          .from("daily_logs")
+          .select(
+            "id, canvasser_id, team_id, log_date, demos_sits, sales, no_demo, one_legs, future_leads, unmarked, people_talked_to, leads_called_in, confirmed_leads",
+          )
           .order("log_date", { ascending: false })
           .limit(500),
         supabase.from("profiles").select("id, display_name, office_location"),
       ]);
       if (logsR.error) throw logsR.error;
       if (profilesR.error) throw profilesR.error;
-      const nameById = new Map((profilesR.data ?? []).map((p) => [p.id, p.display_name ?? "Unknown"]));
-      const locById = new Map((profilesR.data ?? []).map((p) => [p.id, (p as { office_location?: string | null }).office_location ?? null]));
+      const nameById = new Map(
+        (profilesR.data ?? []).map((p) => [p.id, p.display_name ?? "Unknown"]),
+      );
+      const locById = new Map(
+        (profilesR.data ?? []).map((p) => [
+          p.id,
+          (p as { office_location?: string | null }).office_location ?? null,
+        ]),
+      );
       return (logsR.data ?? []).map((r) => ({
         ...r,
-        name: nameById.get(r.canvasser_id) ?? r.canvasser_id.slice(0,8),
+        name: nameById.get(r.canvasser_id) ?? r.canvasser_id.slice(0, 8),
         office_location: locById.get(r.canvasser_id) ?? null,
       }));
     },
@@ -394,4 +460,3 @@ function RawDataTable() {
 }
 
 /* ============ 1. Live Fleet Status (Day/Week/Month) ============ */
-

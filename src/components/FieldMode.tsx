@@ -7,12 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { DoorOpen, MessagesSquare, Ban, Zap, X, Loader2 } from "lucide-react";
 import { getMondayFormUrl } from "@/lib/monday-form";
-import {
-  dailyLogKeys,
-  sumLogCounters,
-  useTodayLogs,
-  type DailyLogRow,
-} from "@/hooks/useDailyLogs";
+import { dailyLogKeys, sumLogCounters, useTodayLogs, type DailyLogRow } from "@/hooks/useDailyLogs";
 
 type TallyKey = "doors_knocked" | "people_talked_to" | "not_interested";
 type PinType = "knock" | "talked_to" | "not_interested" | "lead";
@@ -58,8 +53,6 @@ const TALLIES: Array<{
   },
 ];
 
-
-
 export function FieldMode() {
   const { user, teamId } = useAuth();
   const qc = useQueryClient();
@@ -102,7 +95,11 @@ export function FieldMode() {
 
   async function dropPin(pin_type: PinType, opts?: { silent?: boolean }) {
     if (!user?.id) return { ok: false as const };
-    const fix = await getPositionOrNull({ enableHighAccuracy: true, maximumAge: 8000, timeout: 8000 });
+    const fix = await getPositionOrNull({
+      enableHighAccuracy: true,
+      maximumAge: 8000,
+      timeout: 8000,
+    });
     if (!fix) {
       toast.error("No GPS fix yet — enable Location and try again.");
       return { ok: false as const };
@@ -125,7 +122,11 @@ export function FieldMode() {
       return { ok: false as const };
     }
     if (!opts?.silent && typeof navigator !== "undefined" && "vibrate" in navigator) {
-      try { navigator.vibrate?.(15); } catch { /* ignore */ }
+      try {
+        navigator.vibrate?.(15);
+      } catch {
+        /* ignore */
+      }
     }
     return { ok: true as const };
   }
@@ -140,10 +141,7 @@ export function FieldMode() {
       // sumLogCounters folds it into the total, and a render-captured
       // snapshot would lose counts when two buttons are tapped in quick
       // succession (both would base on the same stale array).
-      qc.setQueryData<DailyLogRow[]>(todayKey, (prev) => [
-        ...(prev ?? []),
-        { log_date, [key]: 1 },
-      ]);
+      qc.setQueryData<DailyLogRow[]>(todayKey, (prev) => [...(prev ?? []), { log_date, [key]: 1 }]);
       const res = await dropPin(pin_type);
       if (!res.ok) {
         // Refetch server truth instead of restoring a snapshot that may
@@ -285,9 +283,7 @@ function LeadSheet({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 bg-background flex flex-col">
       <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-background">
-        <div className="font-display text-xs uppercase tracking-widest text-neon">
-          ⚡ New Lead
-        </div>
+        <div className="font-display text-xs uppercase tracking-widest text-neon">⚡ New Lead</div>
         <button
           type="button"
           onClick={onClose}

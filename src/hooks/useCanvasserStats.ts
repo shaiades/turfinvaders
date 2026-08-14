@@ -109,13 +109,18 @@ export function useCanvasserStats(userId: string) {
   const salesQuery = useQuery({
     queryKey: ["my_confirmed_sales", "mtd", userId],
     queryFn: async () => {
+      // Fetch back to whichever starts earlier: the month (MTD revenue) or
+      // the Mon–Sat pay week — a week straddling the month boundary needs
+      // its prior-month days for weekRevenue/weekCommission.
+      const w = laWeekStartISO();
+      const m = laMonthStartISO();
       const { data, error } = await supabase
         .from("leads")
         .select("sale_amount, created_at")
         .eq("canvasser_id", userId)
         .eq("status", "confirmed")
         .eq("is_sale", true)
-        .gte("created_at", laMidnightUtcISO(laMonthStartISO()));
+        .gte("created_at", laMidnightUtcISO(w < m ? w : m));
       if (error) throw error;
       return data ?? [];
     },
@@ -147,8 +152,12 @@ export function useCanvasserStats(userId: string) {
     const week = aggregate(allRows.filter((r) => r.log_date >= w));
     const month = aggregate(allRows.filter((r) => r.log_date >= m));
 
+    // The fetched window is max(week, month) — bucket each figure explicitly.
     const sales = salesQuery.data ?? [];
-    const monthRevenue = sales.reduce((a, r) => a + Number(r.sale_amount ?? 0), 0);
+    const mStartMs = Date.parse(laMidnightUtcISO(m));
+    const monthRevenue = sales
+      .filter((r) => Date.parse(r.created_at) >= mStartMs)
+      .reduce((a, r) => a + Number(r.sale_amount ?? 0), 0);
     const wStartMs = Date.parse(laMidnightUtcISO(w));
     const weekRevenue = sales
       .filter((r) => Date.parse(r.created_at) >= wStartMs)
@@ -197,6 +206,10 @@ export function useCanvasserStats(userId: string) {
 
   const lpd =
     derived.week.days_worked > 0 ? derived.week.confirmed_leads / derived.week.days_worked : 0;
+  // Historical earning pace: MTD commission ÷ MTD doors (the Plan tab's
+  // value-per-knock is the forward-looking, goal-driven counterpart).
+  const valuePerDoor =
+    derived.month.doors_knocked > 0 ? derived.monthCommission / derived.month.doors_knocked : 0;
   const goalProgress = monthlyGoal > 0 ? Math.min(1, earnings.monthEarned / monthlyGoal) : 0;
 
   return {
@@ -205,6 +218,7 @@ export function useCanvasserStats(userId: string) {
     today,
     weeklyPay,
     lpd,
+    valuePerDoor,
     monthlyGoal,
     weeklyGoal,
     avgCommission,

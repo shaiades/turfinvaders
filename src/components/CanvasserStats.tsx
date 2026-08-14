@@ -81,7 +81,11 @@ export function CanvasserStats({
         <BigStat
           label="Monthly Revenue Generated"
           value={formatCurrency(stats.monthRevenue)}
-          sub="Confirmed sales · MTD"
+          sub={
+            stats.valuePerDoor > 0
+              ? `Confirmed sales · MTD · every knock paid ${formatCurrency(stats.valuePerDoor)}`
+              : "Confirmed sales · MTD"
+          }
           icon={<DollarSign className="w-4 h-4" />}
           accent="var(--victory)"
         />

@@ -10,7 +10,6 @@ import {
 } from "@/lib/funnel";
 import { getFunnelBaseline } from "@/lib/dispatch.functions";
 import { useSixtyDayLogs } from "@/hooks/useDailyLogs";
-import { useCanvasserProfile } from "@/hooks/useCanvasserProfile";
 
 /**
  * The ONE source of conversion rates for the canvasser Mission page — both

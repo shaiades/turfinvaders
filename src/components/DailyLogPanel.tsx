@@ -89,6 +89,10 @@ export function DailyLogPanel({ canEditMondayUrl }: { canEditMondayUrl: boolean 
   // the totals here can't silently disagree with the Stats tab.
   const profile = useCanvasserProfile(user?.id);
   const myOffice = profile.data?.office_location ?? DEFAULT_OFFICE;
+  // Don't accept edits until the real home office is known — a keystroke
+  // made while myOffice is still the DEFAULT_OFFICE placeholder would be
+  // dirty-pinned against the wrong row and later upserted over the real one.
+  const officeReady = !profile.isLoading;
   const todayLogs = useTodayLogs(user?.id);
   const homeRow = findOfficeRow(todayLogs.data, myOffice);
 
@@ -100,6 +104,8 @@ export function DailyLogPanel({ canEditMondayUrl }: { canEditMondayUrl: boolean 
   const [dirty, setDirty] = useState<Set<LogField>>(() => new Set());
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
+  const formRef = useRef(form);
+  formRef.current = form;
 
   useEffect(() => {
     setForm((f) => {
@@ -129,7 +135,20 @@ export function DailyLogPanel({ canEditMondayUrl }: { canEditMondayUrl: boolean 
       {
         onSuccess: () => {
           toast.success("Daily log saved");
-          setDirty(new Set());
+          // Un-dirty ONLY fields whose current value is exactly what this
+          // save sent. Inputs stay enabled while the save is in flight, so a
+          // field edited (or first touched) mid-save must stay dirty — a
+          // blanket clear would let the post-save refetch silently revert
+          // those keystrokes.
+          setDirty((d) => {
+            const next = new Set<LogField>();
+            for (const key of d) {
+              const sent = key === "notes" ? patch.notes : patch[key];
+              const current = key === "notes" ? formRef.current.notes : formRef.current[key];
+              if (sent === undefined || current !== sent) next.add(key);
+            }
+            return next;
+          });
         },
         onError: (e: Error) => toast.error(e.message),
       },
@@ -154,7 +173,10 @@ export function DailyLogPanel({ canEditMondayUrl }: { canEditMondayUrl: boolean 
       <ArcadePanel
         title="Today's Counts"
         action={
-          <Button onClick={submitSave} disabled={save.isPending || dirty.size === 0}>
+          <Button
+            onClick={submitSave}
+            disabled={save.isPending || dirty.size === 0 || !officeReady}
+          >
             <Save className="w-3.5 h-3.5 mr-1.5" /> {save.isPending ? "Saving…" : "Save"}
           </Button>
         }
@@ -178,6 +200,7 @@ export function DailyLogPanel({ canEditMondayUrl }: { canEditMondayUrl: boolean 
                 inputMode="numeric"
                 className="mt-1.5 font-display text-lg"
                 value={form[v.key]}
+                disabled={!officeReady}
                 onChange={(e) => setField(v.key, Math.max(0, Number(e.target.value) || 0))}
               />
             </div>
@@ -191,6 +214,7 @@ export function DailyLogPanel({ canEditMondayUrl }: { canEditMondayUrl: boolean 
             className="mt-1.5"
             rows={2}
             value={form.notes}
+            disabled={!officeReady}
             onChange={(e) => setField("notes", e.target.value)}
             placeholder="Anything Office Staff or your Captain should know about today…"
           />

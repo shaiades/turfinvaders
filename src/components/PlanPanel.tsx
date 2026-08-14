@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { formatCurrency } from "@/lib/utils";
 import { laTodayISO, remainingWorkdaysInMonth, remainingWorkdaysInWeek } from "@/lib/dates";
 import { backSolveFunnel, commissionGap } from "@/lib/funnel";
@@ -343,6 +343,20 @@ function EquationTile({
   );
 }
 
+/** Draft that follows the server value only while the user hasn't diverged
+ *  from it. avgCommission especially resolves async (profile → company 60d
+ *  baseline) — an unconditional sync effect would wipe mid-typing drafts
+ *  whenever a background refetch lands. */
+function useSyncedDraft(server: number) {
+  const [draft, setDraft] = useState(String(server));
+  const prevServer = useRef(server);
+  useEffect(() => {
+    setDraft((d) => (d === String(prevServer.current) ? String(server) : d));
+    prevServer.current = server;
+  }, [server]);
+  return [draft, setDraft] as const;
+}
+
 function GoalEditor({
   weeklyGoal,
   monthlyGoal,
@@ -356,18 +370,9 @@ function GoalEditor({
   saving: boolean;
   onSave: (patch: GoalsPatch) => void;
 }) {
-  const [weeklyDraft, setWeeklyDraft] = useState(String(weeklyGoal));
-  const [monthlyDraft, setMonthlyDraft] = useState(String(monthlyGoal));
-  const [commDraft, setCommDraft] = useState(String(avgCommission));
-  useEffect(() => {
-    setWeeklyDraft(String(weeklyGoal));
-  }, [weeklyGoal]);
-  useEffect(() => {
-    setMonthlyDraft(String(monthlyGoal));
-  }, [monthlyGoal]);
-  useEffect(() => {
-    setCommDraft(String(avgCommission));
-  }, [avgCommission]);
+  const [weeklyDraft, setWeeklyDraft] = useSyncedDraft(weeklyGoal);
+  const [monthlyDraft, setMonthlyDraft] = useSyncedDraft(monthlyGoal);
+  const [commDraft, setCommDraft] = useSyncedDraft(avgCommission);
 
   const submit = () => {
     onSave({

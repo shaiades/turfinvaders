@@ -22,7 +22,10 @@ export type CanvasserProfile = {
   pay_lock_status: string | null;
 };
 
-export const canvasserProfileKey = (userId: string) => ["canvasser_profile", userId] as const;
+// "self"-namespaced: ["canvasser_profile", id] already belongs to the manager
+// canvasser-detail page (canvassers.$canvasserId.tsx) with a narrower row
+// shape — sharing that key would let the two queryFns overwrite each other.
+export const canvasserProfileKey = (userId: string) => ["canvasser_self_profile", userId] as const;
 
 export function useCanvasserProfile(userId: string | undefined) {
   return useQuery({

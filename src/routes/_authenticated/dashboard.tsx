@@ -61,8 +61,7 @@ const OWNER_TABS = ["dispatch", "timesheets", "payroll", "settings"] as const;
 type OwnerTab = (typeof OWNER_TABS)[number];
 type DashboardTab = OwnerTab | CanvasserTab;
 
-const isOwnerTab = (t: unknown): t is OwnerTab =>
-  (OWNER_TABS as readonly unknown[]).includes(t);
+const isOwnerTab = (t: unknown): t is OwnerTab => (OWNER_TABS as readonly unknown[]).includes(t);
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — Knockout" }] }),
@@ -230,6 +229,13 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
   const navigate = Route.useNavigate();
   // Canvasser deep links (?tab=plan|log|stats) land on Fleet Dispatch here.
   const tab: OwnerTab = isOwnerTab(rawTab) ? rawTab : "dispatch";
+  // ...and normalize the stranded value out of the URL — the Command/Fleet
+  // nav items match on search ({tab:"dispatch"}), so a lingering ?tab=plan
+  // (e.g. leadership following a /playbook link) would leave the top nav
+  // with nothing highlighted.
+  useEffect(() => {
+    if (!isOwnerTab(rawTab)) navigate({ search: { tab: "dispatch" }, replace: true });
+  }, [rawTab, navigate]);
 
   return (
     <div className="space-y-4 md:space-y-6">

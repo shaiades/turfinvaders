@@ -33,6 +33,16 @@ export type CanvasserTab = (typeof CANVASSER_TABS)[number];
 export const isCanvasserTab = (t: unknown): t is CanvasserTab =>
   (CANVASSER_TABS as readonly unknown[]).includes(t);
 
+const LAST_TAB_KEY = "mission.last_tab";
+function getStoredTab(): CanvasserTab {
+  try {
+    const stored = sessionStorage.getItem(LAST_TAB_KEY);
+    return isCanvasserTab(stored) ? stored : "log";
+  } catch {
+    return "log";
+  }
+}
+
 export function CanvasserMission({
   userId,
   displayName,
@@ -44,15 +54,21 @@ export function CanvasserMission({
 }) {
   const { tab: rawTab } = dashboardRoute.useSearch();
   const navigate = dashboardRoute.useNavigate();
-  const tab: CanvasserTab = isCanvasserTab(rawTab) ? rawTab : "log";
+  // Foreign tab values reach here constantly — the logo link and old Stats
+  // bookmarks carry ?tab=dispatch, and the search-less bottom-bar item and
+  // swipe nav commit the validateSearch default ("dispatch") too. Coerce in
+  // RENDER only (never rewrite the URL: an owner using View As would lose
+  // their leadership tab), falling back to the last tab this session viewed
+  // so returning to Mission via swipe/bottom bar doesn't reset to Log.
+  const tab: CanvasserTab = isCanvasserTab(rawTab) ? rawTab : getStoredTab();
   const setTab = (t: CanvasserTab) => navigate({ search: { tab: t }, replace: true });
-
-  // Leadership tab values reach here via the logo link and old Stats
-  // bookmarks (?tab=dispatch) — normalize the URL once, replace-only so the
-  // back button isn't fought.
   useEffect(() => {
-    if (!isCanvasserTab(rawTab)) navigate({ search: { tab: "log" }, replace: true });
-  }, [rawTab, navigate]);
+    try {
+      sessionStorage.setItem(LAST_TAB_KEY, tab);
+    } catch {
+      /* private-mode quota — non-essential */
+    }
+  }, [tab]);
 
   // Desk confirmations land across browsers only via realtime — refresh the
   // status pills (Log tab) and MTD revenue (Stats tab) the moment Office
