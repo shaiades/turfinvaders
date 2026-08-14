@@ -6,7 +6,7 @@ import {
   OfficeFilterToggle,
   useOfficeFilter,
 } from "@/components/OfficeFilterContext";
-import { ArcadePanel, TeamBadge } from "@/components/arcade";
+import { ArcadeCard, ArcadePanel, NeonButton, TeamBadge } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 import {
   Radio,
@@ -1397,7 +1397,7 @@ function DispatchFleet({
         // column. What remains here are lead sources (referral, Self Gen…)
         // and the rare unassigned rep, shown only when they have numbers in
         // range so the totals tiles keep reconciling.
-        <div className="arcade-card p-4 space-y-3">
+        <ArcadeCard className="space-y-3">
           <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
             Lead Sources · Unassigned ({looseActive.length})
           </div>
@@ -1415,7 +1415,7 @@ function DispatchFleet({
                 ))}
             </div>
           </div>
-        </div>
+        </ArcadeCard>
       )}
 
       {canManage && (
@@ -1546,14 +1546,10 @@ function WebhookUrlBanner() {
           onFocus={(e) => e.currentTarget.select()}
           className="flex-1 bg-surface border border-border rounded px-3 py-2 text-xs font-mono text-neon overflow-x-auto"
         />
-        <button
-          type="button"
-          onClick={copy}
-          className="arcade-card px-3 py-2 text-[10px] font-display uppercase tracking-widest text-accent hover:bg-surface-elevated flex items-center justify-center gap-2"
-        >
+        <NeonButton tone="turf-cyan" onClick={copy}>
           {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
           {copied ? "Copied" : "Copy"}
-        </button>
+        </NeonButton>
       </div>
     </div>
   );
@@ -1719,14 +1715,10 @@ function WebhookLogsButton() {
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="arcade-card px-3 py-2 text-[10px] font-display uppercase tracking-widest text-accent hover:bg-surface-elevated flex items-center gap-2"
-      >
+      <NeonButton tone="turf-cyan" onClick={() => setOpen(true)}>
         <FileSearch className="w-3.5 h-3.5" />
         Webhook Logs
-      </button>
+      </NeonButton>
       {open && (
         <div
           className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4"

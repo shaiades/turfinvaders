@@ -1,4 +1,5 @@
 import { forwardRef, type ButtonHTMLAttributes, type HTMLAttributes, type ReactNode } from "react";
+import { Slot } from "@radix-ui/react-slot";
 import { cn } from "@/lib/utils";
 
 /* ── Faction design system ────────────────────────────────────────────────────
@@ -25,27 +26,32 @@ const NEON_BUTTON_TONE: Record<NeonTone, string> = {
 export interface NeonButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   /** Faction accent — defaults to the house pink. */
   tone?: NeonTone;
+  /** Render the child element (e.g. a router <Link>) with NeonButton's styling. */
+  asChild?: boolean;
 }
 
 /** Dark button that ignites on hover/press/keyboard focus with an outer neon
  *  glow. 44px touch target below md per the responsive rules (AGENTS.md);
  *  callers can densify from md up via className (twMerge lets them win). */
 export const NeonButton = forwardRef<HTMLButtonElement, NeonButtonProps>(
-  ({ tone = "turf-pink", className, type, ...props }, ref) => (
-    <button
-      ref={ref}
-      type={type ?? "button"}
-      className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-md border bg-background/80 px-4 min-h-11 md:min-h-9",
-        "font-display text-[10px] uppercase tracking-widest whitespace-nowrap cursor-pointer select-none",
-        "transition-all duration-200 active:translate-y-px",
-        "focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50",
-        NEON_BUTTON_TONE[tone],
-        className,
-      )}
-      {...props}
-    />
-  ),
+  ({ tone = "turf-pink", className, type, asChild = false, ...props }, ref) => {
+    const Comp = asChild ? Slot : "button";
+    return (
+      <Comp
+        ref={ref}
+        type={asChild ? type : (type ?? "button")}
+        className={cn(
+          "inline-flex items-center justify-center gap-2 rounded-md border bg-background/80 px-4 min-h-11 md:min-h-9",
+          "font-display text-[10px] uppercase tracking-widest whitespace-nowrap cursor-pointer select-none",
+          "transition-all duration-200 active:translate-y-px",
+          "focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50",
+          NEON_BUTTON_TONE[tone],
+          className,
+        )}
+        {...props}
+      />
+    );
+  },
 );
 NeonButton.displayName = "NeonButton";
 
@@ -112,11 +118,34 @@ export function StatCard({
   );
 }
 
-export function ArcadePanel({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
+export function ArcadePanel({
+  title,
+  action,
+  children,
+  faction,
+}: {
+  title: string;
+  action?: ReactNode;
+  children: ReactNode;
+  /** Faction skin: kombat = gold title on deep black with blood-red chrome. */
+  faction?: keyof typeof ARCADE_CARD_FACTION;
+}) {
   return (
-    <section className="arcade-card">
-      <header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border px-5 py-3">
-        <h2 className="min-w-0 font-display text-xs text-neon uppercase tracking-widest">{title}</h2>
+    <section className={cn("arcade-card", faction && ARCADE_CARD_FACTION[faction].base)}>
+      <header
+        className={cn(
+          "flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b px-5 py-3",
+          faction === "kombat" ? "border-kombat-red/30" : "border-border",
+        )}
+      >
+        <h2
+          className={cn(
+            "min-w-0 font-display text-xs uppercase tracking-widest",
+            faction === "kombat" ? "text-kombat-gold" : "text-neon",
+          )}
+        >
+          {title}
+        </h2>
         {action}
       </header>
       <div className="p-5">{children}</div>

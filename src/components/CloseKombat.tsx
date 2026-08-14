@@ -9,10 +9,12 @@ import {
   useOfficeFilter,
 } from "@/components/OfficeFilterContext";
 import {
+  ArcadeCard,
   ArcadePanel,
   MobileCard,
   MobileCardHeader,
   MobileCardList,
+  NeonButton,
   metricText,
 } from "@/components/arcade";
 import { cn } from "@/lib/utils";
@@ -274,8 +276,8 @@ function CloseKombatInner() {
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="font-display text-sm text-neon uppercase tracking-widest flex items-center gap-2">
-            <Swords className="w-4 h-4" />
+          <h1 className="font-display text-sm text-kombat-gold uppercase tracking-widest flex items-center gap-2">
+            <Swords className="w-4 h-4 text-kombat-red" />
             Close Kombat
           </h1>
           <p className="text-xs text-muted-foreground mt-1">
@@ -285,25 +287,23 @@ function CloseKombatInner() {
         <div className="flex flex-wrap items-center gap-2">
           {isAdmin && (
             <>
-              <Button
-                size="sm"
-                variant="outline"
+              <NeonButton
+                tone="kombat-gold"
                 disabled={sync.isPending}
                 onClick={() => sync.mutate("active")}
                 title="Re-pull this week's two active Block boards"
               >
                 <RefreshCw className={`w-4 h-4 ${sync.isPending ? "animate-spin" : ""}`} />
                 Sync from Monday
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
+              </NeonButton>
+              <NeonButton
+                tone="kombat-red"
                 disabled={sync.isPending}
                 onClick={() => sync.mutate("all")}
                 title="Backfill every SD/OC Block board Monday still lists"
               >
                 Full history
-              </Button>
+              </NeonButton>
             </>
           )}
           <OfficeFilterToggle />
@@ -325,10 +325,10 @@ function CloseKombatInner() {
               key={p.id}
               type="button"
               onClick={() => setTab(p.id)}
-              className={`px-3 py-2 rounded-full text-[10px] font-display uppercase tracking-widest whitespace-nowrap border transition-colors ${
+              className={`px-3 py-2 min-h-11 md:min-h-0 rounded-full text-[10px] font-display uppercase tracking-widest whitespace-nowrap border transition-colors duration-200 ${
                 active
-                  ? "bg-neon text-background border-neon"
-                  : "border-border text-muted-foreground hover:text-foreground hover:border-neon/40"
+                  ? "bg-kombat-gold text-background border-kombat-gold"
+                  : "border-border text-muted-foreground hover:text-foreground hover:border-kombat-gold/40"
               }`}
             >
               {p.label}
@@ -352,10 +352,10 @@ function CloseKombatInner() {
                   key={p.id}
                   type="button"
                   onClick={() => setDayPreset(p.id)}
-                  className={`px-2.5 py-1.5 rounded-full text-[10px] font-display uppercase tracking-widest whitespace-nowrap border transition-colors ${
+                  className={`px-2.5 py-1.5 min-h-11 md:min-h-0 rounded-full text-[10px] font-display uppercase tracking-widest whitespace-nowrap border transition-colors duration-200 ${
                     active
-                      ? "bg-neon text-background border-neon"
-                      : "border-border text-muted-foreground hover:text-foreground hover:border-neon/40"
+                      ? "bg-kombat-gold text-background border-kombat-gold"
+                      : "border-border text-muted-foreground hover:text-foreground hover:border-kombat-gold/40"
                   }`}
                 >
                   {p.label}
@@ -478,6 +478,7 @@ function CloseKombatInner() {
 
       {attention.length > 0 && (
         <ArcadePanel
+          faction="kombat"
           title={`Needs Attention · ${attention.length}`}
           action={
             <span className="text-[10px] font-display uppercase tracking-widest text-warning">
@@ -508,6 +509,7 @@ function CloseKombatInner() {
       )}
 
       <ArcadePanel
+        faction="kombat"
         title={`Kombat Standings · ${range.label}`}
         action={
           range.isLive ? (
@@ -902,7 +904,7 @@ function KombatTile({
   sub?: { label: string; value: number | string; accent: TileAccent };
 }) {
   return (
-    <div className="arcade-card p-4">
+    <ArcadeCard faction="kombat">
       <div className="flex items-baseline justify-between gap-2 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
         <span>{label}</span>
         {sub && <span className="text-right">{sub.label}</span>}
@@ -913,6 +915,6 @@ function KombatTile({
           <span className={`font-display text-lg ${TILE_ACCENT[sub.accent]}`}>{sub.value}</span>
         )}
       </div>
-    </div>
+    </ArcadeCard>
   );
 }
