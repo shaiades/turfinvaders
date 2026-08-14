@@ -15,6 +15,8 @@ import {
   MobileStatGrid,
   MobileStat,
   metricText,
+  ArcadeCard,
+  NeonButton,
 } from "@/components/arcade";
 import { LiveLeadCounter } from "@/components/LiveLeadCounter";
 import { CommandCenter } from "@/components/CommandCenter";
@@ -163,17 +165,14 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
           <NewSignupsPanel />
           <RosterPanel />
           <CompanySettingsPanel />
-          <div className="arcade-card p-4 flex items-center justify-between gap-3 flex-wrap">
+          <ArcadeCard faction="turf" className="flex items-center justify-between gap-3 flex-wrap">
             <div className="text-sm text-muted-foreground">
               Roles, teams, and account cleanup live on the Manage Players screen.
             </div>
-            <Link
-              to="/users"
-              className="inline-flex items-center min-h-10 md:min-h-9 px-4 rounded-md border border-neon/50 text-neon font-display text-[10px] uppercase tracking-widest hover:bg-neon/10"
-            >
-              Manage Players
-            </Link>
-          </div>
+            <NeonButton asChild tone="turf-pink">
+              <Link to="/users">Manage Players</Link>
+            </NeonButton>
+          </ArcadeCard>
         </TabsContent>
       </Tabs>
     </div>
