@@ -103,8 +103,13 @@ export function AppShell({ children }: { children: ReactNode }) {
     router.navigate({ to: "/auth", replace: true });
   }
 
+  // min-h-dvh (not -screen): iOS Safari's collapsing toolbar makes 100vh
+  // overshoot the visible area. px-safe keeps content off the notch in
+  // landscape. overflow-x-hidden is the shell's own backstop on top of
+  // body's overflow-x: clip — intended sideways scrolling happens only
+  // inside explicit overflow-x-auto wrappers.
   return (
-    <div className="min-h-screen w-full max-w-full overflow-x-hidden flex flex-col bg-background">
+    <div className="min-h-dvh w-full max-w-full overflow-x-hidden flex flex-col bg-background px-safe">
       {/* Owner-only tool (owner decision 2026-08-12): View As never renders
           for captains, Admins, canvassers, or sales reps — and useAuth
           ignores the stored override for them too. */}
@@ -122,7 +127,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 const v = e.target.value as AppRole;
                 setDevRoleOverride(v === realRole ? null : v);
               }}
-              className="bg-surface border border-border rounded px-2 py-1.5 min-h-9 text-base md:text-xs font-medium focus:outline-none focus:ring-1 focus:ring-[var(--neon-magenta)]"
+              className="bg-surface border border-border rounded px-2 py-1.5 min-h-11 md:min-h-9 text-base md:text-xs font-medium focus:outline-none focus:ring-1 focus:ring-[var(--neon-magenta)]"
             >
               <option value="owner">Owner</option>
               <option value="captain">Captain</option>
@@ -133,7 +138,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             {isOverridden && (
               <button
                 onClick={() => setDevRoleOverride(null)}
-                className="ml-auto min-h-9 px-2 rounded border border-[var(--neon-magenta)]/40 text-[10px] uppercase tracking-widest text-[var(--neon-magenta)]"
+                className="ml-auto min-h-11 md:min-h-9 px-2 rounded border border-[var(--neon-magenta)]/40 text-[10px] uppercase tracking-widest text-[var(--neon-magenta)]"
               >
                 Reset to {realRole}
               </button>
@@ -141,11 +146,19 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </div>
       )}
-      <header className="border-b border-border bg-background/95 backdrop-blur sticky top-0 z-20">
-        {/* Mobile header: centered logo only */}
+      {/* pt-safe: in the installed (standalone) PWA the sticky header owns
+          the status-bar strip; zero everywhere else. */}
+      <header className="border-b border-border bg-background/95 backdrop-blur sticky top-0 z-20 pt-safe">
+        {/* Mobile header: centered logo only. Side slots are 44px twins so
+            the wordmark stays optically centered. */}
         <div className="md:hidden flex items-center justify-between px-4 py-2">
-          <div className="w-10" />
-          <Link to="/dashboard" search={{ tab: "dispatch" }} aria-label="Turf Invaders home" className="flex items-center justify-center">
+          <div className="w-11" />
+          <Link
+            to="/dashboard"
+            search={{ tab: "dispatch" }}
+            aria-label="Turf Invaders home"
+            className="flex items-center justify-center min-h-11"
+          >
             <img
               src={turfInvadersWordmark.url}
               alt="Turf Invaders"
@@ -156,13 +169,13 @@ export function AppShell({ children }: { children: ReactNode }) {
           {user ? (
             <button
               onClick={signOut}
-              className="min-w-10 min-h-10 inline-flex items-center justify-center rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
+              className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
               aria-label="Sign out"
             >
               <LogOut className="w-5 h-5" />
             </button>
           ) : (
-            <div className="w-9" />
+            <div className="w-11" />
           )}
         </div>
         {/* Desktop header: nav + centered logo + user */}
@@ -174,10 +187,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                 to={item.to}
                 search={item.search as never}
                 activeOptions={{ includeSearch: !!item.search, exact: !item.search }}
-                className="flex items-center gap-2 px-3 py-2 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-surface-elevated transition-colors"
+                className="flex items-center gap-2 px-3 py-2 min-h-11 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-surface-elevated transition-colors"
                 activeProps={{
                   className:
-                    "flex items-center gap-2 px-3 py-2 rounded-md text-sm text-primary bg-surface-elevated ring-1 ring-primary/40",
+                    "flex items-center gap-2 px-3 py-2 min-h-11 rounded-md text-sm text-primary bg-surface-elevated ring-1 ring-primary/40",
                 }}
               >
                 <item.icon className="w-4 h-4" />
@@ -202,7 +215,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </div>
                 <button
                   onClick={signOut}
-                  className="p-2 rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
+                  className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
                   aria-label="Sign out"
                 >
                   <LogOut className="w-4 h-4" />
@@ -218,8 +231,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       {user && (
         <nav
           aria-label="Primary"
-          className="md:hidden fixed bottom-0 inset-x-0 z-30 border-t border-border bg-background/95 backdrop-blur"
-          style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+          className="md:hidden fixed bottom-0 inset-x-0 z-30 border-t border-border bg-background/95 backdrop-blur pb-safe px-safe"
         >
           <ul className="grid" style={{ gridTemplateColumns: `repeat(${Math.min(navItems.length, 5)}, minmax(0, 1fr))` }}>
             {navItems.slice(0, 5).map((item) => (
