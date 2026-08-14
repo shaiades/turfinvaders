@@ -3,7 +3,17 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
-import { ArcadePanel, TeamBadge, MobileCardList, MobileCard, MobileCardHeader, MobileStatGrid, MobileStat } from "@/components/arcade";
+import {
+  ArcadePanel,
+  TeamBadge,
+  MobileCardList,
+  MobileCard,
+  MobileCardHeader,
+  MobileStatGrid,
+  MobileStat,
+  metricText,
+} from "@/components/arcade";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,6 +31,11 @@ import { DEFAULT_OFFICE } from "@/lib/offices";
 
 /* ============ Helpers ============ */
 /* All day/week/month buckets are America/Los_Angeles (midnight PT resets). */
+
+/* Numeric grid cells share one recipe per table so dim-at-zero coloring
+ * (metricText) composes without blowing past the print width. */
+const dailyCell = "px-3 py-1.5 text-right font-mono";
+const weeklyCell = "px-4 py-2.5 text-right font-display";
 
 
 // One board card = one lead (Setter Report parity). demos_sits already
@@ -325,7 +340,11 @@ function RawDataTable() {
   return (
     <ArcadePanel
       title={`All Database Records · daily_logs (${visible.length}${visible.length !== (q.data?.length ?? 0) ? ` of ${q.data?.length ?? 0}` : ""})`}
-      action={<span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Raw · Newest First</span>}
+      action={
+        <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+          Raw · Newest First
+        </span>
+      }
     >
       {q.isLoading ? (
         <div className="text-sm text-muted-foreground">Loading…</div>
@@ -340,54 +359,77 @@ function RawDataTable() {
               <MobileCard key={r.id}>
                 <MobileCardHeader
                   left={r.name}
-                  right={<span className="text-muted-foreground font-mono text-xs">{r.log_date}</span>}
+                  right={
+                    <span className="text-muted-foreground font-mono text-xs">{r.log_date}</span>
+                  }
                 />
                 <MobileStatGrid cols={4}>
-                  <MobileStat label="Sits" value={r.demos_sits} />
-                  <MobileStat label="Sales" value={r.sales} className="text-victory" />
-                  <MobileStat label="Confirmed" value={r.confirmed_leads} />
-                  <MobileStat label="No Demo" value={r.no_demo} />
-                  <MobileStat label="One Legs" value={r.one_legs} />
-                  <MobileStat label="Future" value={r.future_leads} />
-                  <MobileStat label="Talked" value={r.people_talked_to} />
-                  <MobileStat label="Called In" value={r.leads_called_in} />
+                  <MobileStat label="Sits" value={r.demos_sits} lit="text-foreground" />
+                  <MobileStat label="Sales" value={r.sales} lit="text-victory" />
+                  <MobileStat label="Confirmed" value={r.confirmed_leads} lit="text-foreground" />
+                  <MobileStat label="No Demo" value={r.no_demo} lit="text-foreground" />
+                  <MobileStat label="One Legs" value={r.one_legs} lit="text-foreground" />
+                  <MobileStat label="Future" value={r.future_leads} lit="text-foreground" />
+                  <MobileStat label="Talked" value={r.people_talked_to} lit="text-foreground" />
+                  <MobileStat label="Called In" value={r.leads_called_in} lit="text-foreground" />
                 </MobileStatGrid>
               </MobileCard>
             ))}
           </MobileCardList>
           <div className="hidden md:block overflow-x-auto -mx-4 sm:mx-0">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="text-left text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-                <th className="px-3 py-2">Date</th>
-                <th className="px-3 py-2">Canvasser</th>
-                <th className="px-3 py-2 text-right">Sits</th>
-                <th className="px-3 py-2 text-right">Sales</th>
-                <th className="px-3 py-2 text-right">No Demo</th>
-                <th className="px-3 py-2 text-right">One Legs</th>
-                <th className="px-3 py-2 text-right">Future</th>
-                <th className="px-3 py-2 text-right">Talked</th>
-                <th className="px-3 py-2 text-right">Called In</th>
-                <th className="px-3 py-2 text-right">Confirmed</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visible.map((r) => (
-                <tr key={r.id} className="border-t border-border">
-                  <td className="px-3 py-1.5 font-mono">{r.log_date}</td>
-                  <td className="px-3 py-1.5">{r.name}</td>
-                  <td className="px-3 py-1.5 text-right font-mono">{r.demos_sits}</td>
-                  <td className="px-3 py-1.5 text-right font-mono text-victory">{r.sales}</td>
-                  <td className="px-3 py-1.5 text-right font-mono">{r.no_demo}</td>
-                  <td className="px-3 py-1.5 text-right font-mono">{r.one_legs}</td>
-                  <td className="px-3 py-1.5 text-right font-mono">{r.future_leads}</td>
-                  <td className="px-3 py-1.5 text-right font-mono">{r.people_talked_to}</td>
-                  <td className="px-3 py-1.5 text-right font-mono">{r.leads_called_in}</td>
-                  <td className="px-3 py-1.5 text-right font-mono">{r.confirmed_leads}</td>
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                  <th className="px-3 py-2">Date</th>
+                  <th className="px-3 py-2">Canvasser</th>
+                  <th className="px-3 py-2 text-right">Sits</th>
+                  <th className="px-3 py-2 text-right">Sales</th>
+                  <th className="px-3 py-2 text-right">No Demo</th>
+                  <th className="px-3 py-2 text-right">One Legs</th>
+                  <th className="px-3 py-2 text-right">Future</th>
+                  <th className="px-3 py-2 text-right">Talked</th>
+                  <th className="px-3 py-2 text-right">Called In</th>
+                  <th className="px-3 py-2 text-right">Confirmed</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {visible.map((r) => (
+                  <tr
+                    key={r.id}
+                    className="border-t border-border transition-colors duration-200 hover:bg-surface-elevated"
+                  >
+                    <td className="px-3 py-1.5 font-mono">{r.log_date}</td>
+                    <td className="px-3 py-1.5">{r.name}</td>
+                    <td className={cn(dailyCell, metricText(r.demos_sits, "text-foreground"))}>
+                      {r.demos_sits}
+                    </td>
+                    <td className={cn(dailyCell, metricText(r.sales, "text-victory"))}>
+                      {r.sales}
+                    </td>
+                    <td className={cn(dailyCell, metricText(r.no_demo, "text-foreground"))}>
+                      {r.no_demo}
+                    </td>
+                    <td className={cn(dailyCell, metricText(r.one_legs, "text-foreground"))}>
+                      {r.one_legs}
+                    </td>
+                    <td className={cn(dailyCell, metricText(r.future_leads, "text-foreground"))}>
+                      {r.future_leads}
+                    </td>
+                    <td
+                      className={cn(dailyCell, metricText(r.people_talked_to, "text-foreground"))}
+                    >
+                      {r.people_talked_to}
+                    </td>
+                    <td className={cn(dailyCell, metricText(r.leads_called_in, "text-foreground"))}>
+                      {r.leads_called_in}
+                    </td>
+                    <td className={cn(dailyCell, metricText(r.confirmed_leads, "text-foreground"))}>
+                      {r.confirmed_leads}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </>
       )}
@@ -558,7 +600,8 @@ function WeeklyResults({ weekStart }: { weekStart: Date }) {
       title={isCurrentWeek ? "This Week's Results · In Progress" : "Weekly Results"}
       action={
         <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-          {office === "All" ? "" : `${office} · `}{toISODate(lastWeekStart)} → {toISODate(lastWeekEnd)}
+          {office === "All" ? "" : `${office} · `}
+          {toISODate(lastWeekStart)} → {toISODate(lastWeekEnd)}
         </span>
       }
     >
@@ -566,7 +609,9 @@ function WeeklyResults({ weekStart }: { weekStart: Date }) {
         <div className="text-sm text-muted-foreground">Loading…</div>
       ) : rows.length === 0 ? (
         <div className="text-sm text-muted-foreground">
-          {office === "All" ? "No activity recorded this week." : `No ${office} activity recorded this week.`}
+          {office === "All"
+            ? "No activity recorded this week."
+            : `No ${office} activity recorded this week.`}
         </div>
       ) : (
         <>
@@ -575,11 +620,15 @@ function WeeklyResults({ weekStart }: { weekStart: Date }) {
               <MobileCard key={r.canvasserId}>
                 <MobileCardHeader
                   left={r.name}
-                  right={r.payError ? (
-                    <span className="text-destructive text-xs" title={r.payError}>—</span>
-                  ) : (
-                    <span className="text-victory">${r.totalPay.toFixed(2)}</span>
-                  )}
+                  right={
+                    r.payError ? (
+                      <span className="text-destructive text-xs" title={r.payError}>
+                        —
+                      </span>
+                    ) : (
+                      <span className="text-victory">${r.totalPay.toFixed(2)}</span>
+                    )
+                  }
                 />
                 {r.vanName && (
                   <div className="flex flex-wrap items-center gap-1.5">
@@ -587,21 +636,25 @@ function WeeklyResults({ weekStart }: { weekStart: Date }) {
                   </div>
                 )}
                 <MobileStatGrid cols={3}>
-                  <MobileStat label="Leads" value={r.totalLeads} />
-                  <MobileStat label="Sits" value={r.totalSits} />
-                  <MobileStat label="Sales" value={r.totalSales} className="text-victory" />
-                  <MobileStat label="Resets" value={r.totalResets} className="text-[var(--accent)]" />
-                  <MobileStat label="BO" value={r.totalBO} className="text-destructive" />
-                  <MobileStat label="CTC" value={r.totalCTC} className="text-muted-foreground" />
-                  <MobileStat label="Non-Core" value={r.totalNonCore} className="text-warning" />
-                  <MobileStat label="OL" value={r.totalOL} className="text-warning" />
-                  <MobileStat label="Points" value={r.totalPoints} className="text-neon" />
+                  <MobileStat label="Leads" value={r.totalLeads} lit="text-foreground" />
+                  <MobileStat label="Sits" value={r.totalSits} lit="text-foreground" />
+                  <MobileStat label="Sales" value={r.totalSales} lit="text-victory" />
+                  <MobileStat label="Resets" value={r.totalResets} lit="text-[var(--accent)]" />
+                  <MobileStat label="BO" value={r.totalBO} lit="text-destructive" />
+                  <MobileStat label="CTC" value={r.totalCTC} lit="text-muted-foreground" />
+                  <MobileStat label="Non-Core" value={r.totalNonCore} lit="text-warning" />
+                  <MobileStat label="OL" value={r.totalOL} lit="text-warning" />
+                  <MobileStat label="Points" value={r.totalPoints} lit="text-neon" />
                 </MobileStatGrid>
               </MobileCard>
             ))}
             <MobileCard className="border-neon/40">
               <MobileCardHeader
-                left={<span className="font-display text-xs uppercase tracking-widest text-neon">Grand Total</span>}
+                left={
+                  <span className="font-display text-xs uppercase tracking-widest text-neon">
+                    Grand Total
+                  </span>
+                }
                 right={<span className="text-victory">${grand.pay.toFixed(2)}</span>}
               />
               <MobileStatGrid cols={3}>
@@ -618,63 +671,109 @@ function WeeklyResults({ weekStart }: { weekStart: Date }) {
             </MobileCard>
           </MobileCardList>
           <div className="hidden md:block overflow-x-auto -mx-4 sm:mx-0">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-                <th className="px-4 py-2">Canvasser</th>
-                <th className="px-4 py-2">Van</th>
-                <th className="px-4 py-2 text-right">Total Leads</th>
-                <th className="px-4 py-2 text-right">Sits</th>
-                <th className="px-4 py-2 text-right">Resets</th>
-                <th className="px-4 py-2 text-right">BO</th>
-                <th className="px-4 py-2 text-right">CTC</th>
-                <th className="px-4 py-2 text-right">Non-Core</th>
-                <th className="px-4 py-2 text-right">OL</th>
-                <th className="px-4 py-2 text-right">Sales</th>
-                <th className="px-4 py-2 text-right">Points</th>
-                <th className="px-4 py-2 text-right">Pay</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.canvasserId} className="border-t border-border">
-                  <td className="px-4 py-2.5 font-medium">{r.name}</td>
-                  <td className="px-4 py-2.5">
-                    {r.vanName ? <TeamBadge name={r.vanName} color={r.vanColor ?? "#888"} /> : <span className="text-xs text-muted-foreground">—</span>}
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                  <th className="px-4 py-2">Canvasser</th>
+                  <th className="px-4 py-2">Van</th>
+                  <th className="px-4 py-2 text-right">Total Leads</th>
+                  <th className="px-4 py-2 text-right">Sits</th>
+                  <th className="px-4 py-2 text-right">Resets</th>
+                  <th className="px-4 py-2 text-right">BO</th>
+                  <th className="px-4 py-2 text-right">CTC</th>
+                  <th className="px-4 py-2 text-right">Non-Core</th>
+                  <th className="px-4 py-2 text-right">OL</th>
+                  <th className="px-4 py-2 text-right">Sales</th>
+                  <th className="px-4 py-2 text-right">Points</th>
+                  <th className="px-4 py-2 text-right">Pay</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr
+                    key={r.canvasserId}
+                    className="border-t border-border transition-colors duration-200 hover:bg-surface-elevated"
+                  >
+                    <td className="px-4 py-2.5 font-medium">{r.name}</td>
+                    <td className="px-4 py-2.5">
+                      {r.vanName ? (
+                        <TeamBadge name={r.vanName} color={r.vanColor ?? "#888"} />
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </td>
+                    <td className={cn(weeklyCell, metricText(r.totalLeads, "text-foreground"))}>
+                      {r.totalLeads}
+                    </td>
+                    <td className={cn(weeklyCell, metricText(r.totalSits, "text-foreground"))}>
+                      {r.totalSits}
+                    </td>
+                    <td
+                      className={cn(weeklyCell, metricText(r.totalResets, "text-[var(--accent)]"))}
+                    >
+                      {r.totalResets}
+                    </td>
+                    <td className={cn(weeklyCell, metricText(r.totalBO, "text-destructive"))}>
+                      {r.totalBO}
+                    </td>
+                    <td className={cn(weeklyCell, metricText(r.totalCTC, "text-muted-foreground"))}>
+                      {r.totalCTC}
+                    </td>
+                    <td className={cn(weeklyCell, metricText(r.totalNonCore, "text-warning"))}>
+                      {r.totalNonCore}
+                    </td>
+                    <td className={cn(weeklyCell, metricText(r.totalOL, "text-warning"))}>
+                      {r.totalOL}
+                    </td>
+                    <td className={cn(weeklyCell, metricText(r.totalSales, "text-victory"))}>
+                      {r.totalSales}
+                    </td>
+                    <td className={cn(weeklyCell, metricText(r.totalPoints, "text-neon"))}>
+                      {r.totalPoints}
+                    </td>
+                    <td className="px-4 py-2.5 text-right font-display text-victory">
+                      {r.payError ? (
+                        <span className="text-destructive text-xs" title={r.payError}>
+                          —
+                        </span>
+                      ) : (
+                        <>${r.totalPay.toFixed(2)}</>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                <tr className="border-t-2 border-neon/60 bg-surface">
+                  <td
+                    className="px-4 py-2.5 font-display text-xs uppercase tracking-widest text-neon"
+                    colSpan={2}
+                  >
+                    Grand Total
                   </td>
-                  <td className="px-4 py-2.5 text-right font-display">{r.totalLeads}</td>
-                  <td className="px-4 py-2.5 text-right font-display">{r.totalSits}</td>
-                  <td className="px-4 py-2.5 text-right font-display text-[var(--accent)]">{r.totalResets}</td>
-                  <td className="px-4 py-2.5 text-right font-display text-destructive">{r.totalBO}</td>
-                  <td className="px-4 py-2.5 text-right font-display text-muted-foreground">{r.totalCTC}</td>
-                  <td className="px-4 py-2.5 text-right font-display text-warning">{r.totalNonCore}</td>
-                  <td className="px-4 py-2.5 text-right font-display text-warning">{r.totalOL}</td>
-                  <td className="px-4 py-2.5 text-right font-display text-victory">{r.totalSales}</td>
-                  <td className="px-4 py-2.5 text-right font-display text-neon">{r.totalPoints}</td>
+                  <td className="px-4 py-2.5 text-right font-display">{grand.leads}</td>
+                  <td className="px-4 py-2.5 text-right font-display">{grand.sits}</td>
+                  <td className="px-4 py-2.5 text-right font-display text-[var(--accent)]">
+                    {grand.resets}
+                  </td>
+                  <td className="px-4 py-2.5 text-right font-display text-destructive">
+                    {grand.bo}
+                  </td>
+                  <td className="px-4 py-2.5 text-right font-display text-muted-foreground">
+                    {grand.ctc}
+                  </td>
+                  <td className="px-4 py-2.5 text-right font-display text-warning">
+                    {grand.nonCore}
+                  </td>
+                  <td className="px-4 py-2.5 text-right font-display text-warning">{grand.ol}</td>
                   <td className="px-4 py-2.5 text-right font-display text-victory">
-                    {r.payError ? (
-                      <span className="text-destructive text-xs" title={r.payError}>—</span>
-                    ) : (
-                      <>${r.totalPay.toFixed(2)}</>
-                    )}
+                    {grand.sales}
+                  </td>
+                  <td className="px-4 py-2.5 text-right font-display text-neon">{grand.points}</td>
+                  <td className="px-4 py-2.5 text-right font-display text-victory">
+                    ${grand.pay.toFixed(2)}
                   </td>
                 </tr>
-              ))}
-              <tr className="border-t-2 border-neon/60 bg-surface">
-                <td className="px-4 py-2.5 font-display text-xs uppercase tracking-widest text-neon" colSpan={2}>Grand Total</td>
-                <td className="px-4 py-2.5 text-right font-display">{grand.leads}</td>
-                <td className="px-4 py-2.5 text-right font-display">{grand.sits}</td>
-                <td className="px-4 py-2.5 text-right font-display text-[var(--accent)]">{grand.resets}</td>
-                <td className="px-4 py-2.5 text-right font-display text-destructive">{grand.bo}</td>
-                <td className="px-4 py-2.5 text-right font-display text-muted-foreground">{grand.ctc}</td>
-                <td className="px-4 py-2.5 text-right font-display text-warning">{grand.nonCore}</td>
-                <td className="px-4 py-2.5 text-right font-display text-warning">{grand.ol}</td>
-                <td className="px-4 py-2.5 text-right font-display text-victory">{grand.sales}</td>
-                <td className="px-4 py-2.5 text-right font-display text-neon">{grand.points}</td>
-                <td className="px-4 py-2.5 text-right font-display text-victory">${grand.pay.toFixed(2)}</td>
-              </tr>
-            </tbody>
-          </table>
+              </tbody>
+            </table>
           </div>
         </>
       )}

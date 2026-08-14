@@ -300,7 +300,7 @@ export function TimesheetEditor() {
               <tbody>
                 {rows.map(({ e, name, edit, dirty, inVal, outVal }) => {
                   return (
-                    <tr key={e.id} className="border-b border-border/40 hover:bg-surface-elevated">
+                    <tr key={e.id} className="border-b border-border/40 transition-colors duration-200 hover:bg-surface-elevated">
                       <td className="py-2 pr-3 font-medium">{name}</td>
                       <td className="py-2 pr-3 text-xs text-muted-foreground tabular-nums">{e.log_date}</td>
                       <td className="py-2 pr-3">

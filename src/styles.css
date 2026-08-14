@@ -41,6 +41,21 @@
 
   --shadow-arcade: 0 0 0 1px var(--neon), 0 0 24px -4px color-mix(in oklab, var(--neon) 60%, transparent);
   --shadow-glow: 0 0 32px -8px color-mix(in oklab, var(--neon) 70%, transparent);
+
+  /* Faction palettes (design system 2026-08-14). Turf Invaders fights in
+   * cyberpunk pink/cyan; Close Kombat in blood red/gold on deep black.
+   * Utilities: text-turf-pink, bg-kombat-black, border-kombat-gold, … */
+  --color-turf-pink: var(--turf-pink);
+  --color-turf-cyan: var(--turf-cyan);
+  --color-kombat-red: var(--kombat-red);
+  --color-kombat-gold: var(--kombat-gold);
+  --color-kombat-black: var(--kombat-black);
+
+  /* Outer glows for interactive/highlighted chrome: shadow-neon-pink etc. */
+  --shadow-neon-pink: 0 0 0 1px color-mix(in oklab, var(--turf-pink) 45%, transparent), 0 0 24px -4px color-mix(in oklab, var(--turf-pink) 70%, transparent);
+  --shadow-neon-cyan: 0 0 0 1px color-mix(in oklab, var(--turf-cyan) 45%, transparent), 0 0 24px -4px color-mix(in oklab, var(--turf-cyan) 70%, transparent);
+  --shadow-neon-red: 0 0 0 1px color-mix(in oklab, var(--kombat-red) 50%, transparent), 0 0 26px -4px color-mix(in oklab, var(--kombat-red) 75%, transparent);
+  --shadow-neon-gold: 0 0 0 1px color-mix(in oklab, var(--kombat-gold) 50%, transparent), 0 0 24px -4px color-mix(in oklab, var(--kombat-gold) 70%, transparent);
 }
 
 :root {
@@ -84,6 +99,14 @@
   --neon-blue: oklch(0.68 0.20 245);
   --victory: oklch(0.80 0.22 145);          /* vivid green */
   --warning: oklch(0.82 0.17 90);           /* neon yellow */
+
+  /* Faction source-of-truth. Turf reuses the wordmark pink/blue so the
+   * whole app stays one palette; Kombat gets its own blood/gold/black. */
+  --turf-pink: var(--neon-magenta);
+  --turf-cyan: var(--neon-blue);
+  --kombat-red: oklch(0.54 0.22 27);        /* dried-blood red */
+  --kombat-gold: oklch(0.80 0.15 85);       /* trophy gold */
+  --kombat-black: oklch(0.13 0.015 20);     /* deep warm black */
 }
 
 .dark { color-scheme: dark; }

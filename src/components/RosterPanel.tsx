@@ -83,7 +83,7 @@ function RosterTable({ rows }: { rows: RosterRow[] }) {
           {rows.map((r) => {
             const isManager = isManagerRole(r.role);
             return (
-              <tr key={r.id} className="border-b border-border/40 hover:bg-surface-elevated">
+              <tr key={r.id} className="border-b border-border/40 transition-colors duration-200 hover:bg-surface-elevated">
                 <td className="py-2.5">
                   <div className="flex items-center gap-2">
                     <span className="font-medium">{r.display_name}</span>

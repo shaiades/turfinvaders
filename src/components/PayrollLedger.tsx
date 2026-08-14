@@ -431,7 +431,7 @@ export function PayrollLedger() {
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.id} className="border-b border-border/40 hover:bg-surface-elevated">
+                  <tr key={r.id} className="border-b border-border/40 transition-colors duration-200 hover:bg-surface-elevated">
                     <td className="py-2.5 pr-3 font-medium">{r.name}</td>
                     <td className="py-2.5 pr-3">
                       <RankPill rank={r.rank} />
@@ -593,7 +593,7 @@ function MonthlyVolumeBonusPanel({ monthStart }: { monthStart: string }) {
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.id} className="border-b border-border/40 hover:bg-surface-elevated">
+                <tr key={r.id} className="border-b border-border/40 transition-colors duration-200 hover:bg-surface-elevated">
                   <td className="py-2.5 pr-3 font-medium">{r.name}</td>
                   <td className="py-2.5 pr-3 text-right font-display text-victory">
                     {r.error ? "—" : `$${r.volume.toFixed(2)}`}

@@ -8,7 +8,14 @@ import {
   OfficeFilterToggle,
   useOfficeFilter,
 } from "@/components/OfficeFilterContext";
-import { ArcadePanel, MobileCard, MobileCardHeader, MobileCardList } from "@/components/arcade";
+import {
+  ArcadePanel,
+  MobileCard,
+  MobileCardHeader,
+  MobileCardList,
+  metricText,
+} from "@/components/arcade";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useWeekSelector } from "@/hooks/useWeekSelector";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
@@ -80,6 +87,10 @@ const fmtMoney = (n: number) =>
 /** Result counts are whole numbers (full credit each rep); only revenue
  *  splits, and that renders through fmtMoney. */
 const fmtCount = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
+
+/* One recipe for the standings' numeric cells; metricText composes the
+ * dim-at-zero / kombat-faction coloring on top. */
+const kbCell = "py-2.5 px-2 text-right tabular-nums";
 
 const fmtPct = (p: number | null) => (p === null ? "—" : `${Math.round(p * 100)}%`);
 
@@ -560,13 +571,16 @@ function CloseKombatInner() {
                   {reps.map((r, i) => (
                     <tr
                       key={r.rep}
-                      className={`border-b border-border/40 hover:bg-surface-elevated ${
-                        isMe(r.rep) ? "bg-neon/5 ring-1 ring-inset ring-neon/30" : ""
+                      className={`border-b border-border/40 transition-colors duration-200 hover:bg-surface-elevated ${
+                        isMe(r.rep) ? "bg-kombat-gold/5 ring-1 ring-inset ring-kombat-gold/30" : ""
                       }`}
                     >
                       <td className="py-2.5 pr-2 text-muted-foreground tabular-nums">
                         {i === 0 && r.revenue > 0 ? (
-                          <Crown className="w-4 h-4 text-warning inline" aria-label="Champion" />
+                          <Crown
+                            className="w-4 h-4 text-kombat-gold inline"
+                            aria-label="Champion"
+                          />
                         ) : (
                           i + 1
                         )}
@@ -575,29 +589,37 @@ function CloseKombatInner() {
                         {r.rep}
                         <FlawlessBadge r={r} />
                       </td>
-                      <td className="py-2.5 px-2 text-right tabular-nums">{fmtCount(r.appts)}</td>
-                      <td className="py-2.5 px-2 text-right tabular-nums text-destructive">
+                      <td className={cn(kbCell, metricText(r.appts, "text-foreground"))}>
+                        {fmtCount(r.appts)}
+                      </td>
+                      <td className={cn(kbCell, metricText(r.noShow, "text-destructive"))}>
                         {fmtCount(r.noShow)}
                       </td>
-                      <td className="py-2.5 px-2 text-right tabular-nums text-destructive">
+                      <td className={cn(kbCell, metricText(r.noDemo, "text-destructive"))}>
                         {fmtCount(r.noDemo)}
                       </td>
-                      <td className="py-2.5 px-2 text-right tabular-nums text-warning">
+                      <td className={cn(kbCell, metricText(r.ol, "text-warning"))}>
                         {fmtCount(r.ol)}
                       </td>
-                      <td className="py-2.5 px-2 text-right tabular-nums text-accent">
+                      <td className={cn(kbCell, metricText(r.reset, "text-accent"))}>
                         {fmtCount(r.reset)}
                       </td>
-                      <td className="py-2.5 px-2 text-right tabular-nums text-warning">
+                      <td className={cn(kbCell, metricText(r.pm, "text-warning"))}>
                         {fmtCount(r.pm)}
                       </td>
-                      <td className="py-2.5 px-2 text-right tabular-nums text-victory font-medium">
+                      <td
+                        className={cn(
+                          kbCell,
+                          "font-medium",
+                          metricText(r.sold, "text-kombat-gold"),
+                        )}
+                      >
                         {fmtCount(r.sold)}
                       </td>
-                      <td className="py-2.5 px-2 text-right tabular-nums text-victory">
+                      <td className={cn(kbCell, metricText(r.reloads, "text-kombat-gold"))}>
                         {fmtCount(r.reloads)}
                       </td>
-                      <td className="py-2.5 px-2 text-right tabular-nums text-destructive">
+                      <td className={cn(kbCell, metricText(r.cancels, "text-destructive"))}>
                         {fmtCount(r.cancels)}
                       </td>
                       <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs border-l border-border/60">
@@ -627,7 +649,12 @@ function CloseKombatInner() {
                       <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
                         {fmtRatio(r.leadsToSale)}
                       </td>
-                      <td className="py-2.5 pl-2 text-right tabular-nums text-victory">
+                      <td
+                        className={cn(
+                          "py-2.5 pl-2 text-right tabular-nums",
+                          metricText(vol.byRep.get(r.rep) ?? 0, "text-kombat-gold"),
+                        )}
+                      >
                         {fmtMoney(vol.byRep.get(r.rep) ?? 0)}
                       </td>
                     </tr>
@@ -698,13 +725,13 @@ function CloseKombatInner() {
               {reps.map((r, i) => (
                 <MobileCard
                   key={r.rep}
-                  className={isMe(r.rep) ? "border-neon/40 bg-neon/5" : undefined}
+                  className={isMe(r.rep) ? "border-kombat-gold/40 bg-kombat-gold/5" : undefined}
                 >
                   <MobileCardHeader
                     left={
                       <span className="flex items-center gap-1.5">
                         {i === 0 && r.revenue > 0 ? (
-                          <Crown className="w-3.5 h-3.5 text-warning shrink-0" />
+                          <Crown className="w-3.5 h-3.5 text-kombat-gold shrink-0" />
                         ) : (
                           <span className="text-muted-foreground tabular-nums">{i + 1}.</span>
                         )}
@@ -713,7 +740,9 @@ function CloseKombatInner() {
                       </span>
                     }
                     right={
-                      <span className="text-victory">{fmtMoney(vol.byRep.get(r.rep) ?? 0)}</span>
+                      <span className={metricText(vol.byRep.get(r.rep) ?? 0, "text-kombat-gold")}>
+                        {fmtMoney(vol.byRep.get(r.rep) ?? 0)}
+                      </span>
                     }
                   />
                   <StatLine s={r} />
