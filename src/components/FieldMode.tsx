@@ -12,12 +12,50 @@ const MONDAY_FORM_URL =
 
 type TallyKey = "doors_knocked" | "people_talked_to" | "not_interested";
 type PinType = "knock" | "talked_to" | "not_interested" | "lead";
+type Tally = Record<TallyKey, number>;
 
 const TALLY_TO_PIN: Record<TallyKey, PinType> = {
   doors_knocked: "knock",
   people_talked_to: "talked_to",
   not_interested: "not_interested",
 };
+
+const EMPTY_TALLY: Tally = { doors_knocked: 0, people_talked_to: 0, not_interested: 0 };
+
+/** The three tally buttons as data (house pattern — FUNNEL_COLS,
+ *  COMPANY_TILES): the Submit New Lead button stays hand-rolled because it
+ *  really is different (pulse glow, no count, opens the sheet). */
+const TALLIES: Array<{
+  key: TallyKey;
+  label: string;
+  emoji: string;
+  icon: typeof DoorOpen;
+  color: string;
+  subtle?: boolean;
+}> = [
+  {
+    key: "doors_knocked",
+    label: "Log Knock",
+    emoji: "🚪",
+    icon: DoorOpen,
+    color: "var(--neon-blue)",
+  },
+  {
+    key: "people_talked_to",
+    label: "Talked To",
+    emoji: "🗣️",
+    icon: MessagesSquare,
+    color: "var(--neon-orange)",
+  },
+  {
+    key: "not_interested",
+    label: "Not Interested",
+    emoji: "🛑",
+    icon: Ban,
+    color: "oklch(0.55 0.02 270)",
+    subtle: true,
+  },
+];
 
 
 
@@ -108,18 +146,21 @@ export function FieldMode() {
 
   async function bump(key: TallyKey) {
     const pin_type = TALLY_TO_PIN[key];
+    const tallyKey = ["field-tally", user?.id, log_date];
     setPending(pin_type);
     try {
-      // Optimistic UI
-      qc.setQueryData(["field-tally", user?.id, log_date], {
-        doors_knocked: (today?.doors_knocked ?? 0) + (key === "doors_knocked" ? 1 : 0),
-        people_talked_to: (today?.people_talked_to ?? 0) + (key === "people_talked_to" ? 1 : 0),
-        not_interested: (today?.not_interested ?? 0) + (key === "not_interested" ? 1 : 0),
+      // Optimistic +1 via functional updater — a render-captured snapshot
+      // here loses counts when two different buttons are tapped in quick
+      // succession (both would base on the same stale object).
+      qc.setQueryData<Tally>(tallyKey, (prev) => {
+        const base = prev ?? EMPTY_TALLY;
+        return { ...base, [key]: base[key] + 1 };
       });
       const res = await dropPin(pin_type);
       if (!res.ok) {
-        // Revert
-        qc.setQueryData(["field-tally", user?.id, log_date], today);
+        // Refetch server truth instead of restoring a snapshot that may
+        // predate a concurrent tap's +1.
+        qc.invalidateQueries({ queryKey: tallyKey });
       } else {
         qc.invalidateQueries({ queryKey: ["territory_pins_today"] });
       }
@@ -152,41 +193,29 @@ export function FieldMode() {
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:gap-4">
-        <TallyButton
-          label="Log Knock"
-          emoji="🚪"
-          icon={DoorOpen}
-          value={today?.doors_knocked ?? 0}
-          onClick={() => bump("doors_knocked")}
-          loading={pending === "knock"}
-          color="var(--neon-blue)"
-        />
-        <TallyButton
-          label="Talked To"
-          emoji="🗣️"
-          icon={MessagesSquare}
-          value={today?.people_talked_to ?? 0}
-          onClick={() => bump("people_talked_to")}
-          loading={pending === "talked_to"}
-          color="var(--neon-orange)"
-        />
-        <TallyButton
-          label="Not Interested"
-          emoji="🛑"
-          icon={Ban}
-          value={today?.not_interested ?? 0}
-          onClick={() => bump("not_interested")}
-          loading={pending === "not_interested"}
-          color="oklch(0.55 0.02 270)"
-          subtle
-        />
+        {TALLIES.map((t) => (
+          <TallyButton
+            key={t.key}
+            label={t.label}
+            emoji={t.emoji}
+            icon={t.icon}
+            value={today?.[t.key] ?? 0}
+            onClick={() => bump(t.key)}
+            loading={pending === TALLY_TO_PIN[t.key]}
+            color={t.color}
+            subtle={t.subtle}
+          />
+        ))}
         <div className="pulse-glow-wrapper">
           <button
             type="button"
             onClick={openLead}
             disabled={pending === "lead"}
             className="arcade-btn-3d w-full h-full min-h-[9.5rem] flex flex-col items-center justify-center gap-2 p-4"
-            style={{ ["--btn-color" as string]: "var(--victory)", ["--btn-fg" as string]: "#06110a" }}
+            style={{
+              ["--btn-color" as string]: "var(--victory)",
+              ["--btn-fg" as string]: "#06110a",
+            }}
           >
             {pending === "lead" ? (
               <Loader2 className="w-8 h-8 animate-spin" />
@@ -194,7 +223,9 @@ export function FieldMode() {
               <Zap className="w-8 h-8" />
             )}
             <span className="font-display text-[11px] sm:text-xs uppercase tracking-widest text-center leading-tight">
-              ⚡ Submit<br />New Lead
+              ⚡ Submit
+              <br />
+              New Lead
             </span>
           </button>
         </div>
