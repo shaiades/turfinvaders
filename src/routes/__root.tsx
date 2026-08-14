@@ -14,8 +14,8 @@ function NotFoundComponent() {
   return (
     <div className="flex min-h-screen items-center justify-center px-4">
       <div className="max-w-md text-center">
-        <h1 className="font-display text-6xl text-neon">404</h1>
-        <h2 className="mt-4 font-display text-lg">GAME OVER</h2>
+        <h1 className="font-display text-5xl md:text-6xl text-neon">404</h1>
+        <h2 className="mt-4 font-display text-base md:text-lg">GAME OVER</h2>
         <p className="mt-2 text-sm text-muted-foreground">This level doesn't exist.</p>
         <div className="mt-6">
           <Link to="/" className="inline-flex items-center rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:opacity-90">
@@ -33,7 +33,7 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   return (
     <div className="flex min-h-screen items-center justify-center px-4">
       <div className="max-w-md text-center">
-        <h1 className="font-display text-xl text-[var(--destructive)]">Connection Lost</h1>
+        <h1 className="font-display text-lg md:text-xl text-[var(--destructive)]">Connection Lost</h1>
         <p className="mt-2 text-sm text-muted-foreground">Something glitched. Try again.</p>
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           <button onClick={() => { router.invalidate(); reset(); }} className="rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium">
@@ -50,7 +50,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   head: () => ({
     meta: [
       { charSet: "utf-8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1" },
+      // viewport-fit=cover activates env(safe-area-inset-*) on notched
+      // iPhones — required for the pb-safe/pt-safe padding in AppShell,
+      // especially in the installed (standalone) home-screen app.
+      { name: "viewport", content: "width=device-width, initial-scale=1, viewport-fit=cover" },
       { title: "Turf Invaders" },
       { name: "description", content: "Turf Invaders — the arcade-style canvassing tracker. Claim territory, rack up points, level up your crew." },
       { property: "og:title", content: "Turf Invaders" },

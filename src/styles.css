@@ -99,6 +99,14 @@
       radial-gradient(ellipse at top, color-mix(in oklab, var(--neon) 8%, transparent), transparent 60%),
       radial-gradient(ellipse at bottom right, color-mix(in oklab, var(--accent) 6%, transparent), transparent 60%);
     background-attachment: fixed;
+    /* Page-level backstop: stray wide children must never rock the whole
+     * page sideways (covers /auth and error pages that skip AppShell).
+     * `clip` beats `hidden` here — it forbids ALL scrolling of body
+     * without creating a scroll container. Intended horizontal scrolling
+     * lives in explicit overflow-x-auto wrappers; keep their scrollbars
+     * visible on data tables (see AGENTS.md — hiding them is how "can't
+     * see more data" bugs happen), scrollbar-hide on nav/chip strips only. */
+    overflow-x: clip;
   }
   h1, h2, h3, .font-display { font-family: var(--font-display); letter-spacing: 0.02em; }
 }
@@ -286,4 +294,20 @@
   scrollbar-width: none;
   -ms-overflow-style: none;
   &::-webkit-scrollbar { display: none; }
+}
+
+/* iOS safe-area insets (live once viewport-fit=cover is set in __root).
+ * env() resolves to 0 on devices/contexts without insets, so these are
+ * additive no-ops everywhere else. pb-safe pairs with the fixed bottom
+ * tab bar; pt-safe with the sticky header in the standalone PWA; px-safe
+ * keeps content clear of the notch in landscape. */
+@utility pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+@utility pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+@utility px-safe {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
 }

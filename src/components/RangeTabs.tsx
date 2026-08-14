@@ -32,7 +32,7 @@ export function RangeTabs({ controls }: { controls: DateRangeControls }) {
             key={p.id}
             type="button"
             onClick={() => setTab(p.id)}
-            className={`px-3 py-2 rounded-full text-[10px] font-display uppercase tracking-widest whitespace-nowrap border transition-colors ${
+            className={`px-3 py-2 min-h-11 md:min-h-0 rounded-full text-[10px] font-display uppercase tracking-widest whitespace-nowrap border transition-colors ${
               active
                 ? "bg-neon text-background border-neon"
                 : "border-border text-muted-foreground hover:text-foreground hover:border-neon/40"
@@ -59,7 +59,7 @@ export function RangeTabs({ controls }: { controls: DateRangeControls }) {
                 key={p.id}
                 type="button"
                 onClick={() => setDayPreset(p.id)}
-                className={`px-2.5 py-1.5 rounded-full text-[10px] font-display uppercase tracking-widest whitespace-nowrap border transition-colors ${
+                className={`px-2.5 py-1.5 min-h-11 md:min-h-0 rounded-full text-[10px] font-display uppercase tracking-widest whitespace-nowrap border transition-colors ${
                   active
                     ? "bg-neon text-background border-neon"
                     : "border-border text-muted-foreground hover:text-foreground hover:border-neon/40"
