@@ -32,6 +32,57 @@ type Entry = {
 };
 type Profile = { id: string; display_name: string };
 
+/** Save/Delete pair — one component for the mobile card (labeled, full-width)
+ *  and the desktop row (compact icons) so the dirty styling, disabled logic,
+ *  and the delete confirm can never drift between the two views. */
+function TimeEntryActions({
+  compact = false,
+  dirty,
+  saving,
+  deleting,
+  name,
+  onSave,
+  onDelete,
+}: {
+  compact?: boolean;
+  dirty: boolean;
+  saving: boolean;
+  deleting: boolean;
+  name: string;
+  onSave: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div className={compact ? "flex items-center justify-end gap-1" : "flex gap-2"}>
+      <Button
+        size="sm"
+        variant={dirty ? "default" : "outline"}
+        disabled={!dirty || saving}
+        onClick={onSave}
+        className={cn(
+          !compact && "flex-1",
+          dirty && "bg-victory text-background hover:bg-victory/90",
+        )}
+      >
+        <Save className="w-3.5 h-3.5" />
+        {!compact && "Save"}
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={deleting}
+        onClick={() => {
+          if (confirm(`Delete this time entry for ${name}?`)) onDelete();
+        }}
+        className={cn(!compact && "flex-1")}
+      >
+        <Trash2 className="w-3.5 h-3.5 text-destructive" />
+        {!compact && "Delete"}
+      </Button>
+    </div>
+  );
+}
+
 export function TimesheetEditor() {
   const qc = useQueryClient();
   const {
@@ -43,7 +94,9 @@ export function TimesheetEditor() {
     goToWeek,
   } = useWeekSelector({ endOffsetDays: 6 });
   const [filterUser, setFilterUser] = useState<string>("");
-  const [edits, setEdits] = useState<Record<string, { clock_in?: string; clock_out?: string | null }>>({});
+  const [edits, setEdits] = useState<
+    Record<string, { clock_in?: string; clock_out?: string | null }>
+  >({});
 
   const { data, isLoading } = useQuery({
     queryKey: ["timesheets", start, end],
@@ -134,7 +187,10 @@ export function TimesheetEditor() {
     const patch: { clock_in?: string; clock_out?: string | null; log_date?: string } = {};
     if (edit.clock_in !== undefined) {
       const iso = fromLocalInput(edit.clock_in);
-      if (!iso) { toast.error("Invalid clock-in time"); return; }
+      if (!iso) {
+        toast.error("Invalid clock-in time");
+        return;
+      }
       patch.clock_in = iso;
       patch.log_date = iso.slice(0, 10);
     }
@@ -143,7 +199,10 @@ export function TimesheetEditor() {
         patch.clock_out = null;
       } else {
         const iso = fromLocalInput(edit.clock_out);
-        if (!iso) { toast.error("Invalid clock-out time"); return; }
+        if (!iso) {
+          toast.error("Invalid clock-out time");
+          return;
+        }
         patch.clock_out = iso;
       }
     }
@@ -152,19 +211,27 @@ export function TimesheetEditor() {
 
   const weekLabel = `${weekStart.toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${weekEnd.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
 
+  // One handler for all four datetime inputs (mobile/desktop × in/out).
+  const editField = (id: string, field: "clock_in" | "clock_out", value: string) =>
+    setEdits((s) => ({ ...s, [id]: { ...s[id], [field]: value } }));
+
   // Shared by the desktop table and mobile card list so both render identical
   // edit state through the same handlers.
-  const rows = visibleEntries.map((e) => {
-    const edit = edits[e.id] ?? {};
-    return {
-      e,
-      name: profileById.get(e.user_id)?.display_name ?? "Unknown",
-      edit,
-      dirty: edit.clock_in !== undefined || edit.clock_out !== undefined,
-      inVal: edit.clock_in ?? toLocalInput(e.clock_in),
-      outVal: edit.clock_out !== undefined ? (edit.clock_out ?? "") : toLocalInput(e.clock_out),
-    };
-  });
+  const rows = useMemo(
+    () =>
+      visibleEntries.map((e) => {
+        const edit = edits[e.id] ?? {};
+        return {
+          e,
+          name: profileById.get(e.user_id)?.display_name ?? "Unknown",
+          edit,
+          dirty: edit.clock_in !== undefined || edit.clock_out !== undefined,
+          inVal: edit.clock_in ?? toLocalInput(e.clock_in),
+          outVal: edit.clock_out !== undefined ? (edit.clock_out ?? "") : toLocalInput(e.clock_out),
+        };
+      }),
+    [visibleEntries, edits, profileById],
+  );
 
   return (
     <div className="space-y-4">
@@ -193,10 +260,10 @@ export function TimesheetEditor() {
         <div className="mt-3 flex items-start gap-2 text-[11px] text-muted-foreground border-l-2 border-warning/60 pl-2">
           <AlertTriangle className="w-3.5 h-3.5 mt-0.5 text-warning shrink-0" />
           <span>
-            Lunch deduction (30 min per shift) recalculates automatically on save — clocked hours are
-            otherwise paid in full (no daily caps). Sunday entries always bill 0h (Sundays are unpaid).
-            Forgotten shifts auto-close at 6:00 PM weekdays / 5:00 PM Saturdays; review unusually long
-            spans before paying.
+            Lunch deduction (30 min per shift) recalculates automatically on save — clocked hours
+            are otherwise paid in full (no daily caps). Sunday entries always bill 0h (Sundays are
+            unpaid). Forgotten shifts auto-close at 6:00 PM weekdays / 5:00 PM Saturdays; review
+            unusually long spans before paying.
           </span>
         </div>
       </ArcadePanel>
@@ -211,158 +278,129 @@ export function TimesheetEditor() {
           </div>
         ) : (
           <>
-          <MobileCardList>
-            {rows.map(({ e, name, edit, dirty, inVal, outVal }) => (
-              <MobileCard key={e.id}>
-                <MobileCardHeader
-                  left={name}
-                  right={
-                    <span className="text-neon tabular-nums">
-                      {Number(e.billable_hours ?? 0).toFixed(2)}h
+            <MobileCardList>
+              {rows.map(({ e, name, edit, dirty, inVal, outVal }) => (
+                <MobileCard key={e.id}>
+                  <MobileCardHeader
+                    left={name}
+                    right={
+                      <span className="text-neon tabular-nums">
+                        {Number(e.billable_hours ?? 0).toFixed(2)}h
+                      </span>
+                    }
+                  />
+                  <div className="flex items-center justify-between gap-2 text-xs tabular-nums">
+                    <span className="text-muted-foreground">{e.log_date}</span>
+                    <span className="font-display text-victory">
+                      Week {(totalsByUser.get(e.user_id) ?? 0).toFixed(2)}h
                     </span>
-                  }
-                />
-                <div className="flex items-center justify-between gap-2 text-xs tabular-nums">
-                  <span className="text-muted-foreground">{e.log_date}</span>
-                  <span className="font-display text-victory">
-                    Week {(totalsByUser.get(e.user_id) ?? 0).toFixed(2)}h
-                  </span>
-                </div>
-                <label className="block space-y-1">
-                  <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-                    Clock In
-                  </span>
-                  <Input
-                    type="datetime-local"
-                    value={inVal}
-                    onChange={(v) =>
-                      setEdits((s) => ({ ...s, [e.id]: { ...s[e.id], clock_in: v.target.value } }))
-                    }
-                    className="w-full"
+                  </div>
+                  <label className="block space-y-1">
+                    <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                      Clock In
+                    </span>
+                    <Input
+                      type="datetime-local"
+                      value={inVal}
+                      onChange={(v) => editField(e.id, "clock_in", v.target.value)}
+                      className="w-full"
+                    />
+                  </label>
+                  <label className="block space-y-1">
+                    <span className="flex items-center gap-1.5 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                      Clock Out
+                      {!e.clock_out && !edit.clock_out && (
+                        <span className="text-[9px] text-victory animate-pulse">live</span>
+                      )}
+                    </span>
+                    <Input
+                      type="datetime-local"
+                      value={outVal}
+                      onChange={(v) => editField(e.id, "clock_out", v.target.value)}
+                      className="w-full"
+                    />
+                  </label>
+                  <TimeEntryActions
+                    dirty={dirty}
+                    saving={saveMut.isPending}
+                    deleting={deleteMut.isPending}
+                    name={name}
+                    onSave={() => saveRow(e)}
+                    onDelete={() => deleteMut.mutate(e.id)}
                   />
-                </label>
-                <label className="block space-y-1">
-                  <span className="flex items-center gap-1.5 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-                    Clock Out
-                    {!e.clock_out && !edit.clock_out && (
-                      <span className="text-[9px] text-victory animate-pulse">live</span>
-                    )}
-                  </span>
-                  <Input
-                    type="datetime-local"
-                    value={outVal}
-                    onChange={(v) =>
-                      setEdits((s) => ({ ...s, [e.id]: { ...s[e.id], clock_out: v.target.value } }))
-                    }
-                    className="w-full"
-                  />
-                </label>
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    variant={dirty ? "default" : "outline"}
-                    disabled={!dirty || saveMut.isPending}
-                    onClick={() => saveRow(e)}
-                    className={cn("flex-1", dirty && "bg-victory text-background hover:bg-victory/90")}
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    Save
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={deleteMut.isPending}
-                    onClick={() => {
-                      if (confirm(`Delete this time entry for ${name}?`)) deleteMut.mutate(e.id);
-                    }}
-                    className="flex-1"
-                  >
-                    <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                    Delete
-                  </Button>
-                </div>
-              </MobileCard>
-            ))}
-          </MobileCardList>
-          <div className="hidden md:block overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border">
-                  <th className="text-left py-2 pr-3">Canvasser</th>
-                  <th className="text-left py-2 pr-3">Date</th>
-                  <th className="text-left py-2 pr-3">Clock In</th>
-                  <th className="text-left py-2 pr-3">Clock Out</th>
-                  <th className="text-right py-2 pr-3">Billable</th>
-                  <th className="text-right py-2 pr-3">Week Total</th>
-                  <th className="text-right py-2 pr-1">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map(({ e, name, edit, dirty, inVal, outVal }) => {
-                  return (
-                    <tr key={e.id} className="border-b border-border/40 transition-colors duration-200 hover:bg-surface-elevated">
-                      <td className="py-2 pr-3 font-medium">{name}</td>
-                      <td className="py-2 pr-3 text-xs text-muted-foreground tabular-nums">{e.log_date}</td>
-                      <td className="py-2 pr-3">
-                        <Input
-                          type="datetime-local"
-                          value={inVal}
-                          onChange={(v) =>
-                            setEdits((s) => ({ ...s, [e.id]: { ...s[e.id], clock_in: v.target.value } }))
-                          }
-                          className="h-8 text-xs w-full min-w-[150px]"
-                        />
-                      </td>
-                      <td className="py-2 pr-3">
-                        <div className="flex items-center gap-1">
+                </MobileCard>
+              ))}
+            </MobileCardList>
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border">
+                    <th className="text-left py-2 pr-3">Canvasser</th>
+                    <th className="text-left py-2 pr-3">Date</th>
+                    <th className="text-left py-2 pr-3">Clock In</th>
+                    <th className="text-left py-2 pr-3">Clock Out</th>
+                    <th className="text-right py-2 pr-3">Billable</th>
+                    <th className="text-right py-2 pr-3">Week Total</th>
+                    <th className="text-right py-2 pr-1">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map(({ e, name, edit, dirty, inVal, outVal }) => {
+                    return (
+                      <tr
+                        key={e.id}
+                        className="border-b border-border/40 transition-colors duration-200 hover:bg-surface-elevated"
+                      >
+                        <td className="py-2 pr-3 font-medium">{name}</td>
+                        <td className="py-2 pr-3 text-xs text-muted-foreground tabular-nums">
+                          {e.log_date}
+                        </td>
+                        <td className="py-2 pr-3">
                           <Input
                             type="datetime-local"
-                            value={outVal}
-                            onChange={(v) =>
-                              setEdits((s) => ({ ...s, [e.id]: { ...s[e.id], clock_out: v.target.value } }))
-                            }
+                            value={inVal}
+                            onChange={(v) => editField(e.id, "clock_in", v.target.value)}
                             className="h-8 text-xs w-full min-w-[150px]"
                           />
-                          {!e.clock_out && !edit.clock_out && (
-                            <span className="text-[9px] font-display uppercase text-victory animate-pulse">live</span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="py-2 pr-3 text-right font-display text-neon tabular-nums">
-                        {Number(e.billable_hours ?? 0).toFixed(2)}h
-                      </td>
-                      <td className="py-2 pr-3 text-right font-display text-victory tabular-nums">
-                        {(totalsByUser.get(e.user_id) ?? 0).toFixed(2)}h
-                      </td>
-                      <td className="py-2 pr-1 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <Button
-                            size="sm"
-                            variant={dirty ? "default" : "outline"}
-                            disabled={!dirty || saveMut.isPending}
-                            onClick={() => saveRow(e)}
-                            className={dirty ? "bg-victory text-background hover:bg-victory/90" : ""}
-                          >
-                            <Save className="w-3.5 h-3.5" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled={deleteMut.isPending}
-                            onClick={() => {
-                              if (confirm(`Delete this time entry for ${name}?`)) deleteMut.mutate(e.id);
-                            }}
-                          >
-                            <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                        </td>
+                        <td className="py-2 pr-3">
+                          <div className="flex items-center gap-1">
+                            <Input
+                              type="datetime-local"
+                              value={outVal}
+                              onChange={(v) => editField(e.id, "clock_out", v.target.value)}
+                              className="h-8 text-xs w-full min-w-[150px]"
+                            />
+                            {!e.clock_out && !edit.clock_out && (
+                              <span className="text-[9px] font-display uppercase text-victory animate-pulse">
+                                live
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-2 pr-3 text-right font-display text-neon tabular-nums">
+                          {Number(e.billable_hours ?? 0).toFixed(2)}h
+                        </td>
+                        <td className="py-2 pr-3 text-right font-display text-victory tabular-nums">
+                          {(totalsByUser.get(e.user_id) ?? 0).toFixed(2)}h
+                        </td>
+                        <td className="py-2 pr-1 text-right">
+                          <TimeEntryActions
+                            compact
+                            dirty={dirty}
+                            saving={saveMut.isPending}
+                            deleting={deleteMut.isPending}
+                            name={name}
+                            onSave={() => saveRow(e)}
+                            onDelete={() => deleteMut.mutate(e.id)}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </>
         )}
       </ArcadePanel>
