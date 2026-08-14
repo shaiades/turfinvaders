@@ -1,5 +1,98 @@
-import type { ReactNode } from "react";
+import { forwardRef, type ButtonHTMLAttributes, type HTMLAttributes, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
+
+/* ── Faction design system ────────────────────────────────────────────────────
+ * Two factions, one arcade. Turf Invaders = cyberpunk pink/cyan; Close Kombat
+ * = blood red/gold on deep black. Tokens live in styles.css (@theme:
+ * turf-pink / turf-cyan / kombat-red / kombat-gold / kombat-black, plus
+ * shadow-neon-pink|cyan|red|gold). Class maps below are static literals so
+ * Tailwind's scanner can see every utility.
+ */
+
+export type NeonTone = "turf-pink" | "turf-cyan" | "kombat-red" | "kombat-gold";
+
+const NEON_BUTTON_TONE: Record<NeonTone, string> = {
+  "turf-pink":
+    "text-turf-pink border-turf-pink/40 hover:border-turf-pink hover:shadow-neon-pink focus-visible:shadow-neon-pink focus-visible:border-turf-pink active:bg-turf-pink/15",
+  "turf-cyan":
+    "text-turf-cyan border-turf-cyan/40 hover:border-turf-cyan hover:shadow-neon-cyan focus-visible:shadow-neon-cyan focus-visible:border-turf-cyan active:bg-turf-cyan/15",
+  "kombat-red":
+    "text-kombat-red border-kombat-red/50 hover:border-kombat-red hover:shadow-neon-red focus-visible:shadow-neon-red focus-visible:border-kombat-red active:bg-kombat-red/20",
+  "kombat-gold":
+    "text-kombat-gold border-kombat-gold/50 hover:border-kombat-gold hover:shadow-neon-gold focus-visible:shadow-neon-gold focus-visible:border-kombat-gold active:bg-kombat-gold/15",
+};
+
+export interface NeonButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  /** Faction accent — defaults to the house pink. */
+  tone?: NeonTone;
+}
+
+/** Dark button that ignites on hover/press/keyboard focus with an outer neon
+ *  glow. 44px touch target below md per the responsive rules (AGENTS.md);
+ *  callers can densify from md up via className (twMerge lets them win). */
+export const NeonButton = forwardRef<HTMLButtonElement, NeonButtonProps>(
+  ({ tone = "turf-pink", className, type, ...props }, ref) => (
+    <button
+      ref={ref}
+      type={type ?? "button"}
+      className={cn(
+        "inline-flex items-center justify-center gap-2 rounded-md border bg-background/80 px-4 min-h-11 md:min-h-9",
+        "font-display text-[10px] uppercase tracking-widest whitespace-nowrap cursor-pointer select-none",
+        "transition-all duration-200 active:translate-y-px",
+        "focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50",
+        NEON_BUTTON_TONE[tone],
+        className,
+      )}
+      {...props}
+    />
+  ),
+);
+NeonButton.displayName = "NeonButton";
+
+const ARCADE_CARD_FACTION = {
+  turf: {
+    base: "border-turf-pink/35",
+    glow: "shadow-neon-pink border-turf-pink/60",
+  },
+  kombat: {
+    base: "bg-kombat-black border-kombat-red/40",
+    glow: "bg-kombat-black shadow-neon-red border-kombat-red/70",
+  },
+} as const;
+
+export interface ArcadeCardProps extends HTMLAttributes<HTMLDivElement> {
+  /** Omit for the neutral house card; set to tint the border to a faction. */
+  faction?: keyof typeof ARCADE_CARD_FACTION;
+  /** Outer neon glow — reserve for the panel that should own the screen. */
+  glow?: boolean;
+}
+
+/** Dark rounded container on the arcade-card base (styles.css). NOTE:
+ *  arcade-card clips overflow — any horizontal scroller inside needs an
+ *  intact width chain (floored grid tracks / min-w-0), see AGENTS.md rule 2. */
+export const ArcadeCard = forwardRef<HTMLDivElement, ArcadeCardProps>(
+  ({ faction, glow = false, className, ...props }, ref) => (
+    <div
+      ref={ref}
+      className={cn(
+        "arcade-card p-4 transition-all duration-200",
+        faction && ARCADE_CARD_FACTION[faction].base,
+        faction && glow && ARCADE_CARD_FACTION[faction].glow,
+        !faction && glow && "arcade-card-glow",
+        className,
+      )}
+      {...props}
+    />
+  ),
+);
+ArcadeCard.displayName = "ArcadeCard";
+
+/** Dim-at-zero stat coloring: zeros/nulls sink into the background, positive
+ *  values ignite in the given utility class. The table twin of
+ *  FleetDispatch's metricClass — use for every numeric grid cell. */
+export function metricText(value: number | null | undefined, lit: string): string {
+  return (value ?? 0) > 0 ? lit : "text-muted-foreground/40";
+}
 
 export function StatCard({
   label, value, sublabel, accent, className,
@@ -88,12 +181,26 @@ export function MobileStatGrid({
 }
 
 export function MobileStat({
-  label, value, className,
-}: { label: string; value: ReactNode; className?: string }) {
+  label,
+  value,
+  className,
+  lit,
+}: {
+  label: string;
+  value: ReactNode;
+  className?: string;
+  lit?: string;
+}) {
+  // lit = dim-at-zero: numeric zeros sink into the background, positive
+  // values ignite in the given class (metricText, same rule as the tables).
+  const ignite =
+    lit !== undefined && typeof value === "number" ? metricText(value, lit) : undefined;
   return (
     <div className="min-w-0">
-      <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">{label}</div>
-      <div className={cn("text-sm tabular-nums", className)}>{value}</div>
+      <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+        {label}
+      </div>
+      <div className={cn("text-sm tabular-nums", ignite, className)}>{value}</div>
     </div>
   );
 }

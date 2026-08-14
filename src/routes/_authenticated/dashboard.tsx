@@ -5,7 +5,17 @@ import { isAdminRole } from "@/lib/roles";
 import { useQuery } from "@tanstack/react-query";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { supabase } from "@/integrations/supabase/client";
-import { StatCard, ArcadePanel, TeamBadge, MobileCardList, MobileCard, MobileCardHeader, MobileStatGrid, MobileStat } from "@/components/arcade";
+import {
+  StatCard,
+  ArcadePanel,
+  TeamBadge,
+  MobileCardList,
+  MobileCard,
+  MobileCardHeader,
+  MobileStatGrid,
+  MobileStat,
+  metricText,
+} from "@/components/arcade";
 import { LiveLeadCounter } from "@/components/LiveLeadCounter";
 import { CommandCenter } from "@/components/CommandCenter";
 import { HistoricalImporter } from "@/components/HistoricalImporter";
@@ -523,17 +533,29 @@ function RosterTable({ members }: { members: RosterRow[] }) {
               <MobileCardHeader
                 left={
                   <span className="flex items-center gap-2 min-w-0">
-                    <span className="font-display text-xs text-muted-foreground shrink-0">#{String(i + 1).padStart(2, "0")}</span>
-                    <Link to="/canvassers/$canvasserId" params={{ canvasserId: m.id }} className="hover:text-neon font-medium truncate">{m.name}</Link>
+                    <span className="font-display text-xs text-muted-foreground shrink-0">
+                      #{String(i + 1).padStart(2, "0")}
+                    </span>
+                    <Link
+                      to="/canvassers/$canvasserId"
+                      params={{ canvasserId: m.id }}
+                      className="hover:text-neon font-medium truncate"
+                    >
+                      {m.name}
+                    </Link>
                     {suspended && <SuspendedBadge />}
                   </span>
                 }
-                right={<span className="text-victory">{formatCurrency(m.revenueGenerated)}</span>}
+                right={
+                  <span className={metricText(m.revenueGenerated, "text-victory")}>
+                    {formatCurrency(m.revenueGenerated)}
+                  </span>
+                }
               />
               <MobileStatGrid cols={3}>
                 <MobileStat label="Lvl" value={m.level} className="text-victory font-display" />
-                <MobileStat label="Doors" value={m.doorsKnocked} />
-                <MobileStat label="Sales" value={m.salesClosed} />
+                <MobileStat label="Doors" value={m.doorsKnocked} lit="text-foreground" />
+                <MobileStat label="Sales" value={m.salesClosed} lit="text-victory" />
               </MobileStatGrid>
             </MobileCard>
           );
@@ -555,18 +577,39 @@ function RosterTable({ members }: { members: RosterRow[] }) {
             {members.map((m, i) => {
               const suspended = isSuspendedStatus(statuses?.[m.id]);
               return (
-                <tr key={m.id} className="border-b border-border/40 hover:bg-surface-elevated">
-                  <td className="py-2.5 font-display text-xs text-muted-foreground">{String(i + 1).padStart(2, "0")}</td>
+                <tr
+                  key={m.id}
+                  className="border-b border-border/40 transition-colors duration-200 hover:bg-surface-elevated"
+                >
+                  <td className="py-2.5 font-display text-xs text-muted-foreground">
+                    {String(i + 1).padStart(2, "0")}
+                  </td>
                   <td className="py-2.5">
                     <div className="flex items-center gap-2">
-                      <Link to="/canvassers/$canvasserId" params={{ canvasserId: m.id }} className="hover:text-neon font-medium">{m.name}</Link>
+                      <Link
+                        to="/canvassers/$canvasserId"
+                        params={{ canvasserId: m.id }}
+                        className="transition-colors duration-200 hover:text-neon font-medium"
+                      >
+                        {m.name}
+                      </Link>
                       {suspended && <SuspendedBadge />}
                     </div>
                   </td>
                   <td className="py-2.5 text-right text-victory font-display text-xs">{m.level}</td>
-                  <td className="py-2.5 text-right">{m.doorsKnocked}</td>
-                  <td className="py-2.5 text-right">{m.salesClosed}</td>
-                  <td className="py-2.5 text-right text-victory">{formatCurrency(m.revenueGenerated)}</td>
+                  <td
+                    className={`py-2.5 text-right ${metricText(m.doorsKnocked, "text-foreground")}`}
+                  >
+                    {m.doorsKnocked}
+                  </td>
+                  <td className={`py-2.5 text-right ${metricText(m.salesClosed, "text-victory")}`}>
+                    {m.salesClosed}
+                  </td>
+                  <td
+                    className={`py-2.5 text-right ${metricText(m.revenueGenerated, "text-victory")}`}
+                  >
+                    {formatCurrency(m.revenueGenerated)}
+                  </td>
                 </tr>
               );
             })}

@@ -1012,7 +1012,7 @@ type RowManage = {
 function DispatchRow({ r, manage }: { r: FunnelRow; manage?: RowManage }) {
   return (
     <div
-      className={`${rowGrid(!!manage)} px-2 py-1.5 rounded border border-border bg-surface hover:border-neon/60`}
+      className={`${rowGrid(!!manage)} px-2 py-1.5 rounded border border-border bg-surface transition-colors duration-200 hover:border-neon/60`}
     >
       <span className="text-sm truncate flex items-center gap-1.5 min-w-0">
         <span aria-hidden>{r.sub > 0 ? "🔥" : "🍩"}</span>
