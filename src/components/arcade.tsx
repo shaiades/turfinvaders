@@ -295,3 +295,23 @@ export function MobileStat({
     </div>
   );
 }
+
+/** Glowing progress bar shared by the Paycheck Engine and Goal Bar. */
+export function NeonBar({ pct, accent, tall = false }: { pct: number; accent: string; tall?: boolean }) {
+  const w = Math.max(0, Math.min(1, pct)) * 100;
+  return (
+    <div
+      className={`mt-4 relative ${tall ? "h-4" : "h-3"} w-full rounded-full overflow-hidden border border-border bg-[color-mix(in_oklab,var(--foreground)_4%,transparent)]`}
+    >
+      <div
+        className="h-full rounded-full transition-[width] duration-700 ease-out"
+        style={{
+          width: `${w}%`,
+          background: `linear-gradient(90deg, color-mix(in oklab, ${accent} 70%, transparent), ${accent})`,
+          boxShadow: `0 0 14px ${accent}, 0 0 28px color-mix(in oklab, ${accent} 60%, transparent)`,
+        }}
+      />
+      <div className="absolute inset-0 pointer-events-none scanlines opacity-30" />
+    </div>
+  );
+}
