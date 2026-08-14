@@ -1258,8 +1258,13 @@ function DispatchFleet({
             title={`${office} · ${list.length} ${list.length === 1 ? "Van" : "Vans"}`}
           >
             {/* One card per row — the continuous field→leads line needs the
-                full panel width (scrolls horizontally on small screens). */}
-            <div className="grid gap-4">
+                full panel width (scrolls horizontally on small screens).
+                grid-cols-1 (minmax(0,1fr)) is load-bearing: a bare `grid`
+                track sizes to the 47rem rows, so the van card outgrows the
+                overflow-hidden panel and the row scroller never activates —
+                the right half of the board becomes unreachable on phones
+                and narrow windows. */}
+            <div className="grid grid-cols-1 gap-4">
               {list.map((v) => {
                 const roster = (rowsByVan.get(v.id) ?? []).sort(
                   (a, b) => b.sub - a.sub || b.conf - a.conf,
