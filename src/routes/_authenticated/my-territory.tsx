@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { getPositionOrNull } from "@/lib/utils";
 import { laTodayISO } from "@/lib/dates";
 import { useAuth } from "@/hooks/useAuth";
+import { dailyLogKeys } from "@/hooks/useDailyLogs";
 import { isManagerRole } from "@/lib/roles";
 import { ArcadePanel } from "@/components/arcade";
 import { NeonMap, type Territory, type FieldPin, type LatLng } from "@/components/NeonMap";
@@ -238,7 +239,9 @@ function MyTerritoryPage() {
         toast.success(active === "lead" ? "🟢 Lead pin dropped" : active === "talked_to" ? "🟡 Conversation logged" : "🔴 Not home");
       }
       qc.invalidateQueries({ queryKey: ["my_pins_today", user?.id] });
-      qc.invalidateQueries({ queryKey: ["my_logs"] });
+      // bump_daily_log_from_pin has committed by now — refresh every
+      // self-scoped daily_logs read (Log form, Stats, HUD, Active Run tally).
+      if (user?.id) qc.invalidateQueries({ queryKey: dailyLogKeys.all(user.id) });
     },
     onError: (e: Error) => toast.error(e.message),
   });

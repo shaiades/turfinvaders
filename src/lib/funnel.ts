@@ -3,9 +3,9 @@
 // sale revenue); conversion rates come from personal history when it has
 // enough volume, else the company-wide baseline (getFunnelBaseline server
 // fn); workweeks are Mon–Sat everywhere; both back-solves subtract progress
-// already made. CanvasserPersonalDashboard's monthly Mission and
-// WeeklyPlaybook's weekly plan must both compute from these helpers so their
-// doors/day numbers can never disagree on rates again.
+// already made. Both horizons of the Plan tab's back-solve (PlanPanel on the
+// Mission page) must compute from these helpers so their doors/day numbers
+// can never disagree on rates again.
 
 export type FunnelAggregate = {
   doors: number;

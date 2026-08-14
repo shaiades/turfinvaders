@@ -3,24 +3,20 @@ import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { getPositionOrNull } from "@/lib/utils";
 import { laTodayISO } from "@/lib/dates";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { DoorOpen, MessagesSquare, Ban, Zap, X, Loader2 } from "lucide-react";
-
-const MONDAY_FORM_URL =
-  "https://forms.monday.com/forms/embed/2e7e2733e186b6e9f3a37c17523f6e6f?r=use1";
+import { getMondayFormUrl } from "@/lib/monday-form";
+import { dailyLogKeys, sumLogCounters, useTodayLogs, type DailyLogRow } from "@/hooks/useDailyLogs";
 
 type TallyKey = "doors_knocked" | "people_talked_to" | "not_interested";
 type PinType = "knock" | "talked_to" | "not_interested" | "lead";
-type Tally = Record<TallyKey, number>;
 
 const TALLY_TO_PIN: Record<TallyKey, PinType> = {
   doors_knocked: "knock",
   people_talked_to: "talked_to",
   not_interested: "not_interested",
 };
-
-const EMPTY_TALLY: Tally = { doors_knocked: 0, people_talked_to: 0, not_interested: 0 };
 
 /** The three tally buttons as data (house pattern — FUNNEL_COLS,
  *  COMPANY_TILES): the Submit New Lead button stays hand-rolled because it
@@ -57,8 +53,6 @@ const TALLIES: Array<{
   },
 ];
 
-
-
 export function FieldMode() {
   const { user, teamId } = useAuth();
   const qc = useQueryClient();
@@ -94,29 +88,18 @@ export function FieldMode() {
     };
   }, []);
 
-  const { data: today } = useQuery({
-    queryKey: ["field-tally", user?.id, log_date],
-    enabled: !!user?.id,
-    queryFn: async () => {
-      // Rows are per (canvasser, day, office) — sum across them so the tally
-      // is whole-day regardless of which office's row the pins landed on.
-      const { data } = await supabase
-        .from("daily_logs")
-        .select("doors_knocked, people_talked_to, not_interested")
-        .eq("canvasser_id", user!.id)
-        .eq("log_date", log_date);
-      const rows = (data ?? []) as Array<{ doors_knocked: number | null; people_talked_to: number | null; not_interested?: number | null }>;
-      return {
-        doors_knocked: rows.reduce((a, r) => a + (r.doors_knocked ?? 0), 0),
-        people_talked_to: rows.reduce((a, r) => a + (r.people_talked_to ?? 0), 0),
-        not_interested: rows.reduce((a, r) => a + (r.not_interested ?? 0), 0),
-      };
-    },
-  });
+  // Whole-day totals across office rows, from the shared today-logs cache —
+  // the same rows the Log form, Stats page, and HUD read.
+  const { data: todayRows } = useTodayLogs(user?.id);
+  const today = sumLogCounters(todayRows);
 
   async function dropPin(pin_type: PinType, opts?: { silent?: boolean }) {
     if (!user?.id) return { ok: false as const };
-    const fix = await getPositionOrNull({ enableHighAccuracy: true, maximumAge: 8000, timeout: 8000 });
+    const fix = await getPositionOrNull({
+      enableHighAccuracy: true,
+      maximumAge: 8000,
+      timeout: 8000,
+    });
     if (!fix) {
       toast.error("No GPS fix yet — enable Location and try again.");
       return { ok: false as const };
@@ -139,30 +122,36 @@ export function FieldMode() {
       return { ok: false as const };
     }
     if (!opts?.silent && typeof navigator !== "undefined" && "vibrate" in navigator) {
-      try { navigator.vibrate?.(15); } catch { /* ignore */ }
+      try {
+        navigator.vibrate?.(15);
+      } catch {
+        /* ignore */
+      }
     }
     return { ok: true as const };
   }
 
   async function bump(key: TallyKey) {
+    if (!user?.id) return;
     const pin_type = TALLY_TO_PIN[key];
-    const tallyKey = ["field-tally", user?.id, log_date];
+    const todayKey = dailyLogKeys.today(user.id, log_date);
     setPending(pin_type);
     try {
-      // Optimistic +1 via functional updater — a render-captured snapshot
-      // here loses counts when two different buttons are tapped in quick
-      // succession (both would base on the same stale object).
-      qc.setQueryData<Tally>(tallyKey, (prev) => {
-        const base = prev ?? EMPTY_TALLY;
-        return { ...base, [key]: base[key] + 1 };
-      });
+      // Optimistic +1 as an appended synthetic row via functional updater —
+      // sumLogCounters folds it into the total, and a render-captured
+      // snapshot would lose counts when two buttons are tapped in quick
+      // succession (both would base on the same stale array).
+      qc.setQueryData<DailyLogRow[]>(todayKey, (prev) => [...(prev ?? []), { log_date, [key]: 1 }]);
       const res = await dropPin(pin_type);
       if (!res.ok) {
         // Refetch server truth instead of restoring a snapshot that may
         // predate a concurrent tap's +1.
-        qc.invalidateQueries({ queryKey: tallyKey });
+        qc.invalidateQueries({ queryKey: todayKey });
       } else {
         qc.invalidateQueries({ queryKey: ["territory_pins_today"] });
+        // bump_daily_log_from_pin has committed — swap the synthetic row for
+        // server truth and let the Log form / Stats / HUD refresh too.
+        qc.invalidateQueries({ queryKey: dailyLogKeys.all(user.id) });
       }
     } finally {
       setPending(null);
@@ -173,7 +162,11 @@ export function FieldMode() {
     setPending("lead");
     try {
       const res = await dropPin("lead");
-      if (res.ok) qc.invalidateQueries({ queryKey: ["territory_pins_today"] });
+      if (res.ok) {
+        qc.invalidateQueries({ queryKey: ["territory_pins_today"] });
+        // Lead pins bump leads_called_in via trigger — refresh daily-log reads.
+        if (user?.id) qc.invalidateQueries({ queryKey: dailyLogKeys.all(user.id) });
+      }
       setLeadOpen(true);
     } finally {
       setPending(null);
@@ -285,12 +278,12 @@ function TallyButton({
 }
 
 function LeadSheet({ onClose }: { onClose: () => void }) {
+  // Read once on mount, never at module scope (localStorage + SSR safety).
+  const [formUrl] = useState(getMondayFormUrl);
   return (
     <div className="fixed inset-0 z-50 bg-background flex flex-col">
       <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-background">
-        <div className="font-display text-xs uppercase tracking-widest text-neon">
-          ⚡ New Lead
-        </div>
+        <div className="font-display text-xs uppercase tracking-widest text-neon">⚡ New Lead</div>
         <button
           type="button"
           onClick={onClose}
@@ -301,7 +294,7 @@ function LeadSheet({ onClose }: { onClose: () => void }) {
         </button>
       </div>
       <iframe
-        src={MONDAY_FORM_URL}
+        src={formUrl}
         title="Submit New Lead"
         className="flex-1 w-full border-0"
         allow="clipboard-write; camera; microphone; geolocation"

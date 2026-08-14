@@ -90,7 +90,9 @@ export function TimeClock({ userId }: { userId: string }) {
       toast.success("Clocked out · 30-min lunch deducted");
       qc.invalidateQueries({ queryKey: ["time-clock-open", userId] });
       qc.invalidateQueries({ queryKey: ["time-clock-today", userId] });
-      qc.invalidateQueries({ queryKey: ["take-home"] });
+      // Pay-engine reads: the RPC-backed month figure and the weekly paycheck.
+      qc.invalidateQueries({ queryKey: ["takehome_volume_bonus"] });
+      qc.invalidateQueries({ queryKey: ["earnings"] });
       // Weekly pay projection is driven by clocked hours now — refresh it.
       qc.invalidateQueries({ queryKey: ["my_clocked_hours"] });
     },

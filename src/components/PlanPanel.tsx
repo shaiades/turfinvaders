@@ -1,57 +1,65 @@
-import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { formatCurrency } from "@/lib/utils";
-import { laTodayISO, remainingWorkdaysInWeek } from "@/lib/dates";
+import { laTodayISO, remainingWorkdaysInMonth, remainingWorkdaysInWeek } from "@/lib/dates";
 import { backSolveFunnel, commissionGap } from "@/lib/funnel";
-import { useFunnelRates, useProfileGoals } from "@/hooks/useFunnelRates";
-import { useMyEarnings } from "@/hooks/useMyEarnings";
+import { DEFAULT_AVG_COMMISSION, useCanvasserStats } from "@/hooks/useCanvasserStats";
+import {
+  clampCommission,
+  clampGoal,
+  useSaveGoals,
+  type GoalsPatch,
+} from "@/hooks/useCanvasserProfile";
+import { ArcadePanel } from "@/components/arcade";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { Zap, Target, DoorOpen, PhoneCall, Users, Trophy, Calendar, Sparkles } from "lucide-react";
+import {
+  Calendar,
+  DollarSign,
+  DoorOpen,
+  PhoneCall,
+  Sparkles,
+  Target,
+  Trophy,
+  Users,
+  Zap,
+} from "lucide-react";
 
 /**
- * Weekly Playbook — runs on the SHARED funnel engine (useFunnelRates), the
- * same rates the monthly Mission uses, so the two can never contradict.
+ * The Plan tab — the Playbook and the old "My Goals" Mission merged into one
+ * goal → funnel back-solve (2026-08-14). One goal editor writes all three
+ * profile columns; one solve runs on the horizon toggle (This Week ↔ This
+ * Month) through the SHARED funnel engine (useFunnelRates via
+ * useCanvasserStats), so the two horizons can never disagree on rates.
  * The goal is TOTAL take-home (owner, 2026-07-29): pay-engine earnings so
  * far + projected future base are subtracted first; the funnel covers only
  * the remaining commission gap. Progress lives in DOLLARS, not door counts.
  * Equation: [Knocks] × $[Value/Knock] = $[Gap]
  * Funnel:   Gap ÷ AvgCommission = Sales → ÷Close = Sits → ÷Show = Leads → ÷Contact = Knocks
- * Daily:    knocks ÷ remaining Mon–Sat workdays.
+ * Daily:    knocks ÷ remaining Mon–Sat workdays (week) or rest-of-month workdays.
  */
 
-const DEFAULT_AVG_COMMISSION = 200;
-const DEFAULT_WEEKLY_GOAL = 2000;
+type Horizon = "week" | "month";
 
 function fmtInt(n: number) {
   if (!isFinite(n)) return "—";
   return Math.ceil(n).toLocaleString();
 }
 
-export function WeeklyPlaybook({ userId }: { userId: string }) {
-  const qc = useQueryClient();
+export function PlanPanel({ userId }: { userId: string }) {
+  const stats = useCanvasserStats(userId);
+  const { funnelRates, earnings } = stats;
+  const [horizon, setHorizon] = useState<Horizon>("week");
 
-  const goalsQuery = useProfileGoals(userId);
-  const weeklyGoal = Number(goalsQuery.data?.weekly_income_goal ?? DEFAULT_WEEKLY_GOAL);
-  const avgCommission =
-    Number(goalsQuery.data?.avg_commission ?? DEFAULT_AVG_COMMISSION) || DEFAULT_AVG_COMMISSION;
-
-  // Rates come from the shared engine — identical to the monthly Mission's.
-  const funnelRates = useFunnelRates(userId);
-
-  // Pay-engine truth: what this week has already paid, all sources.
-  const earnings = useMyEarnings(userId);
+  const goal = horizon === "week" ? stats.weeklyGoal : stats.monthlyGoal;
 
   const math = useMemo(() => {
-    const daysLeft = remainingWorkdaysInWeek(laTodayISO());
+    const today = laTodayISO();
+    const daysLeft =
+      horizon === "week" ? remainingWorkdaysInWeek(today) : remainingWorkdaysInMonth(today);
+    const earned = horizon === "week" ? earnings.weekEarned : earnings.monthEarned;
     const futureBase = daysLeft * earnings.avgDailyBase;
-    const { gap, goalMet } = commissionGap({
-      goal: weeklyGoal,
-      earned: earnings.weekEarned,
-      futureBase,
-    });
+    const { gap, goalMet } = commissionGap({ goal, earned, futureBase });
     const empty = {
       closeRate: 0,
       sitRate: 0,
@@ -62,13 +70,14 @@ export function WeeklyPlaybook({ userId }: { userId: string }) {
       requiredKnocks: 0,
       valuePerKnock: 0,
       doorsPerDay: 0,
+      talksPerDay: 0,
     };
-    const meta = { daysLeft, earned: earnings.weekEarned, gap };
+    const meta = { daysLeft, earned, futureBase, gap };
     if (goalMet) return { ready: true as const, goalMet: true as const, ...empty, ...meta };
 
     const rates = funnelRates.rates;
     const solve = rates
-      ? backSolveFunnel({ incomeGoal: gap, avgCommissionPerSale: avgCommission, rates })
+      ? backSolveFunnel({ incomeGoal: gap, avgCommissionPerSale: stats.avgCommission, rates })
       : null;
     if (!rates || !solve)
       return { ready: false as const, goalMet: false as const, ...empty, ...meta };
@@ -78,6 +87,7 @@ export function WeeklyPlaybook({ userId }: { userId: string }) {
     // Each remaining knock is worth this much of the remaining gap.
     const valuePerKnock = requiredKnocks > 0 ? gap / requiredKnocks : 0;
     const doorsPerDay = daysLeft > 0 ? requiredKnocks / daysLeft : requiredKnocks;
+    const talksPerDay = doorsPerDay * stats.talkDoorRate;
 
     return {
       ready: true as const,
@@ -91,50 +101,53 @@ export function WeeklyPlaybook({ userId }: { userId: string }) {
       requiredKnocks,
       valuePerKnock,
       doorsPerDay,
+      talksPerDay,
       ...meta,
     };
-  }, [funnelRates.rates, weeklyGoal, avgCommission, earnings.weekEarned, earnings.avgDailyBase]);
+  }, [
+    horizon,
+    goal,
+    earnings.weekEarned,
+    earnings.monthEarned,
+    earnings.avgDailyBase,
+    funnelRates.rates,
+    stats.avgCommission,
+    stats.talkDoorRate,
+  ]);
 
-  const save = useMutation({
-    mutationFn: async (patch: { weekly_income_goal?: number; avg_commission?: number }) => {
-      const { error } = await supabase.from("profiles").update(patch).eq("id", userId);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      toast.success("Playbook updated · funnel re-engineered");
-      qc.invalidateQueries({ queryKey: ["profile_goals", userId] });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
+  const saveGoals = useSaveGoals(userId);
+  const onSave = (patch: GoalsPatch) =>
+    saveGoals.mutate(patch, {
+      onSuccess: () => toast.success("Playbook updated · funnel re-engineered"),
+      onError: (e: Error) => toast.error(e.message),
+    });
+
+  const horizonNoun = horizon === "week" ? "week" : "month";
 
   return (
-    <section className="relative overflow-hidden rounded-xl border border-[color-mix(in_oklab,var(--neon)_45%,var(--border))] bg-[linear-gradient(140deg,color-mix(in_oklab,var(--neon)_8%,var(--surface)),color-mix(in_oklab,var(--victory)_6%,var(--surface)))] p-6 md:p-7">
-      <div className="absolute inset-0 pointer-events-none scanlines opacity-25" />
-      <div
-        className="absolute -inset-1 pointer-events-none rounded-xl opacity-60"
-        style={{ boxShadow: "inset 0 0 80px -16px var(--neon)" }}
-      />
-
-      <div className="relative space-y-6">
-        <header className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2 text-[10px] font-display uppercase tracking-[0.25em] text-neon">
-            <Trophy className="w-3.5 h-3.5" /> Your Weekly Playbook
-          </div>
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-            {math.ready
-              ? funnelRates.source === "personal"
-                ? "Personal rates · your last 60 days"
-                : "Company avg · 60d baseline"
-              : "Awaiting conversion data"}
-          </div>
-        </header>
+    <ArcadePanel
+      title="Playbook"
+      action={
+        <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+          {math.ready
+            ? funnelRates.source === "personal"
+              ? `Personal rates · ${funnelRates.sampleDoors.toLocaleString()} doors / 60d`
+              : "Company avg · 60d baseline"
+            : "Awaiting conversion data"}
+        </span>
+      }
+    >
+      <div className="space-y-6">
+        <HorizonToggle value={horizon} onChange={setHorizon} />
 
         {math.ready && math.goalMet && (
           <div className="rounded-lg border-2 border-[color-mix(in_oklab,var(--victory)_55%,transparent)] bg-[color-mix(in_oklab,var(--victory)_10%,var(--surface))] p-6 text-center">
-            <div className="font-display text-2xl text-victory">🏆 Weekly goal met</div>
+            <div className="font-display text-2xl text-victory">
+              🏆 {horizon === "week" ? "Weekly" : "Monthly"} goal met
+            </div>
             <p className="mt-2 text-sm text-muted-foreground max-w-md mx-auto">
-              {formatCurrency(math.earned)} earned of {formatCurrency(weeklyGoal)} — everything else
-              this week is gravy.
+              {formatCurrency(math.earned)} earned of {formatCurrency(goal)} — everything else this{" "}
+              {horizonNoun} is gravy.
             </p>
           </div>
         )}
@@ -143,7 +156,7 @@ export function WeeklyPlaybook({ userId }: { userId: string }) {
         {math.ready && !math.goalMet && (
           <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr_auto_1fr] items-center gap-3 md:gap-4">
             <EquationTile
-              label="Knocks · This Week"
+              label={horizon === "week" ? "Knocks · This Week" : "Knocks · This Month"}
               value={fmtInt(math.requiredKnocks)}
               accent="var(--neon)"
               icon={<DoorOpen className="w-3.5 h-3.5" />}
@@ -157,9 +170,8 @@ export function WeeklyPlaybook({ userId }: { userId: string }) {
             />
             <Operator>=</Operator>
             <EquationTile
-              label="Income Goal"
-              value={formatCurrency(weeklyGoal)}
-              sub={`${formatCurrency(math.earned)} earned so far`}
+              label={horizon === "week" ? "Weekly Income Goal" : "Monthly Income Goal"}
+              value={formatCurrency(goal)}
               accent="var(--victory)"
               icon={<Target className="w-3.5 h-3.5" />}
               mega
@@ -167,12 +179,13 @@ export function WeeklyPlaybook({ userId }: { userId: string }) {
           </div>
         )}
 
-        {/* ===== Inputs ===== */}
-        <GoalInputs
-          weeklyGoal={weeklyGoal}
-          avgCommission={avgCommission}
-          saving={save.isPending}
-          onSave={(p) => save.mutate(p)}
+        {/* ===== Inputs — the ONE goal editor ===== */}
+        <GoalEditor
+          weeklyGoal={stats.weeklyGoal}
+          monthlyGoal={stats.monthlyGoal}
+          avgCommission={stats.avgCommission}
+          saving={saveGoals.isPending}
+          onSave={onSave}
         />
 
         {!math.ready && (
@@ -218,10 +231,17 @@ export function WeeklyPlaybook({ userId }: { userId: string }) {
               <FunnelTile
                 label="Sales"
                 value={fmtInt(math.requiredSales)}
-                sub={`${formatCurrency(avgCommission)} avg commission`}
+                sub={`${formatCurrency(stats.avgCommission)} avg commission`}
                 accent="var(--victory)"
                 icon={<Trophy className="w-4 h-4" />}
               />
+            </div>
+            <div className="mt-3 text-[10px] font-display uppercase tracking-widest text-muted-foreground border-t border-border pt-3 flex justify-between flex-wrap gap-2">
+              <span>
+                Earned so far · {formatCurrency(math.earned)} of {formatCurrency(goal)}
+              </span>
+              <span>Projected future base · {formatCurrency(math.futureBase)}</span>
+              <span>Gap to close · {formatCurrency(math.gap)}</span>
             </div>
           </div>
         )}
@@ -230,14 +250,37 @@ export function WeeklyPlaybook({ userId }: { userId: string }) {
         {math.ready && !math.goalMet && (
           <DailyAction
             doorsPerDay={math.doorsPerDay}
+            talksPerDay={math.talksPerDay}
+            valuePerKnock={math.valuePerKnock}
             requiredKnocks={math.requiredKnocks}
             daysLeft={math.daysLeft}
-            earned={math.earned}
-            goal={weeklyGoal}
+            goal={goal}
+            horizon={horizon}
           />
         )}
       </div>
-    </section>
+    </ArcadePanel>
+  );
+}
+
+function HorizonToggle({ value, onChange }: { value: Horizon; onChange: (h: Horizon) => void }) {
+  return (
+    <div className="inline-flex rounded-lg border border-border bg-surface p-1">
+      {(["week", "month"] as const).map((h) => (
+        <button
+          key={h}
+          type="button"
+          onClick={() => onChange(h)}
+          className={`px-4 py-1.5 rounded-md font-display text-[10px] uppercase tracking-widest transition ${
+            value === h
+              ? "bg-[color-mix(in_oklab,var(--neon)_15%,transparent)] text-neon shadow-[0_0_18px_-4px_var(--neon)]"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          {h === "week" ? "This Week" : "This Month"}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -300,50 +343,77 @@ function EquationTile({
   );
 }
 
-function GoalInputs({
+/** Draft that follows the server value only while the user hasn't diverged
+ *  from it. avgCommission especially resolves async (profile → company 60d
+ *  baseline) — an unconditional sync effect would wipe mid-typing drafts
+ *  whenever a background refetch lands. */
+function useSyncedDraft(server: number) {
+  const [draft, setDraft] = useState(String(server));
+  const prevServer = useRef(server);
+  useEffect(() => {
+    setDraft((d) => (d === String(prevServer.current) ? String(server) : d));
+    prevServer.current = server;
+  }, [server]);
+  return [draft, setDraft] as const;
+}
+
+function GoalEditor({
   weeklyGoal,
+  monthlyGoal,
   avgCommission,
   saving,
   onSave,
 }: {
   weeklyGoal: number;
+  monthlyGoal: number;
   avgCommission: number;
   saving: boolean;
-  onSave: (patch: { weekly_income_goal?: number; avg_commission?: number }) => void;
+  onSave: (patch: GoalsPatch) => void;
 }) {
-  const [goalDraft, setGoalDraft] = useState(String(weeklyGoal));
-  const [commDraft, setCommDraft] = useState(String(avgCommission));
-  useEffect(() => {
-    setGoalDraft(String(weeklyGoal));
-  }, [weeklyGoal]);
-  useEffect(() => {
-    setCommDraft(String(avgCommission));
-  }, [avgCommission]);
+  const [weeklyDraft, setWeeklyDraft] = useSyncedDraft(weeklyGoal);
+  const [monthlyDraft, setMonthlyDraft] = useSyncedDraft(monthlyGoal);
+  const [commDraft, setCommDraft] = useSyncedDraft(avgCommission);
 
   const submit = () => {
-    const g = Math.max(0, Math.round(Number(goalDraft) || 0));
-    const c = Math.max(1, Math.round(Number(commDraft) || DEFAULT_AVG_COMMISSION));
-    onSave({ weekly_income_goal: g, avg_commission: c });
+    onSave({
+      weekly_income_goal: clampGoal(weeklyDraft),
+      monthly_goal: clampGoal(monthlyDraft),
+      avg_commission: clampCommission(commDraft, DEFAULT_AVG_COMMISSION),
+    });
+  };
+  const onEnter = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") submit();
   };
 
   return (
-    <div className="grid sm:grid-cols-[1fr_1fr_auto] gap-3 items-end rounded-lg border border-border bg-background/40 p-4">
-      <Field label="Weekly Income Goal" prefix="$">
+    <div className="grid sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_auto] gap-3 items-end rounded-lg border border-border bg-background/40 p-4">
+      <Field label="Weekly Income Goal" prefix="$" hint="Week plan">
         <Input
           type="number"
           min={0}
           step={50}
           inputMode="numeric"
-          value={goalDraft}
-          onChange={(e) => setGoalDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") submit();
-          }}
+          value={weeklyDraft}
+          onChange={(e) => setWeeklyDraft(e.target.value)}
+          onKeyDown={onEnter}
           className="h-12 pl-7 font-display text-xl bg-background/60 text-neon border-[color-mix(in_oklab,var(--neon)_40%,var(--border))]"
           placeholder="2000"
         />
       </Field>
-      <Field label="Average Commission" prefix="$" hint="Defaults to $200">
+      <Field label="Monthly Income Goal" prefix="$" hint="Month plan">
+        <Input
+          type="number"
+          min={0}
+          step={100}
+          inputMode="numeric"
+          value={monthlyDraft}
+          onChange={(e) => setMonthlyDraft(e.target.value)}
+          onKeyDown={onEnter}
+          className="h-12 pl-7 font-display text-xl bg-background/60 text-accent border-[color-mix(in_oklab,var(--accent)_40%,var(--border))]"
+          placeholder="10000"
+        />
+      </Field>
+      <Field label="Average Commission" prefix="$" hint="Company avg when unset">
         <Input
           type="number"
           min={1}
@@ -351,9 +421,7 @@ function GoalInputs({
           inputMode="numeric"
           value={commDraft}
           onChange={(e) => setCommDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") submit();
-          }}
+          onKeyDown={onEnter}
           className="h-12 pl-7 font-display text-xl bg-background/60 text-victory border-[color-mix(in_oklab,var(--victory)_40%,var(--border))]"
           placeholder="200"
         />
@@ -443,40 +511,120 @@ function FunnelTile({
   );
 }
 
+/** The per-day marching orders — absorbs the old Daily Mission widget:
+ *  mission sentence + doors/talks/per-knock-value stat trio. */
 function DailyAction({
   doorsPerDay,
+  talksPerDay,
+  valuePerKnock,
   requiredKnocks,
   daysLeft,
-  earned,
   goal,
+  horizon,
 }: {
   doorsPerDay: number;
+  talksPerDay: number;
+  valuePerKnock: number;
   requiredKnocks: number;
   daysLeft: number;
-  earned: number;
   goal: number;
+  horizon: Horizon;
 }) {
+  const doors = Math.ceil(doorsPerDay);
+  const talks = Math.ceil(talksPerDay);
   return (
     <div
       className="relative overflow-hidden rounded-lg border border-[color-mix(in_oklab,var(--accent)_50%,var(--border))] bg-[color-mix(in_oklab,var(--accent)_8%,var(--surface))] p-5"
       style={{ boxShadow: "inset 0 0 30px -10px var(--accent)" }}
     >
-      <div className="flex items-center gap-2 text-[10px] font-display uppercase tracking-widest text-accent">
-        <Calendar className="w-3.5 h-3.5" /> Daily Action · Mon–Sat Plan
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2 text-[10px] font-display uppercase tracking-widest text-accent">
+          <Calendar className="w-3.5 h-3.5" /> Daily Action ·{" "}
+          {horizon === "week" ? "Mon–Sat Plan" : "Rest of Month"}
+        </div>
+        <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+          {daysLeft > 0
+            ? `${daysLeft} workday${daysLeft === 1 ? "" : "s"} left`
+            : horizon === "week"
+              ? "week complete"
+              : "month complete"}
+        </div>
       </div>
-      <div className="mt-2 flex items-end gap-3 flex-wrap">
-        <div
-          className="font-display text-4xl md:text-5xl text-accent leading-none"
-          style={{ textShadow: "0 0 18px color-mix(in oklab, var(--accent) 65%, transparent)" }}
-        >
-          {fmtInt(doorsPerDay)}
-        </div>
-        <div className="text-sm text-muted-foreground pb-1">
-          doors / day ·{" "}
-          {daysLeft > 0 ? `${daysLeft} workday${daysLeft === 1 ? "" : "s"} left` : "week complete"}{" "}
-          · {formatCurrency(earned)} earned of {formatCurrency(goal)} →{"  "}
-          <span className="text-foreground">{fmtInt(requiredKnocks)} knocks to close the gap</span>
-        </div>
+
+      <div className="mt-4 font-display text-lg md:text-xl text-foreground/90 leading-relaxed">
+        To hit <span className="text-victory text-mega-victory">{formatCurrency(goal)}</span>, your
+        mission today is to knock{" "}
+        <span className="text-neon" style={{ textShadow: "0 0 18px var(--neon)" }}>
+          {doors.toLocaleString()} doors
+        </span>{" "}
+        and talk to{" "}
+        <span className="text-accent" style={{ textShadow: "0 0 18px var(--accent)" }}>
+          {talks.toLocaleString()} people
+        </span>
+        .
+      </div>
+
+      <div className="mt-5 grid sm:grid-cols-3 gap-4">
+        <MissionStat
+          icon={<DoorOpen className="w-4 h-4" />}
+          label="Doors / Day"
+          value={doors.toLocaleString()}
+          accent="var(--neon)"
+        />
+        <MissionStat
+          icon={<Users className="w-4 h-4" />}
+          label="Talk To / Day"
+          value={talks.toLocaleString()}
+          accent="var(--accent)"
+        />
+        <MissionStat
+          icon={<DollarSign className="w-4 h-4" />}
+          label="Per-Knock Value"
+          value={formatCurrency(valuePerKnock)}
+          accent="var(--victory)"
+        />
+      </div>
+
+      <div className="mt-4 text-[10px] font-display uppercase tracking-widest text-muted-foreground border-t border-border/60 pt-3">
+        {fmtInt(requiredKnocks)} knocks to close the gap
+      </div>
+    </div>
+  );
+}
+
+function MissionStat({
+  icon,
+  label,
+  value,
+  accent,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  accent: string;
+}) {
+  return (
+    <div
+      className="rounded-md border p-4"
+      style={{
+        borderColor: `color-mix(in oklab, ${accent} 40%, var(--border))`,
+        background: `color-mix(in oklab, ${accent} 6%, var(--surface))`,
+      }}
+    >
+      <div
+        className="flex items-center gap-1.5 text-[10px] font-display uppercase tracking-widest"
+        style={{ color: accent }}
+      >
+        {icon} {label}
+      </div>
+      <div
+        className="mt-2 font-display text-3xl leading-none"
+        style={{
+          color: accent,
+          textShadow: `0 0 16px color-mix(in oklab, ${accent} 60%, transparent)`,
+        }}
+      >
+        {value}
       </div>
     </div>
   );

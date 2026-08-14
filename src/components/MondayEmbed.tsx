@@ -4,18 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { ExternalLink, Pencil, Check, X } from "lucide-react";
-
-const STORAGE_KEY = "knockout.monday_form_url";
-const DEFAULT_URL = "https://wkf.ms/3mOAl1A";
-
-function isSafeUrl(u: string) {
-  try {
-    const url = new URL(u);
-    return url.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
+import { MONDAY_URL_STORAGE_KEY, getMondayFormUrl, isSafeUrl } from "@/lib/monday-form";
 
 export function MondayEmbed({ canEdit }: { canEdit: boolean }) {
   const [url, setUrl] = useState<string>("");
@@ -23,14 +12,14 @@ export function MondayEmbed({ canEdit }: { canEdit: boolean }) {
   const [draft, setDraft] = useState("");
 
   useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY) ?? DEFAULT_URL;
+    const saved = getMondayFormUrl();
     setUrl(saved);
     setDraft(saved);
   }, [canEdit]);
 
   const save = () => {
     if (draft && !isSafeUrl(draft)) return;
-    localStorage.setItem(STORAGE_KEY, draft);
+    localStorage.setItem(MONDAY_URL_STORAGE_KEY, draft);
     setUrl(draft);
     setEditing(false);
   };

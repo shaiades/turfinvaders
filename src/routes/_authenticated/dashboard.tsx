@@ -40,7 +40,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { CanvasserPersonalDashboard } from "@/components/CanvasserPersonalDashboard";
+import { CanvasserMission, isCanvasserTab, type CanvasserTab } from "@/components/CanvasserMission";
 import {
   SuspendedBadge,
   useCanvasserStatuses,
@@ -50,18 +50,27 @@ import { useTodayLeads } from "@/hooks/useTodayLeads";
 import { useDateRange } from "@/hooks/useDateRange";
 import { RangeTabs } from "@/components/RangeTabs";
 import { formatCurrency } from "@/lib/utils";
-import { Zap, DoorOpen, Truck, FileSpreadsheet } from "lucide-react";
+import { Zap, Truck, FileSpreadsheet } from "lucide-react";
 
-type OwnerTab = "dispatch" | "timesheets" | "payroll" | "settings";
+// The one ?tab= param serves both audiences: leadership tabs on the left,
+// canvasser Mission tabs on the right. validateSearch is role-blind — each
+// role's view coerces foreign values into its own set (OwnerDashboard →
+// "dispatch", CanvasserMission → "log") so shadcn Tabs never gets a value
+// with no matching trigger.
+const OWNER_TABS = ["dispatch", "timesheets", "payroll", "settings"] as const;
+type OwnerTab = (typeof OWNER_TABS)[number];
+type DashboardTab = OwnerTab | CanvasserTab;
+
+const isOwnerTab = (t: unknown): t is OwnerTab => (OWNER_TABS as readonly unknown[]).includes(t);
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — Knockout" }] }),
-  validateSearch: (s: Record<string, unknown>): { tab: OwnerTab } => {
+  validateSearch: (s: Record<string, unknown>): { tab: DashboardTab } => {
     // Legacy bookmarks: the old Fleet tab AND the old Executive Dashboard tab
     // both merged into Fleet Dispatch (2026-08-04).
     const t = s.tab === "fleet" || s.tab === "executive" ? "dispatch" : s.tab;
     return {
-      tab: t === "payroll" || t === "timesheets" || t === "settings" ? t : "dispatch",
+      tab: isOwnerTab(t) || isCanvasserTab(t) ? t : "dispatch",
     };
   },
   component: Dashboard,
@@ -85,13 +94,10 @@ function Dashboard() {
   if (isAdminRole(role)) return <OwnerDashboard visibility={!!settings?.global_visibility} />;
   if (role === "captain")
     return <CaptainDashboard teamId={teamId} visibility={!!settings?.global_visibility} />;
-  return (
-    <CanvasserDashboard
-      displayName={displayName}
-      teamId={teamId}
-      userId={user?.id}
-      visibility={!!settings?.global_visibility}
-    />
+  return user?.id ? (
+    <CanvasserMission displayName={displayName} teamId={teamId} userId={user.id} />
+  ) : (
+    <div className="text-sm text-muted-foreground">Loading your dashboard…</div>
   );
 }
 
@@ -219,8 +225,17 @@ function VisibilityChip({ on }: { on: boolean }) {
 /* ============ OWNER ============ */
 function OwnerDashboard({ visibility }: { visibility: boolean }) {
   const [importOpen, setImportOpen] = useState(false);
-  const { tab } = Route.useSearch();
+  const { tab: rawTab } = Route.useSearch();
   const navigate = Route.useNavigate();
+  // Canvasser deep links (?tab=plan|log|stats) land on Fleet Dispatch here.
+  const tab: OwnerTab = isOwnerTab(rawTab) ? rawTab : "dispatch";
+  // ...and normalize the stranded value out of the URL — the Command/Fleet
+  // nav items match on search ({tab:"dispatch"}), so a lingering ?tab=plan
+  // (e.g. leadership following a /playbook link) would leave the top nav
+  // with nothing highlighted.
+  useEffect(() => {
+    if (!isOwnerTab(rawTab)) navigate({ search: { tab: "dispatch" }, replace: true });
+  }, [rawTab, navigate]);
 
   return (
     <div className="space-y-4 md:space-y-6">
@@ -577,67 +592,6 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
           <Zap className="w-4 h-4" /> Global Visibility is off. Only your van is visible. Ask the
           Owner to flip it on for cross-team views.
         </ArcadeCard>
-      )}
-    </div>
-  );
-}
-
-/* ============ CANVASSER ============ */
-function CanvasserDashboard({
-  displayName,
-  teamId,
-  userId,
-  visibility: _v,
-}: {
-  displayName: string | null;
-  teamId: string | null;
-  userId?: string;
-  visibility: boolean;
-}) {
-  const teamQuery = useQuery({
-    enabled: !!teamId,
-    queryKey: ["canvasser_team", teamId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("teams")
-        .select("id, name, color")
-        .eq("id", teamId!)
-        .maybeSingle();
-      if (error) throw error;
-      return data;
-    },
-  });
-  const myTeam = teamQuery.data ?? { id: "", name: "Unassigned", color: "#10b981" };
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-          Player
-        </div>
-        <h1 className="font-display text-2xl text-foreground mt-1">
-          {(displayName ?? "You").toUpperCase()}
-        </h1>
-        {myTeam.id && (
-          <div className="mt-2 flex items-center gap-2">
-            <TeamBadge name={myTeam.name} color={myTeam.color} />
-          </div>
-        )}
-      </div>
-
-      {/* Massive primary CTA — log a door */}
-      <Link
-        to="/my-territory"
-        className="block w-full rounded-xl bg-victory text-background font-display text-xl sm:text-2xl uppercase tracking-widest text-center py-8 sm:py-10 shadow-[0_0_36px_-6px_color-mix(in_oklab,var(--victory)_70%,transparent)] hover:opacity-95 active:scale-[0.99] transition"
-      >
-        <DoorOpen className="inline w-7 h-7 mr-3 -mt-1" />
-        Log a Door
-      </Link>
-
-      {userId ? (
-        <CanvasserPersonalDashboard userId={userId} />
-      ) : (
-        <div className="text-sm text-muted-foreground">Loading your dashboard…</div>
       )}
     </div>
   );

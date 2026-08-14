@@ -5,7 +5,6 @@ import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
 import {
   ArcadePanel,
-  TeamBadge,
   MobileCardList,
   MobileCard,
   MobileCardHeader,
@@ -17,17 +16,26 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { upsertManualWeekly } from "@/lib/fleet.functions";
-import { fetchWeeklyPaychecksChunked } from "@/lib/paychecks";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 import { useOfficeFilter } from "@/components/OfficeFilterContext";
-import { weekStartMonday, toISODate, addDays, laTodayISO, laWeekStartISO, weekStartOfISO, formatWeekRange } from "@/lib/dates";
-import { useWeekSelector } from "@/hooks/useWeekSelector";
-import { DEFAULT_OFFICE } from "@/lib/offices";
-
+import { laTodayISO, laWeekStartISO, weekStartOfISO } from "@/lib/dates";
 
 /* ============ Helpers ============ */
 /* All day/week/month buckets are America/Los_Angeles (midnight PT resets). */
@@ -35,16 +43,6 @@ import { DEFAULT_OFFICE } from "@/lib/offices";
 /* Numeric grid cells share one recipe per table so dim-at-zero coloring
  * (metricText) composes without blowing past the print width. */
 const dailyCell = "px-3 py-1.5 text-right font-mono";
-const weeklyCell = "px-4 py-2.5 text-right font-display";
-
-
-// One board card = one lead (Setter Report parity). demos_sits already
-// includes sold sits, so sales is not added again. OL is intentionally NOT
-// in the total — outside leads are their own column, and the Monday chart
-// totals don't include them either.
-function leadsSum(r: { demos_sits?: number | null; no_demo?: number | null; ctc?: number | null; future_leads?: number | null; unmarked?: number | null }) {
-  return (r.demos_sits ?? 0) + (r.no_demo ?? 0) + (r.ctc ?? 0) + (r.future_leads ?? 0) + (r.unmarked ?? 0);
-}
 
 /* ============ Main ============ */
 
@@ -55,58 +53,17 @@ function leadsSum(r: { demos_sits?: number | null; no_demo?: number | null; ctc?
 // inside Fleet Dispatch, under ITS OfficeFilterProvider — no provider or
 // office toggle of their own.
 export function ExecutiveSection() {
-  // Week selector drives Weekly Results. Defaults to last completed week
-  // (the historical behavior); Mon–Sat pay week, Pacific time.
-  const { weekStart, weekEnd, isCurrentWeek, shiftWeek, setWeekStart } = useWeekSelector({
-    initialOffsetWeeks: -1,
-  });
-  const isLastWeek = toISODate(weekStart) === toISODate(addDays(weekStartMonday(), -7));
-
+  // Weekly Results + its week selector removed 2026-08-14 (owner request):
+  // the Fleet Dispatch board above already shows the current week, and past
+  // weeks' pay lives in the Payroll tab.
   return (
     <div className="space-y-6">
-      {/* Week selector */}
-      <ArcadePanel
-        title="Results Week"
-        action={
-          <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-            {isCurrentWeek ? "Current Week · In Progress" : isLastWeek ? "Last Week" : "Past Week"}
-          </span>
-        }
-      >
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-2 min-w-0 flex-1">
-            <Button size="sm" variant="outline" onClick={() => shiftWeek(-1)} aria-label="Previous week">
-              ‹
-            </Button>
-            <div className="min-w-0 flex-1 text-center font-display text-xs sm:text-sm text-neon truncate">
-              {formatWeekRange(weekStart, weekEnd)}
-            </div>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => shiftWeek(1)}
-              disabled={isCurrentWeek}
-              aria-label="Next week"
-            >
-              ›
-            </Button>
-          </div>
-          {!isLastWeek && (
-            <Button size="sm" variant="ghost" onClick={() => setWeekStart(addDays(weekStartMonday(), -7))}>
-              Jump to last week
-            </Button>
-          )}
-        </div>
-      </ArcadePanel>
-
       <ManualEntryBar />
-      <WeeklyResults weekStart={weekStart} />
       <LiveDailyAction />
       <RawDataTable />
     </div>
   );
 }
-
 
 /* ============ Live Daily Action (Today) ============ */
 
@@ -119,7 +76,9 @@ function LiveDailyAction() {
       const [logsR, profilesR, vansR, rolesR] = await Promise.all([
         supabase
           .from("daily_logs")
-          .select("canvasser_id, team_id, leads_called_in, next_days, future_leads, no_demo, confirmed_leads")
+          .select(
+            "canvasser_id, team_id, leads_called_in, next_days, future_leads, no_demo, confirmed_leads",
+          )
           .eq("log_date", today),
         supabase.from("profiles").select("id, display_name, team_id, suspension_tracked"),
         supabase.from("teams").select("id, name, color"),
@@ -168,7 +127,7 @@ function LiveDailyAction() {
         .map((p) => ({
           id: p.id,
           name: p.display_name ?? "Unknown",
-          van: p.team_id ? vanById.get(p.team_id) ?? null : null,
+          van: p.team_id ? (vanById.get(p.team_id) ?? null) : null,
         }))
         .sort((a, b) => a.name.localeCompare(b.name));
 
@@ -191,16 +150,27 @@ function LiveDailyAction() {
     <section className="space-y-4">
       <div className="flex items-baseline justify-between gap-4">
         <div>
-          <h2 className="font-display text-sm uppercase tracking-widest text-foreground">Live Daily Action</h2>
+          <h2 className="font-display text-sm uppercase tracking-widest text-foreground">
+            Live Daily Action
+          </h2>
           <p className="text-xs text-muted-foreground mt-0.5">{today}</p>
         </div>
       </div>
 
       <div className="space-y-1 text-sm text-foreground">
-        <p>Leads Called In: <span className="text-neon font-medium">{t.called}</span></p>
-        <p>Confirmed Tomorrow: <span className="text-victory font-medium">{t.nextDay}</span></p>
-        <p>Confirmed Future: <span className="text-[var(--accent)] font-medium">{t.future}</span></p>
-        <p>Blowouts / Not Good: <span className="text-[var(--warning)] font-medium">{t.blowout}</span></p>
+        <p>
+          Leads Called In: <span className="text-neon font-medium">{t.called}</span>
+        </p>
+        <p>
+          Confirmed Tomorrow: <span className="text-victory font-medium">{t.nextDay}</span>
+        </p>
+        <p>
+          Confirmed Future: <span className="text-[var(--accent)] font-medium">{t.future}</span>
+        </p>
+        <p>
+          Blowouts / Not Good:{" "}
+          <span className="text-[var(--warning)] font-medium">{t.blowout}</span>
+        </p>
       </div>
 
       <div className="space-y-1">
@@ -210,19 +180,14 @@ function LiveDailyAction() {
         {donut.length === 0 ? (
           <p className="text-sm text-victory">Everyone is on the board — no donuts today.</p>
         ) : (
-          <p className="text-sm text-foreground">
-            {donut.map((d) => d.name).join(", ")}
-          </p>
+          <p className="text-sm text-foreground">{donut.map((d) => d.name).join(", ")}</p>
         )}
       </div>
     </section>
   );
 }
 
-
-
 /* ============ Manual Entry ============ */
-
 
 function ManualEntryBar() {
   const qc = useQueryClient();
@@ -237,7 +202,10 @@ function ManualEntryBar() {
   const peopleQ = useQuery({
     queryKey: ["all_canvassers_simple"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("profiles").select("id, display_name").order("display_name");
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, display_name")
+        .order("display_name");
       if (error) throw error;
       return data ?? [];
     },
@@ -245,21 +213,24 @@ function ManualEntryBar() {
 
   const save = useMutation({
     mutationFn: async () => {
-      await upsertFn({ data: {
-        canvasser_id: canvasserId,
-        week_start: weekStart,
-        total_leads: Number(leads),
-        total_sits: Number(sits),
-        total_sales: Number(sales),
-      }});
+      await upsertFn({
+        data: {
+          canvasser_id: canvasserId,
+          week_start: weekStart,
+          total_leads: Number(leads),
+          total_sits: Number(sits),
+          total_sales: Number(sales),
+        },
+      });
     },
     onSuccess: () => {
       toast.success("Saved · Paycheck engine updated");
-      qc.invalidateQueries({ queryKey: ["weekly_results"] });
       qc.invalidateQueries({ queryKey: ["fleet_status"] });
       qc.invalidateQueries({ queryKey: ["raw_daily_logs"] });
       setOpen(false);
-      setLeads("0"); setSits("0"); setSales("0");
+      setLeads("0");
+      setSits("0");
+      setSales("0");
     },
     onError: (e: Error) => toast.error(e.message ?? "Failed to save"),
   });
@@ -267,40 +238,81 @@ function ManualEntryBar() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="lg" className="w-full h-12 md:h-14 py-3 md:py-4 text-sm md:text-base font-display uppercase tracking-widest bg-victory text-background hover:bg-victory/90">
+        <Button
+          size="lg"
+          className="w-full h-12 md:h-14 py-3 md:py-4 text-sm md:text-base font-display uppercase tracking-widest bg-victory text-background hover:bg-victory/90"
+        >
           <Plus className="w-5 h-5 mr-2" /> Manual Data Entry
         </Button>
       </DialogTrigger>
       <DialogContent>
-        <DialogHeader><DialogTitle className="font-display uppercase tracking-widest text-neon">Manual Weekly Entry</DialogTitle></DialogHeader>
+        <DialogHeader>
+          <DialogTitle className="font-display uppercase tracking-widest text-neon">
+            Manual Weekly Entry
+          </DialogTitle>
+        </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-1.5">
             <Label>Canvasser</Label>
             <Select value={canvasserId} onValueChange={setCanvasserId}>
-              <SelectTrigger><SelectValue placeholder="Select canvasser…" /></SelectTrigger>
+              <SelectTrigger>
+                <SelectValue placeholder="Select canvasser…" />
+              </SelectTrigger>
               <SelectContent>
                 {(peopleQ.data ?? []).map((p) => (
-                  <SelectItem key={p.id} value={p.id}>{p.display_name ?? "Unknown"}</SelectItem>
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.display_name ?? "Unknown"}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
           <div className="space-y-1.5">
             <Label>Week (Monday)</Label>
-            <Input type="date" value={weekStart} onChange={(e) => setWeekStart(weekStartOfISO(e.target.value))} />
+            <Input
+              type="date"
+              value={weekStart}
+              onChange={(e) => setWeekStart(weekStartOfISO(e.target.value))}
+            />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="space-y-1.5"><Label>Total Leads</Label><Input type="number" min={0} value={leads} onChange={(e) => setLeads(e.target.value)} /></div>
-            <div className="space-y-1.5"><Label>Total Sits</Label><Input type="number" min={0} value={sits} onChange={(e) => setSits(e.target.value)} /></div>
-            <div className="space-y-1.5"><Label>Total Sales</Label><Input type="number" min={0} value={sales} onChange={(e) => setSales(e.target.value)} /></div>
+            <div className="space-y-1.5">
+              <Label>Total Leads</Label>
+              <Input
+                type="number"
+                min={0}
+                value={leads}
+                onChange={(e) => setLeads(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Total Sits</Label>
+              <Input type="number" min={0} value={sits} onChange={(e) => setSits(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Total Sales</Label>
+              <Input
+                type="number"
+                min={0}
+                value={sales}
+                onChange={(e) => setSales(e.target.value)}
+              />
+            </div>
           </div>
           <p className="text-xs text-muted-foreground">
-            Points = Sits + Sales. Pay auto-calculated by the Paycheck Engine and shown in <em>Last Week's Results</em>.
+            Points = Sits + Sales. Pay auto-calculated by the Paycheck Engine and shown in the{" "}
+            <em>Payroll</em> tab.
           </p>
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button onClick={() => save.mutate()} disabled={!canvasserId || save.isPending} className="bg-victory text-background hover:bg-victory/90">
+          <Button variant="ghost" onClick={() => setOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => save.mutate()}
+            disabled={!canvasserId || save.isPending}
+            className="bg-victory text-background hover:bg-victory/90"
+          >
             {save.isPending ? "Saving…" : "Save"}
           </Button>
         </DialogFooter>
@@ -316,19 +328,29 @@ function RawDataTable() {
     queryKey: ["raw_daily_logs"],
     queryFn: async () => {
       const [logsR, profilesR] = await Promise.all([
-        supabase.from("daily_logs")
-          .select("id, canvasser_id, team_id, log_date, demos_sits, sales, no_demo, one_legs, future_leads, unmarked, people_talked_to, leads_called_in, confirmed_leads")
+        supabase
+          .from("daily_logs")
+          .select(
+            "id, canvasser_id, team_id, log_date, demos_sits, sales, no_demo, one_legs, future_leads, unmarked, people_talked_to, leads_called_in, confirmed_leads",
+          )
           .order("log_date", { ascending: false })
           .limit(500),
         supabase.from("profiles").select("id, display_name, office_location"),
       ]);
       if (logsR.error) throw logsR.error;
       if (profilesR.error) throw profilesR.error;
-      const nameById = new Map((profilesR.data ?? []).map((p) => [p.id, p.display_name ?? "Unknown"]));
-      const locById = new Map((profilesR.data ?? []).map((p) => [p.id, (p as { office_location?: string | null }).office_location ?? null]));
+      const nameById = new Map(
+        (profilesR.data ?? []).map((p) => [p.id, p.display_name ?? "Unknown"]),
+      );
+      const locById = new Map(
+        (profilesR.data ?? []).map((p) => [
+          p.id,
+          (p as { office_location?: string | null }).office_location ?? null,
+        ]),
+      );
       return (logsR.data ?? []).map((r) => ({
         ...r,
-        name: nameById.get(r.canvasser_id) ?? r.canvasser_id.slice(0,8),
+        name: nameById.get(r.canvasser_id) ?? r.canvasser_id.slice(0, 8),
         office_location: locById.get(r.canvasser_id) ?? null,
       }));
     },
@@ -438,345 +460,3 @@ function RawDataTable() {
 }
 
 /* ============ 1. Live Fleet Status (Day/Week/Month) ============ */
-
-
-/* ============ 2. Last Week's Results ============ */
-
-type WeeklyRow = {
-  canvasserId: string;
-  name: string;
-  officeLocation: string | null;
-  vanName: string | null;
-  vanColor: string | null;
-  totalLeads: number;
-  totalSits: number;
-  totalResets: number;
-  totalBO: number;
-  totalCTC: number;
-  totalNonCore: number;
-  totalOL: number;
-  totalSales: number;
-  totalPoints: number;
-  totalPay: number;
-  payError: string | null;
-};
-
-function WeeklyResults({ weekStart }: { weekStart: Date }) {
-  const lastWeekStart = weekStart;
-  const lastWeekEnd = useMemo(() => addDays(lastWeekStart, 5), [lastWeekStart]);
-  const isCurrentWeek = toISODate(weekStart) === toISODate(weekStartMonday());
-
-  const q = useQuery({
-    queryKey: ["weekly_results", toISODate(lastWeekStart)],
-    queryFn: async (): Promise<WeeklyRow[]> => {
-      const [profilesR, vansR, logsR] = await Promise.all([
-        supabase.from("profiles").select("id, display_name, team_id, office_location"),
-        supabase.from("teams").select("id, name, color"),
-        supabase.from("daily_logs")
-          .select("canvasser_id, office_location, demos_sits, sales, no_demo, ctc, non_core, one_legs, future_leads, unmarked")
-          .gte("log_date", toISODate(lastWeekStart))
-          .lte("log_date", toISODate(lastWeekEnd)),
-      ]);
-      if (profilesR.error) throw profilesR.error;
-      if (vansR.error) throw vansR.error;
-      if (logsR.error) throw logsR.error;
-
-      const vanById = new Map((vansR.data ?? []).map((v) => [v.id, v]));
-      // One aggregate per (canvasser, WORK office) — the office where the
-      // leads actually ran, not the rep's home office, so a rep who worked
-      // both blocks appears under each office filter with that office's
-      // numbers (mirrors the per-office Setter Reports).
-      const agg = new Map<string, { leads: number; sits: number; resets: number; bo: number; ctc: number; nonCore: number; ol: number; sales: number }>();
-      for (const l of logsR.data ?? []) {
-        const key = `${l.canvasser_id}|${(l as { office_location?: string | null }).office_location ?? DEFAULT_OFFICE}`;
-        const cur = agg.get(key) ?? { leads: 0, sits: 0, resets: 0, bo: 0, ctc: 0, nonCore: 0, ol: 0, sales: 0 };
-        cur.leads += leadsSum(l);
-        // demos_sits in DB includes sale rows. Sits = demos_sits - sales.
-        const sitOnly = Math.max(0, (l.demos_sits ?? 0) - (l.sales ?? 0));
-        cur.sits += sitOnly;
-        // Reset outcomes are persisted in future_leads.
-        cur.resets += l.future_leads ?? 0;
-        cur.bo += l.no_demo ?? 0;
-        cur.ctc += l.ctc ?? 0;
-        cur.nonCore += l.non_core ?? 0;
-        // OL outcomes are persisted in one_legs (webhook DAILY_LOG_VECS).
-        cur.ol += l.one_legs ?? 0;
-        cur.sales += l.sales ?? 0;
-        agg.set(key, cur);
-      }
-
-      const activeIds = Array.from(new Set(Array.from(agg.keys()).map((k) => k.split("|")[0])));
-      // Batched calls to the pay engine — same code path as the Payroll tab;
-      // a failed chunk is absorbed as per-id errors instead of failing whole.
-      const payById = new Map<string, { pay: number; error: string | null }>();
-      const paychecks = await fetchWeeklyPaychecksChunked(toISODate(lastWeekStart), activeIds, {
-        onChunkError: "absorb",
-      });
-      for (const r of paychecks) {
-        payById.set(r.canvasser_id, {
-          pay: Number(r.paycheck?.total_pay ?? 0),
-          error: r.error,
-        });
-      }
-
-      const rows: WeeklyRow[] = [];
-      for (const [key, a] of agg) {
-        const [id, workOffice] = key.split("|");
-        const p = profilesR.data?.find((x) => x.id === id);
-        const v = p?.team_id ? vanById.get(p.team_id) : null;
-        // Strict formula: Points = (Sits * 1) + (Sales * 2)
-        const totalPoints = a.sits * 1 + a.sales * 2;
-        rows.push({
-          canvasserId: id,
-          name: p?.display_name ?? "Unknown",
-          officeLocation: workOffice,
-          vanName: v?.name ?? null,
-          vanColor: v?.color ?? null,
-          totalLeads: a.leads,
-          totalSits: a.sits,
-          totalResets: a.resets,
-          totalBO: a.bo,
-          totalCTC: a.ctc,
-          totalNonCore: a.nonCore,
-          totalOL: a.ol,
-          totalSales: a.sales,
-          totalPoints,
-          totalPay: payById.get(id)?.pay ?? 0,
-          payError: payById.get(id)?.error ?? null,
-        });
-      }
-      rows.sort((a, b) => b.totalPay - a.totalPay);
-      return rows;
-    },
-    refetchOnWindowFocus: true,
-    staleTime: 0,
-  });
-
-  const { matches, office } = useOfficeFilter();
-  // Rows come per (canvasser, work office). An office filter shows that
-  // office's slice of each rep's week; "All" merges the slices back into one
-  // row per rep (pay is per person, so it's counted once when merging).
-  const rows = useMemo(() => {
-    const visible = (q.data ?? []).filter((r) => matches(r.officeLocation));
-    if (office !== "All") return visible;
-    const merged = new Map<string, WeeklyRow>();
-    for (const r of visible) {
-      const m = merged.get(r.canvasserId);
-      if (!m) {
-        merged.set(r.canvasserId, { ...r });
-      } else {
-        m.totalLeads += r.totalLeads;
-        m.totalSits += r.totalSits;
-        m.totalResets += r.totalResets;
-        m.totalBO += r.totalBO;
-        m.totalCTC += r.totalCTC;
-        m.totalNonCore += r.totalNonCore;
-        m.totalOL += r.totalOL;
-        m.totalSales += r.totalSales;
-        m.totalPoints += r.totalPoints;
-      }
-    }
-    return Array.from(merged.values()).sort((a, b) => b.totalPay - a.totalPay);
-  }, [q.data, matches, office]);
-
-  const grand = rows.reduce(
-    (acc, r) => ({
-      leads: acc.leads + r.totalLeads,
-      sits: acc.sits + r.totalSits,
-      resets: acc.resets + r.totalResets,
-      bo: acc.bo + r.totalBO,
-      ctc: acc.ctc + r.totalCTC,
-      nonCore: acc.nonCore + r.totalNonCore,
-      ol: acc.ol + r.totalOL,
-      sales: acc.sales + r.totalSales,
-      points: acc.points + r.totalPoints,
-      pay: acc.pay + r.totalPay,
-    }),
-    { leads: 0, sits: 0, resets: 0, bo: 0, ctc: 0, nonCore: 0, ol: 0, sales: 0, points: 0, pay: 0 }
-  );
-
-  return (
-    <ArcadePanel
-      title={isCurrentWeek ? "This Week's Results · In Progress" : "Weekly Results"}
-      action={
-        <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-          {office === "All" ? "" : `${office} · `}
-          {toISODate(lastWeekStart)} → {toISODate(lastWeekEnd)}
-        </span>
-      }
-    >
-      {q.isLoading ? (
-        <div className="text-sm text-muted-foreground">Loading…</div>
-      ) : rows.length === 0 ? (
-        <div className="text-sm text-muted-foreground">
-          {office === "All"
-            ? "No activity recorded this week."
-            : `No ${office} activity recorded this week.`}
-        </div>
-      ) : (
-        <>
-          <MobileCardList>
-            {rows.map((r) => (
-              <MobileCard key={r.canvasserId}>
-                <MobileCardHeader
-                  left={r.name}
-                  right={
-                    r.payError ? (
-                      <span className="text-destructive text-xs" title={r.payError}>
-                        —
-                      </span>
-                    ) : (
-                      <span className="text-victory">${r.totalPay.toFixed(2)}</span>
-                    )
-                  }
-                />
-                {r.vanName && (
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <TeamBadge name={r.vanName} color={r.vanColor ?? "#888"} />
-                  </div>
-                )}
-                <MobileStatGrid cols={3}>
-                  <MobileStat label="Leads" value={r.totalLeads} lit="text-foreground" />
-                  <MobileStat label="Sits" value={r.totalSits} lit="text-foreground" />
-                  <MobileStat label="Sales" value={r.totalSales} lit="text-victory" />
-                  <MobileStat label="Resets" value={r.totalResets} lit="text-[var(--accent)]" />
-                  <MobileStat label="BO" value={r.totalBO} lit="text-destructive" />
-                  <MobileStat label="CTC" value={r.totalCTC} lit="text-muted-foreground" />
-                  <MobileStat label="Non-Core" value={r.totalNonCore} lit="text-warning" />
-                  <MobileStat label="OL" value={r.totalOL} lit="text-warning" />
-                  <MobileStat label="Points" value={r.totalPoints} lit="text-neon" />
-                </MobileStatGrid>
-              </MobileCard>
-            ))}
-            <MobileCard className="border-neon/40">
-              <MobileCardHeader
-                left={
-                  <span className="font-display text-xs uppercase tracking-widest text-neon">
-                    Grand Total
-                  </span>
-                }
-                right={<span className="text-victory">${grand.pay.toFixed(2)}</span>}
-              />
-              <MobileStatGrid cols={3}>
-                <MobileStat label="Leads" value={grand.leads} />
-                <MobileStat label="Sits" value={grand.sits} />
-                <MobileStat label="Sales" value={grand.sales} className="text-victory" />
-                <MobileStat label="Resets" value={grand.resets} className="text-[var(--accent)]" />
-                <MobileStat label="BO" value={grand.bo} className="text-destructive" />
-                <MobileStat label="CTC" value={grand.ctc} className="text-muted-foreground" />
-                <MobileStat label="Non-Core" value={grand.nonCore} className="text-warning" />
-                <MobileStat label="OL" value={grand.ol} className="text-warning" />
-                <MobileStat label="Points" value={grand.points} className="text-neon" />
-              </MobileStatGrid>
-            </MobileCard>
-          </MobileCardList>
-          <div className="hidden md:block overflow-x-auto -mx-4 sm:mx-0">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-                  <th className="px-4 py-2">Canvasser</th>
-                  <th className="px-4 py-2">Van</th>
-                  <th className="px-4 py-2 text-right">Total Leads</th>
-                  <th className="px-4 py-2 text-right">Sits</th>
-                  <th className="px-4 py-2 text-right">Resets</th>
-                  <th className="px-4 py-2 text-right">BO</th>
-                  <th className="px-4 py-2 text-right">CTC</th>
-                  <th className="px-4 py-2 text-right">Non-Core</th>
-                  <th className="px-4 py-2 text-right">OL</th>
-                  <th className="px-4 py-2 text-right">Sales</th>
-                  <th className="px-4 py-2 text-right">Points</th>
-                  <th className="px-4 py-2 text-right">Pay</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr
-                    key={r.canvasserId}
-                    className="border-t border-border transition-colors duration-200 hover:bg-surface-elevated"
-                  >
-                    <td className="px-4 py-2.5 font-medium">{r.name}</td>
-                    <td className="px-4 py-2.5">
-                      {r.vanName ? (
-                        <TeamBadge name={r.vanName} color={r.vanColor ?? "#888"} />
-                      ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      )}
-                    </td>
-                    <td className={cn(weeklyCell, metricText(r.totalLeads, "text-foreground"))}>
-                      {r.totalLeads}
-                    </td>
-                    <td className={cn(weeklyCell, metricText(r.totalSits, "text-foreground"))}>
-                      {r.totalSits}
-                    </td>
-                    <td
-                      className={cn(weeklyCell, metricText(r.totalResets, "text-[var(--accent)]"))}
-                    >
-                      {r.totalResets}
-                    </td>
-                    <td className={cn(weeklyCell, metricText(r.totalBO, "text-destructive"))}>
-                      {r.totalBO}
-                    </td>
-                    <td className={cn(weeklyCell, metricText(r.totalCTC, "text-muted-foreground"))}>
-                      {r.totalCTC}
-                    </td>
-                    <td className={cn(weeklyCell, metricText(r.totalNonCore, "text-warning"))}>
-                      {r.totalNonCore}
-                    </td>
-                    <td className={cn(weeklyCell, metricText(r.totalOL, "text-warning"))}>
-                      {r.totalOL}
-                    </td>
-                    <td className={cn(weeklyCell, metricText(r.totalSales, "text-victory"))}>
-                      {r.totalSales}
-                    </td>
-                    <td className={cn(weeklyCell, metricText(r.totalPoints, "text-neon"))}>
-                      {r.totalPoints}
-                    </td>
-                    <td className="px-4 py-2.5 text-right font-display text-victory">
-                      {r.payError ? (
-                        <span className="text-destructive text-xs" title={r.payError}>
-                          —
-                        </span>
-                      ) : (
-                        <>${r.totalPay.toFixed(2)}</>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-                <tr className="border-t-2 border-neon/60 bg-surface">
-                  <td
-                    className="px-4 py-2.5 font-display text-xs uppercase tracking-widest text-neon"
-                    colSpan={2}
-                  >
-                    Grand Total
-                  </td>
-                  <td className="px-4 py-2.5 text-right font-display">{grand.leads}</td>
-                  <td className="px-4 py-2.5 text-right font-display">{grand.sits}</td>
-                  <td className="px-4 py-2.5 text-right font-display text-[var(--accent)]">
-                    {grand.resets}
-                  </td>
-                  <td className="px-4 py-2.5 text-right font-display text-destructive">
-                    {grand.bo}
-                  </td>
-                  <td className="px-4 py-2.5 text-right font-display text-muted-foreground">
-                    {grand.ctc}
-                  </td>
-                  <td className="px-4 py-2.5 text-right font-display text-warning">
-                    {grand.nonCore}
-                  </td>
-                  <td className="px-4 py-2.5 text-right font-display text-warning">{grand.ol}</td>
-                  <td className="px-4 py-2.5 text-right font-display text-victory">
-                    {grand.sales}
-                  </td>
-                  <td className="px-4 py-2.5 text-right font-display text-neon">{grand.points}</td>
-                  <td className="px-4 py-2.5 text-right font-display text-victory">
-                    ${grand.pay.toFixed(2)}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-    </ArcadePanel>
-  );
-}
