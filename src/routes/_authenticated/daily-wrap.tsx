@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { ArcadePanel } from "@/components/arcade";
+import { ArcadeCard, ArcadePanel } from "@/components/arcade";
 import { AlertTriangle, Trophy } from "lucide-react";
 import { addDaysISO, reportDates } from "@/lib/dates";
 import { isRecentlyActive, lastActiveMap, SUSPENSION_RECENCY_DAYS } from "@/lib/suspension";
@@ -272,39 +272,47 @@ function WinnersPanel({ winners }: { winners: Row[] }) {
   }, [winners.length]);
 
   return (
-    <section className="relative arcade-card overflow-hidden">
-      <div ref={hostRef} aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden" />
-      <header className="flex items-center justify-between border-b border-border px-5 py-3">
-        <h2 className="font-display text-xs text-neon uppercase tracking-widest">Today's Winners 🎉</h2>
-        <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-          {winners.length} on the board
-        </span>
-      </header>
-      <div className="p-5 relative">
-        {winners.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No leads yet today.</p>
-        ) : (
-          <ol className="divide-y divide-border">
-            {winners.map((r, i) => (
-              <li key={r.id} className="flex items-center justify-between py-2.5">
-                <div className="flex items-center gap-3 min-w-0">
-                  <span
-                    className={`font-display text-sm w-8 ${
-                      i < 3 ? "text-victory" : "text-muted-foreground"
-                    }`}
-                  >
-                    {String(i + 1).padStart(2, "0")}
+    <ArcadeCard asChild className="relative p-0 overflow-hidden">
+      <section>
+        <div
+          ref={hostRef}
+          aria-hidden
+          className="pointer-events-none absolute inset-0 overflow-hidden"
+        />
+        <header className="flex items-center justify-between border-b border-border px-5 py-3">
+          <h2 className="font-display text-xs text-neon uppercase tracking-widest">
+            Today's Winners 🎉
+          </h2>
+          <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            {winners.length} on the board
+          </span>
+        </header>
+        <div className="p-5 relative">
+          {winners.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No leads yet today.</p>
+          ) : (
+            <ol className="divide-y divide-border">
+              {winners.map((r, i) => (
+                <li key={r.id} className="flex items-center justify-between py-2.5">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span
+                      className={`font-display text-sm w-8 ${
+                        i < 3 ? "text-victory" : "text-muted-foreground"
+                      }`}
+                    >
+                      {String(i + 1).padStart(2, "0")}
+                    </span>
+                    <span className="font-medium truncate">{r.name}</span>
+                  </div>
+                  <span className="font-display text-sm text-victory">
+                    {r.todayLeads} lead{r.todayLeads === 1 ? "" : "s"}
                   </span>
-                  <span className="font-medium truncate">{r.name}</span>
-                </div>
-                <span className="font-display text-sm text-victory">
-                  {r.todayLeads} lead{r.todayLeads === 1 ? "" : "s"}
-                </span>
-              </li>
-            ))}
-          </ol>
-        )}
-      </div>
-    </section>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      </section>
+    </ArcadeCard>
   );
 }

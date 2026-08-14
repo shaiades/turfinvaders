@@ -1,4 +1,5 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
+import { ArcadeCard } from "@/components/arcade";
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { destinationByRole } from "@/lib/redirect-by-role";
@@ -90,7 +91,7 @@ function AuthPage() {
             className="w-full h-auto object-contain drop-shadow-[0_0_28px_color-mix(in_oklab,var(--neon)_65%,transparent)]"
           />
         </Link>
-        <div className="arcade-card arcade-card-glow p-8">
+        <ArcadeCard glow className="p-8">
           <h1 className="font-display text-base text-neon text-center mb-1">
             {mode === "signin" ? "INSERT CREDENTIALS" : "NEW PLAYER"}
           </h1>
@@ -154,7 +155,7 @@ function AuthPage() {
           >
             {mode === "signin" ? "Need an account? Sign up" : "Already a player? Sign in"}
           </button>
-        </div>
+        </ArcadeCard>
       </div>
     </div>
   );

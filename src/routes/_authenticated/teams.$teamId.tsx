@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { StatCard, ArcadePanel, TeamBadge } from "@/components/arcade";
+import { StatCard, ArcadePanel, TeamBadge, ArcadeCard } from "@/components/arcade";
 import { MANAGER_ROLES, requireRoleBeforeLoad } from "@/lib/roles";
 import { useDateRange } from "@/hooks/useDateRange";
 import { RangeTabs } from "@/components/RangeTabs";
@@ -68,8 +68,12 @@ function TeamDetail() {
   if (data === null) {
     return (
       <div className="space-y-4">
-        <Link to="/teams" className="text-xs text-muted-foreground hover:text-neon">← All Vans</Link>
-        <div className="arcade-card p-6 text-sm text-muted-foreground">This Van no longer exists. It may have been deleted.</div>
+        <Link to="/teams" className="text-xs text-muted-foreground hover:text-neon">
+          ← All Vans
+        </Link>
+        <ArcadeCard className="p-6 text-sm text-muted-foreground">
+          This Van no longer exists. It may have been deleted.
+        </ArcadeCard>
       </div>
     );
   }

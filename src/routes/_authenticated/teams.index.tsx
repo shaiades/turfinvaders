@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { ArcadePanel, TeamBadge } from "@/components/arcade";
+import { ArcadePanel, TeamBadge, ArcadeCard } from "@/components/arcade";
 import { MANAGER_ROLES, requireRoleBeforeLoad } from "@/lib/roles";
 import { useDateRange } from "@/hooks/useDateRange";
 import { RangeTabs } from "@/components/RangeTabs";
@@ -74,19 +74,44 @@ function TeamsIndex() {
         {teams === undefined ? (
           <div className="text-sm text-muted-foreground">Loading…</div>
         ) : teams.length === 0 ? (
-          <div className="text-sm text-muted-foreground">No Vans yet. Create one in the Fleet Manager.</div>
+          <div className="text-sm text-muted-foreground">
+            No Vans yet. Create one in the Fleet Manager.
+          </div>
         ) : (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {teams.map((t) => (
-              <Link key={t.id} to="/teams/$teamId" params={{ teamId: t.id }} className="arcade-card p-5 hover:arcade-card-glow active:arcade-card-glow">
-                <TeamBadge name={t.name} color={t.color} />
-                <div className="mt-4 text-xs text-muted-foreground">Captain · <span className="text-foreground">{t.captain}</span></div>
-                <div className="mt-4 grid grid-cols-3 gap-2">
-                  <div><div className="text-[10px] font-display uppercase text-muted-foreground">Leads</div><div className="text-sm">{t.leads.toLocaleString()}</div></div>
-                  <div><div className="text-[10px] font-display uppercase text-muted-foreground">Sales</div><div className="text-sm">{t.sales}</div></div>
-                  <div><div className="text-[10px] font-display uppercase text-muted-foreground">Crew</div><div className="text-sm text-victory">{t.members}</div></div>
-                </div>
-              </Link>
+              <ArcadeCard
+                key={t.id}
+                asChild
+                className="p-5 hover:arcade-card-glow active:arcade-card-glow"
+              >
+                <Link to="/teams/$teamId" params={{ teamId: t.id }}>
+                  <TeamBadge name={t.name} color={t.color} />
+                  <div className="mt-4 text-xs text-muted-foreground">
+                    Captain · <span className="text-foreground">{t.captain}</span>
+                  </div>
+                  <div className="mt-4 grid grid-cols-3 gap-2">
+                    <div>
+                      <div className="text-[10px] font-display uppercase text-muted-foreground">
+                        Leads
+                      </div>
+                      <div className="text-sm">{t.leads.toLocaleString()}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] font-display uppercase text-muted-foreground">
+                        Sales
+                      </div>
+                      <div className="text-sm">{t.sales}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] font-display uppercase text-muted-foreground">
+                        Crew
+                      </div>
+                      <div className="text-sm text-victory">{t.members}</div>
+                    </div>
+                  </div>
+                </Link>
+              </ArcadeCard>
             ))}
           </div>
         )}

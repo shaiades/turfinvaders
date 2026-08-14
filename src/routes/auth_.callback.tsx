@@ -1,4 +1,5 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
+import { ArcadeCard } from "@/components/arcade";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { destinationByRole } from "@/lib/redirect-by-role";
@@ -51,7 +52,7 @@ function AuthCallbackPage() {
 
   return (
     <div className="min-h-screen grid place-items-center px-4">
-      <div className="arcade-card p-8 text-center max-w-sm w-full">
+      <ArcadeCard className="p-8 text-center max-w-sm w-full">
         {error ? (
           <>
             <h1 className="font-display text-sm text-destructive mb-3">SIGN-IN FAILED</h1>
@@ -69,7 +70,7 @@ function AuthCallbackPage() {
             <p className="text-xs text-muted-foreground">Loading your run.</p>
           </>
         )}
-      </div>
+      </ArcadeCard>
     </div>
   );
 }

@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { formatCurrency } from "@/lib/utils";
-import { ArcadePanel } from "@/components/arcade";
+import { ArcadePanel, ArcadeCard } from "@/components/arcade";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { LiveLeadCounter } from "@/components/LiveLeadCounter";
 import { WeeklyPlaybook } from "@/components/WeeklyPlaybook";
@@ -1359,7 +1359,7 @@ function SCCERankBanner({ userId }: { userId: string }) {
           </span>
         </div>
       )}
-      <div className="arcade-card p-4 flex flex-wrap items-center justify-between gap-4">
+      <ArcadeCard className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3 min-w-0">
           <RankPill rank={rank} size="md" />
           <div className="min-w-0">
@@ -1386,7 +1386,7 @@ function SCCERankBanner({ userId }: { userId: string }) {
             recruits · <span className="text-foreground">{data?.recruits_count ?? 0}</span>
           </span>
         </div>
-      </div>
+      </ArcadeCard>
     </>
   );
 }

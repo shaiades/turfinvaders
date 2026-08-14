@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
-import { ArcadePanel, TeamBadge } from "@/components/arcade";
+import { ArcadePanel, TeamBadge, ArcadeCard } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -258,10 +258,10 @@ export function FleetDispatchManage({
   return (
     <div className="space-y-6">
       {!canManage && (
-        <div className="arcade-card p-3 flex items-center gap-2 text-xs text-muted-foreground border border-border">
+        <ArcadeCard className="p-3 flex items-center gap-2 text-xs text-muted-foreground border border-border">
           <Lock className="w-3.5 h-3.5" /> Read-only view. Van assignments and roster edits are
           limited to Captains, Admins, and Owners.
-        </div>
+        </ArcadeCard>
       )}
 
       {/* Create New Van — owners only (teams RLS is owner-write; showing

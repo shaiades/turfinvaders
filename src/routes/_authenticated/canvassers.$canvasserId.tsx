@@ -1,5 +1,5 @@
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
-import { StatCard, ArcadePanel, TeamBadge } from "@/components/arcade";
+import { StatCard, ArcadePanel, TeamBadge, ArcadeCard } from "@/components/arcade";
 import { useAuth } from "@/hooks/useAuth";
 import { isAdminRole, isManagerRole, MANAGER_ROLES, requireRoleBeforeLoad } from "@/lib/roles";
 import { useQuery } from "@tanstack/react-query";
@@ -171,13 +171,13 @@ function CanvasserProfile() {
       </div>
 
       {!canViewFull ? (
-        <div className="arcade-card p-8 text-center">
+        <ArcadeCard className="p-8 text-center">
           <Lock className="w-6 h-6 mx-auto text-muted-foreground" />
           <p className="mt-3 text-sm text-muted-foreground">
             This player's profile is private. Ask the Owner to enable Global Visibility to see peer
             stats.
           </p>
-        </div>
+        </ArcadeCard>
       ) : (
         <>
           <RangeTabs controls={rangeControls} />
