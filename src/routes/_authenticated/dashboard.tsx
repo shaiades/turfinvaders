@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { isAdminRole } from "@/lib/roles";
 import { useQuery } from "@tanstack/react-query";
@@ -30,7 +31,14 @@ import { AddTeamMemberDialog } from "@/components/AddTeamMemberDialog";
 import { RosterPanel } from "@/components/RosterPanel";
 import { NewSignupsPanel } from "@/components/NewSignupsPanel";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { CanvasserPersonalDashboard } from "@/components/CanvasserPersonalDashboard";
 import {
@@ -59,7 +67,6 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
   component: Dashboard,
 });
 
-
 function Dashboard() {
   const { role, loading, teamId, displayName, user } = useAuth();
 
@@ -76,28 +83,73 @@ function Dashboard() {
 
   // Owners and Office Staff (Admins) both get the full Command view.
   if (isAdminRole(role)) return <OwnerDashboard visibility={!!settings?.global_visibility} />;
-  if (role === "captain") return <CaptainDashboard teamId={teamId} visibility={!!settings?.global_visibility} />;
-  return <CanvasserDashboard displayName={displayName} teamId={teamId} userId={user?.id} visibility={!!settings?.global_visibility} />;
+  if (role === "captain")
+    return <CaptainDashboard teamId={teamId} visibility={!!settings?.global_visibility} />;
+  return (
+    <CanvasserDashboard
+      displayName={displayName}
+      teamId={teamId}
+      userId={user?.id}
+      visibility={!!settings?.global_visibility}
+    />
+  );
 }
 
-function Loading() { return <div className="text-muted-foreground text-sm">Loading dashboard…</div>; }
+function Loading() {
+  return <div className="text-muted-foreground text-sm">Loading dashboard…</div>;
+}
 
+/** Day-1 waiting room. Roles are Owner/Captain-granted (security decision
+ *  2026-08-12 — signup must NOT self-assign), so instead of a dead card this
+ *  screen watches user_roles and unlocks itself the moment the grant lands:
+ *  refreshSession() retriggers useAuth's hydrate via onAuthStateChange, with
+ *  a hard reload as the fallback. */
 function NoRole() {
+  const { user } = useAuth();
+  const { data: hasRole } = useQuery({
+    enabled: !!user,
+    queryKey: ["waiting_room_role", user?.id],
+    refetchInterval: 8_000,
+    queryFn: async () => {
+      const { data } = await supabase.from("user_roles").select("role").eq("user_id", user!.id);
+      return (data ?? []).length > 0;
+    },
+  });
+
+  useEffect(() => {
+    if (!hasRole) return;
+    toast.success("You're on the roster — loading your run!");
+    supabase.auth.refreshSession();
+    const fallback = setTimeout(() => window.location.reload(), 3000);
+    return () => clearTimeout(fallback);
+  }, [hasRole]);
+
   return (
-    <ArcadeCard className="p-8 text-center">
-      <h1 className="font-display text-base text-neon">AWAITING ROSTER ASSIGNMENT</h1>
+    <ArcadeCard glow className="p-8 text-center max-w-md mx-auto">
+      <h1 className="font-display text-base text-neon">PLAYER CREATED</h1>
       <p className="mt-3 text-sm text-muted-foreground">
-        Your account is created. An Owner needs to assign you a role and team before you can play.
+        Your account is live — an Owner or Captain now assigns your role and van. This screen
+        unlocks itself the moment that happens, usually within the hour. Nothing to refresh, no need
+        to sign out.
       </p>
+      <p className="mt-3 text-xs text-muted-foreground">
+        Starting a shift right now? Ping your Captain to activate you on the spot.
+      </p>
+      <div className="mt-5 inline-flex items-center gap-2 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+        <span className="w-2 h-2 rounded-full bg-neon animate-pulse" aria-hidden />
+        Watching for your roster spot…
+      </div>
     </ArcadeCard>
   );
 }
 
 function VisibilityChip({ on }: { on: boolean }) {
   return (
-    <span className={`text-[10px] font-display uppercase tracking-widest px-2 py-1 rounded border ${
-      on ? "border-[var(--victory)] text-victory" : "border-border text-muted-foreground"
-    }`}>
+    <span
+      className={`text-[10px] font-display uppercase tracking-widest px-2 py-1 rounded border ${
+        on ? "border-[var(--victory)] text-victory" : "border-border text-muted-foreground"
+      }`}
+    >
       Global Vis · {on ? "ON" : "OFF"}
     </span>
   );
@@ -157,9 +209,15 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
           </TabsList>
         </div>
 
-        <TabsContent value="dispatch" className="mt-0"><FleetDispatch /></TabsContent>
-        <TabsContent value="timesheets" className="mt-0"><TimesheetEditor /></TabsContent>
-        <TabsContent value="payroll" className="mt-0"><PayrollLedger /></TabsContent>
+        <TabsContent value="dispatch" className="mt-0">
+          <FleetDispatch />
+        </TabsContent>
+        <TabsContent value="timesheets" className="mt-0">
+          <TimesheetEditor />
+        </TabsContent>
+        <TabsContent value="payroll" className="mt-0">
+          <PayrollLedger />
+        </TabsContent>
         <TabsContent value="settings" className="mt-0 space-y-6">
           <WeeklyScheduleSettings />
           <NewSignupsPanel />
@@ -322,7 +380,9 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
     <div className="space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Captain View</div>
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            Captain View
+          </div>
           <h1 className="font-display text-2xl text-neon mt-1 flex items-center gap-3">
             <TeamBadge name={myTeam.name} color={myTeam.color} />
           </h1>
@@ -333,7 +393,6 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
         </div>
       </div>
 
-
       {/* Van-level Live Lead Counter */}
       <ArcadeCard className="p-5 flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
@@ -342,7 +401,9 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
             <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
               Live · This Van
             </div>
-            <div className="font-display text-sm text-neon mt-0.5">{myTeam.name.toUpperCase()} · LEADS TODAY</div>
+            <div className="font-display text-sm text-neon mt-0.5">
+              {myTeam.name.toUpperCase()} · LEADS TODAY
+            </div>
           </div>
         </div>
         <LiveLeadCounter value={leads.byTeam[myTeam.id] ?? 0} size="md" accent="victory" />
@@ -372,7 +433,8 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
         <ArcadeCard className="p-8 text-center">
           <h2 className="font-display text-sm text-neon">NO VAN ASSIGNED</h2>
           <p className="mt-3 text-sm text-muted-foreground">
-            You are not assigned to a van yet. Ask an Owner to add you to a team to see your roster and stats.
+            You are not assigned to a van yet. Ask an Owner to add you to a team to see your roster
+            and stats.
           </p>
         </ArcadeCard>
       )}
@@ -410,7 +472,9 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
             {rosterQuery.isLoading ? (
               <div className="text-sm text-muted-foreground">Loading roster…</div>
             ) : members.length === 0 ? (
-              <div className="text-sm text-muted-foreground">No active members on this van yet.</div>
+              <div className="text-sm text-muted-foreground">
+                No active members on this van yet.
+              </div>
             ) : (
               <RosterTable members={members} />
             )}
@@ -449,7 +513,8 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
         </ArcadePanel>
       ) : (
         <ArcadeCard className="p-5 text-sm text-muted-foreground flex items-center gap-2">
-          <Zap className="w-4 h-4" /> Global Visibility is off. Only your van is visible. Ask the Owner to flip it on for cross-team views.
+          <Zap className="w-4 h-4" /> Global Visibility is off. Only your van is visible. Ask the
+          Owner to flip it on for cross-team views.
         </ArcadeCard>
       )}
     </div>
@@ -457,7 +522,17 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
 }
 
 /* ============ CANVASSER ============ */
-function CanvasserDashboard({ displayName, teamId, userId, visibility: _v }: { displayName: string | null; teamId: string | null; userId?: string; visibility: boolean }) {
+function CanvasserDashboard({
+  displayName,
+  teamId,
+  userId,
+  visibility: _v,
+}: {
+  displayName: string | null;
+  teamId: string | null;
+  userId?: string;
+  visibility: boolean;
+}) {
   const teamQuery = useQuery({
     enabled: !!teamId,
     queryKey: ["canvasser_team", teamId],
@@ -476,8 +551,12 @@ function CanvasserDashboard({ displayName, teamId, userId, visibility: _v }: { d
   return (
     <div className="space-y-6">
       <div>
-        <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Player</div>
-        <h1 className="font-display text-2xl text-foreground mt-1">{(displayName ?? "You").toUpperCase()}</h1>
+        <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+          Player
+        </div>
+        <h1 className="font-display text-2xl text-foreground mt-1">
+          {(displayName ?? "You").toUpperCase()}
+        </h1>
         {myTeam.id && (
           <div className="mt-2 flex items-center gap-2">
             <TeamBadge name={myTeam.name} color={myTeam.color} />
@@ -503,11 +582,12 @@ function CanvasserDashboard({ displayName, teamId, userId, visibility: _v }: { d
   );
 }
 
-
 function Mini({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div className="text-[9px] font-display uppercase tracking-widest text-muted-foreground">{label}</div>
+      <div className="text-[9px] font-display uppercase tracking-widest text-muted-foreground">
+        {label}
+      </div>
       <div className="text-sm font-medium mt-1">{value}</div>
     </div>
   );

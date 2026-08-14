@@ -48,8 +48,12 @@ function AuthPage() {
           toast.success("Check your email to confirm your account.");
           return;
         }
-        toast.success("Account ready — grab your clipboard!");
-        navigate({ to: "/field" });
+        // New accounts have no role yet (roles are Owner/Captain-granted —
+        // security decision 2026-08-12). Land them in the waiting room on
+        // /dashboard, which unlocks itself live the moment a role arrives —
+        // NOT on /field, which is a dead screen without the canvasser role.
+        toast.success("Welcome to the crew! Your manager is being pinged to activate you.");
+        navigate({ to: "/dashboard", search: { tab: "dispatch" } });
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Something went wrong");

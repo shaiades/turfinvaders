@@ -2,6 +2,8 @@ import { Link, useRouter, useRouterState } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth, setDevRoleOverride, type AppRole } from "@/hooks/useAuth";
+import { useSwipeNav } from "@/hooks/useSwipeNav";
+import { CanvasserHUD } from "@/components/CanvasserHUD";
 import { CLOSE_KOMBAT_ROLES, canUseViewAs } from "@/lib/roles";
 import {
   LogOut,
@@ -65,6 +67,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [role, realRole, pathname, router]);
 
   const navItems: NavItem[] = (() => {
+    // Signed in but role-less = the waiting room (Day 1 before an Owner
+    // assigns a role). No tabs at all — the old fallthrough showed this
+    // account the LEADERSHIP nav, which read as broken admin clutter.
+    if (user && !role) return [];
     if (role === "sales_rep") {
       return [{ to: "/close-kombat", label: "Close Kombat", icon: Swords }];
     }
@@ -102,6 +108,14 @@ export function AppShell({ children }: { children: ReactNode }) {
     await supabase.auth.signOut();
     router.navigate({ to: "/auth", replace: true });
   }
+
+  // Field-mode gesture nav: canvassers swipe between their bottom-bar tabs
+  // (map pans and h-scrollers are guarded inside the hook). Other roles keep
+  // tap-only nav — their screens are dense with horizontal scroll areas.
+  useSwipeNav(
+    navItems.slice(0, 5).map((i) => ({ to: i.to, search: i.search })),
+    role === "canvasser",
+  );
 
   // min-h-dvh (not -screen): iOS Safari's collapsing toolbar makes 100vh
   // overshoot the visible area. px-safe keeps content off the notch in
@@ -224,11 +238,15 @@ export function AppShell({ children }: { children: ReactNode }) {
             )}
           </div>
         </div>
+        {/* Score strip rides the sticky header — a canvasser mid-street never
+            hunts for their number. Other roles render nothing here. */}
+        {user && role === "canvasser" && <CanvasserHUD userId={user.id} />}
       </header>
       <main className="flex-1 max-w-7xl w-full min-w-0 mx-auto px-4 sm:px-6 py-4 md:py-8 pb-28 md:pb-8">{children}</main>
 
-      {/* Mobile bottom tab bar */}
-      {user && (
+      {/* Mobile bottom tab bar — hidden entirely for role-less accounts
+          (waiting room) instead of rendering an empty strip. */}
+      {user && navItems.length > 0 && (
         <nav
           aria-label="Primary"
           className="md:hidden fixed bottom-0 inset-x-0 z-30 border-t border-border bg-background/95 backdrop-blur pb-safe px-safe"
