@@ -111,6 +111,35 @@ const ZERO: Totals = {
   days_worked: 0,
 };
 
+/** One profile fetch for the SCCE strip — TakeHomeWidget and SCCERankBanner
+ *  render back-to-back and both need this row; sharing the query key means
+ *  react-query makes a single network call instead of two. */
+function useScceProfile(userId: string) {
+  return useQuery({
+    queryKey: ["scce_rank", userId],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("profiles")
+        .select(
+          "current_rank, consecutive_weeks_3_plus_sits, consecutive_weeks_7_plus_sits, rolling_4_week_sit_avg, recruits_count, pay_lock_status",
+        )
+        .eq("id", userId)
+        .maybeSingle();
+      return data as {
+        current_rank: string | null;
+        consecutive_weeks_3_plus_sits: number;
+        consecutive_weeks_7_plus_sits: number;
+        rolling_4_week_sit_avg: number;
+        recruits_count: number;
+        pay_lock_status: string | null;
+      } | null;
+    },
+  });
+}
+
+/** Goal inputs clamp identically in both editors (MTD bar + Quest Input). */
+const clampGoal = (draft: string) => Math.max(0, Math.round(Number(draft) || 0));
+
 function aggregate(rows: Array<Record<string, number | null> & { log_date: string }>): Totals {
   const t = { ...ZERO };
   const days = new Set<string>();
@@ -900,8 +929,7 @@ function GoalBar({
   }, [goal, editing]);
 
   const submit = () => {
-    const n = Math.max(0, Math.round(Number(draft) || 0));
-    onSave(n);
+    onSave(clampGoal(draft));
     setEditing(false);
   };
 
@@ -1010,8 +1038,7 @@ function GoalInputPanel({
     setDraft(String(goal));
   }, [goal]);
   const submit = () => {
-    const n = Math.max(0, Math.round(Number(draft) || 0));
-    onSave(n);
+    onSave(clampGoal(draft));
   };
   return (
     <div className="relative overflow-hidden rounded-lg border border-[color-mix(in_oklab,var(--neon)_45%,var(--border))] bg-[color-mix(in_oklab,var(--neon)_6%,var(--surface))] p-6">
@@ -1310,53 +1337,35 @@ function FunnelBreakdown({
   );
 }
 
+/** Pay-lock states → banner copy (config-dict twin of PayrollLedger's
+ *  PAY_LOCK_META; "active" renders nothing). */
+const PAY_LOCK_BANNERS: Record<string, { border: string; title: string; titleClass: string; body: string }> = {
+  warned: {
+    border: "border-warning/50 bg-warning/10",
+    title: "⚠ Pay Lock Warning",
+    titleClass: "text-warning",
+    body: ` — your rolling 4-week sit average is below ${PAY_LOCK_MIN_ROLLING_AVG}. A second violation within 90 days reverts your comp to the weekly tier reset (rank retained).`,
+  },
+  reverted: {
+    border: "border-destructive/50 bg-destructive/10",
+    title: "Pay Lock Reverted",
+    titleClass: "text-destructive",
+    body: " — you're currently paid on the weekly point tiers. Reinstatement: 3 consecutive weeks at 7+ sits.",
+  },
+};
+
 function SCCERankBanner({ userId }: { userId: string }) {
-  const { data } = useQuery({
-    queryKey: ["scce_rank", userId],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("profiles")
-        .select(
-          "current_rank, consecutive_weeks_3_plus_sits, consecutive_weeks_7_plus_sits, rolling_4_week_sit_avg, recruits_count, pay_lock_status",
-        )
-        .eq("id", userId)
-        .maybeSingle();
-      return data as {
-        current_rank: string | null;
-        consecutive_weeks_3_plus_sits: number;
-        consecutive_weeks_7_plus_sits: number;
-        rolling_4_week_sit_avg: number;
-        recruits_count: number;
-        pay_lock_status: string | null;
-      } | null;
-    },
-  });
+  const { data } = useScceProfile(userId);
   const rank = data?.current_rank ?? "Jr. Silver";
-  const payLock = data?.pay_lock_status ?? "active";
+  const banner = PAY_LOCK_BANNERS[data?.pay_lock_status ?? "active"];
   return (
     <>
-      {payLock === "warned" && (
-        <div className="rounded-xl border border-warning/50 bg-warning/10 p-4 text-xs">
-          <span className="font-display uppercase tracking-widest text-warning">
-            ⚠ Pay Lock Warning
+      {banner && (
+        <div className={`rounded-xl border p-4 text-xs ${banner.border}`}>
+          <span className={`font-display uppercase tracking-widest ${banner.titleClass}`}>
+            {banner.title}
           </span>
-          <span className="text-muted-foreground">
-            {" "}
-            — your rolling 4-week sit average is below {PAY_LOCK_MIN_ROLLING_AVG}. A second
-            violation within 90 days reverts your comp to the weekly tier reset (rank retained).
-          </span>
-        </div>
-      )}
-      {payLock === "reverted" && (
-        <div className="rounded-xl border border-destructive/50 bg-destructive/10 p-4 text-xs">
-          <span className="font-display uppercase tracking-widest text-destructive">
-            Pay Lock Reverted
-          </span>
-          <span className="text-muted-foreground">
-            {" "}
-            — you're currently paid on the weekly point tiers. Reinstatement: 3 consecutive weeks at
-            7+ sits.
-          </span>
+          <span className="text-muted-foreground">{banner.body}</span>
         </div>
       )}
       <ArcadeCard className="flex flex-wrap items-center justify-between gap-4">
@@ -1403,19 +1412,9 @@ function TakeHomeWidget({
   hourlyRate: number;
   weekPoints: number;
 }) {
-  const { data } = useQuery({
-    queryKey: ["takehome_rank", userId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("current_rank")
-        .eq("id", userId)
-        .maybeSingle();
-      if (error) throw error;
-      return data;
-    },
-  });
-  const rank = (data?.current_rank ?? "Jr. Silver") as string;
+  // Shares SCCERankBanner's query (same key) — one profile fetch feeds both.
+  const { data } = useScceProfile(userId);
+  const rank = data?.current_rank ?? "Jr. Silver";
 
   // Authoritative MTD volume bonus from the pay engine (calc_monthly_paycheck)
   // — the same source the owner's payroll screen pays from. Hidden on error
