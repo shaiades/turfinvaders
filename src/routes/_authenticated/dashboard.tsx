@@ -124,9 +124,51 @@ function NoRole() {
     return () => clearTimeout(fallback);
   }, [hasRole]);
 
-  // Signup intent (a claim from the auth form, never a grant) personalizes
-  // the wait: canvassers hear about Active Run, closers about Close Kombat.
-  const requested = user?.user_metadata?.requested_role as string | undefined;
+  // Signup intent (a claim, never a grant) personalizes the wait. The email
+  // form collects it at signup; OAuth (Google) accounts arrive without one,
+  // so this screen doubles as the one-time picker for them — the choice
+  // saves to the same auth metadata, which also lights up the managers'
+  // "wants …" chip. `picked` bridges the moment before USER_UPDATED
+  // re-hydrates useAuth with fresh metadata.
+  const [picked, setPicked] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const requested = picked ?? (user?.user_metadata?.requested_role as string | undefined);
+
+  async function chooseRole(role: "canvasser" | "sales_rep") {
+    setSaving(true);
+    const { error } = await supabase.auth.updateUser({ data: { requested_role: role } });
+    setSaving(false);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    setPicked(role);
+    toast.success(
+      role === "canvasser"
+        ? "Canvasser it is — clipboard ready!"
+        : "Closer confirmed — sharpen up!",
+    );
+  }
+
+  if (!requested) {
+    return (
+      <ArcadeCard glow className="p-8 text-center max-w-md mx-auto">
+        <h1 className="font-display text-base text-neon">HOW DO YOU PLAY?</h1>
+        <p className="mt-3 text-sm text-muted-foreground">
+          Pick your side — your manager confirms it when they activate you.
+        </p>
+        <div className="mt-5 grid gap-3">
+          <NeonButton tone="turf-pink" disabled={saving} onClick={() => chooseRole("canvasser")}>
+            Canvasser — I knock doors
+          </NeonButton>
+          <NeonButton tone="kombat-gold" disabled={saving} onClick={() => chooseRole("sales_rep")}>
+            Sales Rep — I close deals
+          </NeonButton>
+        </div>
+      </ArcadeCard>
+    );
+  }
+
   const destination =
     requested === "sales_rep"
       ? "you'll spawn straight into Close Kombat"
@@ -150,6 +192,14 @@ function NoRole() {
         <span className="w-2 h-2 rounded-full bg-neon animate-pulse" aria-hidden />
         Watching for your roster spot…
       </div>
+      <button
+        type="button"
+        onClick={() => chooseRole(requested === "canvasser" ? "sales_rep" : "canvasser")}
+        disabled={saving}
+        className="mt-4 text-[10px] text-muted-foreground underline underline-offset-2 hover:text-foreground min-h-11 md:min-h-0"
+      >
+        Wrong side? Switch to {requested === "canvasser" ? "Sales Rep" : "Canvasser"}
+      </button>
     </ArcadeCard>
   );
 }
