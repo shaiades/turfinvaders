@@ -50,7 +50,7 @@ export const TRAINING_VIDEOS: TrainingVideo[] = [
     id: "3-keys-to-success",
     title: "3 Keys to Success",
     speaker: "Shai",
-    youtubeId: null,
+    youtubeId: "-ZeYW5mISCk",
     category: "keys",
   },
   {
