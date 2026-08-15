@@ -255,9 +255,13 @@ function MyTerritoryPage() {
     };
   }, [pinsQuery.data]);
 
+  // Managers never drop field pins — a stray map tap would insert a field_pins
+  // row for them and bump their daily_logs via bump_daily_log_from_pin.
   const mapMode = drawing
     ? { kind: "draw" as const, onComplete: (poly: LatLng[]) => { setPendingPolygon(poly); setIsModalOpen(true); } }
-    : { kind: "pin" as const, onDrop: (ll: LatLng) => dropPin.mutate(ll) };
+    : isManager
+      ? { kind: "view" as const }
+      : { kind: "pin" as const, onDrop: (ll: LatLng) => dropPin.mutate(ll) };
 
   return (
     <GratitudeGate userId={user?.id}>
