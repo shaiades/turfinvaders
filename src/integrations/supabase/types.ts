@@ -786,8 +786,56 @@ export type Database = {
         }
         Relationships: []
       }
+      turf_assignment_history: {
+        Row: {
+          assigned_at: string
+          assigned_by: string | null
+          assigned_user_id: string | null
+          id: string
+          turf_id: string
+        }
+        Insert: {
+          assigned_at?: string
+          assigned_by?: string | null
+          assigned_user_id?: string | null
+          id?: string
+          turf_id: string
+        }
+        Update: {
+          assigned_at?: string
+          assigned_by?: string | null
+          assigned_user_id?: string | null
+          id?: string
+          turf_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "turf_assignment_history_assigned_by_fkey"
+            columns: ["assigned_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "turf_assignment_history_assigned_user_id_fkey"
+            columns: ["assigned_user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "turf_assignment_history_turf_id_fkey"
+            columns: ["turf_id"]
+            isOneToOne: false
+            referencedRelation: "turfs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       turfs: {
         Row: {
+          assigned_at: string | null
+          assigned_by: string | null
           assigned_user_id: string | null
           color: string
           created_at: string
@@ -799,6 +847,8 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          assigned_at?: string | null
+          assigned_by?: string | null
           assigned_user_id?: string | null
           color?: string
           created_at?: string
@@ -810,6 +860,8 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          assigned_at?: string | null
+          assigned_by?: string | null
           assigned_user_id?: string | null
           color?: string
           created_at?: string
@@ -821,6 +873,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "turfs_assigned_by_fkey"
+            columns: ["assigned_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "turfs_assigned_user_id_fkey"
             columns: ["assigned_user_id"]
@@ -964,7 +1023,15 @@ export type Database = {
         | "inactive"
         | "suspension_review"
       lead_status: "pending" | "confirmed" | "denied"
-      pin_type: "not_home" | "talked_to" | "lead" | "knock" | "not_interested"
+      pin_type:
+        | "not_home"
+        | "talked_to"
+        | "lead"
+        | "knock"
+        | "not_interested"
+        | "renter"
+        | "appt"
+        | "go_back"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1100,7 +1167,16 @@ export const Constants = {
         "suspension_review",
       ],
       lead_status: ["pending", "confirmed", "denied"],
-      pin_type: ["not_home", "talked_to", "lead", "knock", "not_interested"],
+      pin_type: [
+        "not_home",
+        "talked_to",
+        "lead",
+        "knock",
+        "not_interested",
+        "renter",
+        "appt",
+        "go_back",
+      ],
     },
   },
 } as const

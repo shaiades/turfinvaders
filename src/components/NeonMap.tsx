@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MapContainer, TileLayer, Polygon, Marker, useMapEvents, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Polygon, Polyline, Marker, useMapEvents, useMap } from "react-leaflet";
 import L from "leaflet";
 
 export type LatLng = { lat: number; lng: number };
@@ -10,24 +10,50 @@ export type Territory = {
   color: string;
   polygon: LatLng[];
   assignmentLabel?: string;
+  /** Unassigned turfs render gray + dashed. */
+  dashed?: boolean;
 };
 
 export type FieldPin = {
   id: string;
-  pin_type: "not_home" | "talked_to" | "lead" | "knock" | "not_interested";
+  pin_type:
+    | "not_home"
+    | "talked_to"
+    | "lead"
+    | "knock"
+    | "not_interested"
+    | "renter"
+    | "appt"
+    | "go_back";
   lat: number;
   lng: number;
   is_remote_drop?: boolean;
   distance_m?: number | null;
 };
 
-// Standard tallies render as a vibrant neon blue dot; leads get their own star.
-const PIN_COLORS: Record<FieldPin["pin_type"], string> = {
-  not_home: "#00e5ff",
+// One color per knock result (matches the canvasser result picker); leads
+// keep their own star. Exported so every pin consumer (map, picker,
+// manager timeline) stays in sync.
+export const PIN_COLORS: Record<FieldPin["pin_type"], string> = {
+  not_home: "#ff2d55",
   knock: "#00e5ff",
-  talked_to: "#00e5ff",
-  not_interested: "#00e5ff",
+  talked_to: "#ffd60a",
+  not_interested: "#ff6b00",
+  renter: "#c77dff",
+  go_back: "#00e5ff",
+  appt: "#ffd60a",
   lead: "#39ff14",
+};
+
+export const PIN_LABELS: Record<FieldPin["pin_type"], string> = {
+  not_home: "NOT HOME",
+  knock: "KNOCK",
+  talked_to: "TALKED TO",
+  not_interested: "NOT INTERESTED",
+  renter: "RENTER",
+  go_back: "GO BACK",
+  appt: "APPT SET",
+  lead: "LEAD GENERATED",
 };
 const REMOTE_DROP_COLOR = "#8a8f99";
 
@@ -109,10 +135,11 @@ function FitBounds({ points }: { points: LatLng[] }) {
   return null;
 }
 
-function FollowMe({ me, zoom = 18, lockRadiusKm = 2, disableLock = false }: { me: LatLng | null | undefined; zoom?: number; lockRadiusKm?: number; disableLock?: boolean }) {
+function FollowMe({ me, zoom = 18, lockRadiusKm = 2, disableLock = false, paused = false }: { me: LatLng | null | undefined; zoom?: number; lockRadiusKm?: number; disableLock?: boolean; paused?: boolean }) {
   const map = useMap();
   const didInitial = useRef(false);
   useEffect(() => {
+    if (paused) return; // never pan the map under a drawing finger
     if (!me) return;
     if (!didInitial.current) {
       if (!disableLock) {
@@ -132,22 +159,29 @@ function FollowMe({ me, zoom = 18, lockRadiusKm = 2, disableLock = false }: { me
       if (mb && !mb.contains([me.lat, me.lng])) return;
       map.panTo([me.lat, me.lng], { animate: true });
     }
-  }, [map, me?.lat, me?.lng, zoom, lockRadiusKm, disableLock]);
+  }, [map, me?.lat, me?.lng, zoom, lockRadiusKm, disableLock, paused]);
   return null;
 }
 
 function LockToPolygon({ polygon, paddingRatio = 0.08 }: { polygon: LatLng[]; paddingRatio?: number }) {
   const map = useMap();
-  const didFit = useRef(false);
+  const sigRef = useRef("");
   useEffect(() => {
-    if (didFit.current || polygon.length < 3) return;
+    if (polygon.length < 3) return;
+    // Re-fit when the locked turf actually changes (live reassignment swaps
+    // the canvasser's polygon without a remount).
+    const sig = polygon.map((p) => `${p.lat.toFixed(6)},${p.lng.toFixed(6)}`).join(";");
+    if (sigRef.current === sig) return;
+    sigRef.current = sig;
+    // Clear the previous clamp first, or fitBounds gets constrained by it.
+    map.setMaxBounds(null as unknown as L.LatLngBoundsExpression);
+    map.setMinZoom(0);
     const b = L.latLngBounds(polygon.map((p) => [p.lat, p.lng] as [number, number]));
     const padded = b.pad(paddingRatio);
     map.fitBounds(padded, { padding: [20, 20], animate: false });
     map.setMaxBounds(padded);
     map.setMinZoom(map.getZoom());
     map.setMaxZoom(20);
-    didFit.current = true;
   }, [map, polygon, paddingRatio]);
   return null;
 }
@@ -218,6 +252,196 @@ function houseIcon(name: string) {
   return L.divIcon({ html, className: "neon-house", iconSize: [80, 34], iconAnchor: [40, 30] });
 }
 
+/** Assignee name pill centered on a turf (video-style "JN · Jorge Najera").
+ *  color may be hsl() (assignee colors) — alpha via color-mix, never hex suffix. */
+function territoryLabelIcon(label: string, color: string) {
+  const safe = label.replace(/[<>&"']/g, "");
+  const html = `
+    <div style="transform:translate(-50%,-50%);display:inline-flex;align-items:center;background:rgba(11,15,26,0.85);border:1px solid ${color};color:${color};font:700 11px/1 ui-sans-serif,system-ui;padding:4px 9px;border-radius:9999px;white-space:nowrap;box-shadow:0 0 10px color-mix(in srgb, ${color} 40%, transparent);">${safe}</div>`;
+  return L.divIcon({ html, className: "neon-territory-label", iconSize: [0, 0], iconAnchor: [0, 0] });
+}
+
+/** Ray-cast point-in-polygon (lng as x, lat as y). */
+function pointInPolygon(pt: LatLng, poly: LatLng[]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i], b = poly[j];
+    if (
+      a.lat > pt.lat !== b.lat > pt.lat &&
+      pt.lng < ((b.lng - a.lng) * (pt.lat - a.lat)) / (b.lat - a.lat) + a.lng
+    ) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+/** Anchor for the label pill: bbox center when inside the ring, else the
+ *  polygon centroid — freehand shapes are often concave enough that the bbox
+ *  center lands outside them. */
+function labelAnchor(polygon: LatLng[]): [number, number] {
+  const c = L.latLngBounds(polygon.map((p) => [p.lat, p.lng] as [number, number])).getCenter();
+  const center = { lat: c.lat, lng: c.lng };
+  if (pointInPolygon(center, polygon)) return [center.lat, center.lng];
+  let area = 0, cx = 0, cy = 0;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const cross = polygon[j].lng * polygon[i].lat - polygon[i].lng * polygon[j].lat;
+    area += cross;
+    cx += (polygon[j].lng + polygon[i].lng) * cross;
+    cy += (polygon[j].lat + polygon[i].lat) * cross;
+  }
+  if (area === 0) return [center.lat, center.lng];
+  const centroid = { lng: cx / (3 * area), lat: cy / (3 * area) };
+  return pointInPolygon(centroid, polygon)
+    ? [centroid.lat, centroid.lng]
+    : [center.lat, center.lng];
+}
+
+/**
+ * Freehand area drawing (SalesRabbit-style): one finger/mouse drags a white
+ * stroke; on release the ring is simplified (Douglas-Peucker, pixel space)
+ * and handed up as a closed polygon. Taps (<10px travel) fall through to the
+ * map click so the tap-to-add-vertex path keeps working. A second touch
+ * aborts the stroke so pinch-zoom stays available.
+ */
+function FreehandCapture({
+  onComplete,
+  onStrokeEnd,
+}: {
+  onComplete: (polygon: LatLng[]) => void;
+  onStrokeEnd: () => void;
+}) {
+  const map = useMap();
+  const [stroke, setStroke] = useState<LatLng[]>([]);
+  // Callbacks live in refs so the pointer listeners bind once per map.
+  const cbRef = useRef({ onComplete, onStrokeEnd });
+  cbRef.current = { onComplete, onStrokeEnd };
+
+  useEffect(() => {
+    const el = map.getContainer();
+    map.dragging.disable();
+    const prevTouchAction = el.style.touchAction;
+    const prevCursor = el.style.cursor;
+    el.style.touchAction = "none"; // stop browser scroll/pull-to-refresh while drawing
+    el.style.cursor = "crosshair";
+
+    let activeId: number | null = null;
+    let isStroke = false;
+    // Ground truth is captured at event time (lls) — the map can pan/zoom
+    // mid-stroke (GPS FollowMe, wheel zoom) and pixel→latlng conversion at
+    // commit time would displace every earlier point. Pixels (pts) exist only
+    // for the sampling gate and Douglas-Peucker tolerance; each carries the
+    // index of its captured latlng so simplify() maps back losslessly.
+    type IdxPoint = L.Point & { _i?: number };
+    let pts: IdxPoint[] = [];
+    let lls: LatLng[] = [];
+
+    const toPoint = (e: PointerEvent) => {
+      const rect = el.getBoundingClientRect();
+      return L.point(e.clientX - rect.left, e.clientY - rect.top);
+    };
+    const capture = (e: PointerEvent) => {
+      const p = toPoint(e) as IdxPoint;
+      const ll = map.containerPointToLatLng(p);
+      p._i = lls.length;
+      pts.push(p);
+      lls.push({ lat: ll.lat, lng: ll.lng });
+    };
+    const reset = () => {
+      activeId = null;
+      isStroke = false;
+      pts = [];
+      lls = [];
+      setStroke([]);
+    };
+
+    const onDown = (e: PointerEvent) => {
+      if (activeId !== null) {
+        // Second finger joins → abort the stroke; Leaflet touchZoom takes over.
+        reset();
+        return;
+      }
+      if (!e.isPrimary) return;
+      if (e.button !== 0) return; // right/middle mouse never starts a stroke
+      activeId = e.pointerId;
+      isStroke = false;
+      pts = [];
+      lls = [];
+      capture(e);
+      try {
+        el.setPointerCapture(e.pointerId);
+      } catch {
+        /* older browsers */
+      }
+    };
+
+    const onMove = (e: PointerEvent) => {
+      if (e.pointerId !== activeId) return;
+      const p = toPoint(e);
+      const last = pts[pts.length - 1];
+      if (last && p.distanceTo(last) < 6) return; // sample every ≥6px
+      capture(e);
+      if (!isStroke && p.distanceTo(pts[0]) >= 10) isStroke = true;
+      if (isStroke) {
+        e.preventDefault();
+        setStroke([...lls]);
+      }
+    };
+
+    const onUp = (e: PointerEvent) => {
+      if (e.pointerId !== activeId) return;
+      const wasStroke = isStroke;
+      const drawnPts = pts;
+      const drawnLls = lls;
+      reset();
+      if (!wasStroke) return; // tap → the map click adds a vertex instead
+      cbRef.current.onStrokeEnd(); // suppress Leaflet's trailing synthetic click
+      const simplified = L.LineUtil.simplify(drawnPts, 2.5) as IdxPoint[];
+      if (simplified.length < 3) return;
+      // Discard degenerate scribbles: the auto-closed ring must enclose a
+      // real area (~30×30px), or a stray swipe becomes a sliver turf.
+      let areaPx = 0;
+      for (let i = 0; i < simplified.length; i++) {
+        const a = simplified[i];
+        const b = simplified[(i + 1) % simplified.length];
+        areaPx += a.x * b.y - b.x * a.y;
+      }
+      if (Math.abs(areaPx) / 2 < 900) return;
+      const ring = simplified
+        .map((p) => (p._i != null ? drawnLls[p._i] : null))
+        .filter((p): p is LatLng => p != null);
+      if (ring.length < 3) return;
+      cbRef.current.onComplete(ring);
+    };
+
+    const onCancel = (e: PointerEvent) => {
+      if (e.pointerId === activeId) reset();
+    };
+
+    el.addEventListener("pointerdown", onDown);
+    el.addEventListener("pointermove", onMove, { passive: false });
+    el.addEventListener("pointerup", onUp);
+    el.addEventListener("pointercancel", onCancel);
+    return () => {
+      map.dragging.enable();
+      el.style.touchAction = prevTouchAction;
+      el.style.cursor = prevCursor;
+      el.removeEventListener("pointerdown", onDown);
+      el.removeEventListener("pointermove", onMove);
+      el.removeEventListener("pointerup", onUp);
+      el.removeEventListener("pointercancel", onCancel);
+    };
+  }, [map]);
+
+  if (stroke.length < 2) return null;
+  return (
+    <Polyline
+      positions={stroke.map((p) => [p.lat, p.lng] as [number, number])}
+      pathOptions={{ color: "#ffffff", weight: 3, opacity: 0.9 }}
+    />
+  );
+}
+
 export function NeonMap({
   territories,
   pins = [],
@@ -231,6 +455,7 @@ export function NeonMap({
   follow = false,
   lockPolygon,
   onTerritoryClick,
+  pendingPolygon,
 }: {
   territories: Territory[];
   pins?: FieldPin[];
@@ -244,9 +469,14 @@ export function NeonMap({
   follow?: boolean;
   lockPolygon?: LatLng[];
   onTerritoryClick?: (id: string) => void;
+  /** A drawn-but-unsaved ring, previewed dashed white until saved/discarded. */
+  pendingPolygon?: LatLng[] | null;
 }) {
   const [draft, setDraft] = useState<LatLng[]>([]);
   const mapRef = useRef<L.Map | null>(null);
+  // Set when a freehand stroke just committed — swallows the synthetic click
+  // some browsers fire after pointerup so it doesn't become a stray vertex/pin.
+  const justDrewRef = useRef(0);
 
   const fallbackCenter = useMemo<LatLng>(() => {
     if (center) return center;
@@ -265,6 +495,7 @@ export function NeonMap({
   }, [territories, pins, me]);
 
   function handleClick(ll: LatLng) {
+    if (Date.now() - justDrewRef.current < 400) return;
     if (mode.kind === "draw") setDraft((d) => [...d, ll]);
     if (mode.kind === "pin") mode.onDrop(ll);
   }
@@ -304,7 +535,7 @@ export function NeonMap({
         <InvalidateOnMount />
         <ClickCapture onClick={handleClick} />
         {lockPolygon && lockPolygon.length >= 3 && <LockToPolygon polygon={lockPolygon} />}
-        {follow ? <FollowMe me={me} disableLock={!!(lockPolygon && lockPolygon.length >= 3)} /> : allPoints.length > 0 && !lockPolygon && <FitBounds points={allPoints} />}
+        {follow ? <FollowMe me={me} disableLock={!!(lockPolygon && lockPolygon.length >= 3)} paused={mode.kind === "draw"} /> : allPoints.length > 0 && !lockPolygon && <FitBounds points={allPoints} />}
 
         {territories.map((t) => (
           <Polygon
@@ -314,11 +545,51 @@ export function NeonMap({
               color: t.color,
               weight: 2,
               fillColor: t.color,
-              fillOpacity: 0.15,
+              ...(t.dashed
+                ? { dashArray: "6 8", fillOpacity: 0.06 }
+                : { fillOpacity: 0.15 }),
             }}
             eventHandlers={onTerritoryClick ? { click: () => onTerritoryClick(t.id) } : undefined}
           />
         ))}
+
+        {territories.map((t) => {
+          if (!t.assignmentLabel || t.polygon.length < 3) return null;
+          return (
+            <Marker
+              key={`${t.id}-label`}
+              position={labelAnchor(t.polygon)}
+              icon={territoryLabelIcon(t.assignmentLabel, t.color)}
+              interactive={false}
+            />
+          );
+        })}
+
+        {pendingPolygon && pendingPolygon.length >= 3 && (
+          <Polygon
+            positions={pendingPolygon.map((p) => [p.lat, p.lng] as [number, number])}
+            pathOptions={{
+              color: "#ffffff",
+              weight: 2,
+              dashArray: "6 6",
+              fillColor: "#ffffff",
+              fillOpacity: 0.08,
+              interactive: false,
+            }}
+          />
+        )}
+
+        {mode.kind === "draw" && (
+          <FreehandCapture
+            onStrokeEnd={() => {
+              justDrewRef.current = Date.now();
+            }}
+            onComplete={(poly) => {
+              setDraft([]); // a committed stroke supersedes any tapped vertices
+              mode.onComplete(poly);
+            }}
+          />
+        )}
 
         {mode.kind === "draw" && draft.length > 0 && (
           <>
@@ -377,7 +648,7 @@ export function NeonMap({
       {mode.kind === "draw" && (
         <div className="absolute top-3 right-3 z-[1000] flex flex-col gap-2 text-xs">
           <div className="rounded border border-neon/60 bg-surface/90 backdrop-blur px-3 py-2 font-display text-[10px] uppercase tracking-widest text-neon">
-            Click map to add vertices · {draft.length} pts
+            Drag to draw an area · tap for points{draft.length > 0 ? ` · ${draft.length} pts` : ""}
           </div>
           <div className="flex gap-2">
             <button

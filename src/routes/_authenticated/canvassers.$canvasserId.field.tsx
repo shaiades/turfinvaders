@@ -4,8 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { ArcadePanel, StatCard, ArcadeCard } from "@/components/arcade";
-import { NeonMap, type FieldPin, type Territory, type LatLng } from "@/components/NeonMap";
-import { Home, MessageSquare, Sparkles, DollarSign, AlertTriangle, ArrowLeft } from "lucide-react";
+import { NeonMap, PIN_COLORS, PIN_LABELS, type FieldPin, type Territory, type LatLng } from "@/components/NeonMap";
+import { Home, MessageSquare, Sparkles, DollarSign, AlertTriangle, ArrowLeft, ThumbsDown, KeyRound, Undo2, CalendarCheck } from "lucide-react";
 import { commissionRateForPoints, weeklyPoints } from "@/lib/pay";
 import { isManagerRole } from "@/lib/roles";
 import { laDateISO, laMidnightUtcISO, addDaysISO, weekStartOfISO } from "@/lib/dates";
@@ -14,6 +14,19 @@ export const Route = createFileRoute("/_authenticated/canvassers/$canvasserId/fi
   head: () => ({ meta: [{ title: "Field Activity — Knockout" }] }),
   component: FieldActivityPage,
 });
+
+// Timeline icons per knock result — colors/labels come from NeonMap's shared
+// PIN_COLORS / PIN_LABELS so the map and this audit view can't drift.
+const PIN_ICONS: Record<FieldPin["pin_type"], typeof Home> = {
+  lead: Sparkles,
+  talked_to: MessageSquare,
+  not_home: Home,
+  knock: Home,
+  not_interested: ThumbsDown,
+  renter: KeyRound,
+  go_back: Undo2,
+  appt: CalendarCheck,
+};
 
 // Field days are LA calendar days (never viewer-local or UTC).
 function fmt(n: number) { return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }); }
@@ -212,13 +225,11 @@ function FieldActivityPage() {
                 );
               }
               const p = e.pin!;
-              const color = p.is_remote_drop ? "#8a8f99"
-                : p.pin_type === "lead" ? "#39ff14"
-                : p.pin_type === "talked_to" ? "#ffd60a" : "#ff2d55";
-              const Icon = p.pin_type === "lead" ? Sparkles : p.pin_type === "talked_to" ? MessageSquare : Home;
-              const label = p.is_remote_drop ? "REMOTE DROP (flagged)"
-                : p.pin_type === "lead" ? "LEAD GENERATED"
-                : p.pin_type === "talked_to" ? "TALKED TO" : "NOT HOME";
+              const color = p.is_remote_drop ? "#8a8f99" : (PIN_COLORS[p.pin_type] ?? "#ff2d55");
+              const Icon = PIN_ICONS[p.pin_type] ?? Home;
+              const label = p.is_remote_drop
+                ? "REMOTE DROP (flagged)"
+                : (PIN_LABELS[p.pin_type] ?? p.pin_type.toUpperCase());
               return (
                 <li key={`p-${p.id}`} className="flex items-center gap-3 rounded border border-border bg-surface px-3 py-2">
                   {p.is_remote_drop
