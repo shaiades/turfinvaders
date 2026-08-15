@@ -18,6 +18,7 @@ import {
   Sparkles,
   Truck,
   Swords,
+  GraduationCap,
 } from "lucide-react";
 const turfInvadersWordmark = { url: "/turf-invaders-wordmark.png" };
 
@@ -35,7 +36,15 @@ type NavItem = {
 // dropping it would bounce old /log bookmarks to /field instead of the Log
 // tab. /playbook redirects in beforeLoad (throws before the location
 // commits), so it can stay off this list.
-const CANVASSER_ALLOWED = ["/field", "/my-territory", "/dashboard", "/log", "/leaderboard", "/daily-wrap"];
+const CANVASSER_ALLOWED = [
+  "/field",
+  "/my-territory",
+  "/dashboard",
+  "/log",
+  "/learn",
+  "/leaderboard",
+  "/daily-wrap",
+];
 
 // Sales reps (closers) get exactly one screen: Close Kombat (owner decision
 // 2026-07-29). Anything else → redirect there.
@@ -104,10 +113,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       ...(role && CLOSE_KOMBAT_ROLES.includes(role)
         ? [{ to: "/close-kombat", label: "Close Kombat", icon: Swords } as NavItem]
         : []),
+      { to: "/learn", label: "Learn", icon: GraduationCap },
       { to: "/daily-wrap", label: "Wrap", icon: Sparkles },
     ];
   })();
-
 
   async function signOut() {
     await supabase.auth.signOut();
@@ -217,7 +226,12 @@ export function AppShell({ children }: { children: ReactNode }) {
               </Link>
             ))}
           </nav>
-          <Link to="/dashboard" search={{ tab: "dispatch" }} className="flex items-center justify-center shrink-0" aria-label="Turf Invaders home">
+          <Link
+            to="/dashboard"
+            search={{ tab: "dispatch" }}
+            className="flex items-center justify-center shrink-0"
+            aria-label="Turf Invaders home"
+          >
             <img
               src={turfInvadersWordmark.url}
               alt="Turf Invaders"
@@ -229,7 +243,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             {user && (
               <>
                 <div className="text-right">
-                  <div className="text-xs text-muted-foreground uppercase tracking-wider">{role}</div>
+                  <div className="text-xs text-muted-foreground uppercase tracking-wider">
+                    {role}
+                  </div>
                   <div className="text-sm font-medium">{displayName}</div>
                 </div>
                 <button
@@ -247,7 +263,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             hunts for their number. Other roles render nothing here. */}
         {user && role === "canvasser" && <CanvasserHUD userId={user.id} />}
       </header>
-      <main className="flex-1 max-w-7xl w-full min-w-0 mx-auto px-4 sm:px-6 py-4 md:py-8 pb-28 md:pb-8">{children}</main>
+      <main className="flex-1 max-w-7xl w-full min-w-0 mx-auto px-4 sm:px-6 py-4 md:py-8 pb-28 md:pb-8">
+        {children}
+      </main>
 
       {/* Mobile bottom tab bar — hidden entirely for role-less accounts
           (waiting room) instead of rendering an empty strip. */}
@@ -256,7 +274,12 @@ export function AppShell({ children }: { children: ReactNode }) {
           aria-label="Primary"
           className="md:hidden fixed bottom-0 inset-x-0 z-30 border-t border-border bg-background/95 backdrop-blur pb-safe px-safe"
         >
-          <ul className="grid" style={{ gridTemplateColumns: `repeat(${Math.min(navItems.length, 5)}, minmax(0, 1fr))` }}>
+          <ul
+            className="grid"
+            style={{
+              gridTemplateColumns: `repeat(${Math.min(navItems.length, 5)}, minmax(0, 1fr))`,
+            }}
+          >
             {navItems.slice(0, 5).map((item) => (
               <li key={`bt-${item.to}-${item.label}`}>
                 <Link
