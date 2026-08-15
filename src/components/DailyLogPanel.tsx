@@ -216,7 +216,7 @@ export function DailyLogPanel({ canEditMondayUrl }: { canEditMondayUrl: boolean 
             value={form.notes}
             disabled={!officeReady}
             onChange={(e) => setField("notes", e.target.value)}
-            placeholder="Anything Office Staff or your Captain should know about today…"
+            placeholder="Anything your Manager or Captain should know about today…"
           />
         </div>
       </ArcadePanel>
@@ -282,7 +282,7 @@ function NewLeadCard({ userId, teamId }: { userId?: string; teamId: string | nul
       {!open ? (
         <p className="text-xs text-muted-foreground">
           Submit a lead with status <span className="text-warning font-display">PENDING</span>. It
-          will only count toward live van + office totals once Office Staff hits Confirm.
+          will only count toward live van + office totals once a Manager hits Confirm.
         </p>
       ) : (
         <div className="space-y-4">

@@ -152,7 +152,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <option value="captain">Captain</option>
               <option value="canvasser">Canvasser</option>
               <option value="sales_rep">Sales Rep</option>
-              <option value="office_staff">Office Staff</option>
+              <option value="office_staff">Manager</option>
             </select>
             {isOverridden && (
               <button

@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { Check, X, Inbox } from "lucide-react";
+import { ObjectionReviewPanel } from "@/components/ObjectionReviewPanel";
 
 export const Route = createFileRoute("/_authenticated/confirmation-desk")({
   head: () => ({ meta: [{ title: "Confirmation Desk — Knockout" }] }),
@@ -41,7 +42,9 @@ function ConfirmationDesk() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("leads")
-        .select("id, canvasser_id, team_id, customer_name, address, is_sale, sale_amount, notes, created_at")
+        .select(
+          "id, canvasser_id, team_id, customer_name, address, is_sale, sale_amount, notes, created_at",
+        )
         .eq("status", "pending")
         .order("created_at", { ascending: true });
       if (error) throw error;
@@ -70,7 +73,11 @@ function ConfirmationDesk() {
   });
 
   const decide = useMutation({
-    mutationFn: async (args: { id: string; status: "confirmed" | "denied"; deny_reason?: string }) => {
+    mutationFn: async (args: {
+      id: string;
+      status: "confirmed" | "denied";
+      deny_reason?: string;
+    }) => {
       const { error } = await supabase
         .from("leads")
         .update({
@@ -83,7 +90,9 @@ function ConfirmationDesk() {
       if (error) throw error;
     },
     onSuccess: (_d, vars) => {
-      toast.success(vars.status === "confirmed" ? "Lead confirmed — counter ticked!" : "Lead denied");
+      toast.success(
+        vars.status === "confirmed" ? "Lead confirmed — counter ticked!" : "Lead denied",
+      );
       qc.invalidateQueries({ queryKey: ["pending_leads"] });
       qc.invalidateQueries({ queryKey: ["lead_events", "today"] });
     },
@@ -94,20 +103,27 @@ function ConfirmationDesk() {
     <div className="space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">Office Staff</div>
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            Manager
+          </div>
           <h1 className="font-display text-2xl text-neon mt-1">CONFIRMATION DESK</h1>
           <p className="text-xs text-muted-foreground mt-2">
             Live queue of pending leads. Confirm to tick the van + office counters; deny to discard.
           </p>
         </div>
-        <LiveLeadCounter value={leadsToday.total} size="md" accent="victory" label="CONFIRMED · TODAY" />
+        <LiveLeadCounter
+          value={leadsToday.total}
+          size="md"
+          accent="victory"
+          label="CONFIRMED · TODAY"
+        />
       </div>
 
       <ArcadePanel
         title="Pending Queue"
         action={
           <span className="text-[10px] font-display uppercase tracking-widest text-warning">
-            {(pending.data?.length ?? 0)} waiting
+            {pending.data?.length ?? 0} waiting
           </span>
         }
       >
@@ -122,23 +138,35 @@ function ConfirmationDesk() {
           <ul className="divide-y divide-border">
             {pending.data!.map((l) => (
               <PendingRow
-                key={l.id} lead={l}
-                canvasserName={directory.data?.profiles.get(l.canvasser_id)?.display_name ?? "Unknown"}
+                key={l.id}
+                lead={l}
+                canvasserName={
+                  directory.data?.profiles.get(l.canvasser_id)?.display_name ?? "Unknown"
+                }
                 team={l.team_id ? directory.data?.teams.get(l.team_id) : undefined}
                 onConfirm={() => decide.mutate({ id: l.id, status: "confirmed" })}
-                onDeny={(reason) => decide.mutate({ id: l.id, status: "denied", deny_reason: reason })}
+                onDeny={(reason) =>
+                  decide.mutate({ id: l.id, status: "denied", deny_reason: reason })
+                }
                 pending={decide.isPending}
               />
             ))}
           </ul>
         )}
       </ArcadePanel>
+
+      <ObjectionReviewPanel />
     </div>
   );
 }
 
 function PendingRow({
-  lead, canvasserName, team, onConfirm, onDeny, pending,
+  lead,
+  canvasserName,
+  team,
+  onConfirm,
+  onDeny,
+  pending,
 }: {
   lead: PendingLead;
   canvasserName: string;
@@ -162,21 +190,45 @@ function PendingRow({
           )}
         </div>
         <div className="text-xs text-muted-foreground mt-1">
-          {canvasserName} · {lead.address || "no address"} · {new Date(lead.created_at).toLocaleString()}
+          {canvasserName} · {lead.address || "no address"} ·{" "}
+          {new Date(lead.created_at).toLocaleString()}
         </div>
-        {lead.notes && <div className="text-xs mt-1.5 text-muted-foreground italic">"{lead.notes}"</div>}
+        {lead.notes && (
+          <div className="text-xs mt-1.5 text-muted-foreground italic">"{lead.notes}"</div>
+        )}
         {denying && (
           <div className="mt-3 flex flex-col sm:flex-row gap-2 sm:items-start">
             <Textarea
-              rows={2} placeholder="Reason for denial…"
-              value={reason} onChange={(e) => setReason(e.target.value)}
+              rows={2}
+              placeholder="Reason for denial…"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
             />
             <div className="flex gap-2 sm:flex-col sm:gap-1.5">
-              <Button size="sm" variant="destructive" disabled={pending} className="flex-1 sm:flex-none"
-                onClick={() => { onDeny(reason); setDenying(false); setReason(""); }}>
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={pending}
+                className="flex-1 sm:flex-none"
+                onClick={() => {
+                  onDeny(reason);
+                  setDenying(false);
+                  setReason("");
+                }}
+              >
                 Confirm Deny
               </Button>
-              <Button size="sm" variant="ghost" className="flex-1 sm:flex-none" onClick={() => { setDenying(false); setReason(""); }}>Cancel</Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="flex-1 sm:flex-none"
+                onClick={() => {
+                  setDenying(false);
+                  setReason("");
+                }}
+              >
+                Cancel
+              </Button>
             </div>
           </div>
         )}
@@ -186,8 +238,11 @@ function PendingRow({
           <Button variant="outline" onClick={() => setDenying(true)} disabled={pending}>
             <X className="w-3.5 h-3.5 mr-1.5" /> Deny
           </Button>
-          <Button onClick={onConfirm} disabled={pending}
-            className="bg-[var(--victory)] text-black hover:opacity-90">
+          <Button
+            onClick={onConfirm}
+            disabled={pending}
+            className="bg-[var(--victory)] text-black hover:opacity-90"
+          >
             <Check className="w-3.5 h-3.5 mr-1.5" /> Confirm
           </Button>
         </div>
