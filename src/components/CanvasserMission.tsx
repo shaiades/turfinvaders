@@ -144,7 +144,7 @@ export function CanvasserMission({
         </TabsContent>
 
         <TabsContent value="stats" className="mt-6">
-          <CanvasserStats stats={stats} onEditGoal={() => setTab("plan")} />
+          <CanvasserStats stats={stats} userId={userId} onEditGoal={() => setTab("plan")} />
         </TabsContent>
 
         <TabsContent value="learn" className="mt-6">

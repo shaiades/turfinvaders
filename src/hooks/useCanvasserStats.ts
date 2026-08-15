@@ -149,7 +149,10 @@ export function useCanvasserStats(userId: string) {
     const allRows = logsQuery.data ?? [];
     const w = laWeekStartISO(),
       m = laMonthStartISO();
-    const week = aggregate(allRows.filter((r) => r.log_date >= w));
+    // Mon–Sat, matching calc_weekly_paycheck (and clockedQuery below) —
+    // Sunday activity belongs to no pay week and must not preview into one.
+    const wEnd = addDaysISO(w, 5);
+    const week = aggregate(allRows.filter((r) => r.log_date >= w && r.log_date <= wEnd));
     const month = aggregate(allRows.filter((r) => r.log_date >= m));
 
     // The fetched window is max(week, month) — bucket each figure explicitly.
