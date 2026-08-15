@@ -29,7 +29,7 @@ export const syncBlockCards = createServerFn({ method: "POST" })
     if (roleErr) throw new Error(roleErr.message);
     const roles = (roleRows ?? []).map((r: { role: string }) => r.role);
     if (!roles.includes("owner") && !roles.includes("office_staff")) {
-      throw new Error("Only Owners or Office Staff can sync Close Kombat.");
+      throw new Error("Only Owners or Managers can sync Close Kombat.");
     }
 
     const { syncBoardsToBlockCards } = await import("@/lib/block-cards.server");

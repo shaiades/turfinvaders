@@ -51,10 +51,7 @@ export function primaryRole(roles: ReadonlyArray<AppRole | string>): AppRole | n
  *  BRAND-NEW account. Mirrors the createCanvasser/addTeamMember server rule —
  *  keep them in lockstep. Changing an EXISTING account's role is owner-only
  *  (set_user_role RPC, owner decision 2026-08-12). */
-export const LIMITED_CREATABLE_ROLES: readonly AppRole[] = [
-  "canvasser",
-  "sales_rep",
-] as const;
+export const LIMITED_CREATABLE_ROLES: readonly AppRole[] = ["canvasser", "sales_rep"] as const;
 
 /** Roles this actor may offer when CHANGING an existing account's role.
  *  Owner-only (owner decision 2026-08-12) — mirrors the set_user_role RPC;
@@ -96,11 +93,13 @@ export function canUseViewAs(role: AppRole | string | null | undefined): boolean
   return role === "owner";
 }
 
-/** Display labels/badge tones — shared by RosterPanel and Manage Players.
- *  office_staff surfaces as "Admin". */
+/** Display labels/badge tones — shared by RosterPanel and Manage Players. */
+// office_staff renders as "Manager" (owner decision 2026-08-14): the chain of
+// command reads Owner → Manager → Captain. The enum value stays office_staff —
+// it's baked into user_roles rows and RLS policies; only the label changed.
 export const ROLE_LABEL: Record<AppRole, string> = {
   owner: "Owner",
-  office_staff: "Admin",
+  office_staff: "Manager",
   captain: "Captain",
   sales_rep: "Sales Rep",
   canvasser: "Canvasser",
