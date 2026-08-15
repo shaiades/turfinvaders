@@ -78,6 +78,24 @@ export function laMidnightUtcISO(isoDate: string): string {
   return new Date(guess.getTime() - laHour * 3_600_000).toISOString(); // 01:00 during PDT → back 1h
 }
 
+/** "Aug 14, 2026 @ 04:26 PM" in Pacific time — turf provenance lines. */
+export function laDateTimeLabel(iso: string | Date): string {
+  const d = typeof iso === "string" ? new Date(iso) : iso;
+  const date = new Intl.DateTimeFormat("en-US", {
+    timeZone: LA_TZ,
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(d);
+  const time = new Intl.DateTimeFormat("en-US", {
+    timeZone: LA_TZ,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  }).format(d);
+  return `${date} @ ${time}`;
+}
+
 /** First of the month (YYYY-MM-01) containing a YYYY-MM-DD calendar date. */
 export function monthStartISO(iso: string): string {
   return `${iso.slice(0, 7)}-01`;
