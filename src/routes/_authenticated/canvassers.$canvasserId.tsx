@@ -7,6 +7,12 @@ import { supabase } from "@/integrations/supabase/client";
 import { formatCurrency } from "@/lib/utils";
 import { useDateRange } from "@/hooks/useDateRange";
 import { RangeTabs } from "@/components/RangeTabs";
+import {
+  DoorResultsGrid,
+  FunnelStageBars,
+  funnelStages,
+  type PinRowLite,
+} from "@/components/ConversionPanels";
 import { Lock, EyeOff } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/canvassers/$canvasserId")({
@@ -117,7 +123,7 @@ function CanvasserProfile() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("daily_logs")
-        .select("doors_knocked, people_talked_to, sales")
+        .select("doors_knocked, people_talked_to, confirmed_leads, demos_sits, sales")
         .eq("canvasser_id", canvasserId)
         .gte("log_date", range.startISO)
         .lte("log_date", range.endISO);
@@ -126,10 +132,29 @@ function CanvasserProfile() {
         (acc, r) => ({
           doors: acc.doors + (r.doors_knocked ?? 0),
           contacts: acc.contacts + (r.people_talked_to ?? 0),
+          leads: acc.leads + (r.confirmed_leads ?? 0),
+          sits: acc.sits + (r.demos_sits ?? 0),
           sales: acc.sales + (r.sales ?? 0),
         }),
-        { doors: 0, contacts: 0, sales: 0 },
+        { doors: 0, contacts: 0, leads: 0, sits: 0, sales: 0 },
       );
+    },
+  });
+
+  // What happened at this player's doors, result by result (same range).
+  const pinsQuery = useQuery({
+    enabled: isRealUser && canReadLogs,
+    queryKey: ["canvasser_pins_range", canvasserId, range.startISO, range.endISO],
+    placeholderData: (prev) => prev,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("field_pins")
+        .select("pin_type, is_remote_drop")
+        .eq("canvasser_id", canvasserId)
+        .gte("log_date", range.startISO)
+        .lte("log_date", range.endISO);
+      if (error) throw error;
+      return (data ?? []) as PinRowLite[];
     },
   });
 
@@ -227,20 +252,49 @@ function CanvasserProfile() {
             </ArcadePanel>
           )}
 
-          {canReadLogs && stats && stats.doors > 0 ? (
-            <ArcadePanel title="Conversion Funnel">
-              <div className="space-y-3">
-                <FunnelRow label="Doors knocked" value={stats.doors} max={stats.doors} />
-                <FunnelRow label="Contacts made" value={stats.contacts} max={stats.doors} />
-                <FunnelRow label="Sales closed" value={stats.sales} max={stats.doors} />
-              </div>
-              <div className="mt-4 text-xs text-muted-foreground">
-                Close rate ·{" "}
-                <span className="text-victory font-display">
-                  {stats.contacts > 0 ? ((stats.sales / stats.contacts) * 100).toFixed(1) : "0.0"}%
-                </span>
-              </div>
-            </ArcadePanel>
+          {canReadLogs && stats ? (
+            <>
+              <ArcadePanel
+                title="Conversion Funnel"
+                action={
+                  <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                    {range.label}
+                  </span>
+                }
+              >
+                {Object.values(stats).every((v) => v === 0) ? (
+                  <div className="text-sm text-muted-foreground">
+                    No funnel activity in this range yet.
+                  </div>
+                ) : (
+                  <FunnelStageBars
+                    stages={funnelStages({
+                      doors: stats.doors,
+                      talks: stats.contacts,
+                      leads: stats.leads,
+                      sits: stats.sits,
+                      sales: stats.sales,
+                    })}
+                  />
+                )}
+              </ArcadePanel>
+              <ArcadePanel
+                title="At the Door"
+                action={
+                  <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                    {range.label}
+                  </span>
+                }
+              >
+                {pinsQuery.isPending ? (
+                  <div className="text-sm text-muted-foreground">Loading pins…</div>
+                ) : pinsQuery.isError ? (
+                  <div className="text-sm text-muted-foreground">Couldn't load pins for this range.</div>
+                ) : (
+                  <DoorResultsGrid pins={pinsQuery.data ?? []} />
+                )}
+              </ArcadePanel>
+            </>
           ) : !canReadLogs ? (
             <ArcadePanel title="Conversion Funnel">
               <div className="flex items-center gap-3 text-sm text-muted-foreground">
@@ -255,17 +309,3 @@ function CanvasserProfile() {
   );
 }
 
-function FunnelRow({ label, value, max }: { label: string; value: number; max: number }) {
-  const pct = max ? (value / max) * 100 : 0;
-  return (
-    <div>
-      <div className="flex justify-between text-xs mb-1">
-        <span className="text-muted-foreground">{label}</span>
-        <span className="font-medium">{value.toLocaleString()}</span>
-      </div>
-      <div className="h-2 bg-surface-elevated rounded">
-        <div className="h-full rounded bg-primary" style={{ width: `${pct}%` }} />
-      </div>
-    </div>
-  );
-}
