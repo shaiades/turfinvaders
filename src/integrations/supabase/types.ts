@@ -995,6 +995,10 @@ export type Database = {
         }
         Returns: boolean
       }
+      merge_canvassers: {
+        Args: { _loser_ids: string[]; _keeper: string; _keep_name?: string }
+        Returns: Json
+      }
       my_team_id: { Args: { _user_id: string }; Returns: string }
       increment_leads_generated: {
         Args: { _canvasser_id: string; _metric_date: string; _office: string }
@@ -1003,6 +1007,10 @@ export type Database = {
       prepare_profile_deletion: { Args: { _target: string }; Returns: undefined }
       reactivate_agent: { Args: { _user_id: string }; Returns: undefined }
       real_owner_count: { Args: never; Returns: number }
+      rename_canvasser: {
+        Args: { _ids: string[]; _new_name: string }
+        Returns: Json
+      }
       refresh_canvasser_rank: {
         Args: { _canvasser_id: string }
         Returns: string

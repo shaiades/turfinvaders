@@ -9,6 +9,7 @@ import {
   Select,
   SelectContent,
   SelectItem,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -32,9 +33,13 @@ import {
   X,
   UserPlus,
   Lock,
+  Merge,
 } from "lucide-react";
 import { deleteProfile, deleteVan } from "@/lib/fleet.functions";
 import { AddAgentDialog } from "@/components/AddAgentDialog";
+import { RenameCanvasserDialog, type NameGroupRef } from "@/components/RenameCanvasserDialog";
+import { MergeCanvasserDialog } from "@/components/MergeCanvasserDialog";
+import { isLeadSourceName } from "@/lib/lead-sources";
 import { useAuth } from "@/hooks/useAuth";
 import { isManagerRole } from "@/lib/roles";
 import { canManageTarget } from "@/lib/role-policy";
@@ -93,6 +98,9 @@ export function FleetDispatchManage({
   const [addAgentOpen, setAddAgentOpen] = useState(false);
   const [addAgentVanId, setAddAgentVanId] = useState<string | null>(null);
   const [archivedOpen, setArchivedOpen] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<NameGroupRef | null>(null);
+  const [mergeSource, setMergeSource] = useState<NameGroupRef | null>(null);
+  const [mergePreset, setMergePreset] = useState<string | null>(null);
 
   const reactivateAgent = useMutation({
     mutationFn: async (userId: string) => {
@@ -569,6 +577,26 @@ export function FleetDispatchManage({
                                         }
                                       : undefined
                                   }
+                                  onRename={
+                                    canModify && !isLeadSourceName(r.display_name)
+                                      ? () =>
+                                          setRenameTarget({
+                                            key: nameKey,
+                                            display_name: r.display_name,
+                                          })
+                                      : undefined
+                                  }
+                                  onMerge={
+                                    canModify && !isLeadSourceName(r.display_name)
+                                      ? () => {
+                                          setMergePreset(null);
+                                          setMergeSource({
+                                            key: nameKey,
+                                            display_name: r.display_name,
+                                          });
+                                        }
+                                      : undefined
+                                  }
                                 />
                               );
                             })}
@@ -678,6 +706,26 @@ export function FleetDispatchManage({
                           }
                         : undefined
                     }
+                    onRename={
+                      canModify && !isLeadSourceName(p.display_name)
+                        ? () =>
+                            setRenameTarget({
+                              key: normalizeName(p.display_name),
+                              display_name: p.display_name,
+                            })
+                        : undefined
+                    }
+                    onMerge={
+                      canModify && !isLeadSourceName(p.display_name)
+                        ? () => {
+                            setMergePreset(null);
+                            setMergeSource({
+                              key: normalizeName(p.display_name),
+                              display_name: p.display_name,
+                            });
+                          }
+                        : undefined
+                    }
                   />
                 );
               })
@@ -767,6 +815,32 @@ export function FleetDispatchManage({
         vans={vans}
         initialVanId={addAgentVanId}
       />
+
+      {/* Rename / Combine — same dialogs as the dispatch board rows. */}
+      <RenameCanvasserDialog
+        open={!!renameTarget}
+        onOpenChange={(o) => {
+          if (!o) setRenameTarget(null);
+        }}
+        group={renameTarget}
+        profiles={allProfiles}
+        rolesByUser={rolesByUser}
+        onSwitchToMerge={(targetKey) => {
+          setMergeSource(renameTarget);
+          setMergePreset(targetKey);
+          setRenameTarget(null);
+        }}
+      />
+      <MergeCanvasserDialog
+        open={!!mergeSource}
+        onOpenChange={(o) => {
+          if (!o) setMergeSource(null);
+        }}
+        source={mergeSource}
+        profiles={allProfiles}
+        rolesByUser={rolesByUser}
+        presetTargetKey={mergePreset}
+      />
     </div>
   );
 }
@@ -783,6 +857,8 @@ function RosterRow({
   onMove,
   onArchive,
   onDelete,
+  onRename,
+  onMerge,
   isCaptain = false,
 }: {
   id: string;
@@ -794,6 +870,8 @@ function RosterRow({
   onMove?: (vanId: string | null) => void;
   onArchive?: () => void;
   onDelete?: () => void;
+  onRename?: () => void;
+  onMerge?: () => void;
   isCaptain?: boolean;
 }) {
   const isGhost = points === 0 && volume === 0;
@@ -813,11 +891,14 @@ function RosterRow({
       {vans && onMove && (
         // Sentinel-value Select: the trigger always reads "Move to…"/"Assign
         // Van…"; picking a destination fires onMove and the roster refetch
-        // re-renders the row wherever it landed.
+        // re-renders the row wherever it landed. Rename/Combine ride along in
+        // the same menu ("more options" — owner ask, 2026-08-15).
         <Select
           value="current"
           onValueChange={(val) => {
             if (val === "current") return;
+            if (val === "__rename") return onRename?.();
+            if (val === "__merge") return onMerge?.();
             onMove(val === "free" ? null : val);
           }}
         >
@@ -837,6 +918,21 @@ function RosterRow({
                 </span>
               </SelectItem>
             ))}
+            {(onRename || onMerge) && <SelectSeparator />}
+            {onRename && (
+              <SelectItem value="__rename">
+                <span className="inline-flex items-center gap-2">
+                  <Pencil className="w-3.5 h-3.5" /> Rename…
+                </span>
+              </SelectItem>
+            )}
+            {onMerge && (
+              <SelectItem value="__merge">
+                <span className="inline-flex items-center gap-2">
+                  <Merge className="w-3.5 h-3.5" /> Combine with another player…
+                </span>
+              </SelectItem>
+            )}
           </SelectContent>
         </Select>
       )}

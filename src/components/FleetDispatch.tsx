@@ -30,8 +30,16 @@ import {
   UserPlus,
   Archive,
   ArrowRightLeft,
+  Pencil,
+  Merge,
 } from "lucide-react";
-import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectSeparator,
+  SelectTrigger,
+} from "@/components/ui/select";
 import { toast } from "sonner";
 import {
   addDaysISO,
@@ -49,13 +57,16 @@ import {
 import { useWeekSelector } from "@/hooks/useWeekSelector";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { useAuth } from "@/hooks/useAuth";
-import { isManagerRole } from "@/lib/roles";
+import { canManageTarget, isManagerRole } from "@/lib/roles";
 import { isRecentlyActive, lastActiveMap } from "@/lib/suspension";
 import { formatCurrency, normalizeName } from "@/lib/utils";
+import { isLeadSourceKey } from "@/lib/lead-sources";
 import { DEFAULT_OFFICE, OFFICE_LOCATIONS } from "@/lib/offices";
 import { getDispatchProduction, type DispatchResults } from "@/lib/dispatch.functions";
 import { FleetDispatchManage } from "@/components/FleetDispatchManage";
 import { AddAgentDialog } from "@/components/AddAgentDialog";
+import { RenameCanvasserDialog, type NameGroupRef } from "@/components/RenameCanvasserDialog";
+import { MergeCanvasserDialog } from "@/components/MergeCanvasserDialog";
 import { useMoveAgents, useArchiveAgents } from "@/hooks/useRosterActions";
 import { ExecutiveSection } from "@/components/ExecutiveDashboard";
 
@@ -67,6 +78,7 @@ export type RosterProfile = {
   team_id: string | null;
   team_office: string | null;
   is_active: boolean | null;
+  is_placeholder: boolean | null;
   suspension_tracked: boolean;
   created_at: string;
 };
@@ -233,7 +245,7 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
         supabase
           .from("profiles")
           .select(
-            "id, display_name, office_location, team_id, is_active, suspension_tracked, created_at, teams:team_id(office_location)",
+            "id, display_name, office_location, team_id, is_active, is_placeholder, suspension_tracked, created_at, teams:team_id(office_location)",
           )
           .order("display_name"),
         supabase.from("user_roles").select("user_id, role"),
@@ -253,6 +265,7 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
           office_location: string | null;
           team_id: string | null;
           is_active: boolean | null;
+          is_placeholder: boolean | null;
           suspension_tracked: boolean;
           created_at: string;
           teams: { office_location: string | null } | null;
@@ -263,6 +276,7 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
         office_location: p.office_location,
         team_id: p.team_id,
         is_active: p.is_active,
+        is_placeholder: p.is_placeholder,
         suspension_tracked: p.suspension_tracked,
         created_at: p.created_at,
         team_office: p.teams?.office_location ?? null,
@@ -671,6 +685,12 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
   }, [rows, genByDay, workedDays, tab, dayPreset, dismissed, lastActiveBy, today, rolesByUser]);
 
   const canManage = !readOnly && isManagerRole(realRole);
+  // Row actions (move/rename/combine/archive) are role-gated, NOT page-gated
+  // — the suspension-✕ precedent (owner, 2026-08-12): captains have no
+  // COMMAND tab, so the read-only leaderboard is where they manage their
+  // people. ExecutiveSection, Manage Fleet, and the webhook cards stay
+  // page-gated behind !readOnly.
+  const canEditRows = isManagerRole(realRole);
 
   const footnote =
     tab === "day"
@@ -890,6 +910,9 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
           vans={vans}
           crossOfficeVanIds={crossOfficeVanIds}
           canManage={canManage}
+          canEditRows={canEditRows}
+          profiles={allProfiles}
+          rolesByUser={rolesByUser}
         />
       )}
 
@@ -1039,13 +1062,17 @@ function RowDivider() {
   return <span className="h-4 w-px bg-border justify-self-center" aria-hidden />;
 }
 
-/** Per-row roster controls shown to managers on the dashboard board. */
+/** Per-row roster controls shown to manager-tier viewers on both the
+ *  dashboard board and the leaderboard. currentVanId null = the row sits in
+ *  the unassigned pen (the menu reads "Assign Van…" and hides Free Agents). */
 type RowManage = {
   vans: Van[];
-  currentVanId: string;
+  currentVanId: string | null;
   busy: boolean;
   onMove: (vanId: string | null) => void;
   onArchive: () => void;
+  onRename: () => void;
+  onMerge: () => void;
 };
 
 /** The shared 15-cell stat run — funnel · divider · results · Pts · Volume.
@@ -1088,11 +1115,22 @@ function DispatchStatCells({ s, bold = false }: { s: DispatchStats; bold?: boole
   );
 }
 
-/** One rep's continuous line — field funnel first, then what the leads became. */
-function DispatchRow({ r, manage }: { r: FunnelRow; manage?: RowManage }) {
+/** One rep's continuous line — field funnel first, then what the leads became.
+ *  gridManage keeps a row aligned with its managed siblings when THIS row has
+ *  no controls (pseudo lead-sources, privileged targets) via an empty spacer
+ *  cell — the same idiom as the caption/header/total rows. */
+function DispatchRow({
+  r,
+  manage,
+  gridManage = false,
+}: {
+  r: FunnelRow;
+  manage?: RowManage;
+  gridManage?: boolean;
+}) {
   return (
     <div
-      className={`${rowGrid(!!manage)} px-2 py-1.5 rounded border border-border bg-surface transition-colors duration-200 hover:border-neon/60`}
+      className={`${rowGrid(gridManage || !!manage)} px-2 py-1.5 rounded border border-border bg-surface transition-colors duration-200 hover:border-neon/60`}
     >
       <span className="text-sm truncate flex items-center gap-1.5 min-w-0">
         <span aria-hidden>{r.sub > 0 ? "🔥" : "🍩"}</span>
@@ -1104,27 +1142,30 @@ function DispatchRow({ r, manage }: { r: FunnelRow; manage?: RowManage }) {
         )}
       </span>
       <DispatchStatCells s={r} />
+      {gridManage && !manage && <span />}
       {manage && (
         <span className="flex items-center justify-end gap-0.5">
           <Select
             value="current"
             onValueChange={(val) => {
               if (val === "current") return;
+              if (val === "__rename") return manage.onRename();
+              if (val === "__merge") return manage.onMerge();
               manage.onMove(val === "free" ? null : val);
             }}
           >
             <SelectTrigger
               disabled={manage.busy}
-              title="Move to another van"
+              title="Move · Rename · Combine"
               className="h-7 w-11 px-1.5 justify-center bg-background border-[color:var(--neon-blue)]/50 hover:border-[color:var(--neon-blue)]"
             >
               <ArrowRightLeft className="w-3.5 h-3.5" />
             </SelectTrigger>
             <SelectContent className="bg-background border-[color:var(--neon-blue)]/50">
               <SelectItem value="current" disabled>
-                Move to…
+                {manage.currentVanId ? "Move to…" : "Assign Van…"}
               </SelectItem>
-              <SelectItem value="free">Free Agents</SelectItem>
+              {manage.currentVanId && <SelectItem value="free">Free Agents</SelectItem>}
               {manage.vans.map((vn) => (
                 <SelectItem key={vn.id} value={vn.id} disabled={vn.id === manage.currentVanId}>
                   <span className="inline-flex items-center gap-2">
@@ -1136,6 +1177,17 @@ function DispatchRow({ r, manage }: { r: FunnelRow; manage?: RowManage }) {
                   </span>
                 </SelectItem>
               ))}
+              <SelectSeparator />
+              <SelectItem value="__rename">
+                <span className="inline-flex items-center gap-2">
+                  <Pencil className="w-3.5 h-3.5" /> Rename…
+                </span>
+              </SelectItem>
+              <SelectItem value="__merge">
+                <span className="inline-flex items-center gap-2">
+                  <Merge className="w-3.5 h-3.5" /> Combine with another player…
+                </span>
+              </SelectItem>
             </SelectContent>
           </Select>
           <button
@@ -1212,26 +1264,67 @@ function DispatchColHeader({ manage = false }: { manage?: boolean }) {
 
 /** The board: office panels → van cards → per-rep funnel rows, with per-van
  *  Points and Volume pills, plus the unassigned lead-source pen. When
- *  canManage is set (managers on the dashboard, never the leaderboard), each
- *  rep row gets Move/Remove controls and each van header a "+" add button —
- *  the same actions as Manage Fleet, right on the production board. */
+ *  canEditRows is set (manager tier, on the dashboard AND the leaderboard),
+ *  each rep row gets a Move/Rename/Combine menu + Remove button — per-target
+ *  gated by canManageTarget, never on pseudo lead-source rows. canManage
+ *  (dashboard only) additionally enables each van header's "+" add button. */
 function DispatchFleet({
   rows,
   vans,
   crossOfficeVanIds,
   canManage = false,
+  canEditRows = false,
+  profiles,
+  rolesByUser,
 }: {
   rows: FunnelRow[];
   vans: Van[];
   crossOfficeVanIds: Set<string>;
   canManage?: boolean;
+  canEditRows?: boolean;
+  profiles: RosterProfile[];
+  rolesByUser: Map<string, string[]>;
 }) {
   const { office: activeOffice, matches } = useOfficeFilter();
+  const { realRole } = useAuth();
   const moveAgents = useMoveAgents(vans);
   const archiveAgents = useArchiveAgents();
   const [addOpen, setAddOpen] = useState(false);
   const [addVanId, setAddVanId] = useState<string | null>(null);
+  const [renameTarget, setRenameTarget] = useState<NameGroupRef | null>(null);
+  const [mergeSource, setMergeSource] = useState<NameGroupRef | null>(null);
+  const [mergePreset, setMergePreset] = useState<string | null>(null);
   const busy = moveAgents.isPending || archiveAgents.isPending;
+
+  /** Row controls for a manager-tier viewer — or undefined (spacer only) for
+   *  pseudo lead-source rows and targets above the viewer's pay grade. */
+  const manageFor = (r: FunnelRow, currentVanId: string | null): RowManage | undefined => {
+    if (!canEditRows) return undefined;
+    if (isLeadSourceKey(r.g.key)) return undefined;
+    const targetRoles = r.g.ids.flatMap((id) => rolesByUser.get(id) ?? []);
+    if (!canManageTarget(realRole, targetRoles)) return undefined;
+    return {
+      vans,
+      currentVanId,
+      busy,
+      onMove: (vanId) =>
+        moveAgents.mutate({ ids: r.g.ids, vanId, name: r.g.display_name ?? "Agent" }),
+      onArchive: () => {
+        if (
+          confirm(
+            `Remove "${r.g.display_name}" from the roster? Their history and data are kept — reactivate anytime from Archived Agents.`,
+          )
+        ) {
+          archiveAgents.mutate({ ids: r.g.ids, name: r.g.display_name ?? "Agent" });
+        }
+      },
+      onRename: () => setRenameTarget(r.g),
+      onMerge: () => {
+        setMergePreset(null);
+        setMergeSource(r.g);
+      },
+    };
+  };
 
   // One pass over the roster per data change — rosters pre-sorted, totals
   // and captain names precomputed — instead of rebuilding maps and
@@ -1338,51 +1431,26 @@ function DispatchFleet({
                       </div>
                     ) : (
                       <div className="overflow-x-auto">
-                        <div className={`space-y-1.5 ${rowMinW(canManage)}`}>
-                          <DispatchGroupCaption manage={canManage} />
-                          <DispatchColHeader manage={canManage} />
+                        <div className={`space-y-1.5 ${rowMinW(canEditRows)}`}>
+                          <DispatchGroupCaption manage={canEditRows} />
+                          <DispatchColHeader manage={canEditRows} />
                           {/* The whole van at a glance — every stat the
                               canvassers below sum into. */}
                           <div
-                            className={`${rowGrid(canManage)} px-2 py-1.5 rounded border border-neon/40 bg-neon/5`}
+                            className={`${rowGrid(canEditRows)} px-2 py-1.5 rounded border border-neon/40 bg-neon/5`}
                           >
                             <span className="text-[10px] font-display uppercase tracking-widest text-neon truncate">
                               Van Total
                             </span>
                             <DispatchStatCells s={t} bold />
-                            {canManage && <span />}
+                            {canEditRows && <span />}
                           </div>
                           {roster.map((r) => (
                             <DispatchRow
                               key={r.g.key}
                               r={r}
-                              manage={
-                                canManage
-                                  ? {
-                                      vans,
-                                      currentVanId: v.id,
-                                      busy,
-                                      onMove: (vanId) =>
-                                        moveAgents.mutate({
-                                          ids: r.g.ids,
-                                          vanId,
-                                          name: r.g.display_name ?? "Agent",
-                                        }),
-                                      onArchive: () => {
-                                        if (
-                                          confirm(
-                                            `Remove "${r.g.display_name}" from the roster? Their history and data are kept — reactivate anytime from Archived Agents.`,
-                                          )
-                                        ) {
-                                          archiveAgents.mutate({
-                                            ids: r.g.ids,
-                                            name: r.g.display_name ?? "Agent",
-                                          });
-                                        }
-                                      },
-                                    }
-                                  : undefined
-                              }
+                              manage={manageFor(r, v.id)}
+                              gridManage={canEditRows}
                             />
                           ))}
                         </div>
@@ -1406,11 +1474,20 @@ function DispatchFleet({
             Lead Sources · Unassigned ({looseActive.length})
           </div>
           <div className="overflow-x-auto">
-            <div className={`space-y-1.5 ${ROW_MIN_W}`}>
-              <DispatchGroupCaption />
-              <DispatchColHeader />
+            <div className={`space-y-1.5 ${rowMinW(canEditRows)}`}>
+              <DispatchGroupCaption manage={canEditRows} />
+              <DispatchColHeader manage={canEditRows} />
+              {/* Junk name variants pile up exactly here (the Bouncer drops
+                  unmatched Monday names into this pen), so unassigned rows
+                  get the full menu too; pseudo lead-source rows come back
+                  undefined from manageFor and keep just the spacer. */}
               {looseActive.map((r) => (
-                <DispatchRow key={r.g.key} r={r} />
+                <DispatchRow
+                  key={r.g.key}
+                  r={r}
+                  manage={manageFor(r, null)}
+                  gridManage={canEditRows}
+                />
               ))}
             </div>
           </div>
@@ -1427,6 +1504,35 @@ function DispatchFleet({
           vans={vans}
           initialVanId={addVanId}
         />
+      )}
+
+      {canEditRows && (
+        <>
+          <RenameCanvasserDialog
+            open={!!renameTarget}
+            onOpenChange={(o) => {
+              if (!o) setRenameTarget(null);
+            }}
+            group={renameTarget}
+            profiles={profiles}
+            rolesByUser={rolesByUser}
+            onSwitchToMerge={(targetKey) => {
+              setMergeSource(renameTarget);
+              setMergePreset(targetKey);
+              setRenameTarget(null);
+            }}
+          />
+          <MergeCanvasserDialog
+            open={!!mergeSource}
+            onOpenChange={(o) => {
+              if (!o) setMergeSource(null);
+            }}
+            source={mergeSource}
+            profiles={profiles}
+            rolesByUser={rolesByUser}
+            presetTargetKey={mergePreset}
+          />
+        </>
       )}
     </div>
   );
