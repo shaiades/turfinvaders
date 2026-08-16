@@ -646,7 +646,12 @@ serve(async (req) => {
       return new Response('No canvasser', { status: 200, headers: corsHeaders })
     }
 
-    // Step 4: Fuzzy match canvasser
+    // Step 4: Match canvasser. Tier order matters:
+    //   exact live profile → recorded alias → fuzzy tiers → Bouncer.
+    // Exact outranks alias so a stale alias can never steal credit from a
+    // real person who later carries the name (new hire, rename-back);
+    // aliases outrank the fuzzy tiers because they are explicit manager
+    // decisions recorded by rename/merge in Fleet.
     const wanted = normalizeName(canvasserName)
     const { data: profiles } = await supabaseAdmin
       .from('profiles')
@@ -656,11 +661,45 @@ serve(async (req) => {
       .filter((p) => p.display_name)
       .map((p) => ({ ...p, _norm: normalizeName(p.display_name as string) }))
 
-    // Incoming Leads board: EXACT normalized match only. Distinct people share
-    // name fragments ("Ryan" in OC vs "Ian Ryan" in SD), and the substring
-    // tiers below would credit one person's leads to another. No exact match
-    // → the Bouncer provisions a separate profile, which is correct.
+    // Incoming Leads board: EXACT normalized match only (plus the unique-
+    // first-name tier below). Distinct people share name fragments ("Ryan"
+    // in OC vs "Ian Ryan" in SD), and the substring tiers would credit one
+    // person's leads to another. No match → the Bouncer provisions a
+    // separate profile, which is correct.
     let match = candidates.find((p) => p._norm === wanted)
+
+    // 4a: alias lookup — a rename/merge in Fleet records the old name in
+    // canvasser_aliases so Monday cards still carrying it credit the keeper.
+    // FAIL-SOFT: if the table doesn't exist yet (edge deployed before the
+    // hand-applied migration) or the lookup errors, fall through to the
+    // fuzzy cascade — ingestion must never break on this.
+    if (!match) {
+      try {
+        const { data: alias, error: aliasErr } = await supabaseAdmin
+          .from('canvasser_aliases')
+          .select('profile_id')
+          .eq('alias_norm', wanted)
+          .maybeSingle()
+        if (!aliasErr && alias?.profile_id) {
+          const target = candidates.find((p) => p.id === alias.profile_id)
+          if (target) {
+            match = target
+            await supabaseAdmin.from('webhook_logs').insert({
+              step: '4a_Alias_Hit',
+              data: {
+                canvasserName,
+                aliasNorm: wanted,
+                matchedId: target.id,
+                matchedName: target.display_name,
+              },
+            })
+          }
+        }
+      } catch (_) {
+        /* alias lookup must never break the pipeline */
+      }
+    }
+
     // A bare first name from the office ("Bobby") must not spawn a shadow
     // profile when exactly ONE profile carries that first name (owner,
     // 2026-08-10: Bobby's Friday lead credited a "Bobby" placeholder and
