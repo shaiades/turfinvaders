@@ -75,7 +75,7 @@ type TurfRow = {
 };
 
 function MyTerritoryPage() {
-  const { user, role } = useAuth();
+  const { user, role, loading } = useAuth();
   const qc = useQueryClient();
   const isManager = isManagerRole(role);
   const [me, setMe] = useState<LatLng | null>(null);
@@ -397,9 +397,13 @@ function MyTerritoryPage() {
   }, [editingTurfId, isModalOpen, turfsQuery.isSuccess, turfsQuery.isFetching, turfsQuery.data]);
 
   return (
-    // role == null (still resolving) keeps the gate up rather than flashing
-    // the map at a canvasser; GRATITUDE_GATE_ROLES decides who checks in.
-    <GratitudeGate userId={user?.id} bypass={role != null && !requiresGratitudeGate(role)}>
+    // GRATITUDE_GATE_ROLES decides who checks in; while auth is still
+    // resolving the gate holds a blank beat so neither variant flashes.
+    <GratitudeGate
+      userId={user?.id}
+      bypass={!loading && !requiresGratitudeGate(role)}
+      pending={loading}
+    >
       <div className="space-y-6">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <h1 className="font-display text-2xl text-neon">MY TERRITORY</h1>
