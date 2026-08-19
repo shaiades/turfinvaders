@@ -14,8 +14,9 @@ export function hasPassedGratitudeGate(userId: string | undefined): boolean {
   try { return !!window.localStorage.getItem(storageKey(userId)); } catch { return false; }
 }
 
-// bypass: the daily ritual is field-canvasser culture — the manager tier
-// skips straight to the content (owner decision 2026-08-19).
+// bypass: roles exempt from the daily ritual skip straight to the content —
+// GRATITUDE_GATE_ROLES in role-policy.ts says who checks in (owner decision
+// 2026-08-19: canvassers and captains do; owners, Admins, sales reps don't).
 export function GratitudeGate({
   userId, bypass = false, children,
 }: { userId: string | undefined; bypass?: boolean; children: React.ReactNode }) {

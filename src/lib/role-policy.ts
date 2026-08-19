@@ -40,6 +40,17 @@ export const CLOSE_KOMBAT_ROLES: readonly AppRole[] = [
   "sales_rep",
 ] as const;
 
+/** Daily Gratitude Gate on My Territory: canvassers AND captains do the
+ *  check-in — they work the field (owner decision 2026-08-19). Owners,
+ *  Admins, and sales reps skip straight to the map. Not a manager/admin
+ *  tier — don't swap this list for one of those. */
+export const GRATITUDE_GATE_ROLES: readonly AppRole[] = ["canvasser", "captain"] as const;
+
+export function requiresGratitudeGate(role: AppRole | string | null | undefined): boolean {
+  if (!role) return false;
+  return (GRATITUDE_GATE_ROLES as readonly string[]).includes(role);
+}
+
 /** Highest-priority role held: owner > office_staff > captain > sales_rep >
  *  canvasser; null when none of the app roles are present. */
 export function primaryRole(roles: ReadonlyArray<AppRole | string>): AppRole | null {

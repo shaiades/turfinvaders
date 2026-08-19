@@ -7,7 +7,7 @@ import { laTodayISO } from "@/lib/dates";
 import { useAuth } from "@/hooks/useAuth";
 import { dailyLogKeys } from "@/hooks/useDailyLogs";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
-import { isManagerRole } from "@/lib/roles";
+import { isManagerRole, requiresGratitudeGate } from "@/lib/roles";
 import { assigneeColor } from "@/lib/assignee-colors";
 import { ArcadePanel } from "@/components/arcade";
 import { NeonMap, type Territory, type FieldPin, type LatLng } from "@/components/NeonMap";
@@ -397,7 +397,9 @@ function MyTerritoryPage() {
   }, [editingTurfId, isModalOpen, turfsQuery.isSuccess, turfsQuery.isFetching, turfsQuery.data]);
 
   return (
-    <GratitudeGate userId={user?.id} bypass={isManager}>
+    // role == null (still resolving) keeps the gate up rather than flashing
+    // the map at a canvasser; GRATITUDE_GATE_ROLES decides who checks in.
+    <GratitudeGate userId={user?.id} bypass={role != null && !requiresGratitudeGate(role)}>
       <div className="space-y-6">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <h1 className="font-display text-2xl text-neon">MY TERRITORY</h1>
