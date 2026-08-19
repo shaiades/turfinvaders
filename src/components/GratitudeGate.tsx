@@ -17,15 +17,18 @@ export function hasPassedGratitudeGate(userId: string | undefined): boolean {
 // bypass: roles exempt from the daily ritual skip straight to the content —
 // GRATITUDE_GATE_ROLES in role-policy.ts says who checks in (owner decision
 // 2026-08-19: canvassers and captains do; owners, Admins, sales reps don't).
+// pending: role still resolving — hold a blank beat instead of flashing the
+// gate at an exempt role (or the map at a gated one) on cold loads.
 export function GratitudeGate({
-  userId, bypass = false, children,
-}: { userId: string | undefined; bypass?: boolean; children: React.ReactNode }) {
+  userId, bypass = false, pending = false, children,
+}: { userId: string | undefined; bypass?: boolean; pending?: boolean; children: React.ReactNode }) {
   const [unlocked, setUnlocked] = useState<boolean>(() => hasPassedGratitudeGate(userId));
   const [text, setText] = useState("");
 
   useEffect(() => { setUnlocked(hasPassedGratitudeGate(userId)); }, [userId]);
 
   if (bypass || unlocked) return <>{children}</>;
+  if (pending) return null;
 
   const submit = () => {
     const v = text.trim();
