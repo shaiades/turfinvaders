@@ -14,15 +14,17 @@ export function hasPassedGratitudeGate(userId: string | undefined): boolean {
   try { return !!window.localStorage.getItem(storageKey(userId)); } catch { return false; }
 }
 
+// bypass: the daily ritual is field-canvasser culture — the manager tier
+// skips straight to the content (owner decision 2026-08-19).
 export function GratitudeGate({
-  userId, children,
-}: { userId: string | undefined; children: React.ReactNode }) {
+  userId, bypass = false, children,
+}: { userId: string | undefined; bypass?: boolean; children: React.ReactNode }) {
   const [unlocked, setUnlocked] = useState<boolean>(() => hasPassedGratitudeGate(userId));
   const [text, setText] = useState("");
 
   useEffect(() => { setUnlocked(hasPassedGratitudeGate(userId)); }, [userId]);
 
-  if (unlocked) return <>{children}</>;
+  if (bypass || unlocked) return <>{children}</>;
 
   const submit = () => {
     const v = text.trim();
