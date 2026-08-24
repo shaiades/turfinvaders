@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MapContainer, TileLayer, Polygon, Polyline, Marker, useMapEvents, useMap } from "react-leaflet";
 import L from "leaflet";
+import { LocateFixed } from "lucide-react";
+import { PIN_COLORS, type PinType } from "@/lib/pin-results";
+
+// Canonical copy lives in lib/pin-results (SSR-safe); re-exported here so map
+// consumers keep a single import site.
+export { PIN_COLORS, PIN_LABELS } from "@/lib/pin-results";
 
 export type LatLng = { lat: number; lng: number };
 
@@ -16,103 +22,100 @@ export type Territory = {
 
 export type FieldPin = {
   id: string;
-  pin_type:
-    | "not_home"
-    | "talked_to"
-    | "lead"
-    | "knock"
-    | "not_interested"
-    | "renter"
-    | "appt"
-    | "go_back";
+  pin_type: PinType;
   lat: number;
   lng: number;
   is_remote_drop?: boolean;
   distance_m?: number | null;
+  created_at?: string;
+  /** Optimistic row awaiting server truth — rendered dimmed, not tappable. */
+  pending?: boolean;
 };
 
-// One color per knock result (matches the canvasser result picker); leads
-// keep their own star. Exported so every pin consumer (map, picker,
-// manager timeline) stays in sync.
-export const PIN_COLORS: Record<FieldPin["pin_type"], string> = {
-  not_home: "#ff2d55",
-  knock: "#00e5ff",
-  talked_to: "#ffd60a",
-  not_interested: "#ff6b00",
-  renter: "#c77dff",
-  go_back: "#00e5ff",
-  appt: "#ffd60a",
-  lead: "#39ff14",
-};
-
-export const PIN_LABELS: Record<FieldPin["pin_type"], string> = {
-  not_home: "NOT HOME",
-  knock: "KNOCK",
-  talked_to: "TALKED TO",
-  not_interested: "NOT INTERESTED",
-  renter: "RENTER",
-  go_back: "GO BACK",
-  appt: "APPT SET",
-  lead: "LEAD GENERATED",
-};
 const REMOTE_DROP_COLOR = "#8a8f99";
 
-function glowingDotIcon(color: string, size = 18) {
-  const html = `
-    <div style="
-      width:${size}px;height:${size}px;border-radius:9999px;
-      background:${color};
-      border:2px solid rgba(255,255,255,0.85);
-      box-shadow:0 0 12px ${color},0 0 22px ${color}88,inset 0 0 6px rgba(255,255,255,0.6);
-    "></div>`;
-  return L.divIcon({
-    html,
-    className: "neon-pin",
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size / 2],
+// L.divIcon is a stateless descriptor, so instances are safely shared across
+// markers. Caching keeps each marker's `icon` prop identity stable between
+// renders — this page re-renders on every GPS tick, and a fresh identity per
+// tick makes react-leaflet call setIcon and rebuild every marker's DOM.
+// Key space is tiny (a handful of colors × two hit sizes).
+const iconCache = new Map<string, L.DivIcon>();
+function cachedIcon(key: string, make: () => L.DivIcon): L.DivIcon {
+  let icon = iconCache.get(key);
+  if (!icon) {
+    icon = make();
+    iconCache.set(key, icon);
+  }
+  return icon;
+}
+
+// `hit` grows the tappable box past the visual dot (interactive pins need a
+// finger-sized target; an 18px dot alone is a dead zone on a phone).
+function glowingDotIcon(color: string, size = 18, hit = size) {
+  return cachedIcon(`dot|${color}|${size}|${hit}`, () => {
+    const html = `
+    <div style="width:${hit}px;height:${hit}px;display:flex;align-items:center;justify-content:center;">
+      <div style="
+        width:${size}px;height:${size}px;border-radius:9999px;
+        background:${color};
+        border:2px solid rgba(255,255,255,0.85);
+        box-shadow:0 0 12px ${color},0 0 22px ${color}88,inset 0 0 6px rgba(255,255,255,0.6);
+      "></div>
+    </div>`;
+    return L.divIcon({
+      html,
+      className: "neon-pin",
+      iconSize: [hit, hit],
+      iconAnchor: [hit / 2, hit / 2],
+    });
   });
 }
 
 function leadStarIcon(size = 34) {
-  const color = "#39ff14";
-  const half = size / 2;
-  const html = `
+  return cachedIcon(`star|${size}`, () => {
+    const color = "#39ff14";
+    const half = size / 2;
+    const html = `
     <div style="position:relative;width:${size}px;height:${size}px;">
       <div style="position:absolute;inset:-4px;border-radius:9999px;background:${color};opacity:.25;filter:blur(6px);animation:nm-star-pulse 1.8s ease-in-out infinite;"></div>
       <svg width="${size}" height="${size}" viewBox="0 0 24 24" style="position:absolute;inset:0;filter:drop-shadow(0 0 6px ${color}) drop-shadow(0 0 12px ${color}aa);">
         <polygon points="12,1.6 15.09,8.86 22.9,9.55 16.95,14.7 18.82,22.4 12,18.27 5.18,22.4 7.05,14.7 1.1,9.55 8.91,8.86"
           fill="${color}" stroke="#ffffff" stroke-width="1.2" stroke-linejoin="round" />
       </svg>
-    </div>
-    <style>@keyframes nm-star-pulse{0%,100%{transform:scale(1);opacity:.25}50%{transform:scale(1.35);opacity:.55}}</style>`;
-  return L.divIcon({
-    html,
-    className: "neon-lead-star",
-    iconSize: [size, size],
-    iconAnchor: [half, half],
+    </div>`;
+    return L.divIcon({
+      html,
+      className: "neon-lead-star",
+      iconSize: [size, size],
+      iconAnchor: [half, half],
+    });
   });
 }
 
-function flaggedPinIcon(size = 22) {
-  const color = REMOTE_DROP_COLOR;
-  const html = `
-    <div style="position:relative;width:${size}px;height:${size}px;">
-      <div style="position:absolute;inset:0;border-radius:9999px;background:${color};border:2px dashed #fff;box-shadow:0 0 10px ${color},0 0 0 2px #ff2d5588;animation:nm-flag 1.6s ease-in-out infinite;"></div>
-      <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font:700 11px/1 ui-sans-serif,system-ui;text-shadow:0 0 4px #000;">!</div>
-    </div>
-    <style>@keyframes nm-flag{0%,100%{box-shadow:0 0 10px ${color},0 0 0 2px #ff2d5588}50%{box-shadow:0 0 18px ${color},0 0 0 4px #ff2d55cc}}</style>`;
-  return L.divIcon({ html, className: "neon-pin-flag", iconSize: [size, size], iconAnchor: [size / 2, size / 2] });
+function flaggedPinIcon(size = 22, hit = size) {
+  return cachedIcon(`flag|${size}|${hit}`, () => {
+    const color = REMOTE_DROP_COLOR;
+    const html = `
+    <div style="width:${hit}px;height:${hit}px;display:flex;align-items:center;justify-content:center;">
+      <div style="position:relative;width:${size}px;height:${size}px;">
+        <div style="position:absolute;inset:0;border-radius:9999px;background:${color};border:2px dashed #fff;box-shadow:0 0 10px ${color},0 0 0 2px #ff2d5588;animation:nm-flag 1.6s ease-in-out infinite;"></div>
+        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font:700 11px/1 ui-sans-serif,system-ui;text-shadow:0 0 4px #000;">!</div>
+      </div>
+    </div>`;
+    return L.divIcon({ html, className: "neon-pin-flag", iconSize: [hit, hit], iconAnchor: [hit / 2, hit / 2] });
+  });
 }
 
 function pulseDotIcon(color: string) {
-  const html = `
+  return cachedIcon(`pulse|${color}`, () => {
+    const html = `
     <div style="position:relative;width:22px;height:22px;">
       <div style="position:absolute;inset:0;border-radius:9999px;background:${color};opacity:.35;animation:nm-pulse 1.4s ease-out infinite;"></div>
       <div style="position:absolute;inset:5px;border-radius:9999px;background:${color};border:2px solid #fff;box-shadow:0 0 14px ${color};"></div>
-    </div>
-    <style>@keyframes nm-pulse{0%{transform:scale(.6);opacity:.6}100%{transform:scale(2.6);opacity:0}}</style>`;
-  return L.divIcon({
-    html, className: "neon-pin-me", iconSize: [22, 22], iconAnchor: [11, 11],
+    </div>`;
+    return L.divIcon({
+      html, className: "neon-pin-me", iconSize: [22, 22], iconAnchor: [11, 11],
+    });
   });
 }
 
@@ -163,26 +166,53 @@ function FollowMe({ me, zoom = 18, lockRadiusKm = 2, disableLock = false, paused
   return null;
 }
 
-function LockToPolygon({ polygon, paddingRatio = 0.08 }: { polygon: LatLng[]; paddingRatio?: number }) {
+function LockToPolygon({ polygons, me, paddingRatio = 0.08 }: { polygons: LatLng[][]; me?: LatLng | null; paddingRatio?: number }) {
   const map = useMap();
   const sigRef = useRef("");
+  // Last turf-union clamp, kept so the out-of-bounds widening below is always
+  // "turf union + current position", never cumulative drift.
+  const paddedRef = useRef<L.LatLngBounds | null>(null);
   useEffect(() => {
-    if (polygon.length < 3) return;
-    // Re-fit when the locked turf actually changes (live reassignment swaps
-    // the canvasser's polygon without a remount).
-    const sig = polygon.map((p) => `${p.lat.toFixed(6)},${p.lng.toFixed(6)}`).join(";");
+    const rings = polygons.filter((p) => p.length >= 3);
+    if (rings.length === 0) return;
+    // Re-fit when the locked turf set actually changes (live reassignment
+    // swaps the canvasser's polygons without a remount).
+    const sig = rings
+      .map((ring) => ring.map((p) => `${p.lat.toFixed(6)},${p.lng.toFixed(6)}`).join(";"))
+      .join("|");
     if (sigRef.current === sig) return;
     sigRef.current = sig;
     // Clear the previous clamp first, or fitBounds gets constrained by it.
     map.setMaxBounds(null as unknown as L.LatLngBoundsExpression);
     map.setMinZoom(0);
-    const b = L.latLngBounds(polygon.map((p) => [p.lat, p.lng] as [number, number]));
+    // One bounds over every assigned turf — a canvasser with two areas can
+    // pan between both instead of being clamped inside the newest.
+    const b = L.latLngBounds([]);
+    rings.forEach((ring) => ring.forEach((p) => b.extend([p.lat, p.lng])));
     const padded = b.pad(paddingRatio);
+    paddedRef.current = padded;
     map.fitBounds(padded, { padding: [20, 20], animate: false });
     map.setMaxBounds(padded);
     map.setMinZoom(map.getZoom());
     map.setMaxZoom(20);
-  }, [map, polygon, paddingRatio]);
+  }, [map, polygons, paddingRatio]);
+
+  // Standing just outside the turf: widen the clamp so the "me" dot stays
+  // reachable (and FollowMe's in-bounds pan check passes again). `polygons`
+  // is a dep so a mid-shift reassignment (which resets the clamp above)
+  // re-widens immediately for a stationary phone instead of waiting for the
+  // next GPS tick.
+  useEffect(() => {
+    const padded = paddedRef.current;
+    if (!padded || !me) return;
+    if (padded.contains([me.lat, me.lng])) {
+      map.setMaxBounds(padded);
+      return;
+    }
+    const widened = L.latLngBounds(padded.getSouthWest(), padded.getNorthEast())
+      .extend(L.latLng(me.lat, me.lng).toBounds(120));
+    map.setMaxBounds(widened);
+  }, [map, me?.lat, me?.lng, polygons]);
   return null;
 }
 
@@ -207,7 +237,14 @@ function InvalidateOnMount() {
 type Mode =
   | { kind: "view" }
   | { kind: "draw"; onComplete: (polygon: LatLng[]) => void }
-  | { kind: "pin"; onDrop: (ll: LatLng) => void };
+  | {
+      kind: "pin";
+      onDrop: (ll: LatLng) => void;
+      /** Currently armed knock result — shown in the on-map badge. */
+      armed?: { label: string; color: string };
+      /** When true, map taps are ignored (page-level hold, e.g. no GPS). */
+      disabled?: boolean;
+    };
 
 export type HouseMarker = { id: string; lat: number; lng: number; name: string };
 
@@ -222,12 +259,14 @@ export const LEAD_STATUS_COLORS: Record<LeadStatus, string> = {
 };
 
 function leadPinIcon(color: string, solid: boolean, size = 20) {
-  const html = solid
-    ? `<div style="width:${size}px;height:${size}px;border-radius:9999px;background:${color};border:2px solid #fff;box-shadow:0 0 14px ${color},0 0 22px ${color}88;"></div>`
-    : `<div style="width:${size}px;height:${size}px;border-radius:9999px;background:transparent;border:3px solid ${color};box-shadow:0 0 10px ${color}aa, inset 0 0 6px ${color}55;"></div>`;
-  return L.divIcon({
-    html, className: "neon-lead-pin",
-    iconSize: [size, size], iconAnchor: [size / 2, size / 2],
+  return cachedIcon(`lead|${color}|${solid ? 1 : 0}|${size}`, () => {
+    const html = solid
+      ? `<div style="width:${size}px;height:${size}px;border-radius:9999px;background:${color};border:2px solid #fff;box-shadow:0 0 14px ${color},0 0 22px ${color}88;"></div>`
+      : `<div style="width:${size}px;height:${size}px;border-radius:9999px;background:transparent;border:3px solid ${color};box-shadow:0 0 10px ${color}aa, inset 0 0 6px ${color}55;"></div>`;
+    return L.divIcon({
+      html, className: "neon-lead-pin",
+      iconSize: [size, size], iconAnchor: [size / 2, size / 2],
+    });
   });
 }
 
@@ -453,8 +492,9 @@ export function NeonMap({
   center,
   height = 480,
   follow = false,
-  lockPolygon,
+  lockPolygons,
   onTerritoryClick,
+  onPinClick,
   pendingPolygon,
 }: {
   territories: Territory[];
@@ -467,8 +507,11 @@ export function NeonMap({
   center?: LatLng;
   height?: number;
   follow?: boolean;
-  lockPolygon?: LatLng[];
+  /** Clamp pan/zoom to the union of these rings (all of a canvasser's turfs). */
+  lockPolygons?: LatLng[][];
   onTerritoryClick?: (id: string) => void;
+  /** Makes field pins tappable (own-pin corrections). Omit = inert markers. */
+  onPinClick?: (id: string) => void;
   /** A drawn-but-unsaved ring, previewed dashed white until saved/discarded. */
   pendingPolygon?: LatLng[] | null;
 }) {
@@ -494,10 +537,12 @@ export function NeonMap({
     return pts;
   }, [territories, pins, me]);
 
+  const hasLock = !!lockPolygons?.some((p) => p.length >= 3);
+
   function handleClick(ll: LatLng) {
     if (Date.now() - justDrewRef.current < 400) return;
     if (mode.kind === "draw") setDraft((d) => [...d, ll]);
-    if (mode.kind === "pin") mode.onDrop(ll);
+    if (mode.kind === "pin" && !mode.disabled) mode.onDrop(ll);
   }
 
   function finishDraft() {
@@ -526,16 +571,18 @@ export function NeonMap({
         <TileLayer
           attribution='&copy; Esri'
           url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-          maxZoom={19}
+          maxNativeZoom={19}
+          maxZoom={20}
         />
         <TileLayer
           url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
-          maxZoom={19}
+          maxNativeZoom={19}
+          maxZoom={20}
         />
         <InvalidateOnMount />
         <ClickCapture onClick={handleClick} />
-        {lockPolygon && lockPolygon.length >= 3 && <LockToPolygon polygon={lockPolygon} />}
-        {follow ? <FollowMe me={me} disableLock={!!(lockPolygon && lockPolygon.length >= 3)} paused={mode.kind === "draw"} /> : allPoints.length > 0 && !lockPolygon && <FitBounds points={allPoints} />}
+        {hasLock && <LockToPolygon polygons={lockPolygons!} me={me} />}
+        {follow ? <FollowMe me={me} disableLock={hasLock} paused={mode.kind === "draw"} /> : allPoints.length > 0 && !hasLock && <FitBounds points={allPoints} />}
 
         {territories.map((t) => (
           <Polygon
@@ -613,20 +660,27 @@ export function NeonMap({
           <Marker key={h.id} position={[h.lat, h.lng]} icon={houseIcon(h.name)} />
         ))}
 
-        {pins.map((p) => (
-          <Marker
-            key={p.id}
-            position={[p.lat, p.lng]}
-            icon={
-              p.is_remote_drop
-                ? flaggedPinIcon()
-                : p.pin_type === "lead"
-                  ? leadStarIcon()
-                  : glowingDotIcon(PIN_COLORS[p.pin_type])
-            }
-          />
-
-        ))}
+        {pins.map((p) => {
+          const tappable = !!onPinClick && !p.pending;
+          return (
+            <Marker
+              key={p.id}
+              position={[p.lat, p.lng]}
+              opacity={p.pending ? 0.6 : 1}
+              // Inert markers must not swallow map taps — an untappable pin
+              // would otherwise be a dead zone over the door next to it.
+              interactive={tappable}
+              eventHandlers={tappable ? { click: () => onPinClick(p.id) } : undefined}
+              icon={
+                p.is_remote_drop
+                  ? flaggedPinIcon(22, tappable ? 30 : 22)
+                  : p.pin_type === "lead"
+                    ? leadStarIcon()
+                    : glowingDotIcon(PIN_COLORS[p.pin_type], 18, tappable ? 30 : 18)
+              }
+            />
+          );
+        })}
 
         {leads.map((l) => {
           const color = LEAD_STATUS_COLORS[l.status];
@@ -668,11 +722,38 @@ export function NeonMap({
         </div>
       )}
 
-      {/* Pin mode legend */}
+      {/* Pin mode legend — shows the armed result so a scrolled-away picker
+          can't silently mislabel a street of doors */}
       {mode.kind === "pin" && (
-        <div className="absolute top-3 right-3 z-[1000] rounded border border-neon/60 bg-surface/90 backdrop-blur px-3 py-2 font-display text-[10px] uppercase tracking-widest text-neon">
-          Tap map to drop pin
+        <div className="absolute top-3 right-3 z-[1000] flex items-center gap-2 rounded border border-neon/60 bg-surface/90 backdrop-blur px-3 py-2 font-display text-[10px] uppercase tracking-widest text-neon">
+          {mode.armed ? (
+            <>
+              <span
+                className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                style={{ background: mode.armed.color, boxShadow: `0 0 8px ${mode.armed.color}` }}
+              />
+              Dropping: {mode.armed.label}
+            </>
+          ) : (
+            "Tap map to drop pin"
+          )}
         </div>
+      )}
+
+      {/* Recenter on my location (Leaflet clamps the jump inside maxBounds) */}
+      {me && mode.kind !== "draw" && (
+        <button
+          type="button"
+          aria-label="Center map on my location"
+          onClick={() => {
+            const m = mapRef.current;
+            if (!m) return;
+            m.setView([me.lat, me.lng], Math.max(m.getZoom(), 17), { animate: true });
+          }}
+          className="absolute bottom-16 right-3 z-[1000] flex h-11 w-11 items-center justify-center rounded-full border border-neon/60 bg-surface/90 backdrop-blur text-neon"
+        >
+          <LocateFixed className="h-5 w-5" />
+        </button>
       )}
     </div>
   );

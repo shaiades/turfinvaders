@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { getPositionOrNull } from "@/lib/utils";
@@ -12,14 +12,26 @@ import { assigneeColor } from "@/lib/assignee-colors";
 import { ArcadePanel } from "@/components/arcade";
 import { NeonMap, type Territory, type FieldPin, type LatLng } from "@/components/NeonMap";
 import {
-  AreaDetailsSheet, DeleteAreaConfirmDialog,
-  type AssignableUser, type AreaDetailsTurf, type LastWorked,
+  AreaDetailsSheet,
+  DeleteAreaConfirmDialog,
+  type AssignableUser,
+  type AreaDetailsTurf,
+  type LastWorked,
 } from "@/components/AreaDetailsSheet";
+import { PinActionSheet } from "@/components/PinActionSheet";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import {
-  Home, Sparkles, Crosshair, Pencil, MapPin, Trash2,
-  ThumbsDown, KeyRound, Undo2, CalendarCheck,
+  Home,
+  Sparkles,
+  Crosshair,
+  Pencil,
+  MapPin,
+  Trash2,
+  ThumbsDown,
+  KeyRound,
+  Undo2,
+  CalendarCheck,
 } from "lucide-react";
 import { GratitudeGate } from "@/components/GratitudeGate";
 
@@ -27,7 +39,6 @@ export const Route = createFileRoute("/_authenticated/my-territory")({
   head: () => ({ meta: [{ title: "My Territory — Knockout" }] }),
   component: MyTerritoryPage,
 });
-
 
 function haversineMeters(a: LatLng, b: LatLng) {
   const R = 6371000;
@@ -44,12 +55,22 @@ type ActivePin = FieldPin["pin_type"];
 
 // The six knock results (owner directive 2026-08-15). Appt is map-only:
 // appointments and sales are counted from Monday.com, never from pins.
-const KNOCK_RESULTS: Array<{ type: ActivePin; label: string; color: string; icon: React.ReactNode }> = [
+const KNOCK_RESULTS: Array<{
+  type: ActivePin;
+  label: string;
+  color: string;
+  icon: React.ReactNode;
+}> = [
   { type: "lead", label: "Lead", color: "#39ff14", icon: <Sparkles className="w-4 h-4" /> },
   { type: "not_home", label: "NH", color: "#ff2d55", icon: <Home className="w-4 h-4" /> },
   { type: "go_back", label: "GB", color: "#00e5ff", icon: <Undo2 className="w-4 h-4" /> },
   { type: "renter", label: "Renter", color: "#c77dff", icon: <KeyRound className="w-4 h-4" /> },
-  { type: "not_interested", label: "NI", color: "#ff6b00", icon: <ThumbsDown className="w-4 h-4" /> },
+  {
+    type: "not_interested",
+    label: "NI",
+    color: "#ff6b00",
+    icon: <ThumbsDown className="w-4 h-4" />,
+  },
   { type: "appt", label: "Appt", color: "#ffd60a", icon: <CalendarCheck className="w-4 h-4" /> },
 ];
 
@@ -85,29 +106,55 @@ function MyTerritoryPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTurfId, setEditingTurfId] = useState<string | null>(null);
   const [listDeleteId, setListDeleteId] = useState<string | null>(null);
+  const [editingPinId, setEditingPinId] = useState<string | null>(null);
+  const [geoStatus, setGeoStatus] = useState<"acquiring" | "ok" | "denied" | "unavailable">(
+    "acquiring",
+  );
 
   useEffect(() => {
-    if (!navigator.geolocation) return;
+    if (!navigator.geolocation) {
+      setGeoStatus("unavailable");
+      return;
+    }
     const id = navigator.geolocation.watchPosition(
-      (pos) => setMe({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-      (err) => console.warn("geo err", err.message),
+      (pos) => {
+        setMe({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setGeoStatus("ok");
+      },
+      (err) => {
+        console.warn("geo err", err.message);
+        if (err.code === err.PERMISSION_DENIED) {
+          setGeoStatus("denied");
+          // Drop the stale fix too: keeping it would show "LIVE" and measure
+          // every pin from wherever the rep stood when permission was revoked,
+          // silently flagging real knocks as Remote Drops.
+          setMe(null);
+        } else {
+          setGeoStatus("unavailable");
+        }
+      },
       { enableHighAccuracy: true, maximumAge: 15000 },
     );
     return () => navigator.geolocation.clearWatch(id);
   }, []);
+
+  // One key per LA day: corrections are same-day by construction — after
+  // midnight a still-open tab rolls to a fresh (empty) pin list instead of
+  // letting yesterday's cached pins be edited. FieldMode invalidates the
+  // ["my_pins_today", uid] prefix, which still matches this key.
+  const todayISO = laTodayISO();
+  const pinsKey = useMemo(() => ["my_pins_today", user?.id, todayISO], [user?.id, todayISO]);
 
   // Turfs: managers see all, canvassers see only their assigned (enforced by RLS too)
   const turfsQuery = useQuery({
     enabled: !!user?.id,
     queryKey: ["turfs", user?.id, role],
     queryFn: async () => {
-      let q = supabase
-        .from("turfs")
-        .select(
-          `id, name, color, polygon_coordinates, assigned_user_id, assigned_by, assigned_at,
+      let q = supabase.from("turfs").select(
+        `id, name, color, polygon_coordinates, assigned_user_id, assigned_by, assigned_at,
            assignee:profiles!turfs_assigned_user_id_fkey(display_name),
            assigner:profiles!turfs_assigned_by_fkey(display_name)`,
-        );
+      );
       if (!isManager) q = q.eq("assigned_user_id", user!.id);
       const { data, error } = await q.order("created_at", { ascending: false });
       if (error) throw error;
@@ -122,6 +169,36 @@ function MyTerritoryPage() {
     invalidateKeys: [["turfs"], ["turf_history"]],
     enabled: !!user?.id,
   });
+
+  // "New area assigned" awareness — without this a mid-shift reassignment
+  // (realtime refetch) just silently snaps the map to a different polygon.
+  // Compare against the last-seen snapshot; first run writes it silently so a
+  // new device doesn't greet the canvasser with stale news.
+  useEffect(() => {
+    if (isManager || !user?.id || !turfsQuery.isSuccess) return;
+    const key = `turf-seen:v1:${user.id}`;
+    const turfs = turfsQuery.data ?? [];
+    const snapshot: Record<string, string> = {};
+    for (const t of turfs) snapshot[t.id] = t.assigned_at ?? "";
+    let stored: Record<string, string> | null = null;
+    try {
+      const raw = localStorage.getItem(key);
+      stored = raw ? (JSON.parse(raw) as Record<string, string>) : null;
+    } catch {
+      stored = null;
+    }
+    if (stored != null) {
+      const fresh = turfs.filter(
+        (t) => stored[t.id] === undefined || (t.assigned_at ?? "") > stored[t.id],
+      );
+      if (fresh.length > 0) toast.info("New area assigned — your map has been updated");
+    }
+    try {
+      localStorage.setItem(key, JSON.stringify(snapshot));
+    } catch {
+      /* private mode etc. — awareness degrades, pins still work */
+    }
+  }, [isManager, user?.id, turfsQuery.isSuccess, turfsQuery.data]);
 
   // Assignable users — canvassers, captains, and owners can all be assigned a turf
   const canvassersQuery = useQuery({
@@ -198,11 +275,11 @@ function MyTerritoryPage() {
 
   const pinsQuery = useQuery({
     enabled: !!user?.id,
-    queryKey: ["my_pins_today", user?.id],
+    queryKey: pinsKey,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("field_pins")
-        .select("id, pin_type, lat, lng, is_remote_drop, distance_m")
+        .select("id, pin_type, lat, lng, is_remote_drop, distance_m, created_at")
         .eq("canvasser_id", user!.id)
         .eq("log_date", laTodayISO());
       if (error) throw error;
@@ -211,21 +288,26 @@ function MyTerritoryPage() {
   });
 
   const territories: Territory[] = useMemo(
-    () => (turfsQuery.data ?? []).map((t) => ({
-      id: t.id,
-      name: t.name,
-      color: assigneeColor(t.assigned_user_id),
-      polygon: (t.polygon_coordinates ?? []) as LatLng[],
-      dashed: !t.assigned_user_id,
-      assignmentLabel: t.assigned_user_id
-        ? (t.assignee?.display_name ?? "Assigned")
-        : "Unassigned",
-    })),
+    () =>
+      (turfsQuery.data ?? []).map((t) => ({
+        id: t.id,
+        name: t.name,
+        color: assigneeColor(t.assigned_user_id),
+        polygon: (t.polygon_coordinates ?? []) as LatLng[],
+        dashed: !t.assigned_user_id,
+        assignmentLabel: t.assigned_user_id
+          ? (t.assignee?.display_name ?? "Assigned")
+          : "Unassigned",
+      })),
     [turfsQuery.data],
   );
 
   const saveTurf = useMutation({
-    mutationFn: async (payload: { name: string; assigned_user_id: string | null; polygon: LatLng[] }) => {
+    mutationFn: async (payload: {
+      name: string;
+      assigned_user_id: string | null;
+      polygon: LatLng[];
+    }) => {
       const { data: authData } = await supabase.auth.getUser();
       const uid = authData.user?.id;
       if (!uid) throw new Error("Not signed in — please refresh and sign in again.");
@@ -249,7 +331,9 @@ function MyTerritoryPage() {
       return data;
     },
     onSuccess: (_data, vars) => {
-      toast.success(vars.assigned_user_id ? "Area assigned successfully!" : "Area saved — unassigned");
+      toast.success(
+        vars.assigned_user_id ? "Area assigned successfully!" : "Area saved — unassigned",
+      );
       setPendingPolygon(null);
       setIsModalOpen(false);
       setDrawing(false);
@@ -276,7 +360,9 @@ function MyTerritoryPage() {
       if (error) throw new Error(error.message);
     },
     onSuccess: (_data, vars) => {
-      toast.success(vars.assigned_user_id ? "Area assigned successfully!" : "Area set to unassigned");
+      toast.success(
+        vars.assigned_user_id ? "Area assigned successfully!" : "Area set to unassigned",
+      );
       setEditingTurfId(null);
       setIsModalOpen(false);
       qc.invalidateQueries({ queryKey: ["turfs"] });
@@ -284,7 +370,6 @@ function MyTerritoryPage() {
     },
     onError: (e: Error) => toast.error(`Failed to reassign: ${e.message}`, { duration: 8000 }),
   });
-
 
   const deleteTurf = useMutation({
     mutationFn: async (id: string) => {
@@ -303,40 +388,128 @@ function MyTerritoryPage() {
   });
 
   const dropPin = useMutation({
-    mutationFn: async (ll: LatLng) => {
-      const fix = await getPositionOrNull({ enableHighAccuracy: true, maximumAge: 10000, timeout: 8000 });
+    // pin_type is captured at tap time — reading `active` in the callbacks
+    // could mislabel the toast if the rep switches results mid-flight.
+    mutationFn: async ({ ll, pin_type }: { ll: LatLng; pin_type: ActivePin }) => {
+      const fix = await getPositionOrNull({
+        enableHighAccuracy: true,
+        maximumAge: 10000,
+        timeout: 8000,
+      });
       const device = fix ? { lat: fix.coords.latitude, lng: fix.coords.longitude } : me;
-      const distance_m = device ? haversineMeters(device, ll) : null;
-      const is_remote_drop = distance_m == null ? true : distance_m > 18;
+      if (!device) {
+        // A no-GPS pin is guaranteed stat-dead (flagged Remote, bumps nothing)
+        // and sits on the rep's record forever — block it instead of inserting.
+        throw new Error("No GPS fix — pin not saved. Wait for the blue dot and try again.");
+      }
+      const distance_m = haversineMeters(device, ll);
+      const is_remote_drop = distance_m > 18;
       const { error } = await supabase.from("field_pins").insert({
         canvasser_id: user!.id,
-        pin_type: active,
+        pin_type,
         lat: ll.lat,
         lng: ll.lng,
         log_date: laTodayISO(),
-        device_lat: device?.lat ?? null,
-        device_lng: device?.lng ?? null,
+        device_lat: device.lat,
+        device_lng: device.lng,
         distance_m,
         is_remote_drop,
       });
       if (error) throw error;
-      return { is_remote_drop, distance_m };
+      return { is_remote_drop, distance_m, pin_type };
     },
-    onSuccess: ({ is_remote_drop, distance_m }) => {
+    // Serialize concurrent drops instead of dropping them: rapid taps on a
+    // duplex both land, in order, each with its own optimistic row.
+    scope: { id: "drop-pin" },
+    onMutate: async ({ ll, pin_type }) => {
+      // FieldMode pattern: haptic + optimistic synthetic row, so slow LTE
+      // shows the pin instantly instead of inviting a second tap.
+      try {
+        navigator.vibrate?.(15);
+      } catch {
+        /* ignore */
+      }
+      // Cancel any in-flight refetch first — a response snapshotted before
+      // this insert would otherwise land late and wipe the optimistic row.
+      await qc.cancelQueries({ queryKey: pinsKey });
+      qc.setQueryData<FieldPin[]>(pinsKey, (prev) => [
+        ...(prev ?? []),
+        {
+          id: `optimistic-${crypto.randomUUID()}`,
+          pin_type,
+          lat: ll.lat,
+          lng: ll.lng,
+          is_remote_drop: false,
+          pending: true,
+        },
+      ]);
+    },
+    onSuccess: ({ is_remote_drop, distance_m, pin_type }) => {
       if (is_remote_drop) {
-        const yds = distance_m != null ? Math.round(distance_m * 1.0936) : null;
-        toast.warning(`⚠ Remote Drop flagged${yds != null ? ` · ${yds} yds from pin` : ""}`, {
+        const yds = Math.round(distance_m * 1.0936);
+        toast.warning(`⚠ Remote Drop flagged · ${yds} yds from pin`, {
           description: "Pin won't count toward your stats. Walk to the door and try again.",
         });
       } else {
-        toast.success(RESULT_TOASTS[active] ?? "Pin dropped");
+        toast.success(RESULT_TOASTS[pin_type] ?? "Pin dropped");
       }
-      qc.invalidateQueries({ queryKey: ["my_pins_today", user?.id] });
       // bump_daily_log_from_pin has committed by now — refresh every
       // self-scoped daily_logs read (Log form, Stats, HUD, Active Run tally).
       if (user?.id) qc.invalidateQueries({ queryKey: dailyLogKeys.all(user.id) });
     },
     onError: (e: Error) => toast.error(e.message),
+    // Refetch server truth on both outcomes — reconciles the optimistic row
+    // (or removes it after an error).
+    onSettled: () => qc.invalidateQueries({ queryKey: pinsKey }),
+  });
+
+  // Same-day corrections: switch a mis-tapped pin's result or delete it.
+  // The extended bump trigger adjusts daily_logs counters on both ops.
+  // Same-day is enforced in three layers: the dated pinsKey (a stale tab
+  // rolls over at LA midnight), the .eq("log_date", today) guard here (a
+  // stale edit no-ops), and the DB fence in 20260824150000 (RLS).
+  const updatePin = useMutation({
+    mutationFn: async ({ id, pin_type }: { id: string; pin_type: ActivePin }) => {
+      const { error } = await supabase
+        .from("field_pins")
+        .update({ pin_type })
+        .eq("id", id)
+        .eq("log_date", laTodayISO());
+      if (error) throw error;
+    },
+    onMutate: async ({ id, pin_type }) => {
+      await qc.cancelQueries({ queryKey: pinsKey });
+      qc.setQueryData<FieldPin[]>(pinsKey, (prev) =>
+        (prev ?? []).map((p) => (p.id === id ? { ...p, pin_type } : p)),
+      );
+    },
+    onSuccess: () => {
+      toast.success("Pin updated — stats adjusted");
+      if (user?.id) qc.invalidateQueries({ queryKey: dailyLogKeys.all(user.id) });
+    },
+    onError: (e: Error) => toast.error(e.message),
+    onSettled: () => qc.invalidateQueries({ queryKey: pinsKey }),
+  });
+
+  const deletePin = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from("field_pins")
+        .delete()
+        .eq("id", id)
+        .eq("log_date", laTodayISO());
+      if (error) throw error;
+    },
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: pinsKey });
+      qc.setQueryData<FieldPin[]>(pinsKey, (prev) => (prev ?? []).filter((p) => p.id !== id));
+    },
+    onSuccess: () => {
+      toast.success("Pin deleted");
+      if (user?.id) qc.invalidateQueries({ queryKey: dailyLogKeys.all(user.id) });
+    },
+    onError: (e: Error) => toast.error(e.message),
+    onSettled: () => qc.invalidateQueries({ queryKey: pinsKey }),
   });
 
   const counts = useMemo(() => {
@@ -346,16 +519,65 @@ function MyTerritoryPage() {
     return byType;
   }, [pinsQuery.data]);
 
+  // Memoized (structural sharing keeps turfsQuery.data stable) — this page
+  // re-renders on every GPS tick, and a fresh array identity per tick would
+  // make LockToPolygon rebuild its per-vertex signature all shift long.
+  const lockPolygons = useMemo(
+    () =>
+      (turfsQuery.data ?? [])
+        .map((t) => (t.polygon_coordinates ?? []) as LatLng[])
+        .filter((p) => p.length >= 3),
+    [turfsQuery.data],
+  );
+
+  const armedResult = KNOCK_RESULTS.find((r) => r.type === active);
+  // Accidental double-taps (same spot, sub-second) are swallowed; distinct
+  // taps queue via the mutation scope, so working a duplex fast loses nothing.
+  const lastDropRef = useRef<{ t: number; ll: LatLng } | null>(null);
+
   // Managers never drop field pins — a stray map tap would insert a field_pins
   // row for them and bump their daily_logs via bump_daily_log_from_pin.
   const mapMode = drawing
-    ? { kind: "draw" as const, onComplete: (poly: LatLng[]) => { setPendingPolygon(poly); setIsModalOpen(true); } }
+    ? {
+        kind: "draw" as const,
+        onComplete: (poly: LatLng[]) => {
+          setPendingPolygon(poly);
+          setIsModalOpen(true);
+        },
+      }
     : isManager
       ? { kind: "view" as const }
-      : { kind: "pin" as const, onDrop: (ll: LatLng) => dropPin.mutate(ll) };
+      : {
+          kind: "pin" as const,
+          onDrop: (ll: LatLng) => {
+            // Block BEFORE the optimistic row: a no-GPS drop would otherwise
+            // buzz, show a pin for the 8 s fix wait, then silently vanish.
+            if (!me) {
+              toast.error("No GPS fix — pin not saved. Wait for the blue dot and try again.");
+              return;
+            }
+            const last = lastDropRef.current;
+            if (last && Date.now() - last.t < 600 && haversineMeters(last.ll, ll) < 8) return;
+            lastDropRef.current = { t: Date.now(), ll };
+            dropPin.mutate({ ll, pin_type: active });
+          },
+          armed: armedResult ? { label: armedResult.label, color: armedResult.color } : undefined,
+        };
+
+  // Canvasser page state: don't render a map when there's nothing to lock to —
+  // the empty/error cards say what's happening instead of a Kansas-centered map.
+  const canvasserGate: "loading" | "error" | "empty" | "ready" = isManager
+    ? "ready"
+    : turfsQuery.isPending
+      ? "loading"
+      : turfsQuery.isError
+        ? "error"
+        : (turfsQuery.data ?? []).length === 0
+          ? "empty"
+          : "ready";
 
   const editing = editingTurfId
-    ? (turfsQuery.data ?? []).find((t) => t.id === editingTurfId) ?? null
+    ? ((turfsQuery.data ?? []).find((t) => t.id === editingTurfId) ?? null)
     : null;
   const editingTurf: AreaDetailsTurf | null = editing
     ? {
@@ -378,7 +600,11 @@ function MyTerritoryPage() {
   }, [historyQuery.data]);
 
   const listDeleting = listDeleteId
-    ? (turfsQuery.data ?? []).find((t) => t.id === listDeleteId) ?? null
+    ? ((turfsQuery.data ?? []).find((t) => t.id === listDeleteId) ?? null)
+    : null;
+
+  const editingPin = editingPinId
+    ? ((pinsQuery.data ?? []).find((p) => p.id === editingPinId) ?? null)
     : null;
 
   // Another manager deleted the area this sheet is editing (realtime refetch
@@ -409,20 +635,51 @@ function MyTerritoryPage() {
           <h1 className="font-display text-2xl text-neon">MY TERRITORY</h1>
           <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground flex items-center gap-2">
             <Crosshair className="w-3 h-3 text-[#00e5ff]" />
-            {me ? `LIVE · ${me.lat.toFixed(4)}, ${me.lng.toFixed(4)}` : "Acquiring GPS…"}
+            {geoStatus === "denied" ? (
+              <span className="text-destructive">GPS OFF</span>
+            ) : me ? (
+              `LIVE · ${me.lat.toFixed(4)}, ${me.lng.toFixed(4)}`
+            ) : (
+              "Acquiring GPS…"
+            )}
           </div>
         </div>
+
+        {/* GPS trouble is invisible otherwise — and a no-GPS pin never counts */}
+        {!isManager && geoStatus === "denied" && (
+          <div className="rounded-lg border border-destructive/60 bg-destructive/10 p-3 text-sm text-destructive">
+            <div className="font-display text-[10px] uppercase tracking-widest mb-1">
+              Location blocked
+            </div>
+            Pins without GPS don't count. Enable Location for this site in your browser settings
+            (iPhone: Settings → Apps → Safari → Location · Android: tap the icon left of the address
+            bar), then reload.
+          </div>
+        )}
+        {!isManager && geoStatus !== "denied" && !me && (
+          <div className="rounded-lg border border-border bg-surface/60 p-3 text-sm text-muted-foreground">
+            Waiting for a GPS fix — pin drops unlock when the blue dot appears on the map.
+          </div>
+        )}
 
         {/* Manager toolbar */}
         {isManager && (
           <div className="flex flex-wrap items-center gap-3 rounded-lg border border-neon/40 bg-surface/60 p-3">
-            <div className="font-display text-[10px] uppercase tracking-widest text-neon">Turf Tools</div>
+            <div className="font-display text-[10px] uppercase tracking-widest text-neon">
+              Turf Tools
+            </div>
             {!drawing ? (
               <Button onClick={() => setDrawing(true)} className="gap-2">
                 <Pencil className="w-3.5 h-3.5" /> Draw New Area
               </Button>
             ) : (
-              <Button variant="outline" onClick={() => { setDrawing(false); setPendingPolygon(null); }}>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setDrawing(false);
+                  setPendingPolygon(null);
+                }}
+              >
                 Cancel Drawing
               </Button>
             )}
@@ -432,8 +689,36 @@ function MyTerritoryPage() {
           </div>
         )}
 
+        {/* Canvasser page states — a failed fetch must not look like "no turf" */}
+        {canvasserGate === "loading" && (
+          <ArcadePanel title="My Area">
+            <div className="text-sm text-muted-foreground">Loading your turf…</div>
+          </ArcadePanel>
+        )}
+        {canvasserGate === "error" && (
+          <ArcadePanel title="My Area">
+            <div className="space-y-3">
+              <div className="text-sm text-muted-foreground">
+                Couldn't load your area. Check your signal and try again.
+              </div>
+              <Button variant="outline" onClick={() => turfsQuery.refetch()}>
+                Retry
+              </Button>
+            </div>
+          </ArcadePanel>
+        )}
+        {canvasserGate === "empty" && (
+          <ArcadePanel title="My Area">
+            <div className="text-sm text-muted-foreground">
+              No area assigned yet — your manager assigns turf before the shift. Check back soon or
+              ping your captain. In the meantime you can still log knocks and leads from{" "}
+              <span className="text-neon">Active Run</span>.
+            </div>
+          </ArcadePanel>
+        )}
+
         {/* Canvasser knock-result picker */}
-        {!isManager && (
+        {!isManager && canvasserGate === "ready" && (
           <div className="grid grid-cols-3 gap-2 sm:gap-3">
             {KNOCK_RESULTS.map((r) => (
               <PinPicker
@@ -449,70 +734,134 @@ function MyTerritoryPage() {
           </div>
         )}
 
-        <div className="relative">
-          <NeonMap
-            territories={territories}
-            pins={isManager ? [] : (pinsQuery.data ?? [])}
-            houses={[]}
-            me={me}
-            height={560}
-            follow
-            lockPolygon={!isManager ? ((turfsQuery.data ?? [])[0]?.polygon_coordinates as LatLng[] | undefined) : undefined}
-            pendingPolygon={isManager ? pendingPolygon : undefined}
-            mode={mapMode}
-            onTerritoryClick={isManager && !drawing ? (id) => { setEditingTurfId(id); setIsModalOpen(true); } : undefined}
-          />
+        {canvasserGate === "ready" && (
+          <div className="relative">
+            <NeonMap
+              territories={territories}
+              pins={isManager ? [] : (pinsQuery.data ?? [])}
+              houses={[]}
+              me={me}
+              height={560}
+              follow
+              lockPolygons={!isManager ? lockPolygons : undefined}
+              pendingPolygon={isManager ? pendingPolygon : undefined}
+              mode={mapMode}
+              onTerritoryClick={
+                isManager && !drawing
+                  ? (id) => {
+                      setEditingTurfId(id);
+                      setIsModalOpen(true);
+                    }
+                  : undefined
+              }
+              onPinClick={!isManager ? (id) => setEditingPinId(id) : undefined}
+            />
 
-          {/* Floating fallback: always visible when a polygon is pending */}
-          {isManager && pendingPolygon && pendingPolygon.length >= 3 && !isModalOpen && (
-            <div className="absolute left-1/2 -translate-x-1/2 bottom-4 z-[1000] flex flex-col items-stretch gap-2 w-[calc(100%-1.5rem)] max-w-sm">
-              <Button
-                onClick={() => setIsModalOpen(true)}
-                className="font-display uppercase tracking-widest bg-victory text-black hover:bg-victory/90 shadow-[0_0_24px_rgba(57,255,20,0.6)] animate-pulse"
-              >
-                <MapPin className="w-4 h-4 mr-2" />
-                Assign Area ({pendingPolygon.length} pts)
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => { setPendingPolygon(null); setIsModalOpen(false); }}
-              >
-                Discard
-              </Button>
-            </div>
-          )}
-        </div>
+            {/* Compact armed-result switcher pinned to the map — the full picker
+              above scrolls away on phones while the map is being worked */}
+            {!isManager && (
+              <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-[1000] flex items-center gap-1.5 rounded-full border border-border bg-surface/90 backdrop-blur px-2 py-1.5">
+                {KNOCK_RESULTS.map((r) => {
+                  const isArmed = active === r.type;
+                  return (
+                    <button
+                      key={r.type}
+                      type="button"
+                      aria-label={`${r.label} — arm this result`}
+                      onClick={() => setActive(r.type)}
+                      className="relative flex h-10 w-10 items-center justify-center rounded-full"
+                      style={{
+                        color: r.color,
+                        background: isArmed
+                          ? `color-mix(in oklab, ${r.color} 22%, var(--surface))`
+                          : "transparent",
+                        boxShadow: isArmed
+                          ? `0 0 0 2px ${r.color}, 0 0 14px -2px ${r.color}`
+                          : "none",
+                      }}
+                    >
+                      {r.icon}
+                      <span
+                        className="absolute -top-1 -right-1 min-w-4 rounded-full bg-surface px-1 text-center font-display text-[9px] leading-4"
+                        style={{ color: r.color }}
+                      >
+                        {counts[r.type] ?? 0}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Floating fallback: always visible when a polygon is pending */}
+            {isManager && pendingPolygon && pendingPolygon.length >= 3 && !isModalOpen && (
+              <div className="absolute left-1/2 -translate-x-1/2 bottom-4 z-[1000] flex flex-col items-stretch gap-2 w-[calc(100%-1.5rem)] max-w-sm">
+                <Button
+                  onClick={() => setIsModalOpen(true)}
+                  className="font-display uppercase tracking-widest bg-victory text-black hover:bg-victory/90 shadow-[0_0_24px_rgba(57,255,20,0.6)] animate-pulse"
+                >
+                  <MapPin className="w-4 h-4 mr-2" />
+                  Assign Area ({pendingPolygon.length} pts)
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setPendingPolygon(null);
+                    setIsModalOpen(false);
+                  }}
+                >
+                  Discard
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Manager turf list */}
         {isManager && (
           <ArcadePanel title="Assigned Areas">
             {territories.length === 0 ? (
-              <div className="text-sm text-muted-foreground">No areas yet. Tap "Draw New Area" to define one.</div>
+              <div className="text-sm text-muted-foreground">
+                No areas yet. Tap "Draw New Area" to define one.
+              </div>
             ) : (
               <ul className="space-y-2">
                 {(turfsQuery.data ?? []).map((t) => {
                   const color = assigneeColor(t.assigned_user_id);
                   return (
-                    <li key={t.id} className="flex items-center justify-between gap-3 rounded border border-border bg-surface/60 p-3">
+                    <li
+                      key={t.id}
+                      className="flex items-center justify-between gap-3 rounded border border-border bg-surface/60 p-3"
+                    >
                       <button
                         type="button"
-                        onClick={() => { setEditingTurfId(t.id); setIsModalOpen(true); }}
+                        onClick={() => {
+                          setEditingTurfId(t.id);
+                          setIsModalOpen(true);
+                        }}
                         className="flex items-center gap-3 min-w-0 flex-1 text-left"
                       >
-                        <span className="inline-block w-3 h-3 rounded-full shrink-0" style={{ background: color, boxShadow: `0 0 8px ${color}` }} />
+                        <span
+                          className="inline-block w-3 h-3 rounded-full shrink-0"
+                          style={{ background: color, boxShadow: `0 0 8px ${color}` }}
+                        />
                         <div className="min-w-0">
-                          <div className="font-display text-sm text-foreground truncate">{t.name}</div>
+                          <div className="font-display text-sm text-foreground truncate">
+                            {t.name}
+                          </div>
                           <div className="text-[10px] uppercase tracking-widest text-muted-foreground truncate">
                             <MapPin className="inline w-3 h-3 mr-1" />
                             {t.assigned_user_id
                               ? (t.assignee?.display_name ?? "Unknown assignee")
                               : "Unassigned"}
-                            {" · "}{(t.polygon_coordinates ?? []).length} vertices
+                            {" · "}
+                            {(t.polygon_coordinates ?? []).length} vertices
                           </div>
                         </div>
                       </button>
                       <Button
-                        size="icon" variant="ghost"
+                        size="icon"
+                        variant="ghost"
                         onClick={() => setListDeleteId(t.id)}
                         className="text-destructive"
                       >
@@ -532,9 +881,25 @@ function MyTerritoryPage() {
             <ul className="text-sm text-muted-foreground space-y-1.5">
               <li>• Your assigned area appears as a colored boundary on the map.</li>
               <li>• Pick the result of the conversation above, then tap the house you knocked.</li>
-              <li>• <span className="text-[#39ff14]">Lead</span> · <span className="text-[#ff2d55]">NH = Not Home</span> · <span className="text-[#00e5ff]">GB = Go Back</span> · <span className="text-[#c77dff]">Renter</span> · <span className="text-[#ff6b00]">NI = Not Interested</span> · <span className="text-[#ffd60a]">Appt</span>.</li>
-              <li>• Appt pins mark the house only — appointments and sales are counted from Monday.</li>
-              <li>• Pins &gt; 20 yards from your GPS location are flagged as Remote Drops.</li>
+              <li>
+                • <span className="text-[#39ff14]">Lead</span> ·{" "}
+                <span className="text-[#ff2d55]">NH = Not Home</span> ·{" "}
+                <span className="text-[#00e5ff]">GB = Go Back</span> ·{" "}
+                <span className="text-[#c77dff]">Renter</span> ·{" "}
+                <span className="text-[#ff6b00]">NI = Not Interested</span> ·{" "}
+                <span className="text-[#ffd60a]">Appt</span>.
+              </li>
+              <li>
+                • Appt pins mark the house only — appointments and sales are counted from Monday.
+              </li>
+              <li>
+                • Pins dropped more than about 20 yards from where you stand are flagged as Remote
+                Drops and don't count.
+              </li>
+              <li>
+                • Mis-tap? Tap the pin to switch its result or delete it — your stats adjust
+                automatically (today only).
+              </li>
             </ul>
           </ArcadePanel>
         )}
@@ -551,7 +916,9 @@ function MyTerritoryPage() {
         }}
         mode={editingTurf ? "edit" : "create"}
         turf={editingTurf}
-        vertexCount={editingTurf ? (editing?.polygon_coordinates ?? []).length : (pendingPolygon?.length ?? 0)}
+        vertexCount={
+          editingTurf ? (editing?.polygon_coordinates ?? []).length : (pendingPolygon?.length ?? 0)
+        }
         users={canvassersQuery.data ?? []}
         lastWorked={editingTurf ? lastWorked : null}
         saving={saveTurf.isPending || updateTurf.isPending}
@@ -572,18 +939,54 @@ function MyTerritoryPage() {
       {/* Delete confirm for the Assigned Areas list */}
       <DeleteAreaConfirmDialog
         open={!!listDeleteId}
-        onOpenChange={(v) => { if (!v) setListDeleteId(null); }}
+        onOpenChange={(v) => {
+          if (!v) setListDeleteId(null);
+        }}
         areaName={listDeleting?.name ?? "this area"}
         deleting={deleteTurf.isPending}
-        onConfirm={() => { if (listDeleteId) deleteTurf.mutate(listDeleteId); }}
+        onConfirm={() => {
+          if (listDeleteId) deleteTurf.mutate(listDeleteId);
+        }}
+      />
+
+      {/* Pin corrections (canvasser-only): tap a pin → switch result / delete */}
+      <PinActionSheet
+        open={!isManager && !!editingPinId}
+        onOpenChange={(v) => {
+          if (!v) setEditingPinId(null);
+        }}
+        pin={editingPin}
+        results={KNOCK_RESULTS}
+        updating={updatePin.isPending}
+        deleting={deletePin.isPending}
+        onSelect={(pin_type) => {
+          if (editingPinId) updatePin.mutate({ id: editingPinId, pin_type });
+          setEditingPinId(null);
+        }}
+        onDelete={() => {
+          if (editingPinId) deletePin.mutate(editingPinId);
+          setEditingPinId(null);
+        }}
       />
     </GratitudeGate>
   );
 }
 
 function PinPicker({
-  label, count, color, icon, active, onClick,
-}: { label: string; count: number; color: string; icon: React.ReactNode; active: boolean; onClick: () => void }) {
+  label,
+  count,
+  color,
+  icon,
+  active,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  color: string;
+  icon: React.ReactNode;
+  active: boolean;
+  onClick: () => void;
+}) {
   return (
     <button
       onClick={onClick}
@@ -595,10 +998,16 @@ function PinPicker({
       }}
     >
       <div className="flex items-center justify-between gap-1 min-w-0">
-        <div className="flex items-center gap-1.5 font-display text-[9px] uppercase tracking-widest min-w-0 truncate" style={{ color }}>
+        <div
+          className="flex items-center gap-1.5 font-display text-[9px] uppercase tracking-widest min-w-0 truncate"
+          style={{ color }}
+        >
           {icon} <span className="truncate">{label}</span>
         </div>
-        <div className="font-display text-xl sm:text-2xl shrink-0" style={{ color, textShadow: `0 0 10px ${color}88` }}>
+        <div
+          className="font-display text-xl sm:text-2xl shrink-0"
+          style={{ color, textShadow: `0 0 10px ${color}88` }}
+        >
           {count}
         </div>
       </div>
