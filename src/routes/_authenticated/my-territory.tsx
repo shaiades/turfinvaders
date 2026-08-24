@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { getPositionOrNull } from "@/lib/utils";
@@ -123,12 +123,27 @@ function MyTerritoryPage() {
       },
       (err) => {
         console.warn("geo err", err.message);
-        setGeoStatus(err.code === err.PERMISSION_DENIED ? "denied" : "unavailable");
+        if (err.code === err.PERMISSION_DENIED) {
+          setGeoStatus("denied");
+          // Drop the stale fix too: keeping it would show "LIVE" and measure
+          // every pin from wherever the rep stood when permission was revoked,
+          // silently flagging real knocks as Remote Drops.
+          setMe(null);
+        } else {
+          setGeoStatus("unavailable");
+        }
       },
       { enableHighAccuracy: true, maximumAge: 15000 },
     );
     return () => navigator.geolocation.clearWatch(id);
   }, []);
+
+  // One key per LA day: corrections are same-day by construction — after
+  // midnight a still-open tab rolls to a fresh (empty) pin list instead of
+  // letting yesterday's cached pins be edited. FieldMode invalidates the
+  // ["my_pins_today", uid] prefix, which still matches this key.
+  const todayISO = laTodayISO();
+  const pinsKey = useMemo(() => ["my_pins_today", user?.id, todayISO], [user?.id, todayISO]);
 
   // Turfs: managers see all, canvassers see only their assigned (enforced by RLS too)
   const turfsQuery = useQuery({
@@ -260,7 +275,7 @@ function MyTerritoryPage() {
 
   const pinsQuery = useQuery({
     enabled: !!user?.id,
-    queryKey: ["my_pins_today", user?.id],
+    queryKey: pinsKey,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("field_pins")
@@ -403,7 +418,10 @@ function MyTerritoryPage() {
       if (error) throw error;
       return { is_remote_drop, distance_m, pin_type };
     },
-    onMutate: ({ ll, pin_type }) => {
+    // Serialize concurrent drops instead of dropping them: rapid taps on a
+    // duplex both land, in order, each with its own optimistic row.
+    scope: { id: "drop-pin" },
+    onMutate: async ({ ll, pin_type }) => {
       // FieldMode pattern: haptic + optimistic synthetic row, so slow LTE
       // shows the pin instantly instead of inviting a second tap.
       try {
@@ -411,10 +429,13 @@ function MyTerritoryPage() {
       } catch {
         /* ignore */
       }
-      qc.setQueryData<FieldPin[]>(["my_pins_today", user?.id], (prev) => [
+      // Cancel any in-flight refetch first — a response snapshotted before
+      // this insert would otherwise land late and wipe the optimistic row.
+      await qc.cancelQueries({ queryKey: pinsKey });
+      qc.setQueryData<FieldPin[]>(pinsKey, (prev) => [
         ...(prev ?? []),
         {
-          id: `optimistic-${Date.now()}`,
+          id: `optimistic-${crypto.randomUUID()}`,
           pin_type,
           lat: ll.lat,
           lng: ll.lng,
@@ -439,19 +460,26 @@ function MyTerritoryPage() {
     onError: (e: Error) => toast.error(e.message),
     // Refetch server truth on both outcomes — reconciles the optimistic row
     // (or removes it after an error).
-    onSettled: () => qc.invalidateQueries({ queryKey: ["my_pins_today", user?.id] }),
+    onSettled: () => qc.invalidateQueries({ queryKey: pinsKey }),
   });
 
   // Same-day corrections: switch a mis-tapped pin's result or delete it.
-  // The extended bump trigger adjusts daily_logs counters on both ops; the UI
-  // only ever surfaces today's pins, which is what makes these same-day-only.
+  // The extended bump trigger adjusts daily_logs counters on both ops.
+  // Same-day is enforced in three layers: the dated pinsKey (a stale tab
+  // rolls over at LA midnight), the .eq("log_date", today) guard here (a
+  // stale edit no-ops), and the DB fence in 20260824150000 (RLS).
   const updatePin = useMutation({
     mutationFn: async ({ id, pin_type }: { id: string; pin_type: ActivePin }) => {
-      const { error } = await supabase.from("field_pins").update({ pin_type }).eq("id", id);
+      const { error } = await supabase
+        .from("field_pins")
+        .update({ pin_type })
+        .eq("id", id)
+        .eq("log_date", laTodayISO());
       if (error) throw error;
     },
-    onMutate: ({ id, pin_type }) => {
-      qc.setQueryData<FieldPin[]>(["my_pins_today", user?.id], (prev) =>
+    onMutate: async ({ id, pin_type }) => {
+      await qc.cancelQueries({ queryKey: pinsKey });
+      qc.setQueryData<FieldPin[]>(pinsKey, (prev) =>
         (prev ?? []).map((p) => (p.id === id ? { ...p, pin_type } : p)),
       );
     },
@@ -460,25 +488,28 @@ function MyTerritoryPage() {
       if (user?.id) qc.invalidateQueries({ queryKey: dailyLogKeys.all(user.id) });
     },
     onError: (e: Error) => toast.error(e.message),
-    onSettled: () => qc.invalidateQueries({ queryKey: ["my_pins_today", user?.id] }),
+    onSettled: () => qc.invalidateQueries({ queryKey: pinsKey }),
   });
 
   const deletePin = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("field_pins").delete().eq("id", id);
+      const { error } = await supabase
+        .from("field_pins")
+        .delete()
+        .eq("id", id)
+        .eq("log_date", laTodayISO());
       if (error) throw error;
     },
-    onMutate: (id) => {
-      qc.setQueryData<FieldPin[]>(["my_pins_today", user?.id], (prev) =>
-        (prev ?? []).filter((p) => p.id !== id),
-      );
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: pinsKey });
+      qc.setQueryData<FieldPin[]>(pinsKey, (prev) => (prev ?? []).filter((p) => p.id !== id));
     },
     onSuccess: () => {
       toast.success("Pin deleted");
       if (user?.id) qc.invalidateQueries({ queryKey: dailyLogKeys.all(user.id) });
     },
     onError: (e: Error) => toast.error(e.message),
-    onSettled: () => qc.invalidateQueries({ queryKey: ["my_pins_today", user?.id] }),
+    onSettled: () => qc.invalidateQueries({ queryKey: pinsKey }),
   });
 
   const counts = useMemo(() => {
@@ -488,7 +519,21 @@ function MyTerritoryPage() {
     return byType;
   }, [pinsQuery.data]);
 
+  // Memoized (structural sharing keeps turfsQuery.data stable) — this page
+  // re-renders on every GPS tick, and a fresh array identity per tick would
+  // make LockToPolygon rebuild its per-vertex signature all shift long.
+  const lockPolygons = useMemo(
+    () =>
+      (turfsQuery.data ?? [])
+        .map((t) => (t.polygon_coordinates ?? []) as LatLng[])
+        .filter((p) => p.length >= 3),
+    [turfsQuery.data],
+  );
+
   const armedResult = KNOCK_RESULTS.find((r) => r.type === active);
+  // Accidental double-taps (same spot, sub-second) are swallowed; distinct
+  // taps queue via the mutation scope, so working a duplex fast loses nothing.
+  const lastDropRef = useRef<{ t: number; ll: LatLng } | null>(null);
 
   // Managers never drop field pins — a stray map tap would insert a field_pins
   // row for them and bump their daily_logs via bump_daily_log_from_pin.
@@ -504,12 +549,19 @@ function MyTerritoryPage() {
       ? { kind: "view" as const }
       : {
           kind: "pin" as const,
-          // isPending doubles as the double-tap guard: one insert at a time.
           onDrop: (ll: LatLng) => {
-            if (!dropPin.isPending) dropPin.mutate({ ll, pin_type: active });
+            // Block BEFORE the optimistic row: a no-GPS drop would otherwise
+            // buzz, show a pin for the 8 s fix wait, then silently vanish.
+            if (!me) {
+              toast.error("No GPS fix — pin not saved. Wait for the blue dot and try again.");
+              return;
+            }
+            const last = lastDropRef.current;
+            if (last && Date.now() - last.t < 600 && haversineMeters(last.ll, ll) < 8) return;
+            lastDropRef.current = { t: Date.now(), ll };
+            dropPin.mutate({ ll, pin_type: active });
           },
           armed: armedResult ? { label: armedResult.label, color: armedResult.color } : undefined,
-          disabled: dropPin.isPending,
         };
 
   // Canvasser page state: don't render a map when there's nothing to lock to —
@@ -583,10 +635,10 @@ function MyTerritoryPage() {
           <h1 className="font-display text-2xl text-neon">MY TERRITORY</h1>
           <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground flex items-center gap-2">
             <Crosshair className="w-3 h-3 text-[#00e5ff]" />
-            {me ? (
-              `LIVE · ${me.lat.toFixed(4)}, ${me.lng.toFixed(4)}`
-            ) : geoStatus === "denied" ? (
+            {geoStatus === "denied" ? (
               <span className="text-destructive">GPS OFF</span>
+            ) : me ? (
+              `LIVE · ${me.lat.toFixed(4)}, ${me.lng.toFixed(4)}`
             ) : (
               "Acquiring GPS…"
             )}
@@ -659,7 +711,8 @@ function MyTerritoryPage() {
           <ArcadePanel title="My Area">
             <div className="text-sm text-muted-foreground">
               No area assigned yet — your manager assigns turf before the shift. Check back soon or
-              ping your captain.
+              ping your captain. In the meantime you can still log knocks and leads from{" "}
+              <span className="text-neon">Active Run</span>.
             </div>
           </ArcadePanel>
         )}
@@ -690,13 +743,7 @@ function MyTerritoryPage() {
               me={me}
               height={560}
               follow
-              lockPolygons={
-                !isManager
-                  ? (turfsQuery.data ?? [])
-                      .map((t) => (t.polygon_coordinates ?? []) as LatLng[])
-                      .filter((p) => p.length >= 3)
-                  : undefined
-              }
+              lockPolygons={!isManager ? lockPolygons : undefined}
               pendingPolygon={isManager ? pendingPolygon : undefined}
               mode={mapMode}
               onTerritoryClick={

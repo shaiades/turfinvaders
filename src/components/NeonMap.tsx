@@ -34,10 +34,26 @@ export type FieldPin = {
 
 const REMOTE_DROP_COLOR = "#8a8f99";
 
+// L.divIcon is a stateless descriptor, so instances are safely shared across
+// markers. Caching keeps each marker's `icon` prop identity stable between
+// renders — this page re-renders on every GPS tick, and a fresh identity per
+// tick makes react-leaflet call setIcon and rebuild every marker's DOM.
+// Key space is tiny (a handful of colors × two hit sizes).
+const iconCache = new Map<string, L.DivIcon>();
+function cachedIcon(key: string, make: () => L.DivIcon): L.DivIcon {
+  let icon = iconCache.get(key);
+  if (!icon) {
+    icon = make();
+    iconCache.set(key, icon);
+  }
+  return icon;
+}
+
 // `hit` grows the tappable box past the visual dot (interactive pins need a
 // finger-sized target; an 18px dot alone is a dead zone on a phone).
 function glowingDotIcon(color: string, size = 18, hit = size) {
-  const html = `
+  return cachedIcon(`dot|${color}|${size}|${hit}`, () => {
+    const html = `
     <div style="width:${hit}px;height:${hit}px;display:flex;align-items:center;justify-content:center;">
       <div style="
         width:${size}px;height:${size}px;border-radius:9999px;
@@ -46,18 +62,20 @@ function glowingDotIcon(color: string, size = 18, hit = size) {
         box-shadow:0 0 12px ${color},0 0 22px ${color}88,inset 0 0 6px rgba(255,255,255,0.6);
       "></div>
     </div>`;
-  return L.divIcon({
-    html,
-    className: "neon-pin",
-    iconSize: [hit, hit],
-    iconAnchor: [hit / 2, hit / 2],
+    return L.divIcon({
+      html,
+      className: "neon-pin",
+      iconSize: [hit, hit],
+      iconAnchor: [hit / 2, hit / 2],
+    });
   });
 }
 
 function leadStarIcon(size = 34) {
-  const color = "#39ff14";
-  const half = size / 2;
-  const html = `
+  return cachedIcon(`star|${size}`, () => {
+    const color = "#39ff14";
+    const half = size / 2;
+    const html = `
     <div style="position:relative;width:${size}px;height:${size}px;">
       <div style="position:absolute;inset:-4px;border-radius:9999px;background:${color};opacity:.25;filter:blur(6px);animation:nm-star-pulse 1.8s ease-in-out infinite;"></div>
       <svg width="${size}" height="${size}" viewBox="0 0 24 24" style="position:absolute;inset:0;filter:drop-shadow(0 0 6px ${color}) drop-shadow(0 0 12px ${color}aa);">
@@ -65,34 +83,39 @@ function leadStarIcon(size = 34) {
           fill="${color}" stroke="#ffffff" stroke-width="1.2" stroke-linejoin="round" />
       </svg>
     </div>`;
-  return L.divIcon({
-    html,
-    className: "neon-lead-star",
-    iconSize: [size, size],
-    iconAnchor: [half, half],
+    return L.divIcon({
+      html,
+      className: "neon-lead-star",
+      iconSize: [size, size],
+      iconAnchor: [half, half],
+    });
   });
 }
 
 function flaggedPinIcon(size = 22, hit = size) {
-  const color = REMOTE_DROP_COLOR;
-  const html = `
+  return cachedIcon(`flag|${size}|${hit}`, () => {
+    const color = REMOTE_DROP_COLOR;
+    const html = `
     <div style="width:${hit}px;height:${hit}px;display:flex;align-items:center;justify-content:center;">
       <div style="position:relative;width:${size}px;height:${size}px;">
         <div style="position:absolute;inset:0;border-radius:9999px;background:${color};border:2px dashed #fff;box-shadow:0 0 10px ${color},0 0 0 2px #ff2d5588;animation:nm-flag 1.6s ease-in-out infinite;"></div>
         <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font:700 11px/1 ui-sans-serif,system-ui;text-shadow:0 0 4px #000;">!</div>
       </div>
     </div>`;
-  return L.divIcon({ html, className: "neon-pin-flag", iconSize: [hit, hit], iconAnchor: [hit / 2, hit / 2] });
+    return L.divIcon({ html, className: "neon-pin-flag", iconSize: [hit, hit], iconAnchor: [hit / 2, hit / 2] });
+  });
 }
 
 function pulseDotIcon(color: string) {
-  const html = `
+  return cachedIcon(`pulse|${color}`, () => {
+    const html = `
     <div style="position:relative;width:22px;height:22px;">
       <div style="position:absolute;inset:0;border-radius:9999px;background:${color};opacity:.35;animation:nm-pulse 1.4s ease-out infinite;"></div>
       <div style="position:absolute;inset:5px;border-radius:9999px;background:${color};border:2px solid #fff;box-shadow:0 0 14px ${color};"></div>
     </div>`;
-  return L.divIcon({
-    html, className: "neon-pin-me", iconSize: [22, 22], iconAnchor: [11, 11],
+    return L.divIcon({
+      html, className: "neon-pin-me", iconSize: [22, 22], iconAnchor: [11, 11],
+    });
   });
 }
 
@@ -175,7 +198,10 @@ function LockToPolygon({ polygons, me, paddingRatio = 0.08 }: { polygons: LatLng
   }, [map, polygons, paddingRatio]);
 
   // Standing just outside the turf: widen the clamp so the "me" dot stays
-  // reachable (and FollowMe's in-bounds pan check passes again).
+  // reachable (and FollowMe's in-bounds pan check passes again). `polygons`
+  // is a dep so a mid-shift reassignment (which resets the clamp above)
+  // re-widens immediately for a stationary phone instead of waiting for the
+  // next GPS tick.
   useEffect(() => {
     const padded = paddedRef.current;
     if (!padded || !me) return;
@@ -186,7 +212,7 @@ function LockToPolygon({ polygons, me, paddingRatio = 0.08 }: { polygons: LatLng
     const widened = L.latLngBounds(padded.getSouthWest(), padded.getNorthEast())
       .extend(L.latLng(me.lat, me.lng).toBounds(120));
     map.setMaxBounds(widened);
-  }, [map, me?.lat, me?.lng]);
+  }, [map, me?.lat, me?.lng, polygons]);
   return null;
 }
 
@@ -216,7 +242,7 @@ type Mode =
       onDrop: (ll: LatLng) => void;
       /** Currently armed knock result — shown in the on-map badge. */
       armed?: { label: string; color: string };
-      /** True while a drop is in flight — map taps are ignored. */
+      /** When true, map taps are ignored (page-level hold, e.g. no GPS). */
       disabled?: boolean;
     };
 
@@ -233,12 +259,14 @@ export const LEAD_STATUS_COLORS: Record<LeadStatus, string> = {
 };
 
 function leadPinIcon(color: string, solid: boolean, size = 20) {
-  const html = solid
-    ? `<div style="width:${size}px;height:${size}px;border-radius:9999px;background:${color};border:2px solid #fff;box-shadow:0 0 14px ${color},0 0 22px ${color}88;"></div>`
-    : `<div style="width:${size}px;height:${size}px;border-radius:9999px;background:transparent;border:3px solid ${color};box-shadow:0 0 10px ${color}aa, inset 0 0 6px ${color}55;"></div>`;
-  return L.divIcon({
-    html, className: "neon-lead-pin",
-    iconSize: [size, size], iconAnchor: [size / 2, size / 2],
+  return cachedIcon(`lead|${color}|${solid ? 1 : 0}|${size}`, () => {
+    const html = solid
+      ? `<div style="width:${size}px;height:${size}px;border-radius:9999px;background:${color};border:2px solid #fff;box-shadow:0 0 14px ${color},0 0 22px ${color}88;"></div>`
+      : `<div style="width:${size}px;height:${size}px;border-radius:9999px;background:transparent;border:3px solid ${color};box-shadow:0 0 10px ${color}aa, inset 0 0 6px ${color}55;"></div>`;
+    return L.divIcon({
+      html, className: "neon-lead-pin",
+      iconSize: [size, size], iconAnchor: [size / 2, size / 2],
+    });
   });
 }
 

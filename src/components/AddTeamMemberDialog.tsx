@@ -54,7 +54,7 @@ export function AddTeamMemberDialog({ variant = "default" }: { variant?: "defaul
       qc.invalidateQueries({ queryKey: ["dispatch_roster"] });
       qc.invalidateQueries({ queryKey: ["profiles"] });
       qc.invalidateQueries({ queryKey: ["fleet"] });
-      qc.invalidateQueries({ queryKey: ["territories"] });
+      qc.invalidateQueries({ queryKey: ["turfs"] });
       qc.invalidateQueries({ queryKey: ["leaderboard"] });
       qc.invalidateQueries({ queryKey: ["canvassers"] });
       // Broad safety net for any query keyed on profile lists.
