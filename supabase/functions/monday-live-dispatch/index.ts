@@ -802,9 +802,12 @@ serve(async (req) => {
     // funnel: Pending / Confirmed / Future / Blow-Out / N/A. Any card with an
     // exact-matching Agent credits, wherever it now sits on the board, and
     // Rep Reset cards count (owner decisions 2026-07-24). "Future Reconf" is
-    // deliberately unmapped. Transition semantics mirror the Block path:
-    // undo the previous bucket (floor 0), apply the new one. Never touches
-    // daily_logs, leads_submitted, or the sale sync.
+    // deliberately unmapped. Counts are attributed to the day the lead was
+    // SUBMITTED (Jorge Najera, 2026-08-24) — a Friday lead confirmed Monday
+    // updates Friday's funnel, not Monday's. Transition semantics mirror the
+    // Block path: undo the previous bucket on the day it was counted (the
+    // prior marker's metric_date), apply the new one on the attributed day.
+    // Never touches daily_logs, leads_submitted, or the sale sync.
     if (isLeadStatusEvent) {
       const mapLeadStatus = (value: string | undefined): string | null => {
         const v = (value || '').trim().toLowerCase()
@@ -816,58 +819,219 @@ serve(async (req) => {
         if (v.startsWith('n/a')) return 'no_answers'
         return null
       }
-      const statusBucket = mapLeadStatus(changedValue)
-      const statusPrevBucket = mapLeadStatus(previousStatusFromEvent)
-      if (statusBucket === statusPrevBucket) {
+      // Board truth over the event's frozen label: a stale retry (its flip
+      // was superseded while it sat in Monday's retry queue) must converge on
+      // the card's CURRENT Lead Status, not re-apply a backwards transition.
+      // changedCol is the re-fetched Lead Status column itself (the branch is
+      // scoped to LEAD_STATUS_COL_ID); the event label is only a fallback for
+      // the freak case where the re-fetched item lacks the column.
+      const currentStatusValue = (changedCol ? changedCol.text || '' : statusFromEvent || '').trim()
+      const statusBucket = mapLeadStatus(currentStatusValue)
+      const pid = String(pulseId)
+      const flipDate = todayLA()
+      const statusOffice = boardOffice ?? match.office_location ?? 'San Diego'
+
+      // Prior state and submission day both come from this card's own markers
+      // (indexed by webhook_logs_step_pulse_created_idx).
+      const [stQ, genQ] = await Promise.all([
+        supabaseAdmin.from('webhook_logs').select('id, data, created_at')
+          .eq('step', 'Lead_Status_Processed')
+          .eq('data->>pulseId', pid)
+          .order('created_at', { ascending: true })
+          .order('id', { ascending: true }),
+        supabaseAdmin.from('webhook_logs').select('step, data, created_at')
+          .in('step', ['Lead_Generated_Processed', 'Lead_Generated_Credited'])
+          .eq('data->>pulseId', pid),
+      ])
+      if (stQ.error || genQ.error) {
+        await supabaseAdmin.from('webhook_logs').insert({
+          step: 'Lead_Status_Marker_Read_Error',
+          data: { pulseId: pid, error: stQ.error?.message ?? genQ.error?.message ?? null },
+        })
+        // A blind write could double-count or strand a bucket — let Monday retry.
+        return new Response('Lead status marker read failed', { status: 502, headers: corsHeaders })
+      }
+      const statusMarkers = (stQ.data ?? []) as Array<{ id: string; data: Record<string, unknown> | null; created_at: string }>
+      const earliest = statusMarkers[0] ?? null
+      const latest = statusMarkers[statusMarkers.length - 1] ?? null
+      const genRows = (genQ.data ?? []) as Array<{ step: string; data: Record<string, unknown> | null; created_at: string }>
+      const genProcessed = genRows.find((r) => r.step === 'Lead_Generated_Processed') ?? null
+      const genCredited = genRows.find((r) => r.step === 'Lead_Generated_Credited') ?? null
+
+      // Previous state is MARKER-derived, never event-derived: the marker's
+      // metric_date is the row its +1 actually sits on (receipt-day era and
+      // attributed era alike), so the decrement lands where the count is.
+      // The event's previousValue only feeds the no-marker no-op check — a
+      // never-counted previous state must not steal a unit from another pulse.
+      const latestRec = (latest?.data ?? {}) as {
+        recordedAs?: string | null
+        metric_date?: string
+        canvasser_id?: string
+      }
+      const prevBucket = latest ? ((latestRec.recordedAs as string | null) ?? null) : null
+      const prevDate = latest
+        ? (latestRec.metric_date ?? laDateOf(latest.created_at) ?? flipDate)
+        : null
+
+      const effectivePrev = latest ? prevBucket : mapLeadStatus(previousStatusFromEvent)
+      if (statusBucket === effectivePrev) {
         await supabaseAdmin.from('webhook_logs').insert({
           step: 'Lead_Status_Noop',
           data: {
-            pulseId: String(pulseId),
+            pulseId: pid,
             from: previousStatusFromEvent ?? null,
-            to: changedValue,
+            to: currentStatusValue,
+            eventTo: changedValue,
+            dedupedBy: latest ? 'marker' : 'event',
             note: statusBucket ? 'Same funnel bucket' : 'Neither value maps to a funnel bucket',
           },
         })
         return new Response('No-op (lead status)', { status: 200, headers: corsHeaders })
       }
 
-      const statusDate = todayLA()
-      const statusOffice = boardOffice ?? match.office_location ?? 'San Diego'
-      const FUNNEL_KEYS = ['leads_confirmed', 'no_answers', 'killed', 'pending', 'future']
-
-      const { data: statusRow } = await supabaseAdmin
-        .from('daily_metrics')
-        .select('id, leads_confirmed, no_answers, killed, pending, future')
-        .eq('canvasser_id', match.id)
-        .eq('metric_date', statusDate)
-        .maybeSingle()
-      const statusCur: Record<string, number> = statusRow ?? {
-        leads_confirmed: 0, no_answers: 0, killed: 0, pending: 0, future: 0,
+      // Attribution day — the day the lead was submitted, by best evidence:
+      // gen marker (exact) → gen claim receipt day → the day this card first
+      // counted (pre-pipeline/recycled cards stay pinned where they landed) →
+      // the Monday item's own birth day (recycled cards never get gen markers;
+      // clamped to 14 days so stale recycles can't rewrite closed history) →
+      // today.
+      let attributedDate = flipDate
+      let attributedVia = 'flip_day'
+      if (genProcessed) {
+        const rec = (genProcessed.data ?? {}) as { metric_date?: string }
+        attributedDate = rec.metric_date ?? laDateOf(genProcessed.created_at) ?? flipDate
+        attributedVia = 'lead_generated_processed'
+      } else if (genCredited) {
+        attributedDate = laDateOf(genCredited.created_at) ?? flipDate
+        attributedVia = 'lead_generated_credited'
+      } else if (earliest) {
+        const rec = (earliest.data ?? {}) as { metric_date?: string }
+        attributedDate = rec.metric_date ?? laDateOf(earliest.created_at) ?? flipDate
+        attributedVia = 'first_status_marker'
+      } else {
+        const born = laDateOf((item as { created_at?: string }).created_at ?? null)
+        const cutoff = laDateOf(new Date(Date.now() - 14 * 86400000).toISOString())
+        if (born && cutoff && born >= cutoff && born <= flipDate) {
+          attributedDate = born
+          attributedVia = 'item_created_at'
+        }
       }
-      const statusNext: Record<string, number> = { ...statusCur }
-      if (statusPrevBucket && FUNNEL_KEYS.includes(statusPrevBucket)) {
-        statusNext[statusPrevBucket] = Math.max(0, (statusCur[statusPrevBucket] ?? 0) - 1)
+
+      // The decrement targets the canvasser whose row holds the +1 — the
+      // marker's canvasser_id, not the Agent matched NOW (the office edits
+      // Agent cells between flips). Merged-away profiles remap to the keeper
+      // (merge_canvassers repoints daily_metrics but markers keep the loser).
+      let prevCanvasser = latest ? (latestRec.canvasser_id ?? match.id) : match.id
+      if (prevCanvasser !== match.id) {
+        const { data: prevProf } = await supabaseAdmin
+          .from('profiles')
+          .select('id, merged_into')
+          .eq('id', prevCanvasser)
+          .maybeSingle()
+        if (!prevProf) prevCanvasser = match.id
+        else if (prevProf.merged_into) prevCanvasser = prevProf.merged_into as string
+      }
+
+      const FUNNEL_KEYS = ['leads_confirmed', 'no_answers', 'killed', 'pending', 'future']
+      const statusDeltas = new Map<string, { canvasser: string; date: string; cols: Record<string, number> }>()
+      const addStatusDelta = (canvasser: string, date: string, col: string, d: number) => {
+        const key = `${canvasser}|${date}`
+        const e = statusDeltas.get(key) ?? { canvasser, date, cols: {} }
+        e.cols[col] = (e.cols[col] ?? 0) + d
+        statusDeltas.set(key, e)
+      }
+      if (prevBucket && FUNNEL_KEYS.includes(prevBucket) && prevDate) {
+        addStatusDelta(prevCanvasser, prevDate, prevBucket, -1)
       }
       if (statusBucket && FUNNEL_KEYS.includes(statusBucket)) {
-        statusNext[statusBucket] = (statusNext[statusBucket] ?? 0) + 1
+        addStatusDelta(match.id, attributedDate, statusBucket, +1)
+      }
+      if (statusDeltas.size === 0) {
+        await supabaseAdmin.from('webhook_logs').insert({
+          step: 'Lead_Status_Noop',
+          data: {
+            pulseId: pid,
+            from: previousStatusFromEvent ?? null,
+            to: currentStatusValue,
+            eventTo: changedValue,
+            note: 'No countable delta',
+          },
+        })
+        return new Response('No-op (lead status)', { status: 200, headers: corsHeaders })
       }
 
+      // Claim FIRST (mirrors the Block path): the marker insert is the
+      // compare-and-swap — if another delivery advanced this card since our
+      // read, the claim is rejected and Monday's retry re-reads fresh state
+      // (usually landing on the marker-based no-op). metric_date keeps its
+      // invariant — the day this card's +1 now sits on. A counted card
+      // flipped to an unmapped label still claims (recordedAs null) so the
+      // undo is on record.
+      const claimRes = await supabaseAdmin.rpc('claim_lead_status_transition', {
+        _pulse_id: pid,
+        _expected: latest ? { exists: true, marker_id: latest.id } : { exists: false },
+        _marker_data: {
+          pulseId: pid,
+          agentName: match.display_name,
+          canvasser_id: match.id,
+          metric_date: attributedDate,
+          office: statusOffice,
+          from: previousStatusFromEvent ?? null,
+          to: currentStatusValue,
+          eventTo: changedValue,
+          recordedAs: statusBucket,
+          undid: prevBucket,
+          undidCanvasserId: prevCanvasser,
+          flipDate,
+          attributedVia,
+          undidDate: prevDate,
+          itemName: item.name ?? null,
+        },
+      })
+      const claim = (claimRes.data ?? null) as { claimed?: boolean; marker_id?: string } | null
+      if (claimRes.error || !claim?.claimed) {
+        await supabaseAdmin.from('webhook_logs').insert({
+          step: 'Lead_Status_Claim_Lost',
+          data: { pulseId: pid, error: claimRes.error?.message ?? null },
+        })
+        // Another delivery owns this transition (or the RPC failed) — let
+        // Monday redeliver against the fresh marker state.
+        return new Response('Lead status claim lost', { status: 502, headers: corsHeaders })
+      }
+      const statusMarkerId = claim.marker_id ?? null
+
+      const statusRows: Record<string, unknown>[] = []
+      for (const { canvasser, date, cols } of statusDeltas.values()) {
+        const { data: statusRow } = await supabaseAdmin
+          .from('daily_metrics')
+          .select('id, office_location, leads_confirmed, no_answers, killed, pending, future')
+          .eq('canvasser_id', canvasser)
+          .eq('metric_date', date)
+          .maybeSingle()
+        const cur = (statusRow as Record<string, number | string | null> | null) ?? null
+        const next: Record<string, number> = {}
+        for (const k of FUNNEL_KEYS) {
+          next[k] = Math.max(0, Number(cur?.[k] ?? 0) + (cols[k] ?? 0))
+        }
+        statusRows.push({
+          canvasser_id: canvasser,
+          metric_date: date,
+          // Never re-home an existing day-row; only new rows take our guess.
+          office_location: (cur?.office_location as string | null | undefined) ?? statusOffice,
+          ...next,
+        })
+      }
       const { error: statusErr } = await supabaseAdmin
         .from('daily_metrics')
-        .upsert({
-          canvasser_id: match.id,
-          metric_date: statusDate,
-          office_location: statusOffice,
-          leads_confirmed: statusNext.leads_confirmed ?? 0,
-          no_answers: statusNext.no_answers ?? 0,
-          killed: statusNext.killed ?? 0,
-          pending: statusNext.pending ?? 0,
-          future: statusNext.future ?? 0,
-        }, { onConflict: 'canvasser_id,metric_date' })
+        .upsert(statusRows, { onConflict: 'canvasser_id,metric_date' })
       if (statusErr) {
+        // Release the claim so Monday's redelivery can re-apply cleanly.
+        if (statusMarkerId) {
+          await supabaseAdmin.from('webhook_logs').delete().eq('id', statusMarkerId)
+        }
         await supabaseAdmin.from('webhook_logs').insert({
           step: 'Lead_Status_Upsert_Error',
-          data: { pulseId: String(pulseId), error: statusErr.message },
+          data: { pulseId: pid, error: statusErr.message },
         })
         // 5xx so Monday's retry loop redelivers — Event_Processed is only
         // written after a successful counter write.
@@ -877,23 +1041,9 @@ serve(async (req) => {
       if (triggerUuid) {
         await supabaseAdmin.from('webhook_logs').insert({
           step: 'Event_Processed',
-          data: { triggerUuid, pulseId: String(pulseId) },
+          data: { triggerUuid, pulseId: pid },
         })
       }
-      await supabaseAdmin.from('webhook_logs').insert({
-        step: 'Lead_Status_Processed',
-        data: {
-          pulseId: String(pulseId),
-          agentName: match.display_name,
-          canvasser_id: match.id,
-          metric_date: statusDate,
-          office: statusOffice,
-          from: previousStatusFromEvent ?? null,
-          to: changedValue,
-          recordedAs: statusBucket,
-          undid: statusPrevBucket,
-        },
-      })
       return new Response('Lead status recorded', { status: 200, headers: corsHeaders })
     }
 
