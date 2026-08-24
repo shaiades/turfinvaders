@@ -99,6 +99,9 @@ export type Van = {
 // their sum, so Submitted ≡ Confirmed + Future + Blowout always holds.
 // A card contributes nothing until its status button is actioned; card
 // creation (leads_generated) feeds only the suspension window.
+// Funnel counts are attributed to the lead's SUBMISSION day (2026-08-24) —
+// past metric_date rows legitimately keep filling in for a few days while
+// the confirmation team works the backlog.
 type Metric = {
   canvasser_id: string;
   metric_date: string;
@@ -118,7 +121,8 @@ export function FleetDispatch({ readOnly = false }: { readOnly?: boolean }) {
 }
 
 type RangeTab = "day" | "week" | "month";
-type DayPreset = "today" | "yesterday";
+/** "today" follows the midnight-PT roll; any other value is a pinned YYYY-MM-DD past day. */
+type DaySel = "today" | (string & {});
 
 type ResolvedRange = {
   funnelStart: string;
@@ -138,13 +142,22 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
 
   // --- Range engine: Day (report-date clock) / Week (Mon–Sat) / Month ---
   const [tab, setTab] = useState<RangeTab>("day");
-  const [dayPreset, setDayPreset] = useState<DayPreset>("today");
+  const [daySel, setDaySel] = useState<DaySel>("today");
   // Full calendar days (owner, 2026-08-04): "Today" is the LA calendar day,
   // midnight to 11:59 PM PT — today's results stay under Today all day. The
   // old 7 PM report-day roll (lock chip + confetti) is gone from this board;
   // the Daily Wrap page keeps its own 7 PM clock.
   const [today, setToday] = useState(laTodayISO);
   const yday = addDaysISO(today, -1);
+  const dayISO = daySel === "today" ? today : daySel;
+  const isViewingToday = dayISO === today;
+  // Arrow past yesterday to any prior day; landing back on today resumes the
+  // live midnight roll. Future days are definitionally empty under
+  // submission-day attribution, so the forward arrow clamps at today.
+  const shiftDay = (delta: 1 | -1) => {
+    const next = addDaysISO(dayISO, delta);
+    setDaySel(next >= today ? "today" : next);
+  };
   // Chips removed via the X vanish instantly (optimistic) while the
   // suspension_tracked flag persists server-side.
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
@@ -173,7 +186,7 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
 
   const range: ResolvedRange = useMemo(() => {
     if (tab === "day") {
-      const d = dayPreset === "yesterday" ? yday : today;
+      const d = dayISO;
       // Owner directive (2026-08-04): the "As Leads" half of the board reads
       // as THIS WEEK'S RESULTS IN PROGRESS — results, Points, and Volume
       // always cover the full Mon–Sat week containing the selected day
@@ -187,9 +200,9 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
         logEnd: addDaysISO(wk, 5),
         volStartISO: laMidnightUtcISO(wk),
         volEndISO: laMidnightUtcISO(addDaysISO(wk, 7)),
-        label: dayPreset === "yesterday" ? "Yesterday" : "Today",
+        label: isViewingToday ? "Today" : d === yday ? "Yesterday" : fmtWorkedDay(d),
         sub: d,
-        isLive: dayPreset === "today",
+        isLive: isViewingToday,
       };
     }
     if (tab === "week") {
@@ -221,8 +234,8 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
     };
   }, [
     tab,
-    dayPreset,
-    today,
+    dayISO,
+    isViewingToday,
     yday,
     week.weekStart,
     week.weekEnd,
@@ -654,7 +667,7 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
   // activity in over 7 calendar days (presumed off the team; auto-archive
   // finishes the job at 14).
   const suspensionRows = useMemo(() => {
-    if (tab !== "day" || dayPreset !== "today" || workedDays.length < 2) return [];
+    if (tab !== "day" || !isViewingToday || workedDays.length < 2) return [];
     const genOn = (ids: string[], day: string) =>
       ids.reduce((a, id) => a + (genByDay.get(id)?.get(day) ?? 0), 0);
     const [d1, d2] = workedDays;
@@ -682,7 +695,17 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
       }
       return [{ g: r.g, d1, d2, streak, streakLabel: `${streak}${capped ? "+" : ""}` }];
     });
-  }, [rows, genByDay, workedDays, tab, dayPreset, dismissed, lastActiveBy, today, rolesByUser]);
+  }, [
+    rows,
+    genByDay,
+    workedDays,
+    tab,
+    isViewingToday,
+    dismissed,
+    lastActiveBy,
+    today,
+    rolesByUser,
+  ]);
 
   const canManage = !readOnly && isManagerRole(realRole);
   // Row actions (move/rename/combine/archive) are role-gated, NOT page-gated
@@ -694,9 +717,9 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
 
   const footnote =
     tab === "day"
-      ? "Funnel columns show the selected day. Lead results, Sales, and Volume are this week's results in progress — the full Mon–Sat week containing that day, Pacific time."
+      ? "Funnel columns show the selected day, credited to the day the lead was SUBMITTED — a confirm recorded Monday for a Friday lead updates Friday, so recent days keep filling in for a few days. Lead results, Sales, and Volume are this week's results in progress — the full Mon–Sat week containing that day, Pacific time."
       : tab === "week"
-        ? "Points reflect Mon–Sat of the selected week, Pacific time (PM = 1 pt, Sale = 2 pts; BO/RS = 0). Volume runs Mon 12:00 AM → next Mon 12:00 AM Pacific."
+        ? "Funnel counts credit each lead's submission day, so a just-closed week keeps filling in early the next week. Points reflect Mon–Sat of the selected week, Pacific time (PM = 1 pt, Sale = 2 pts; BO/RS = 0). Volume runs Mon 12:00 AM → next Mon 12:00 AM Pacific."
         : "Points cover the calendar month, Pacific time (PM = 1 pt, Sale = 2 pts). Volume resets on the 1st, 12:00 AM Pacific.";
 
   return (
@@ -751,28 +774,27 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
 
         {tab === "day" && (
           <>
-            {(
-              [
-                { id: "today", label: "Today" },
-                { id: "yesterday", label: "Yesterday" },
-              ] as Array<{ id: DayPreset; label: string }>
-            ).map((p) => {
-              const active = dayPreset === p.id;
-              return (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => setDayPreset(p.id)}
-                  className={`px-2.5 py-1.5 rounded-full text-[10px] font-display uppercase tracking-widest whitespace-nowrap border transition-colors ${
-                    active
-                      ? "bg-neon text-background border-neon"
-                      : "border-border text-muted-foreground hover:text-foreground hover:border-neon/40"
-                  }`}
-                >
-                  {p.label}
-                </button>
-              );
-            })}
+            <Button size="sm" variant="outline" onClick={() => shiftDay(-1)} title="Previous day">
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+            <div className="px-3 py-1 rounded border border-neon/40 bg-neon/5 flex items-center gap-2 whitespace-nowrap">
+              <CalendarRange className="w-4 h-4 text-neon shrink-0" />
+              <span className="text-xs font-display">{range.label}</span>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => shiftDay(1)}
+              disabled={isViewingToday}
+              title="Next day"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+            {!isViewingToday && (
+              <Button size="sm" variant="ghost" onClick={() => setDaySel("today")}>
+                Jump to today
+              </Button>
+            )}
           </>
         )}
 
@@ -978,10 +1000,30 @@ const FUNNEL_COLS: Array<{
   key: "sub" | "conf" | "fut" | "kil";
   color: keyof typeof metricColorClass;
 }> = [
-  { short: "Sub", full: "Submitted", key: "sub", color: "neon" },
-  { short: "Con", full: "Confirmed", key: "conf", color: "victory" },
-  { short: "Fut", full: "Future", key: "fut", color: "accent" },
-  { short: "BO", full: "Blowout — dead-end at confirmation", key: "kil", color: "destructive" },
+  {
+    short: "Sub",
+    full: "Submitted — actioned leads, credited to their submission day",
+    key: "sub",
+    color: "neon",
+  },
+  {
+    short: "Con",
+    full: "Confirmed — credited to the lead's submission day",
+    key: "conf",
+    color: "victory",
+  },
+  {
+    short: "Fut",
+    full: "Future — credited to the lead's submission day",
+    key: "fut",
+    color: "accent",
+  },
+  {
+    short: "BO",
+    full: "Blowout — dead-end at confirmation, credited to the lead's submission day",
+    key: "kil",
+    color: "destructive",
+  },
 ];
 
 /** The lead-results half of the continuous row — Weekly Results columns in

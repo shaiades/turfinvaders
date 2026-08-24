@@ -206,6 +206,10 @@ function DailyWrap() {
         <p className="text-[10px] text-muted-foreground mt-0.5 font-display uppercase tracking-widest">
           Report date {today} (PT) · Prior {yday}
         </p>
+        <p className="text-[10px] text-muted-foreground mt-0.5 font-display uppercase tracking-widest">
+          Lead counts credit the day the lead was submitted · confirms recorded later update that
+          day
+        </p>
       </div>
 
       {/* Suspension Zone */}

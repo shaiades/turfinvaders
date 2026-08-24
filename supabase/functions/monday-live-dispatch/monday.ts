@@ -145,8 +145,10 @@ export type ItemFetchResult = { item: Record<string, unknown> | null; error: str
 
 // board.name feeds the Close Kombat snapshot's week parsing ("SD Block
 // 7/28/26 - 8/2/26" → card week); nothing else reads item.board.
+// created_at feeds the Lead Status attribution chain's last resort: a
+// recycled card with no gen or status markers dates to its board birth day.
 const ITEM_FIELDS =
-  "id name board { id name } group { id title } column_values { id text column { title id } ... on FormulaValue { display_value } }";
+  "id name created_at board { id name } group { id title } column_values { id text column { title id } ... on FormulaValue { display_value } }";
 
 type Waiter = (r: ItemFetchResult) => void;
 let batch: { token: string; waiters: Map<string, Waiter[]> } | null = null;
