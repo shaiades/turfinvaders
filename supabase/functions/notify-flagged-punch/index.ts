@@ -73,9 +73,25 @@ async function sendToSubs(
   return { sent, pruned, failed };
 }
 
+// Browser calls (the "Send test" button) need CORS; the pg_net trigger path
+// doesn't care but is unharmed by it.
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-notify-secret",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { ...CORS, "Content-Type": "application/json" },
+  });
+
 Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: CORS });
+  }
   if (req.method !== "POST") {
-    return new Response("method not allowed", { status: 405 });
+    return new Response("method not allowed", { status: 405, headers: CORS });
   }
   const body = await req.json().catch(() => null);
   if (!body) return new Response("bad request", { status: 400 });
@@ -95,7 +111,7 @@ Deno.serve(async (req) => {
       url: "/dashboard?tab=timesheets",
       tag: "push-test",
     });
-    return Response.json(result);
+    return json(result);
   }
 
   // ── Trigger path: fan out to the review audience ──────────────────────────
@@ -133,7 +149,7 @@ Deno.serve(async (req) => {
     ]),
   ].filter((id) => id !== user_id); // never notify the worker about their own flag
 
-  if (targets.length === 0) return Response.json({ sent: 0, pruned: 0, failed: 0 });
+  if (targets.length === 0) return json({ sent: 0, pruned: 0, failed: 0 });
 
   const { data: subs } = await admin
     .from("push_subscriptions")
@@ -142,11 +158,11 @@ Deno.serve(async (req) => {
 
   const labels = (flag_reasons ?? []).map((f) => FLAG_LABEL[f] ?? f);
   if (entry_source === "auto_closed" && !labels.length) labels.push("auto-closed");
-  const result = await sendToSubs(subs ?? [], {
+  const result2 = await sendToSubs(subs ?? [], {
     title: "Time clock · review needed",
     body: `${worker?.display_name ?? "A crew member"} · ${labels.join(", ") || "flagged punch"} · ${log_date}`,
     url: "/dashboard?tab=timesheets",
     tag: `review-${entry_id}`, // same entry collapses to one notification
   });
-  return Response.json(result);
+  return json(result2);
 });
