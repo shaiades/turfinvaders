@@ -7,11 +7,16 @@
 -- migration 20260824130000_lead_status_claim.sql and (2) deploying the
 -- updated monday-live-dispatch edge function — its markers carry flipDate
 -- and are excluded here, so deploy-then-backfill ordering is safe. The
--- advisory locks below share the deployed claim RPC's key, so a live flip
--- for an affected pulse blocks until this transaction commits instead of
--- interleaving with the re-bucketing.
--- To DRY-RUN: change the final COMMIT to ROLLBACK; the summary SELECT just
--- above it prints what would move either way.
+-- single global advisory lock below is the same one the deployed claim RPC
+-- takes, so EVERY live flip (including a card's first-ever flip) blocks
+-- until this transaction commits, then re-derives its previous state from
+-- the restamped markers inside the RPC — no interleaving is possible.
+-- To DRY-RUN: uncomment the RAISE EXCEPTION line in the summary DO block —
+-- the exception aborts (rolls back) the whole transaction and the editor
+-- ALWAYS renders error text, unlike RAISE NOTICE, which the dashboard's SQL
+-- editor swallows. A real apply persists a Backfill_Subday_Summary
+-- webhook_logs row, and the final post-COMMIT SELECT renders it as the
+-- script's result.
 --
 -- Everything is DERIVED from the Lead_Status_Processed markers (which have
 -- carried metric_date — the day their +1 landed — since 2026-07-27) plus the
@@ -33,33 +38,29 @@
 BEGIN;
 
 -- ── Serialize against live flips ───────────────────────────────────────────
--- Same lock key as claim_lead_status_transition; taken in sorted order
--- BEFORE the snapshot so a concurrent flip either committed already (and is
--- in the snapshot) or waits for our COMMIT. The edge function only ever
--- holds one of these at a time, so no deadlock is possible.
-DO $$
-DECLARE p record;
-BEGIN
-  FOR p IN
-    SELECT DISTINCT data ->> 'pulseId' AS pulse_id
-    FROM public.webhook_logs
-    WHERE step = 'Lead_Status_Processed' AND data ->> 'pulseId' IS NOT NULL
-    ORDER BY 1
-  LOOP
-    PERFORM pg_advisory_xact_lock(hashtextextended('lead_status:' || p.pulse_id, 0));
-  END LOOP;
-END $$;
+-- The single global lock claim_lead_status_transition takes — acquired
+-- BEFORE the snapshot, so a concurrent flip either committed already (and
+-- is in the snapshot) or its RPC waits for our COMMIT and then reads the
+-- restamped markers. One lock, no shared-lock-table pressure, no deadlock
+-- (the RPC never waits while holding it).
+SELECT pg_advisory_xact_lock(hashtextextended('lead_status', 0));
 
 -- ── Snapshot every Lead Status marker (pre-restamp view) ───────────────────
 CREATE TEMP TABLE _ls ON COMMIT DROP AS
 SELECT wl.id AS marker_id,
        wl.created_at,
        wl.data ->> 'pulseId' AS pulse_id,
-       (wl.data ->> 'canvasser_id')::uuid AS canvasser_id,
+       -- Guarded casts: a malformed marker must not abort the whole run.
+       -- A NULL canvasser fails the profiles JOIN below and lands in the
+       -- skipped count; a malformed date falls back to the receipt day.
+       CASE WHEN (wl.data ->> 'canvasser_id')
+                 ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+            THEN (wl.data ->> 'canvasser_id')::uuid END AS canvasser_id,
        wl.data ->> 'office' AS office,
        wl.data ->> 'recordedAs' AS bucket,
        wl.data ->> 'undid' AS undid,
-       COALESCE((wl.data ->> 'metric_date')::date,
+       COALESCE(CASE WHEN (wl.data ->> 'metric_date') ~ '^\d{4}-\d{2}-\d{2}$'
+                     THEN (wl.data ->> 'metric_date')::date END,
                 (wl.created_at AT TIME ZONE 'America/Los_Angeles')::date) AS mdate,
        (wl.data ? 'flipDate' OR wl.data ? 'subdayAttributed') AS new_era,
        (wl.data ? 'strandedCleared') AS cleared,
@@ -79,7 +80,8 @@ CREATE TEMP TABLE _sub ON COMMIT DROP AS
 SELECT pulse_id, COALESCE(MIN(pd), MIN(cd)) AS sub_date
 FROM (
   SELECT wl.data ->> 'pulseId' AS pulse_id,
-         COALESCE((wl.data ->> 'metric_date')::date,
+         COALESCE(CASE WHEN (wl.data ->> 'metric_date') ~ '^\d{4}-\d{2}-\d{2}$'
+                       THEN (wl.data ->> 'metric_date')::date END,
                   (wl.created_at AT TIME ZONE 'America/Los_Angeles')::date) AS pd,
          NULL::date AS cd
   FROM public.webhook_logs wl
@@ -187,17 +189,40 @@ SET data = wl.data || '{"strandedCleared": true}'::jsonb
 FROM _stranded s
 WHERE wl.id = s.marker_id;
 
--- ── Summary (visible in dry-run and apply alike) ───────────────────────────
-SELECT
-  (SELECT count(*) FROM _moves)    AS moved_to_submission_day,
-  (SELECT count(*) FROM _stranded) AS strands_cleared,
-  (SELECT count(*) FROM _ls l
-     WHERE l.rn_desc = 1 AND NOT l.new_era AND l.bucket IS NOT NULL
-       AND NOT EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = l.canvasser_id))
-                                   AS skipped_deleted_profile,
-  (SELECT count(DISTINCT pulse_id) FROM _ls) AS pulses_seen;
+-- ── Summary ────────────────────────────────────────────────────────────────
+-- RAISE NOTICE surfaces in the editor's messages regardless of statement
+-- position (the editor only renders the LAST statement's result set, which
+-- is COMMIT/ROLLBACK here). The webhook_logs row makes a real apply
+-- auditable after the fact; a dry-run ROLLBACK discards it but keeps the
+-- notice.
+DO $$
+DECLARE
+  n_moves int; n_stranded int; n_skipped int; n_pulses int;
+BEGIN
+  SELECT count(*) INTO n_moves FROM _moves;
+  SELECT count(*) INTO n_stranded FROM _stranded;
+  SELECT count(*) INTO n_skipped FROM _ls l
+    WHERE l.rn_desc = 1 AND NOT l.new_era AND l.bucket IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = l.canvasser_id);
+  SELECT count(DISTINCT pulse_id) INTO n_pulses FROM _ls;
+  -- DRY RUN: uncomment the next line — the exception prints the summary
+  -- (the editor always renders error text) and rolls everything back.
+  -- RAISE EXCEPTION 'DRY RUN — would move %, clear % strands, skip % (deleted profile), % pulses seen', n_moves, n_stranded, n_skipped, n_pulses;
+  INSERT INTO public.webhook_logs (step, data)
+  VALUES ('Backfill_Subday_Summary', jsonb_build_object(
+    'moved', n_moves, 'strandsCleared', n_stranded,
+    'skippedDeletedProfile', n_skipped, 'pulsesSeen', n_pulses));
+END $$;
 
 COMMIT;
+
+-- Rendered as the script's result on a real apply (the editor shows only
+-- the last statement's result set).
+SELECT created_at, data
+FROM public.webhook_logs
+WHERE step = 'Backfill_Subday_Summary'
+ORDER BY created_at DESC
+LIMIT 1;
 
 -- ── Reconciliation (run separately, before and after) ──────────────────────
 -- Expected-from-markers vs actual daily_metrics, per day. After the backfill
