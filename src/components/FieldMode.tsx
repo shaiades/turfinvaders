@@ -54,7 +54,7 @@ const TALLIES: Array<{
 ];
 
 export function FieldMode() {
-  const { user, teamId } = useAuth();
+  const { user } = useAuth();
   const qc = useQueryClient();
   const [leadOpen, setLeadOpen] = useState(false);
   const [pending, setPending] = useState<PinType | null>(null);
@@ -104,7 +104,7 @@ export function FieldMode() {
       toast.error("No GPS fix yet — enable Location and try again.");
       return { ok: false as const };
     }
-    const payload: Record<string, unknown> = {
+    const { error } = await supabase.from("field_pins").insert({
       canvasser_id: user.id,
       pin_type,
       lat: fix.coords.latitude,
@@ -114,9 +114,7 @@ export function FieldMode() {
       device_lng: fix.coords.longitude,
       distance_m: 0,
       is_remote_drop: false,
-    };
-    if (teamId) payload.team_id = teamId;
-    const { error } = await supabase.from("field_pins").insert(payload as never);
+    });
     if (error) {
       toast.error(error.message || "Couldn't save pin");
       return { ok: false as const };
@@ -148,7 +146,7 @@ export function FieldMode() {
         // predate a concurrent tap's +1.
         qc.invalidateQueries({ queryKey: todayKey });
       } else {
-        qc.invalidateQueries({ queryKey: ["territory_pins_today"] });
+        qc.invalidateQueries({ queryKey: ["my_pins_today", user.id] });
         // bump_daily_log_from_pin has committed — swap the synthetic row for
         // server truth and let the Log form / Stats / HUD refresh too.
         qc.invalidateQueries({ queryKey: dailyLogKeys.all(user.id) });
@@ -162,10 +160,10 @@ export function FieldMode() {
     setPending("lead");
     try {
       const res = await dropPin("lead");
-      if (res.ok) {
-        qc.invalidateQueries({ queryKey: ["territory_pins_today"] });
+      if (res.ok && user?.id) {
+        qc.invalidateQueries({ queryKey: ["my_pins_today", user.id] });
         // Lead pins bump leads_called_in via trigger — refresh daily-log reads.
-        if (user?.id) qc.invalidateQueries({ queryKey: dailyLogKeys.all(user.id) });
+        qc.invalidateQueries({ queryKey: dailyLogKeys.all(user.id) });
       }
       setLeadOpen(true);
     } finally {
