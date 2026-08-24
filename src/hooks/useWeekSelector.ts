@@ -3,8 +3,9 @@ import { addDays, toISODate, weekStartMonday } from "@/lib/dates";
 
 /**
  * Monday-anchored week selection (LA calendar via weekStartMonday), shared by
- * the weekly views. `endOffsetDays` 5 = Mon–Sat pay week (default), 6 = full
- * Mon–Sun week.
+ * the weekly views. `endOffsetDays` 5 = Mon–Sat Block-board stats convention
+ * (default), 6 = the full Mon–Sun workweek — payroll surfaces must use 6 to
+ * match calc_weekly_paycheck v6 (Sundays are paid when worked).
  */
 export function useWeekSelector(opts?: { initialOffsetWeeks?: number; endOffsetDays?: 5 | 6 }): {
   weekStart: Date;
