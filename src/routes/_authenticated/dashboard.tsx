@@ -43,6 +43,7 @@ import { Button } from "@/components/ui/button";
 import { CanvasserMission, isCanvasserTab, type CanvasserTab } from "@/components/CanvasserMission";
 import { TimeClock } from "@/components/TimeClock";
 import { TimeClockReviewQueue } from "@/components/TimeClockReviewQueue";
+import { PushAlertsCard } from "@/components/PushAlertsCard";
 import {
   SuspendedBadge,
   useCanvasserStatuses,
@@ -476,8 +477,10 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
       {user && <TimeClock userId={user.id} />}
 
       {/* Flagged punches for THIS van — captains approve or escalate
-          (owner directive 2026-08-24). Renders nothing when clean. */}
+          (owner directive 2026-08-24). Renders nothing when clean; the
+          alerts card below it stays so push can be enabled any time. */}
       <TimeClockReviewQueue teamId={teamId} />
+      <PushAlertsCard />
 
       {/* Van-level Live Lead Counter */}
       <ArcadeCard className="p-5 flex items-center justify-between gap-4 flex-wrap">
