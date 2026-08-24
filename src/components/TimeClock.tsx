@@ -129,7 +129,27 @@ export function TimeClock({ userId }: { userId: string }) {
       if (error) throw error;
     },
     onSuccess: () => {
-      toast.success("Clocked in");
+      // Mirror of the server-side anomaly flags (compute trigger): tell the
+      // worker up front when a punch will sit in the review queue.
+      const laHour = Number(
+        new Intl.DateTimeFormat("en-US", {
+          hour: "numeric",
+          hour12: false,
+          timeZone: "America/Los_Angeles",
+        }).format(new Date()),
+      );
+      const sundayNow = new Date(`${laTodayISO()}T12:00:00Z`).getUTCDay() === 0;
+      if (laHour < 7) {
+        toast.info("Clocked in early", {
+          description: "Before 7:00 AM — your captain or manager will review and approve.",
+        });
+      } else if (sundayNow) {
+        toast.info("Clocked in on a Sunday", {
+          description: "Sundays aren't scheduled — this shift is flagged for review (and paid).",
+        });
+      } else {
+        toast.success("Clocked in");
+      }
       qc.invalidateQueries({ queryKey: ["time-clock-open", userId] });
       qc.invalidateQueries({ queryKey: ["time-clock-today", userId] });
     },

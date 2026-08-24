@@ -911,10 +911,13 @@ export type Database = {
           clock_out: string | null
           created_at: string
           entry_source: string
+          flag_reasons: string[]
           id: string
           log_date: string
           meal_status: string
           needs_correction: boolean
+          reviewed_at: string | null
+          reviewed_by: string | null
           updated_at: string
           user_id: string
           void_reason: string | null
@@ -927,10 +930,13 @@ export type Database = {
           clock_out?: string | null
           created_at?: string
           entry_source?: string
+          flag_reasons?: string[]
           id?: string
           log_date?: string
           meal_status?: string
           needs_correction?: boolean
+          reviewed_at?: string | null
+          reviewed_by?: string | null
           updated_at?: string
           user_id: string
           void_reason?: string | null
@@ -943,10 +949,13 @@ export type Database = {
           clock_out?: string | null
           created_at?: string
           entry_source?: string
+          flag_reasons?: string[]
           id?: string
           log_date?: string
           meal_status?: string
           needs_correction?: boolean
+          reviewed_at?: string | null
+          reviewed_by?: string | null
           updated_at?: string
           user_id?: string
           void_reason?: string | null
@@ -1180,6 +1189,10 @@ export type Database = {
       }
       approve_payroll_run: {
         Args: { _run_id: string }
+        Returns: undefined
+      }
+      approve_time_entry: {
+        Args: { _id: string }
         Returns: undefined
       }
       calc_monthly_paycheck: {

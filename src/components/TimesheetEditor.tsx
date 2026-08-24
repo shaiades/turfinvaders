@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Clock, ChevronLeft, ChevronRight, Save, Trash2, AlertTriangle, Utensils } from "lucide-react";
 import { useWeekSelector } from "@/hooks/useWeekSelector";
+import { TimeClockReviewQueue } from "@/components/TimeClockReviewQueue";
 
 // Weeks anchor to the LA Monday (midnight PT reset).
 function toLocalInput(iso: string | null) {
@@ -361,6 +362,9 @@ export function TimesheetEditor() {
 
   return (
     <div className="space-y-4">
+      {/* All-crew flagged punches — approve here or fix a row below. */}
+      <TimeClockReviewQueue />
+
       <ArcadePanel title="Timesheets · Owner Edit Mode">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
