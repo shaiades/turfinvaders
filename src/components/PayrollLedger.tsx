@@ -161,7 +161,7 @@ export function PayrollLedger() {
     weekEndISO: endStr,
     shiftWeek,
     goToWeek,
-  } = useWeekSelector({ initialOffsetWeeks: -1 });
+  } = useWeekSelector({ initialOffsetWeeks: -1, endOffsetDays: 6 });
   const [pickerOpen, setPickerOpen] = useState(false);
 
   // The frozen-run state for this week drives the review → approve flow.
