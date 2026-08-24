@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Clock, ChevronLeft, ChevronRight, Save, Trash2, AlertTriangle } from "lucide-react";
 import { useWeekSelector } from "@/hooks/useWeekSelector";
+import { laDateISO } from "@/lib/dates";
 
 // Weeks anchor to the LA Monday (midnight PT reset).
 function toLocalInput(iso: string | null) {
@@ -192,7 +193,10 @@ export function TimesheetEditor() {
         return;
       }
       patch.clock_in = iso;
-      patch.log_date = iso.slice(0, 10);
+      // LA calendar day of the instant — slicing the UTC ISO string put
+      // evening edits on the next day (a Saturday punch edited to 5pm PT
+      // booked as Sunday and paid $0).
+      patch.log_date = laDateISO(new Date(iso));
     }
     if (edit.clock_out !== undefined) {
       if (edit.clock_out === "" || edit.clock_out === null) {
