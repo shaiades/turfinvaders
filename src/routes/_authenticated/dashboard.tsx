@@ -42,6 +42,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { CanvasserMission, isCanvasserTab, type CanvasserTab } from "@/components/CanvasserMission";
 import { TimeClock } from "@/components/TimeClock";
+import { TimeClockReviewQueue } from "@/components/TimeClockReviewQueue";
 import {
   SuspendedBadge,
   useCanvasserStatuses,
@@ -473,6 +474,10 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
       {/* Captains work the field too — same punch surface as canvassers
           (owner decision 2026-08-19: captain hours feed payroll). */}
       {user && <TimeClock userId={user.id} />}
+
+      {/* Flagged punches for THIS van — captains approve or escalate
+          (owner directive 2026-08-24). Renders nothing when clean. */}
+      <TimeClockReviewQueue teamId={teamId} />
 
       {/* Van-level Live Lead Counter */}
       <ArcadeCard className="p-5 flex items-center justify-between gap-4 flex-wrap">
