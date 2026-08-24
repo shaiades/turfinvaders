@@ -313,6 +313,22 @@
   pointer-events: none;
 }
 
+/* NeonMap marker animations — one shared copy; the divIcon HTML used to
+   inline these per marker (a day of leads = dozens of duplicate <style> tags). */
+@keyframes nm-star-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.25; }
+  50% { transform: scale(1.35); opacity: 0.55; }
+}
+@keyframes nm-flag {
+  /* #8a8f99 = REMOTE_DROP_COLOR / UNASSIGNED_COLOR */
+  0%, 100% { box-shadow: 0 0 10px #8a8f99, 0 0 0 2px #ff2d5588; }
+  50% { box-shadow: 0 0 18px #8a8f99, 0 0 0 4px #ff2d55cc; }
+}
+@keyframes nm-pulse {
+  0% { transform: scale(0.6); opacity: 0.6; }
+  100% { transform: scale(2.6); opacity: 0; }
+}
+
 @utility scrollbar-hide {
   scrollbar-width: none;
   -ms-overflow-style: none;

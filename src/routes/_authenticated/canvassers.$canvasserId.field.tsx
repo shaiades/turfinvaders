@@ -137,18 +137,23 @@ function FieldActivityPage() {
     };
   }, [timeline, commissionRate, pins]);
 
-  // Territories overlay
+  // Turf overlay — the areas actually assigned to this canvasser (the legacy
+  // `territories` table is dead: nothing writes it since the turfs flow landed).
   const territoriesQuery = useQuery({
     enabled: allowed,
-    queryKey: ["territories_view", profileQuery.data?.team_id],
+    queryKey: ["turfs_for_canvasser", canvasserId],
     queryFn: async () => {
-      const { data } = await supabase.from("territories").select("id, name, color, polygon");
+      const { data, error } = await supabase
+        .from("turfs")
+        .select("id, name, color, polygon_coordinates")
+        .eq("assigned_user_id", canvasserId);
+      if (error) throw error;
       return data ?? [];
     },
   });
   const territories: Territory[] = (territoriesQuery.data ?? []).map((t) => ({
     id: t.id as string, name: t.name as string, color: (t.color as string) ?? "#39ff14",
-    polygon: t.polygon as LatLng[],
+    polygon: (t.polygon_coordinates ?? []) as LatLng[],
   }));
 
   if (!allowed) {
