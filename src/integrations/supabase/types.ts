@@ -753,36 +753,238 @@ export type Database = {
           },
         ]
       }
+      meal_periods: {
+        Row: {
+          created_at: string
+          id: string
+          meal_end: string | null
+          meal_start: string
+          time_entry_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          meal_end?: string | null
+          meal_start?: string
+          time_entry_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          meal_end?: string | null
+          meal_start?: string
+          time_entry_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "meal_periods_time_entry_id_fkey"
+            columns: ["time_entry_id"]
+            isOneToOne: false
+            referencedRelation: "time_entries"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payroll_run_lines: {
+        Row: {
+          base_pay: number
+          canvasser_id: string
+          commission: number
+          display_name: string
+          dt_hours: number
+          exceptions: Json
+          hourly_rate: number
+          hours: number
+          id: string
+          meal_premium_count: number
+          meal_premium_pay: number
+          monster_bonus: number
+          ot_hours: number
+          ot_premium_pay: number
+          rank: string | null
+          reg_hours: number
+          regular_rate: number
+          run_id: string
+          sit_bonus: number
+          snapshot: Json
+          total_pay: number
+        }
+        Insert: {
+          base_pay?: number
+          canvasser_id: string
+          commission?: number
+          display_name: string
+          dt_hours?: number
+          exceptions?: Json
+          hourly_rate?: number
+          hours?: number
+          id?: string
+          meal_premium_count?: number
+          meal_premium_pay?: number
+          monster_bonus?: number
+          ot_hours?: number
+          ot_premium_pay?: number
+          rank?: string | null
+          reg_hours?: number
+          regular_rate?: number
+          run_id: string
+          sit_bonus?: number
+          snapshot?: Json
+          total_pay?: number
+        }
+        Update: {
+          base_pay?: number
+          canvasser_id?: string
+          commission?: number
+          display_name?: string
+          dt_hours?: number
+          exceptions?: Json
+          hourly_rate?: number
+          hours?: number
+          id?: string
+          meal_premium_count?: number
+          meal_premium_pay?: number
+          monster_bonus?: number
+          ot_hours?: number
+          ot_premium_pay?: number
+          rank?: string | null
+          reg_hours?: number
+          regular_rate?: number
+          run_id?: string
+          sit_bonus?: number
+          snapshot?: Json
+          total_pay?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payroll_run_lines_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "payroll_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payroll_runs: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          created_at: string
+          created_by: string
+          id: string
+          notes: string | null
+          status: string
+          week_start: string
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          created_at?: string
+          created_by: string
+          id?: string
+          notes?: string | null
+          status?: string
+          week_start: string
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          created_at?: string
+          created_by?: string
+          id?: string
+          notes?: string | null
+          status?: string
+          week_start?: string
+        }
+        Relationships: []
+      }
       time_entries: {
         Row: {
           billable_hours: number
           clock_in: string
           clock_out: string | null
           created_at: string
+          entry_source: string
           id: string
           log_date: string
+          meal_status: string
+          needs_correction: boolean
           updated_at: string
           user_id: string
+          void_reason: string | null
+          voided_at: string | null
+          voided_by: string | null
         }
         Insert: {
           billable_hours?: number
           clock_in?: string
           clock_out?: string | null
           created_at?: string
+          entry_source?: string
           id?: string
           log_date?: string
+          meal_status?: string
+          needs_correction?: boolean
           updated_at?: string
           user_id: string
+          void_reason?: string | null
+          voided_at?: string | null
+          voided_by?: string | null
         }
         Update: {
           billable_hours?: number
           clock_in?: string
           clock_out?: string | null
           created_at?: string
+          entry_source?: string
           id?: string
           log_date?: string
+          meal_status?: string
+          needs_correction?: boolean
           updated_at?: string
           user_id?: string
+          void_reason?: string | null
+          voided_at?: string | null
+          voided_by?: string | null
+        }
+        Relationships: []
+      }
+      time_entry_audit: {
+        Row: {
+          action: string
+          actor: string | null
+          happened_at: string
+          id: number
+          new_row: Json | null
+          old_row: Json | null
+          reason: string | null
+          time_entry_id: string
+        }
+        Insert: {
+          action: string
+          actor?: string | null
+          happened_at?: string
+          id?: never
+          new_row?: Json | null
+          old_row?: Json | null
+          reason?: string | null
+          time_entry_id: string
+        }
+        Update: {
+          action?: string
+          actor?: string | null
+          happened_at?: string
+          id?: never
+          new_row?: Json | null
+          old_row?: Json | null
+          reason?: string | null
+          time_entry_id?: string
         }
         Relationships: []
       }
@@ -949,6 +1151,37 @@ export type Database = {
       archive_agent: { Args: { _user_id: string }; Returns: undefined }
       auto_archive_agents: { Args: never; Returns: number }
       auto_clock_out_expired: { Args: never; Returns: number }
+      admin_create_time_entry: {
+        Args: {
+          _user_id: string
+          _clock_in: string
+          _clock_out: string | null
+          _reason: string
+        }
+        Returns: string
+      }
+      admin_set_meal: {
+        Args: {
+          _time_entry_id: string
+          _meal_start: string
+          _meal_end: string
+          _reason: string
+        }
+        Returns: undefined
+      }
+      admin_update_time_entry: {
+        Args: {
+          _id: string
+          _clock_in: string
+          _clock_out: string | null
+          _reason: string
+        }
+        Returns: undefined
+      }
+      approve_payroll_run: {
+        Args: { _run_id: string }
+        Returns: undefined
+      }
       calc_monthly_paycheck: {
         Args: { _canvasser_id: string; _month_start: string }
         Returns: {
@@ -960,6 +1193,7 @@ export type Database = {
           total_sales: number
           total_sits: number
           volume_bonus: number
+          volume_bonus_ot_true_up: number
           weekly_pay_total: number
         }[]
       }
@@ -969,11 +1203,19 @@ export type Database = {
           base_pay: number
           commission: number
           commission_rate: number
+          dt_hours: number
+          exceptions: Json
           hourly_rate: number
           hours: number
+          meal_premium_count: number
+          meal_premium_pay: number
           monster_bonus: number
+          ot_hours: number
+          ot_premium_pay: number
           points: number
           rank: string
+          reg_hours: number
+          regular_rate: number
           sale_price_total: number
           sales: number
           sit_bonus: number
@@ -982,6 +1224,10 @@ export type Database = {
           week_end: string
           week_start: string
         }[]
+      }
+      create_payroll_run: {
+        Args: { _week_start: string }
+        Returns: string
       }
       evaluate_canvasser_suspension: {
         Args: { _canvasser_id: string }
@@ -1020,6 +1266,10 @@ export type Database = {
           _new_role: Database["public"]["Enums"]["app_role"]
           _target_user: string
         }
+        Returns: undefined
+      }
+      void_time_entry: {
+        Args: { _id: string; _reason: string }
         Returns: undefined
       }
     }

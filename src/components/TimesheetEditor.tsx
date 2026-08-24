@@ -6,9 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { Clock, ChevronLeft, ChevronRight, Save, Trash2, AlertTriangle } from "lucide-react";
+import { Clock, ChevronLeft, ChevronRight, Save, Trash2, AlertTriangle, Utensils } from "lucide-react";
 import { useWeekSelector } from "@/hooks/useWeekSelector";
-import { laDateISO } from "@/lib/dates";
 
 // Weeks anchor to the LA Monday (midnight PT reset).
 function toLocalInput(iso: string | null) {
@@ -30,28 +29,39 @@ type Entry = {
   clock_out: string | null;
   log_date: string;
   billable_hours: number;
+  entry_source: string;
+  needs_correction: boolean;
+  meal_status: string;
 };
 type Profile = { id: string; display_name: string };
 
-/** Save/Delete pair — one component for the mobile card (labeled, full-width)
- *  and the desktop row (compact icons) so the dirty styling, disabled logic,
- *  and the delete confirm can never drift between the two views. */
+/** Meal states that need a human before payroll can approve the week. */
+const MEAL_ATTENTION: Record<string, string> = {
+  pending: "meal ?",
+  unrecorded: "lunch times needed",
+  missed: "no lunch · premium",
+  taken_late: "late lunch · premium",
+};
+
+/** Save/Void/Lunch trio — one component for the mobile card (labeled,
+ *  full-width) and the desktop row (compact icons) so the dirty styling,
+ *  disabled logic, and the reason prompts can never drift between views. */
 function TimeEntryActions({
   compact = false,
   dirty,
   saving,
   deleting,
-  name,
   onSave,
-  onDelete,
+  onVoid,
+  onFixLunch,
 }: {
   compact?: boolean;
   dirty: boolean;
   saving: boolean;
   deleting: boolean;
-  name: string;
   onSave: () => void;
-  onDelete: () => void;
+  onVoid: () => void;
+  onFixLunch: () => void;
 }) {
   return (
     <div className={compact ? "flex items-center justify-end gap-1" : "flex gap-2"}>
@@ -68,19 +78,46 @@ function TimeEntryActions({
         <Save className="w-3.5 h-3.5" />
         {!compact && "Save"}
       </Button>
+      <Button size="sm" variant="outline" onClick={onFixLunch} className={cn(!compact && "flex-1")}>
+        <Utensils className="w-3.5 h-3.5 text-warning" />
+        {!compact && "Lunch"}
+      </Button>
       <Button
         size="sm"
         variant="outline"
         disabled={deleting}
-        onClick={() => {
-          if (confirm(`Delete this time entry for ${name}?`)) onDelete();
-        }}
+        onClick={onVoid}
         className={cn(!compact && "flex-1")}
       >
         <Trash2 className="w-3.5 h-3.5 text-destructive" />
-        {!compact && "Delete"}
+        {!compact && "Void"}
       </Button>
     </div>
+  );
+}
+
+/** Chip row under a name: provenance + meal state that needs eyes. */
+function EntryFlags({ e }: { e: Entry }) {
+  const meal = MEAL_ATTENTION[e.meal_status];
+  if (e.entry_source !== "auto_closed" && !e.needs_correction && !meal) return null;
+  return (
+    <span className="inline-flex flex-wrap gap-1 ml-2 align-middle">
+      {e.entry_source === "auto_closed" && (
+        <span className="text-[9px] font-display uppercase tracking-widest text-warning border border-warning/40 rounded px-1">
+          auto-closed
+        </span>
+      )}
+      {e.needs_correction && (
+        <span className="text-[9px] font-display uppercase tracking-widest text-destructive border border-destructive/40 rounded px-1">
+          needs review
+        </span>
+      )}
+      {meal && (
+        <span className="text-[9px] font-display uppercase tracking-widest text-warning border border-warning/40 rounded px-1">
+          {meal}
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -95,6 +132,7 @@ export function TimesheetEditor() {
     goToWeek,
   } = useWeekSelector({ endOffsetDays: 6 });
   const [filterUser, setFilterUser] = useState<string>("");
+  const [needsReviewOnly, setNeedsReviewOnly] = useState(false);
   const [edits, setEdits] = useState<
     Record<string, { clock_in?: string; clock_out?: string | null }>
   >({});
@@ -105,9 +143,12 @@ export function TimesheetEditor() {
       const [entriesRes, profilesRes] = await Promise.all([
         supabase
           .from("time_entries")
-          .select("id, user_id, clock_in, clock_out, log_date, billable_hours")
+          .select(
+            "id, user_id, clock_in, clock_out, log_date, billable_hours, entry_source, needs_correction, meal_status",
+          )
           .gte("log_date", start)
           .lte("log_date", end)
+          .is("voided_at", null)
           .order("log_date", { ascending: false })
           .order("clock_in", { ascending: false }),
         supabase.from("profiles").select("id, display_name"),
@@ -127,14 +168,19 @@ export function TimesheetEditor() {
   );
 
   const visibleEntries = useMemo(() => {
-    const list = data?.entries ?? [];
+    let list = data?.entries ?? [];
+    if (needsReviewOnly) {
+      list = list.filter(
+        (e) => e.needs_correction || e.meal_status === "pending" || e.meal_status === "unrecorded",
+      );
+    }
     if (!filterUser) return list;
     const q = filterUser.toLowerCase();
     return list.filter((e) => {
       const n = profileById.get(e.user_id)?.display_name?.toLowerCase() ?? "";
       return n.includes(q);
     });
-  }, [data?.entries, filterUser, profileById]);
+  }, [data?.entries, filterUser, needsReviewOnly, profileById]);
 
   const totalsByUser = useMemo(() => {
     const m = new Map<string, number>();
@@ -144,15 +190,28 @@ export function TimesheetEditor() {
     return m;
   }, [data?.entries]);
 
+  // All history edits flow through the reasoned RPCs: the database rejects a
+  // privileged time edit without a reason, and every change lands in
+  // time_entry_audit with actor + before/after. log_date is stamped
+  // server-side from the LA calendar day of the new clock-in.
   const saveMut = useMutation({
     mutationFn: async ({
       id,
-      patch,
+      clock_in,
+      clock_out,
+      reason,
     }: {
       id: string;
-      patch: { clock_in?: string; clock_out?: string | null; log_date?: string };
+      clock_in: string;
+      clock_out: string | null;
+      reason: string;
     }) => {
-      const { error } = await supabase.from("time_entries").update(patch).eq("id", id);
+      const { error } = await supabase.rpc("admin_update_time_entry", {
+        _id: id,
+        _clock_in: clock_in,
+        _clock_out: clock_out,
+        _reason: reason,
+      });
       if (error) throw error;
     },
     onSuccess: (_d, vars) => {
@@ -169,48 +228,111 @@ export function TimesheetEditor() {
     onError: (e: Error) => toast.error("Update failed", { description: e.message }),
   });
 
-  const deleteMut = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from("time_entries").delete().eq("id", id);
+  const voidMut = useMutation({
+    mutationFn: async ({ id, reason }: { id: string; reason: string }) => {
+      const { error } = await supabase.rpc("void_time_entry", { _id: id, _reason: reason });
       if (error) throw error;
     },
     onSuccess: () => {
-      toast.success("Time entry deleted");
+      toast.success("Time entry voided");
       qc.invalidateQueries({ queryKey: ["timesheets"] });
       qc.invalidateQueries({ queryKey: ["payroll-ledger"] });
     },
-    onError: (e: Error) => toast.error("Delete failed", { description: e.message }),
+    onError: (e: Error) => toast.error("Void failed", { description: e.message }),
+  });
+
+  const lunchMut = useMutation({
+    mutationFn: async ({
+      entryId,
+      mealStart,
+      mealEnd,
+      reason,
+    }: {
+      entryId: string;
+      mealStart: string;
+      mealEnd: string;
+      reason: string;
+    }) => {
+      const { error } = await supabase.rpc("admin_set_meal", {
+        _time_entry_id: entryId,
+        _meal_start: mealStart,
+        _meal_end: mealEnd,
+        _reason: reason,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Lunch recorded — hours repriced");
+      qc.invalidateQueries({ queryKey: ["timesheets"] });
+      qc.invalidateQueries({ queryKey: ["payroll-ledger"] });
+    },
+    onError: (e: Error) => toast.error("Lunch update failed", { description: e.message }),
   });
 
   function saveRow(e: Entry) {
     const edit = edits[e.id];
     if (!edit) return;
-    const patch: { clock_in?: string; clock_out?: string | null; log_date?: string } = {};
+    let clockIn = e.clock_in;
+    let clockOut: string | null = e.clock_out;
     if (edit.clock_in !== undefined) {
       const iso = fromLocalInput(edit.clock_in);
       if (!iso) {
         toast.error("Invalid clock-in time");
         return;
       }
-      patch.clock_in = iso;
-      // LA calendar day of the instant — slicing the UTC ISO string put
-      // evening edits on the next day (a Saturday punch edited to 5pm PT
-      // booked as Sunday and paid $0).
-      patch.log_date = laDateISO(new Date(iso));
+      clockIn = iso;
     }
     if (edit.clock_out !== undefined) {
       if (edit.clock_out === "" || edit.clock_out === null) {
-        patch.clock_out = null;
+        clockOut = null;
       } else {
         const iso = fromLocalInput(edit.clock_out);
         if (!iso) {
           toast.error("Invalid clock-out time");
           return;
         }
-        patch.clock_out = iso;
+        clockOut = iso;
       }
     }
-    saveMut.mutate({ id: e.id, patch });
+    const reason = window.prompt("Reason for this change (required — it goes on the audit trail):");
+    if (!reason || !reason.trim()) return;
+    saveMut.mutate({ id: e.id, clock_in: clockIn, clock_out: clockOut, reason: reason.trim() });
+  }
+
+  function voidRow(e: Entry, name: string) {
+    const reason = window.prompt(
+      `Void this ${e.log_date} entry for ${name}? Enter the reason (required):`,
+    );
+    if (!reason || !reason.trim()) return;
+    voidMut.mutate({ id: e.id, reason: reason.trim() });
+  }
+
+  // P0 lunch fix: HH:MM prompts on the entry's own date, entered in Pacific
+  // wall time (the office's zone).
+  function fixLunch(e: Entry) {
+    const startHM = window.prompt(`Lunch START on ${e.log_date} (HH:MM, 24h Pacific):`, "12:00");
+    if (!startHM) return;
+    const endHM = window.prompt(`Lunch END on ${e.log_date} (HH:MM, 24h Pacific):`, "12:30");
+    if (!endHM) return;
+    const hm = /^([01]?\d|2[0-3]):([0-5]\d)$/;
+    if (!hm.test(startHM.trim()) || !hm.test(endHM.trim())) {
+      toast.error("Times must be HH:MM (24-hour)");
+      return;
+    }
+    const mealStart = new Date(`${e.log_date}T${startHM.trim().padStart(5, "0")}:00`);
+    const mealEnd = new Date(`${e.log_date}T${endHM.trim().padStart(5, "0")}:00`);
+    if (mealEnd <= mealStart) {
+      toast.error("Lunch end must be after start");
+      return;
+    }
+    const reason = window.prompt("Reason (required — e.g. \"worker attested lunch, forgot to punch\"):");
+    if (!reason || !reason.trim()) return;
+    lunchMut.mutate({
+      entryId: e.id,
+      mealStart: mealStart.toISOString(),
+      mealEnd: mealEnd.toISOString(),
+      reason: reason.trim(),
+    });
   }
 
   const weekLabel = `${weekStart.toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${weekEnd.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
@@ -253,21 +375,32 @@ export function TimesheetEditor() {
               This Week
             </Button>
           </div>
-          <Input
-            value={filterUser}
-            onChange={(e) => setFilterUser(e.target.value)}
-            placeholder="Filter by canvasser name…"
-            className="max-w-xs"
-          />
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-1.5 text-[10px] font-display uppercase tracking-widest text-muted-foreground cursor-pointer">
+              <input
+                type="checkbox"
+                checked={needsReviewOnly}
+                onChange={(e) => setNeedsReviewOnly(e.target.checked)}
+                className="accent-[var(--warning)]"
+              />
+              Needs review
+            </label>
+            <Input
+              value={filterUser}
+              onChange={(e) => setFilterUser(e.target.value)}
+              placeholder="Filter by canvasser name…"
+              className="max-w-xs"
+            />
+          </div>
         </div>
 
         <div className="mt-3 flex items-start gap-2 text-[11px] text-muted-foreground border-l-2 border-warning/60 pl-2">
           <AlertTriangle className="w-3.5 h-3.5 mt-0.5 text-warning shrink-0" />
           <span>
-            Lunch deduction (30 min per shift) recalculates automatically on save — clocked hours
-            are otherwise paid in full (no daily caps). Sunday entries always bill 0h (Sundays are
-            unpaid). Forgotten shifts auto-close at 6:00 PM weekdays / 5:00 PM Saturdays; review
-            unusually long spans before paying.
+            Hours are paid in full — only punched (or manager-entered) lunches are deducted, and
+            Sundays pay when worked. Every save and void needs a reason and lands on the audit
+            trail. Auto-closed shifts are flagged; resolve them (fix the time or confirm it) before
+            approving the week's payroll run.
           </span>
         </div>
       </ArcadePanel>
@@ -286,7 +419,12 @@ export function TimesheetEditor() {
               {rows.map(({ e, name, edit, dirty, inVal, outVal }) => (
                 <MobileCard key={e.id}>
                   <MobileCardHeader
-                    left={name}
+                    left={
+                      <>
+                        {name}
+                        <EntryFlags e={e} />
+                      </>
+                    }
                     right={
                       <span className="text-neon tabular-nums">
                         {Number(e.billable_hours ?? 0).toFixed(2)}h
@@ -327,10 +465,10 @@ export function TimesheetEditor() {
                   <TimeEntryActions
                     dirty={dirty}
                     saving={saveMut.isPending}
-                    deleting={deleteMut.isPending}
-                    name={name}
+                    deleting={voidMut.isPending}
                     onSave={() => saveRow(e)}
-                    onDelete={() => deleteMut.mutate(e.id)}
+                    onVoid={() => voidRow(e, name)}
+                    onFixLunch={() => fixLunch(e)}
                   />
                 </MobileCard>
               ))}
@@ -355,7 +493,10 @@ export function TimesheetEditor() {
                         key={e.id}
                         className="border-b border-border/40 transition-colors duration-200 hover:bg-surface-elevated"
                       >
-                        <td className="py-2 pr-3 font-medium">{name}</td>
+                        <td className="py-2 pr-3 font-medium">
+                          {name}
+                          <EntryFlags e={e} />
+                        </td>
                         <td className="py-2 pr-3 text-xs text-muted-foreground tabular-nums">
                           {e.log_date}
                         </td>
@@ -393,10 +534,10 @@ export function TimesheetEditor() {
                             compact
                             dirty={dirty}
                             saving={saveMut.isPending}
-                            deleting={deleteMut.isPending}
-                            name={name}
+                            deleting={voidMut.isPending}
                             onSave={() => saveRow(e)}
-                            onDelete={() => deleteMut.mutate(e.id)}
+                            onVoid={() => voidRow(e, name)}
+                            onFixLunch={() => fixLunch(e)}
                           />
                         </td>
                       </tr>
