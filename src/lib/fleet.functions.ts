@@ -206,14 +206,22 @@ export type PaycheckRow = {
   sales: number;
   sale_price_total: number;
   hours: number;
+  reg_hours: number;
+  ot_hours: number;
+  dt_hours: number;
   hourly_rate: number;
+  regular_rate: number;
   base_pay: number;
+  ot_premium_pay: number;
+  meal_premium_count: number;
+  meal_premium_pay: number;
   commission_rate: number;
   commission: number;
   sit_bonus: number;
   monster_bonus: number;
   total_pay: number;
   rank: string;
+  exceptions: Record<string, unknown> | null;
 };
 
 export type PaycheckResult = {
@@ -304,6 +312,7 @@ export type MonthlyPaycheckRow = {
   sale_price_total: number;
   weekly_pay_total: number;
   volume_bonus: number;
+  volume_bonus_ot_true_up: number;
   total_pay: number;
 };
 

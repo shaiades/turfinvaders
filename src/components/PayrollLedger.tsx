@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { CalendarIcon, Download } from "lucide-react";
+import { CalendarIcon, Download, Lock, FileCheck2, AlertTriangle } from "lucide-react";
+import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchWeeklyPaychecksChunked, fetchMonthlyPaychecksChunked } from "@/lib/paychecks";
 import { sitBonusPerForRank } from "@/lib/pay";
@@ -115,9 +116,44 @@ function PayAmount({ error, amount }: { error: string | null | undefined; amount
   return <>${amount.toFixed(2)}</>;
 }
 
+type RunRow = {
+  id: string;
+  week_start: string;
+  status: string;
+  created_at: string;
+  approved_at: string | null;
+};
+
+/** Per-agent exception chips from the engine's exceptions jsonb. */
+function ExceptionChips({ ex }: { ex: Record<string, unknown> | null | undefined }) {
+  if (!ex) return null;
+  const chips: string[] = [];
+  const n = (k: string) => Number(ex[k] ?? 0);
+  if (n("sunday_hours") > 0) chips.push(`Sunday ${n("sunday_hours").toFixed(1)}h`);
+  if (n("auto_closed_entries") > 0) chips.push(`${n("auto_closed_entries")} auto-closed`);
+  if (n("needs_correction") > 0) chips.push(`${n("needs_correction")} needs review`);
+  if (n("meal_pending") > 0) chips.push(`${n("meal_pending")} meal ?`);
+  if (n("meal_unrecorded") > 0) chips.push(`${n("meal_unrecorded")} lunch times`);
+  if (ex["below_min_wage"] === true) chips.push("below min wage");
+  if (chips.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1 mt-1">
+      {chips.map((c) => (
+        <span
+          key={c}
+          className="text-[9px] font-display uppercase tracking-widest text-warning border border-warning/40 rounded px-1"
+        >
+          {c}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export function PayrollLedger() {
   const { matches, office } = useOfficeFilter();
-  // Default to last week; Mon..Sat pay week.
+  const qc = useQueryClient();
+  // Default to last week; Mon..Sun workweek (Sundays unscheduled but paid).
   const {
     weekStart,
     weekEnd,
@@ -127,6 +163,50 @@ export function PayrollLedger() {
     goToWeek,
   } = useWeekSelector({ initialOffsetWeeks: -1 });
   const [pickerOpen, setPickerOpen] = useState(false);
+
+  // The frozen-run state for this week drives the review → approve flow.
+  const runQuery = useQuery({
+    queryKey: ["payroll-run", startStr],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("payroll_runs")
+        .select("id, week_start, status, created_at, approved_at")
+        .eq("week_start", startStr)
+        .maybeSingle();
+      if (error) throw error;
+      return (data ?? null) as RunRow | null;
+    },
+  });
+  const run = runQuery.data ?? null;
+
+  const createRun = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.rpc("create_payroll_run", { _week_start: startStr });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Draft run created — review the lines, then approve to freeze");
+      qc.invalidateQueries({ queryKey: ["payroll-run", startStr] });
+    },
+    onError: (e: Error) => toast.error("Couldn't create run", { description: e.message }),
+  });
+
+  const approveRun = useMutation({
+    mutationFn: async () => {
+      if (!run) throw new Error("Create a draft run first");
+      const { error } = await supabase.rpc("approve_payroll_run", { _run_id: run.id });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Payroll run approved and frozen");
+      qc.invalidateQueries({ queryKey: ["payroll-run", startStr] });
+    },
+    onError: (e: Error) =>
+      toast.error("Approval blocked", {
+        description: e.message,
+        duration: 9000,
+      }),
+  });
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["payroll-ledger", startStr, endStr],
@@ -230,6 +310,8 @@ export function PayrollLedger() {
         const hoursSource: "clocked" | "none" = clocked > 0 ? "clocked" : "none";
         const sitBonus = Number(pc?.sit_bonus ?? 0);
         const monster = Number(pc?.monster_bonus ?? 0);
+        const otPremium = Number(pc?.ot_premium_pay ?? 0);
+        const mealPremium = Number(pc?.meal_premium_pay ?? 0);
         return {
           id: cid,
           name: profile?.display_name ?? "Unknown",
@@ -237,11 +319,19 @@ export function PayrollLedger() {
           rank,
           ...a,
           hours: Number(pc?.hours ?? 0),
+          regHours: Number(pc?.reg_hours ?? 0),
+          otHours: Number(pc?.ot_hours ?? 0),
+          dtHours: Number(pc?.dt_hours ?? 0),
           hoursSource,
           payLock,
           rate: Number(pc?.hourly_rate ?? 0),
           commRate: Number(pc?.commission_rate ?? 0),
           base: Number(pc?.base_pay ?? 0),
+          otPremium,
+          mealPremium,
+          mealPremiumCount: Number(pc?.meal_premium_count ?? 0),
+          premiums: otPremium + mealPremium,
+          exceptions: (pc?.exceptions ?? null) as Record<string, unknown> | null,
           commission: Number(pc?.commission ?? 0),
           sitBonus,
           sitBonusPer: sitBonusPerForRank(rank),
@@ -267,64 +357,111 @@ export function PayrollLedger() {
     [rows],
   );
 
-  function exportCsv() {
-    const headers = [
-      "Agent Name",
-      "Rank",
-      "Van / Team",
-      "Total Leads",
-      "Results Breakdown",
-      "Total Sits",
-      "Total Points",
-      "Hourly Rate",
-      "Total Hours",
-      "Hours Source",
-      "Base Pay",
-      "Total Sales Volume ($)",
-      "Commission Rate",
-      "Commission Earned ($)",
-      "Sit Bonus ($/sit)",
-      "Sit Bonus",
-      "Monster Bonus",
-      "Bonuses Total",
-      "Total Estimated Pay ($)",
-    ];
-    const lines = [headers.join(",")];
-    for (const r of rows) {
-      const breakdown = `${r.bo} BO, ${r.ol} OL, ${r.rs} RS, ${r.pm} Sit, ${r.sales} Sale`;
-      const cells = [
-        r.name,
-        r.rank,
-        r.team?.name ?? "Unassigned",
-        r.total,
-        breakdown,
-        r.sits,
-        r.points,
-        `$${r.rate}/hr`,
-        r.hours.toFixed(2),
-        r.hoursSource,
-        r.base.toFixed(2),
-        r.sale_amount.toFixed(2),
-        `${(r.commRate * 100).toFixed(0)}%`,
-        r.commission.toFixed(2),
-        `$${r.sitBonusPer}`,
-        r.sitBonus.toFixed(2),
-        r.monster.toFixed(2),
-        r.bonuses.toFixed(2),
-        r.payError ? "ERROR" : r.totalPay.toFixed(2),
-      ];
-      lines.push(cells.map(csvCell).join(","));
-    }
+  function downloadCsv(lines: string[], frozen: boolean) {
     const csv = lines.join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `payroll-${startStr}-to-${endStr}.csv`;
+    a.download = `payroll-${startStr}-to-${endStr}${frozen ? "-approved" : "-DRAFT"}.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  }
+
+  const CSV_HEADERS = [
+    "Agent Name",
+    "Rank",
+    "Van / Team",
+    "Reg Hours",
+    "OT Hours (1.5x)",
+    "DT Hours (2x)",
+    "Total Hours",
+    "Hourly Rate",
+    "Base Pay (straight time)",
+    "OT Premium Pay",
+    "Meal Premium Days",
+    "Meal Premium Pay",
+    "Total Sales Volume ($)",
+    "Commission Rate",
+    "Commission Earned ($)",
+    "Sit Bonus",
+    "Monster Bonus",
+    "Total Pay ($)",
+    "Exceptions",
+  ];
+
+  // The CSV exports the FROZEN run when this week is approved — the live
+  // recompute can drift after edits, the approved snapshot cannot.
+  async function exportCsv() {
+    if (run?.status === "approved") {
+      const { data, error } = await supabase
+        .from("payroll_run_lines")
+        .select("*")
+        .eq("run_id", run.id)
+        .order("total_pay", { ascending: false });
+      if (error) {
+        toast.error("Couldn't read the approved run", { description: error.message });
+        return;
+      }
+      const lines = [CSV_HEADERS.join(",")];
+      for (const l of data ?? []) {
+        const ex = (l.exceptions ?? {}) as Record<string, unknown>;
+        const cells = [
+          l.display_name,
+          l.rank ?? "",
+          "", // team isn't snapshotted; the frozen pay figures are what matter
+          Number(l.reg_hours).toFixed(2),
+          Number(l.ot_hours).toFixed(2),
+          Number(l.dt_hours).toFixed(2),
+          Number(l.hours).toFixed(2),
+          `$${l.hourly_rate}/hr`,
+          Number(l.base_pay).toFixed(2),
+          Number(l.ot_premium_pay).toFixed(2),
+          l.meal_premium_count,
+          Number(l.meal_premium_pay).toFixed(2),
+          "",
+          "",
+          Number(l.commission).toFixed(2),
+          Number(l.sit_bonus).toFixed(2),
+          Number(l.monster_bonus).toFixed(2),
+          Number(l.total_pay).toFixed(2),
+          Object.keys(ex).filter((k) => Number(ex[k]) > 0 || ex[k] === true).join("; "),
+        ];
+        lines.push(cells.map(csvCell).join(","));
+      }
+      downloadCsv(lines, true);
+      return;
+    }
+
+    const lines = [CSV_HEADERS.join(",")];
+    for (const r of rows) {
+      const ex = r.exceptions ?? {};
+      const cells = [
+        r.name,
+        r.rank,
+        r.team?.name ?? "Unassigned",
+        r.regHours.toFixed(2),
+        r.otHours.toFixed(2),
+        r.dtHours.toFixed(2),
+        r.hours.toFixed(2),
+        `$${r.rate}/hr`,
+        r.base.toFixed(2),
+        r.otPremium.toFixed(2),
+        r.mealPremiumCount,
+        r.mealPremium.toFixed(2),
+        r.sale_amount.toFixed(2),
+        `${(r.commRate * 100).toFixed(0)}%`,
+        r.commission.toFixed(2),
+        r.sitBonus.toFixed(2),
+        r.monster.toFixed(2),
+        r.payError ? "ERROR" : r.totalPay.toFixed(2),
+        Object.keys(ex).filter((k) => Number(ex[k]) > 0 || ex[k] === true).join("; "),
+      ];
+      lines.push(cells.map(csvCell).join(","));
+    }
+    downloadCsv(lines, false);
   }
 
   return (
@@ -338,9 +475,9 @@ export function PayrollLedger() {
             {format(weekStart, "MMM d")} → {format(weekEnd, "MMM d, yyyy")}
           </h2>
           <div className="text-xs text-muted-foreground mt-1">
-            Official pay engine · Hours: clocked time only (30-min lunch deducted per shift, no
-            daily caps) — no clock-in, no base pay · Hourly tier by points · Commission by Sale
-            Price · Sit & Monster bonuses included
+            Official pay engine · Clocked time only (punched lunches deducted, Sundays paid when
+            worked) · CA overtime: daily 8/12, weekly 40, 7th-day, on the blended regular rate ·
+            Meal premiums auto-added · Hourly tier by points · Commission by Sale Price
           </div>
           {office !== "All" && (
             <div className="mt-3 text-[10px] font-display uppercase tracking-widest text-neon">
@@ -403,6 +540,68 @@ export function PayrollLedger() {
         </div>
       </ArcadeCard>
 
+      {/* Run lifecycle: draft (review) → approved (frozen). The CSV exports
+          the frozen lines once approved. */}
+      <ArcadeCard className="p-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-xs">
+          {run?.status === "approved" ? (
+            <>
+              <Lock className="w-4 h-4 text-victory" />
+              <span className="font-display uppercase tracking-widest text-victory">
+                Run approved · frozen
+              </span>
+              <span className="text-muted-foreground">
+                {run.approved_at ? format(new Date(run.approved_at), "MMM d, p") : ""} — corrections
+                go on next week's run
+              </span>
+            </>
+          ) : run?.status === "draft" ? (
+            <>
+              <FileCheck2 className="w-4 h-4 text-warning" />
+              <span className="font-display uppercase tracking-widest text-warning">
+                Draft run awaiting approval
+              </span>
+              <span className="text-muted-foreground">
+                Resolve flagged entries, re-create if times changed, then approve to freeze.
+              </span>
+            </>
+          ) : (
+            <>
+              <AlertTriangle className="w-4 h-4 text-muted-foreground" />
+              <span className="text-muted-foreground">
+                No payroll run yet for this week — the table below is a live estimate.
+              </span>
+            </>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {run?.status !== "approved" && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={createRun.isPending}
+              onClick={() => createRun.mutate()}
+              className="font-display text-[10px] uppercase tracking-widest"
+            >
+              {run?.status === "draft" ? "Re-create draft" : "Create draft run"}
+            </Button>
+          )}
+          {run?.status === "draft" && (
+            <Button
+              size="sm"
+              disabled={approveRun.isPending}
+              onClick={() => {
+                if (confirm("Approve and freeze this week's payroll? This cannot be edited after."))
+                  approveRun.mutate();
+              }}
+              className="bg-victory text-background hover:bg-victory/90 font-display text-[10px] uppercase tracking-widest"
+            >
+              Approve & freeze
+            </Button>
+          )}
+        </div>
+      </ArcadeCard>
+
       <ArcadePanel
         title={`Payroll Ledger · ${rows.length} agents`}
         action={
@@ -460,7 +659,11 @@ export function PayrollLedger() {
                         <>
                           {r.hours.toFixed(2)}h
                           <div className="text-[9px] text-muted-foreground">
-                            {r.hoursSource === "clocked" ? "clocked" : "no time clocked"}
+                            {r.otHours + r.dtHours > 0
+                              ? `${r.regHours.toFixed(1)} reg · ${r.otHours.toFixed(1)} OT${r.dtHours > 0 ? ` · ${r.dtHours.toFixed(1)} DT` : ""}`
+                              : r.hoursSource === "clocked"
+                                ? "clocked"
+                                : "no time clocked"}
                           </div>
                         </>
                       }
@@ -472,11 +675,17 @@ export function PayrollLedger() {
                       className="font-display text-victory"
                     />
                     <MobileStat label="Commission" value={`$${r.commission.toFixed(2)}`} />
+                    <MobileStat
+                      label="Premiums"
+                      value={`$${r.premiums.toFixed(2)}`}
+                      className={cn(r.premiums > 0 && "text-warning")}
+                    />
                     <MobileStat label="Bonuses" value={`$${r.bonuses.toFixed(2)}`} />
                   </MobileStatGrid>
                   <div className="text-xs text-muted-foreground">
                     <ResultsBreakdown r={r} />
                   </div>
+                  <ExceptionChips ex={r.exceptions} />
                 </MobileCard>
               ))}
               <MobileCard className="border-neon/40">
@@ -505,8 +714,9 @@ export function PayrollLedger() {
                     <th className="text-right py-2 pr-3">Total Hours</th>
                     <th className="text-right py-2 pr-3">Total Sales Volume ($)</th>
                     <th className="text-right py-2 pr-3">Commission Earned ($)</th>
+                    <th className="text-right py-2 pr-3">Premiums</th>
                     <th className="text-right py-2 pr-3">Bonuses</th>
-                    <th className="text-right py-2 pr-1">Total Estimated Pay ($)</th>
+                    <th className="text-right py-2 pr-1">Total Pay ($)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -515,7 +725,10 @@ export function PayrollLedger() {
                       key={r.id}
                       className="border-b border-border/40 transition-colors duration-200 hover:bg-surface-elevated"
                     >
-                      <td className="py-2.5 pr-3 font-medium">{r.name}</td>
+                      <td className="py-2.5 pr-3 font-medium">
+                        {r.name}
+                        <ExceptionChips ex={r.exceptions} />
+                      </td>
                       <td className="py-2.5 pr-3">
                         <RankPill rank={r.rank} />
                         <PayLockBadge status={r.payLock} className="mt-1" />
@@ -538,8 +751,12 @@ export function PayrollLedger() {
                       </td>
                       <td className="py-2.5 pr-3 text-right">
                         <div className="font-display text-neon">{r.hours.toFixed(2)}h</div>
-                        <div className="text-[9px] text-muted-foreground">
-                          {r.hoursSource === "clocked" ? "clocked" : "no time clocked"}
+                        <div className="text-[9px] text-muted-foreground whitespace-nowrap">
+                          {r.otHours + r.dtHours > 0
+                            ? `${r.regHours.toFixed(1)} reg · ${r.otHours.toFixed(1)} OT${r.dtHours > 0 ? ` · ${r.dtHours.toFixed(1)} DT` : ""}`
+                            : r.hoursSource === "clocked"
+                              ? "clocked"
+                              : "no time clocked"}
                         </div>
                       </td>
                       <td className="py-2.5 pr-3 text-right font-display text-victory">
@@ -550,6 +767,18 @@ export function PayrollLedger() {
                         <div className="text-[9px] text-muted-foreground">
                           {(r.commRate * 100).toFixed(0)}% commission tier
                         </div>
+                      </td>
+                      <td className="py-2.5 pr-3 text-right">
+                        <div className={cn(r.premiums > 0 && "text-warning")}>
+                          ${r.premiums.toFixed(2)}
+                        </div>
+                        {r.premiums > 0 && (
+                          <div className="text-[9px] text-muted-foreground whitespace-nowrap">
+                            {r.otPremium > 0 && `OT $${r.otPremium.toFixed(0)}`}
+                            {r.otPremium > 0 && r.mealPremium > 0 && " · "}
+                            {r.mealPremium > 0 && `meal ×${r.mealPremiumCount}`}
+                          </div>
+                        )}
                       </td>
                       <td className="py-2.5 pr-3 text-right">
                         <div>${r.bonuses.toFixed(2)}</div>
@@ -570,10 +799,10 @@ export function PayrollLedger() {
                 <tfoot>
                   <tr className="border-t border-neon/40">
                     <td
-                      colSpan={12}
+                      colSpan={13}
                       className="py-3 text-right text-[10px] font-display uppercase tracking-widest text-muted-foreground"
                     >
-                      Grand Total · Estimated Pay
+                      Grand Total
                     </td>
                     <td className="py-3 pr-1 text-right font-display text-victory text-base">
                       ${grandTotal.toFixed(2)}

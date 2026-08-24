@@ -279,7 +279,7 @@ function PaycheckEngineWidget({
           </div>
           <div className="font-display text-3xl text-neon mt-1">{hours.toFixed(1)}</div>
           <div className="text-[10px] uppercase tracking-widest text-muted-foreground mt-1">
-            from time clock · lunch deducted
+            from time clock · punched lunches deducted
           </div>
         </div>
         <div>

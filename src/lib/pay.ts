@@ -70,7 +70,61 @@ export function sitBonusPerForRank(rank?: string | null): number {
     : SIT_BONUS_PER;
 }
 
-/** Base-pay hours come exclusively from clocked time_entries (no daily caps,
- *  30-min lunch deducted per closed shift, Sundays unpaid). There is NO
- *  activity-based hour estimate: no clock-in means no base pay. */
-export const LUNCH_DEDUCTION_HOURS = 0.5;
+/** Base-pay hours come exclusively from clocked time_entries: full worked
+ *  time minus PUNCHED (or manager-entered) meal periods only — there is no
+ *  blanket deduction, Sundays pay when worked, and there is NO activity-based
+ *  hour estimate: no clock-in means no base pay. */
+
+/** CA overtime mirror of calc_weekly_paycheck v6 (change together!):
+ *  workweek Mon–Sun LA; daily >8h = 1.5x, >12h = 2x; 7th consecutive day
+ *  worked = first 8h at 1.5x, beyond at 2x; weekly straight time >40h = 1.5x
+ *  (hours already premium daily never double-count). */
+export const DAILY_OT_AFTER = 8;
+export const DAILY_DT_AFTER = 12;
+export const WEEKLY_OT_AFTER = 40;
+export const MEAL_REQUIRED_AFTER_HOURS = 5;
+
+export type WeekHoursSplit = { reg: number; ot: number; dt: number };
+
+/** dayHours: billable hours per worked day of one Mon–Sun workweek, in day
+ *  order with the 7th slot being Sunday. Mirrors the SQL exactly — the
+ *  verify:overtime script asserts both stay in step. */
+export function splitWeekHours(dayHours: number[]): WeekHoursSplit {
+  const workedAllSeven = dayHours.length === 7 && dayHours.every((h) => h > 0);
+  let reg = 0, ot = 0, dt = 0;
+  dayHours.forEach((h, i) => {
+    const is7th = workedAllSeven && i === 6;
+    if (is7th) {
+      ot += Math.min(h, DAILY_OT_AFTER);
+      dt += Math.max(h - DAILY_OT_AFTER, 0);
+    } else {
+      reg += Math.min(h, DAILY_OT_AFTER);
+      ot += Math.min(Math.max(h - DAILY_OT_AFTER, 0), DAILY_DT_AFTER - DAILY_OT_AFTER);
+      dt += Math.max(h - DAILY_DT_AFTER, 0);
+    }
+  });
+  if (reg > WEEKLY_OT_AFTER) {
+    ot += reg - WEEKLY_OT_AFTER;
+    reg = WEEKLY_OT_AFTER;
+  }
+  return { reg, ot, dt };
+}
+
+/** Premium dollars on top of straight-time-for-all-hours, given the split
+ *  and the week's flat-sum bonuses + commission (Alvarado / DLSE 49.2.4). */
+export function overtimePremiumPay(
+  split: WeekHoursSplit,
+  hourlyRate: number,
+  flatBonus: number,
+  commission: number,
+): number {
+  const hours = split.reg + split.ot + split.dt;
+  let prem = 0.5 * hourlyRate * split.ot + 1.0 * hourlyRate * split.dt;
+  if (split.reg > 0 && flatBonus > 0) {
+    prem += (flatBonus / split.reg) * (1.5 * split.ot + 2.0 * split.dt);
+  }
+  if (hours > 0 && commission > 0) {
+    prem += (commission / hours) * (0.5 * split.ot + 1.0 * split.dt);
+  }
+  return prem;
+}
