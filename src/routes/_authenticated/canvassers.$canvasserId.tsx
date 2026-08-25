@@ -97,22 +97,11 @@ function CanvasserProfile() {
   // VISIBILITY of the profile itself
   const canViewFull = isManagerRole(role) || isSelf || sameTeam || visibility;
 
-  // Who may read this player's daily_logs (mirrors the "daily_logs read scoped" RLS
-  // policy — peers get zero rows back, so don't render fake zeros for them).
-  const directCaptainQuery = useQuery({
-    enabled: role === "captain" && !!profileTeamId && !isSelf,
-    queryKey: ["is_direct_captain", profileTeamId, user?.id],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("teams")
-        .select("captain_id")
-        .eq("id", profileTeamId!)
-        .maybeSingle();
-      return data?.captain_id === user?.id;
-    },
-  });
-  const isDirectCaptain = !!directCaptainQuery.data;
-  const canReadLogs = isSelf || isAdminRole(role) || (role === "captain" && isDirectCaptain);
+  // Who may read this player's daily_logs — mirrors the "daily_logs read
+  // scoped" RLS policy since 20260803010000: self, Admins, and ANY captain
+  // (role-based global reads; /teams/$teamId already shows every captain any
+  // van's logs). Peers get zero rows back, so don't render fake zeros for them.
+  const canReadLogs = isSelf || isAdminRole(role) || role === "captain";
   const canViewRevenue = canReadLogs;
 
   // Production stats from real daily_logs, scoped to the selected range.

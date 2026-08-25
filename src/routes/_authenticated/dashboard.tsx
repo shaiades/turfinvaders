@@ -330,7 +330,7 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
     queryFn: async () => {
       const { data, error } = await supabase
         .from("teams")
-        .select("id, name, color, captain_id")
+        .select("id, name, color")
         .eq("id", teamId!)
         .maybeSingle();
       if (error) throw error;
@@ -338,14 +338,15 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
     },
   });
 
-  // daily_logs/leads RLS grants captains rows only for teams where they are the
-  // captain_id — which can diverge from profiles.team_id (e.g. a replaced captain
-  // still assigned to the van as a member). Only query when we're the real captain,
-  // and say so instead of rendering misleading zeros.
-  const isVanCaptain = !!user && teamQuery.data?.captain_id === user.id;
+  // Only role==="captain" reaches this component, and captain reads are
+  // role-based since 20260803010000 (global SELECT on daily_logs/leads/etc) —
+  // so a captain's assigned van IS their command view. teams.captain_id is
+  // seed-era data with no UI writer; never gate on it. `van` stays null for a
+  // dangling profiles.team_id so a deleted team can't render as "Unassigned".
+  const van = teamQuery.data ?? null;
 
   const rosterQuery = useQuery({
-    enabled: !!teamId && isVanCaptain,
+    enabled: !!teamId,
     queryKey: ["captain_roster", teamId, range.startISO, range.endISO],
     queryFn: async () => {
       const [profilesRes, logsRes, salesRes] = await Promise.all([
@@ -409,8 +410,9 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
     },
   });
 
-  // Cross-van cards read daily_metrics (the leaderboard pipeline) because
-  // captains cannot read other teams' daily_logs/leads under RLS by design.
+  // Cross-van cards read daily_metrics (the leaderboard pipeline) — one
+  // aggregated row per canvasser/day, far cheaper than summing raw logs.
+  // (Captains CAN read other vans' logs since 20260803010000; perf choice.)
   const otherVansQuery = useQuery({
     enabled: visibility,
     queryKey: ["captain_other_vans", range.startISO, range.endISO],
@@ -502,33 +504,21 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
       <RangeTabs controls={rangeControls} />
 
       {teamId ? (
-        isVanCaptain ? (
+        van ? (
           <CommandCenter
             teamId={teamId}
             range={{ startISO: range.startISO, endISO: range.endISO, label: range.label }}
           />
         ) : teamQuery.isSuccess ? (
-          <ArcadeCard className="p-8 text-center">
-            <h2 className="font-display text-sm text-neon">MEMBER VIEW</h2>
-            <p className="mt-3 text-sm text-muted-foreground">
-              You're assigned to this van as a member — live team stats are visible to the van's
-              captain. Ask an Owner if you should be set as this van's captain.
-            </p>
-          </ArcadeCard>
+          <NoVanCard />
         ) : (
           <div className="text-sm text-muted-foreground">Loading van…</div>
         )
       ) : (
-        <ArcadeCard className="p-8 text-center">
-          <h2 className="font-display text-sm text-neon">NO VAN ASSIGNED</h2>
-          <p className="mt-3 text-sm text-muted-foreground">
-            You are not assigned to a van yet. Ask an Owner to add you to a team to see your roster
-            and stats.
-          </p>
-        </ArcadeCard>
+        <NoVanCard />
       )}
 
-      {isVanCaptain && (
+      {van && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <StatCard
@@ -607,6 +597,20 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
         </ArcadeCard>
       )}
     </div>
+  );
+}
+
+// Shown when the captain has no profiles.team_id, or when it points at a
+// team row that no longer exists (deleted van) — same remedy either way.
+function NoVanCard() {
+  return (
+    <ArcadeCard className="p-8 text-center">
+      <h2 className="font-display text-sm text-neon">NO VAN ASSIGNED</h2>
+      <p className="mt-3 text-sm text-muted-foreground">
+        You are not assigned to a van yet. Ask an Owner to add you to a team to see your roster and
+        stats.
+      </p>
+    </ArcadeCard>
   );
 }
 

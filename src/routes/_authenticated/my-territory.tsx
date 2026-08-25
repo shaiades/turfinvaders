@@ -7,7 +7,7 @@ import { laTodayISO } from "@/lib/dates";
 import { useAuth } from "@/hooks/useAuth";
 import { dailyLogKeys } from "@/hooks/useDailyLogs";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
-import { isManagerRole, requiresGratitudeGate } from "@/lib/roles";
+import { isAdminRole, isManagerRole, requiresGratitudeGate } from "@/lib/roles";
 import { assigneeColor } from "@/lib/assignee-colors";
 import { ArcadePanel } from "@/components/arcade";
 import { NeonMap, type Territory, type FieldPin, type LatLng } from "@/components/NeonMap";
@@ -738,7 +738,9 @@ function MyTerritoryPage() {
           <div className="relative">
             <NeonMap
               territories={territories}
-              pins={isManager ? [] : (pinsQuery.data ?? [])}
+              // Captains canvass too — they keep their own today-pins over the
+              // manager territory layer; only Admin tier gets the clean map.
+              pins={isAdminRole(role) ? [] : (pinsQuery.data ?? [])}
               houses={[]}
               me={me}
               height={560}

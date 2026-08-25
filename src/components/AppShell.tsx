@@ -101,9 +101,24 @@ export function AppShell({ children }: { children: ReactNode }) {
         { to: "/daily-wrap", label: "Wrap", icon: Sparkles },
       ];
     }
-    // Leadership: owner, captain, office_staff (manager suite). Close Kombat
-    // only for roles its route guard admits — captains are excluded, so
-    // don't show them a nav item that silently bounces.
+    if (role === "captain") {
+      // Captains get their own five (owner decision 2026-08-25): no Payroll
+      // (CaptainDashboard has no ?tab views — the admin link was a silent
+      // no-op) and no Desk (/confirmation-desk is Admin-tier and bounces).
+      // Command carries no search so activeOptions matches on pathname alone
+      // (Mission precedent above); Fleet Dispatch points at the live board —
+      // the read-only leaderboard IS the captain management surface
+      // (row edits stay role-gated inside FleetDispatch).
+      return [
+        { to: "/dashboard", label: "Command", icon: LayoutDashboard },
+        { to: "/my-territory", label: "Territory", icon: MapPin },
+        { to: "/leaderboard", label: "Fleet Dispatch", icon: Truck },
+        { to: "/learn", label: "Learn", icon: GraduationCap },
+        { to: "/daily-wrap", label: "Wrap", icon: Sparkles },
+      ];
+    }
+    // Leadership: owner + office_staff (Admin tier — captains returned above).
+    // Close Kombat only for roles its route guard admits.
     return [
       { to: "/dashboard", search: { tab: "dispatch" }, label: "Command", icon: LayoutDashboard },
       { to: "/my-territory", label: "Territory", icon: MapPin },

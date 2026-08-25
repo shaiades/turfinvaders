@@ -5,6 +5,7 @@ import { StatCard, ArcadePanel, TeamBadge, ArcadeCard } from "@/components/arcad
 import { MANAGER_ROLES, requireRoleBeforeLoad } from "@/lib/roles";
 import { useDateRange } from "@/hooks/useDateRange";
 import { RangeTabs } from "@/components/RangeTabs";
+import { normalizeName } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/teams/$teamId")({
   head: () => ({ meta: [{ title: "Van — Knockout" }] }),
@@ -26,8 +27,8 @@ function TeamDetail() {
     // Keep the page (and the range selector) mounted while a new range loads.
     placeholderData: (prev) => prev,
     queryFn: async () => {
-      const [teamR, profilesR, logsR] = await Promise.all([
-        supabase.from("teams").select("id, name, color, captain_id").eq("id", teamId).maybeSingle(),
+      const [teamR, profilesR, logsR, rolesR] = await Promise.all([
+        supabase.from("teams").select("id, name, color").eq("id", teamId).maybeSingle(),
         supabase.from("profiles").select("id, display_name, team_id").eq("team_id", teamId),
         supabase
           .from("daily_logs")
@@ -35,12 +36,27 @@ function TeamDetail() {
           .eq("team_id", teamId)
           .gte("log_date", range.startISO)
           .lte("log_date", range.endISO),
+        supabase.from("user_roles").select("user_id").eq("role", "captain"),
       ]);
       const team = teamR.data;
       if (!team) return null;
-      const captainName = team.captain_id
-        ? (await supabase.from("profiles").select("display_name").eq("id", team.captain_id).maybeSingle()).data?.display_name ?? "—"
-        : "—";
+      // Captain label = member(s) of this van holding the captain role.
+      // teams.captain_id is seed-era data with no UI writer — never label from
+      // it. Deduped by normalizeName: same-name duplicate profiles are normal.
+      const captainIds = new Set((rolesR.data ?? []).map((r) => r.user_id));
+      const seenCaptainKeys = new Set<string>();
+      const captainName =
+        (profilesR.data ?? [])
+          .filter((p) => {
+            if (!captainIds.has(p.id)) return false;
+            const key = normalizeName(p.display_name) || `id:${p.id}`;
+            if (seenCaptainKeys.has(key)) return false;
+            seenCaptainKeys.add(key);
+            return true;
+          })
+          .map((p) => p.display_name ?? "—")
+          .sort()
+          .join(" · ") || "—";
 
       const agg = new Map<string, { leads: number; sales: number; sits: number }>();
       for (const l of logsR.data ?? []) {
