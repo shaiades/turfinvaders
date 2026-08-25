@@ -5,6 +5,7 @@ import { ArcadePanel, TeamBadge, ArcadeCard } from "@/components/arcade";
 import { MANAGER_ROLES, requireRoleBeforeLoad } from "@/lib/roles";
 import { useDateRange } from "@/hooks/useDateRange";
 import { RangeTabs } from "@/components/RangeTabs";
+import { normalizeName } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/teams/")({
   head: () => ({ meta: [{ title: "Vans — Knockout" }] }),
@@ -25,19 +26,35 @@ function TeamsIndex() {
     // Keep the cards mounted while a new range loads.
     placeholderData: (prev) => prev,
     queryFn: async () => {
-      const [teamsR, profilesR, logsR] = await Promise.all([
-        supabase.from("teams").select("id, name, color, captain_id").order("name"),
+      const [teamsR, profilesR, logsR, rolesR] = await Promise.all([
+        supabase.from("teams").select("id, name, color").order("name"),
         supabase.from("profiles").select("id, display_name, team_id"),
         supabase
           .from("daily_logs")
           .select("team_id, demos_sits, sales, no_demo, one_legs, future_leads")
           .gte("log_date", range.startISO)
           .lte("log_date", range.endISO),
+        supabase.from("user_roles").select("user_id").eq("role", "captain"),
       ]);
-      const captainName = new Map((profilesR.data ?? []).map((p) => [p.id, p.display_name ?? "—"]));
+      // Captain label = team member(s) holding the captain role. teams.captain_id
+      // is seed-era data with no UI writer — post-seed vans have it NULL.
+      // Deduped by normalizeName: same-name duplicate profiles are normal.
+      const captainIds = new Set((rolesR.data ?? []).map((r) => r.user_id));
+      const captainsByTeam = new Map<string, string[]>();
+      const seenCaptainKeys = new Set<string>();
       const memberCount = new Map<string, number>();
       for (const p of profilesR.data ?? []) {
-        if (p.team_id) memberCount.set(p.team_id, (memberCount.get(p.team_id) ?? 0) + 1);
+        if (!p.team_id) continue;
+        memberCount.set(p.team_id, (memberCount.get(p.team_id) ?? 0) + 1);
+        if (captainIds.has(p.id)) {
+          const key = `${p.team_id}|${normalizeName(p.display_name) || `id:${p.id}`}`;
+          if (seenCaptainKeys.has(key)) continue;
+          seenCaptainKeys.add(key);
+          captainsByTeam.set(p.team_id, [
+            ...(captainsByTeam.get(p.team_id) ?? []),
+            p.display_name ?? "—",
+          ]);
+        }
       }
       const totalsByTeam = new Map<string, { leads: number; sales: number; sits: number }>();
       for (const l of logsR.data ?? []) {
@@ -52,7 +69,7 @@ function TeamsIndex() {
         id: t.id,
         name: t.name,
         color: t.color ?? "#00f0ff",
-        captain: t.captain_id ? captainName.get(t.captain_id) ?? "—" : "—",
+        captain: captainsByTeam.get(t.id)?.sort().join(" · ") ?? "—",
         members: memberCount.get(t.id) ?? 0,
         ...(totalsByTeam.get(t.id) ?? { leads: 0, sales: 0, sits: 0 }),
       }));

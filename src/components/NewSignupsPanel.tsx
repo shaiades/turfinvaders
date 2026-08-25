@@ -84,7 +84,7 @@ export function NewSignupsPanel() {
     queryFn: async () => {
       const { data: rows, error: err } = await supabase
         .from("teams")
-        .select("id, name, color, captain_id, office_location")
+        .select("id, name, color, office_location")
         .order("name");
       if (err) throw err;
       return (rows ?? []) as Van[];

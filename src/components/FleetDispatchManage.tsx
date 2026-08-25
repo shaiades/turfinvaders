@@ -448,12 +448,29 @@ export function FleetDispatchManage({
                               <span className="min-w-0 truncate">
                                 <TeamBadge name={v.name} color={v.color ?? "#888"} />
                               </span>
-                              {v.captain_id && (
-                                <span className="hidden sm:inline text-[10px] text-muted-foreground truncate min-w-0">
-                                  ·{" "}
-                                  {captains.find((c) => c.id === v.captain_id)?.display_name ?? ""}
-                                </span>
-                              )}
+                              {(() => {
+                                // Caption = roster members holding the captain
+                                // role (teams.captain_id is seed-era data with
+                                // no UI writer — never label from it). Deduped
+                                // by normalizeName — same-name duplicate
+                                // profiles are normal on this board.
+                                const seen = new Set<string>();
+                                const capNames = captains
+                                  .filter((c) => c.team_id === v.id)
+                                  .map((c) => c.display_name)
+                                  .filter((n): n is string => {
+                                    if (!n) return false;
+                                    const key = normalizeName(n);
+                                    if (seen.has(key)) return false;
+                                    seen.add(key);
+                                    return true;
+                                  });
+                                return capNames.length > 0 ? (
+                                  <span className="hidden sm:inline text-[10px] text-muted-foreground truncate min-w-0">
+                                    · {capNames.join(" · ")}
+                                  </span>
+                                ) : null;
+                              })()}
                             </div>
 
                             <div className="flex items-center gap-1">
@@ -529,9 +546,7 @@ export function FleetDispatchManage({
                                 (sum, p) => sum + (volumeByUser.get(p.id) ?? 0),
                                 0,
                               );
-                              const rIsCaptain =
-                                v.captain_id === r.id ||
-                                (rolesByUser.get(r.id) ?? []).includes("captain");
+                              const rIsCaptain = (rolesByUser.get(r.id) ?? []).includes("captain");
                               return (
                                 <RosterRow
                                   key={r.id}

@@ -89,7 +89,6 @@ export type Van = {
   id: string;
   name: string;
   color: string | null;
-  captain_id: string | null;
   office_location: string | null;
 };
 
@@ -324,7 +323,7 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("teams")
-        .select("id, name, color, captain_id, office_location")
+        .select("id, name, color, office_location")
         .order("name");
       if (error) throw error;
       return (data ?? []) as Van[];
@@ -1372,7 +1371,7 @@ function DispatchFleet({
   // and captain names precomputed — instead of rebuilding maps and
   // re-reducing per-van totals (O(vans × reps), and again inside every sort
   // comparison) on every render of a board that refetches on realtime pings.
-  const { rowsByVan, looseActive, totalsByVan, nameByProfileId } = useMemo(() => {
+  const { rowsByVan, looseActive, totalsByVan, captainNamesByVan } = useMemo(() => {
     const rowsByVan = new Map<string, FunnelRow[]>();
     const freeAgents: FunnelRow[] = [];
     const vanIds = new Set(vans.map((v) => v.id));
@@ -1387,11 +1386,24 @@ function DispatchFleet({
     }
     for (const list of rowsByVan.values()) list.sort(byProduction);
     const totalsByVan = new Map(vans.map((v) => [v.id, totalsOfRows(rowsByVan.get(v.id) ?? [])]));
-    const nameByProfileId = new Map<string, string | null>();
-    for (const r of rows) {
-      for (const id of r.g.ids) {
-        if (!nameByProfileId.has(id)) nameByProfileId.set(id, r.g.display_name);
-      }
+    // Van captions come from the roster: active members holding the captain
+    // role (teams.captain_id is seed-era data with no UI writer — a stale id
+    // would caption a replaced captain, a NULL one no caption at all).
+    // Deduped by normalizeName like the rows are — duplicate same-name
+    // profiles ("Logan temple" / "Logan Temple") are normal on this board.
+    // Profiles arrive display_name-ordered, so multi-captain joins are stable.
+    const captainNamesByVan = new Map<string, string[]>();
+    const seenCaptainKeys = new Set<string>();
+    for (const p of profiles) {
+      if (p.is_active !== true || !p.team_id || !p.display_name) continue;
+      if (!(rolesByUser.get(p.id) ?? []).includes("captain")) continue;
+      const key = `${p.team_id}|${normalizeName(p.display_name) || `id:${p.id}`}`;
+      if (seenCaptainKeys.has(key)) continue;
+      seenCaptainKeys.add(key);
+      captainNamesByVan.set(p.team_id, [
+        ...(captainNamesByVan.get(p.team_id) ?? []),
+        p.display_name,
+      ]);
     }
     const looseActive = freeAgents
       .filter(
@@ -1399,12 +1411,14 @@ function DispatchFleet({
           r.sub + r.conf + r.fut + r.kil + r.pts + r.vol + r.res.lds + r.res.ol + r.res.sal > 0,
       )
       .sort(byProductionThenName);
-    return { rowsByVan, looseActive, totalsByVan, nameByProfileId };
-  }, [rows, vans]);
+    return { rowsByVan, looseActive, totalsByVan, captainNamesByVan };
+  }, [rows, vans, profiles, rolesByUser]);
 
   const vanSub = (id: string) => totalsByVan.get(id)?.sub ?? 0;
-  const captainName = (v: Van) =>
-    v.captain_id ? (nameByProfileId.get(v.captain_id) ?? null) : null;
+  const captainName = (v: Van) => {
+    const names = captainNamesByVan.get(v.id);
+    return names?.length ? names.join(" · ") : null;
+  };
 
   const offices = OFFICE_LOCATIONS.filter((o) => matches(o));
 
