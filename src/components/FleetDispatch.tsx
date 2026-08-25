@@ -111,10 +111,18 @@ type Metric = {
   future: number;
 };
 
-export function FleetDispatch({ readOnly = false }: { readOnly?: boolean }) {
+export function FleetDispatch({
+  readOnly = false,
+  focusTeamId,
+}: {
+  readOnly?: boolean;
+  /** Render only this van's card (the captain Command embed). Queries stay
+   *  fleet-wide — same cache keys as the leaderboard — only display filters. */
+  focusTeamId?: string | null;
+}) {
   return (
     <OfficeFilterProvider>
-      <FleetDispatchInner readOnly={readOnly} />
+      <FleetDispatchInner readOnly={readOnly} focusTeamId={focusTeamId ?? null} />
     </OfficeFilterProvider>
   );
 }
@@ -135,7 +143,13 @@ type ResolvedRange = {
   isLive: boolean;
 };
 
-function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
+function FleetDispatchInner({
+  readOnly,
+  focusTeamId,
+}: {
+  readOnly: boolean;
+  focusTeamId: string | null;
+}) {
   const qc = useQueryClient();
   const { realRole } = useAuth();
 
@@ -534,12 +548,16 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
 
   const visible = useMemo(
     () =>
-      canvassers.filter(
-        (c) =>
-          matches(c.office_location ?? c.team_office) ||
-          (c.team_id !== null && crossOfficeVanIds.has(c.team_id)),
-      ),
-    [canvassers, matches, crossOfficeVanIds],
+      // Focus mode (captain Command embed) pins the board to one van and
+      // ignores the office filter — a van lives in exactly one office.
+      focusTeamId
+        ? canvassers.filter((c) => c.team_id === focusTeamId)
+        : canvassers.filter(
+            (c) =>
+              matches(c.office_location ?? c.team_office) ||
+              (c.team_id !== null && crossOfficeVanIds.has(c.team_id)),
+          ),
+    [canvassers, matches, crossOfficeVanIds, focusTeamId],
   );
 
   // De-duplicate by normalized display_name. If any duplicate is a captain,
@@ -708,10 +726,10 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
 
   const canManage = !readOnly && isManagerRole(realRole);
   // Row actions (move/rename/combine/archive) are role-gated, NOT page-gated
-  // — the suspension-✕ precedent (owner, 2026-08-12): captains have no
-  // COMMAND tab, so the read-only leaderboard is where they manage their
-  // people. ExecutiveSection, Manage Fleet, and the webhook cards stay
-  // page-gated behind !readOnly.
+  // — the suspension-✕ precedent (owner, 2026-08-12): captains manage their
+  // people from the read-only surfaces (the leaderboard and their Command
+  // tab's van board). ExecutiveSection, Manage Fleet, and the webhook cards
+  // stay page-gated behind !readOnly.
   const canEditRows = isManagerRole(realRole);
 
   const footnote =
@@ -731,7 +749,11 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
               Fleet Dispatch · {range.label}
             </div>
             <div className="font-display text-sm text-neon mt-0.5">
-              {readOnly ? "LEADERBOARD · LIVE" : "READ-ONLY · MONDAY.COM FEED"}
+              {focusTeamId
+                ? "MY VAN · LIVE"
+                : readOnly
+                  ? "LEADERBOARD · LIVE"
+                  : "READ-ONLY · MONDAY.COM FEED"}
             </div>
           </div>
         </div>
@@ -868,10 +890,10 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
       <SuspensionBanner
         rows={suspensionRows}
         onRemove={
-          // Role-gated, not page-gated: captains have no COMMAND tab, so the
-          // read-only leaderboard is where they get the one-click ✕ (owner,
-          // 2026-08-12). Writes persist for the whole manager tier via the
-          // "Managers update non-privileged profiles" policy.
+          // Role-gated, not page-gated: captains get the one-click ✕ on their
+          // read-only surfaces — the leaderboard and the Command van board
+          // (owner, 2026-08-12). Writes persist for the whole manager tier via
+          // the "Managers update non-privileged profiles" policy.
           !isManagerRole(realRole)
             ? undefined
             : (g) => {
@@ -923,7 +945,7 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
       {rows.length === 0 ? (
         <ArcadeCard className="p-8 text-center text-sm text-muted-foreground flex flex-col items-center gap-2">
           <Users className="w-5 h-5" />
-          No canvassers in this office yet.
+          {focusTeamId ? "No active agents on this van yet." : "No canvassers in this office yet."}
         </ArcadeCard>
       ) : (
         <DispatchFleet
@@ -934,6 +956,7 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
           canEditRows={canEditRows}
           profiles={allProfiles}
           rolesByUser={rolesByUser}
+          focusTeamId={focusTeamId}
         />
       )}
 
@@ -1317,6 +1340,7 @@ function DispatchFleet({
   canEditRows = false,
   profiles,
   rolesByUser,
+  focusTeamId = null,
 }: {
   rows: FunnelRow[];
   vans: Van[];
@@ -1325,6 +1349,7 @@ function DispatchFleet({
   canEditRows?: boolean;
   profiles: RosterProfile[];
   rolesByUser: Map<string, string[]>;
+  focusTeamId?: string | null;
 }) {
   const { office: activeOffice, matches } = useOfficeFilter();
   const { realRole } = useAuth();
@@ -1422,6 +1447,10 @@ function DispatchFleet({
 
   const offices = OFFICE_LOCATIONS.filter((o) => matches(o));
 
+  // Focus mode renders just the one van's card; the full `vans` list stays on
+  // the Move-to… menu so a captain can still send a rep to another van.
+  const boardVans = focusTeamId ? vans.filter((v) => v.id === focusTeamId) : vans;
+
   return (
     <div className="space-y-4">
       {offices.map((office) => {
@@ -1429,7 +1458,7 @@ function DispatchFleet({
         // (combined numbers, owner: Cynthia reads 10 lds / 6 sit / 2 sal
         // there) and in the single visible panel on a specific office tab,
         // where the rows upstream are already sliced to that office.
-        const list = vans
+        const list = boardVans
           .filter(
             (v) =>
               (v.office_location ?? DEFAULT_OFFICE) === office ||
