@@ -547,6 +547,12 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
             />
           </div>
 
+          {/* The full dispatch board — same columns as the owner's Fleet
+              Dispatch tab, scoped to this van (owner, 2026-08-25). It brings
+              its own Day/Week/Month range; the page RangeTabs above govern
+              only the Command Center, stat cards, and roster. */}
+          <FleetDispatch readOnly focusTeamId={teamId} />
+
           <ArcadePanel title="Team Roster">
             {rosterQuery.isLoading ? (
               <div className="text-sm text-muted-foreground">Loading roster…</div>
