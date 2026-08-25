@@ -65,6 +65,14 @@
 //   Verified on July 2026: 4 saves, 1 landed (Leon — Josh OConnor sold
 //   $37,884, wife killed it, Bergan Lundak saved at $27,583 → $13,791.50
 //   each, matching the Shark Tank dashboard exactly).
+// - Report reps (owner, 2026-08-25): the office sometimes records the second
+//   closer ONLY on the monthly Sales Report's Sales Rep column, never on the
+//   Block card (Hagmann/Pinel, Aug '26) — and the Shark Tank splits volume by
+//   exactly that column. When the Sales-Report pass stamped report_reps on a
+//   card, the VOLUME split follows it; result counts stay with the Block
+//   card's own reps (the report proves who shares the money, not who sat the
+//   demo — full result credit arrives the normal way once the Block card is
+//   fixed). The rep_mismatch audit flags the drift so the board gets fixed.
 //
 // Pure module: no imports, unit-testable like funnel.ts.
 
@@ -92,6 +100,11 @@ export type BlockCard = {
   comments: string | null;
   /** Customer phone — links a Can/Save card to the original sale's card. */
   phone: string | null;
+  /** Rep display names from the card's best-matched Sales-Report row —
+   *  stamped ONLY by the Sales-Report pass (same contract as wcc; the row
+   *  builders exclude it so upserts never clobber). When non-empty it
+   *  overrides `reps` for the VOLUME split only (owner, 2026-08-25). */
+  report_reps: string[] | null;
 };
 
 /** Sale-column values that mean sold — keep in sync with SOLD_VALUES in
@@ -191,6 +204,92 @@ export function customerKey(s: string | null | undefined): string {
     .join(" ");
 }
 
+/** Trim, collapse internal runs of whitespace (house rule — see normalizeName
+ *  in utils.ts; "Daniel  Figueiredo" and "Daniel Figueiredo" are one person),
+ *  drop blanks, dedupe — a Reps cell of "Sam, Sam" is one Sam, not a double
+ *  bump with a halved split. Every rep list goes through this door. */
+export function cleanReps(xs: string[] | null | undefined): string[] {
+  return [
+    ...new Set((xs ?? []).map((r) => r.trim().replace(/\s+/g, " ")).filter(Boolean)),
+  ];
+}
+
+/** Who gets RESULT credit (Appts/Sold/...): always the Block card's own reps.
+ *  The Sales Report proves who shares the money, not who sat the demo. */
+export function countReps(c: Pick<BlockCard, "reps">): string[] {
+  return cleanReps(c.reps);
+}
+
+/** Who shares the card's MONEY (owner, 2026-08-25): the Sales-Report row's
+ *  reps when the pass stamped them, else the Block card's own. Result counts
+ *  never read this — they stay with countReps. */
+export function volumeReps(c: Pick<BlockCard, "reps" | "report_reps">): string[] {
+  const fromReport = cleanReps(c.report_reps);
+  return fromReport.length > 0 ? fromReport : cleanReps(c.reps);
+}
+
+/** One report row's evidence about a card, as collected by the Sales-Report
+ *  pass in block-cards.server.ts. Lives here so the decision ladder below is
+ *  unit-testable by verify-close-kombat.ts (this module stays pure). */
+export type ReportRepHit = {
+  /** The row's WCC label (Cancelled/CTC/FTD/...), null when unset. */
+  wcc: string | null;
+  /** The row's Sale Amt — best-row tiebreak only, never a volume source. */
+  amt: number | null;
+  /** The row's "Sales Rep" people column, cleaned display names. */
+  reps: string[];
+  /** The row's real Date Sold (null when unparseable). */
+  saleDate: string | null;
+  /** Matched in matchReportRow's date-anchored pass — the only tier trusted
+   *  to rewrite who gets paid. */
+  dateTrue: boolean;
+  /** The row's board had a resolvable "Sales Rep" column. A renamed column
+   *  makes every row look repless — that must read as "unknown", never as
+   *  "the office removed the reps" (it would mass-clear a month of stamps). */
+  repsKnown: boolean;
+};
+
+/** The ONE report row allowed to name a card's volume reps (owner,
+ *  2026-08-25), and whether to write at all. Union-across-rows is
+ *  deliberately avoided: one customer spans sale + reload + "(copy)" rows
+ *  with DIFFERENT rep sets, and a mis-bound sibling would dilute the sale
+ *  and double-count its closer.
+ *
+ *  Returns { set } to write (set may be null = clear a stale stamp) or null
+ *  to leave the stored stamp untouched. A stamp is only CLEARED by evidence
+ *  as strong as what sets one: a date-anchored match from a board whose
+ *  Sales Rep column resolved. Weaker evidence (date-blind fuzzy matches, a
+ *  renamed column) keeps the stamp. Can/Save cards never carry a stamp —
+ *  the report row describes the sale's closers, not the save crew.
+ *
+ *  Among qualifying rows: the one whose Sale Amt equals the card's Sale
+ *  Price wins, then the nearest Date Sold, then a non-cancel row. */
+export function chooseReportReps(
+  hits: ReportRepHit[],
+  card: { sale_price: number | null; card_date: string | null; can_save: boolean },
+): { set: string[] | null } | null {
+  if (card.can_save) return { set: null };
+  const cands = hits.filter((h) => h.dateTrue && h.repsKnown);
+  if (cands.length === 0) return null; // weak evidence — keep what's stored
+  const withReps = cands.filter((h) => h.reps.length > 0);
+  if (withReps.length === 0) return { set: null }; // office removed the reps
+  const dead = (v: string | null) => isCancelLabel(v) || isFtdLabel(v);
+  const dist = (h: ReportRepHit) =>
+    h.saleDate && card.card_date
+      ? Math.abs(Date.parse(h.saleDate) - Date.parse(card.card_date))
+      : Number.MAX_SAFE_INTEGER;
+  const best = [...withReps].sort((a, b) => {
+    const amtA = card.sale_price !== null && a.amt === card.sale_price ? 0 : 1;
+    const amtB = card.sale_price !== null && b.amt === card.sale_price ? 0 : 1;
+    if (amtA !== amtB) return amtA - amtB;
+    const dA = dist(a);
+    const dB = dist(b);
+    if (dA !== dB) return dA - dB;
+    return Number(dead(a.wcc)) - Number(dead(b.wcc));
+  })[0];
+  return { set: cleanReps(best.reps) };
+}
+
 export type RepStats = {
   rep: string;
   /** RESULTED leads only — a card with nothing marked yet isn't an appt, and
@@ -249,7 +348,9 @@ export type RepStats = {
    *  from both sides: no lead was spent to get one. Null until a sale exists,
    *  since dividing by zero sales is meaningless rather than zero. */
   leadsToSale: number | null;
-  /** Sale volume: split evenly across the card's reps; includes office-appt upsales. */
+  /** Sale volume: split evenly across the card's volume reps (report_reps
+   *  when the Sales-Report pass stamped them, else the Block card's reps —
+   *  owner, 2026-08-25); includes office-appt upsales. */
   revenue: number;
 };
 
@@ -338,7 +439,10 @@ function linkSaves(cards: BlockCard[]): {
     if (!prev || (s.card_date ?? "") >= prev.saveDate) {
       effects.set(original.monday_item_id, {
         price: s.sale_price,
-        saverReps: s.reps.map((r) => r.trim()).filter(Boolean),
+        // Deliberately the BLOCK card's reps, never report_reps: the report
+        // row describes the sale's closers, not the save crew — a matched
+        // cancel row must not redirect the saver's half (owner, 2026-08-25).
+        saverReps: countReps(s),
         saveDate: s.card_date ?? "",
       });
     }
@@ -416,8 +520,10 @@ export function aggregateCloseKombat(cards: BlockCard[]): {
     if (isExcludedCard(card) && !isCancelLabel(card.wcc) && !isFtdLabel(card.wcc)) continue;
     // Totals count every card exactly once — reps.length never inflates them.
     bump(totals, card);
-    const names = card.reps.map((r) => r.trim()).filter(Boolean);
-    for (const name of names) bump(repRow(name), card);
+    // Result counts follow the Block card's reps; the volume split below
+    // follows the Sales Report when it disagrees (owner, 2026-08-25).
+    const countNames = countReps(card);
+    for (const name of countNames) bump(repRow(name), card);
 
     // --- Volume. Money is money — an office-appt upsale still pays. A blank
     // Sale Price on the Block board is $0, full stop (owner, 2026-07-30):
@@ -433,8 +539,10 @@ export function aggregateCloseKombat(cards: BlockCard[]): {
     // not a Sold.
     if (cardOutcome(card) === "sold") {
       totals.revenue += save ? save.price : (card.sale_price ?? 0);
+      const volNames = volumeReps(card);
       if (save) {
-        const savers = [...new Set(save.saverReps)];
+        // saverReps comes out of linkSaves already cleaned/deduped.
+        const savers = save.saverReps;
         // No saver names on the save card: nobody to pay the save half to —
         // the originals split the whole re-priced deal instead.
         const saverPool = savers.length > 0 ? save.price / 2 : 0;
@@ -442,10 +550,10 @@ export function aggregateCloseKombat(cards: BlockCard[]): {
         for (const name of savers) repRow(name).revenue += saverPool / savers.length;
         // No original reps recorded: their half stays uncredited (company
         // totals keep the whole price) — never invent a recipient.
-        for (const name of names) repRow(name).revenue += originalPool / names.length;
+        for (const name of volNames) repRow(name).revenue += originalPool / volNames.length;
       } else {
         const price = card.sale_price ?? 0;
-        for (const name of names) repRow(name).revenue += price / names.length;
+        for (const name of volNames) repRow(name).revenue += price / volNames.length;
       }
     }
   }
@@ -505,7 +613,12 @@ export function aggregateCloseKombat(cards: BlockCard[]): {
 // says (see the never-invent rule); fixing happens on Monday, then a sync.
 
 export type AttentionKind =
-  "excluded_sale" | "no_reps" | "blank_price" | "unresolved" | "no_weekday_group";
+  | "excluded_sale"
+  | "no_reps"
+  | "blank_price"
+  | "rep_mismatch"
+  | "unresolved"
+  | "no_weekday_group";
 
 export type AttentionItem = {
   kind: AttentionKind;
@@ -535,6 +648,16 @@ const isWeekdayGroup = (title: string | null): boolean => {
   return WEEKDAY_NAMES.some((w) => t === w || t.startsWith(w + " "));
 };
 
+/** Same people, ignoring order/case/spacing — "b, A" equals "a, B". Used to
+ *  keep the rep_mismatch flag quiet when the boards actually agree, and by
+ *  the Sales-Report pass to skip no-op report_reps writes. Routed through
+ *  cleanReps so its normalization can never drift from the rep lists'. */
+export const sameRepSet = (a: string[], b: string[]): boolean => {
+  const key = (xs: string[]) =>
+    [...new Set(cleanReps(xs).map((r) => r.toLowerCase()))].sort().join("|");
+  return key(a) === key(b);
+};
+
 /** ONE issue per card, worst first — a Not Issued card carrying a sale also
  *  has a blank price half the time, and the Iss fix has to come first anyway
  *  (the price only starts counting once the card counts at all). Save-aware:
@@ -549,7 +672,8 @@ export function auditBlockCards(cards: BlockCard[], todayISO: string): Attention
     const outcome = cardOutcome(c);
     const saleLabel = (c.sale ?? "").trim();
     const carriesSale = (SOLD_VALUES as readonly string[]).includes(saleLabel.toLowerCase());
-    const reps = c.reps.map((r) => r.trim()).filter(Boolean);
+    const reps = countReps(c);
+    const reportReps = cleanReps(c.report_reps);
     const excluded = isExcludedCard(c);
     const dead = isCancelLabel(c.wcc) || isFtdLabel(c.wcc);
     // A landed save card is folded into its original — the aggregate already
@@ -566,7 +690,15 @@ export function auditBlockCards(cards: BlockCard[], todayISO: string): Attention
       // The Garcia/Nielsen/Vroom reloads, the Nguyen $41,000, Maddalena.
       kind = "excluded_sale";
       detail = `"${saleLabel}" on a "${c.iss}" card — counts NOWHERE until the Iss cell is fixed`;
-    } else if (!consumedSave && !excluded && outcome === "sold" && reps.length === 0) {
+    } else if (
+      !consumedSave &&
+      !excluded &&
+      outcome === "sold" &&
+      reps.length === 0 &&
+      reportReps.length === 0
+    ) {
+      // Report reps count as credit too — a card the Sales-Report pass
+      // stamped is a rep_mismatch below, not an uncredited sale.
       kind = "no_reps";
       detail = `${saleLabel || "Sale"} with no reps — the money counts for the company, nobody gets credit`;
     } else if (
@@ -579,6 +711,24 @@ export function auditBlockCards(cards: BlockCard[], todayISO: string): Attention
       // The Adams $27,500 and Washington $780 — blank counts as $0.
       kind = "blank_price";
       detail = `${saleLabel || "Sale"} with a blank Sale Price — counting as $0`;
+    } else if (
+      !consumedSave &&
+      // Mirror the aggregate's gate exactly: an excluded card still counts
+      // (and still routes volume through report_reps) when the report
+      // stamped it dead — so the drift must stay visible there too.
+      (!excluded || dead) &&
+      (outcome === "sold" || outcome === "cancelled") &&
+      reportReps.length > 0 &&
+      !sameRepSet(reportReps, reps)
+    ) {
+      // The Hagmann/Pinel drift: the report's Sales Rep column disagrees
+      // with the Block card. Rep credit already follows the report
+      // (volumeReps), so the numbers are right — this flags the board fix
+      // that grants the missing rep full RESULT credit too.
+      kind = "rep_mismatch";
+      detail =
+        `Sales Report credits ${reportReps.join(", ")}; the Block card's Reps say ` +
+        `${reps.join(", ") || "nobody"} — rep credit follows the report; fix the Block card`;
     } else if (
       !excluded &&
       !isOfficeAppt(c) &&
@@ -617,8 +767,9 @@ export function auditBlockCards(cards: BlockCard[], todayISO: string): Attention
     excluded_sale: 0,
     no_reps: 1,
     blank_price: 2,
-    unresolved: 3,
-    no_weekday_group: 4,
+    rep_mismatch: 3,
+    unresolved: 4,
+    no_weekday_group: 5,
   };
   items.sort(
     (a, b) =>

@@ -31,6 +31,7 @@ export type Database = {
           phone: string | null
           pm: string | null
           products: string | null
+          report_reps: string[] | null
           reps: string[]
           rs: string | null
           sale: string | null
@@ -54,6 +55,7 @@ export type Database = {
           phone?: string | null
           pm?: string | null
           products?: string | null
+          report_reps?: string[] | null
           reps?: string[]
           rs?: string | null
           sale?: string | null
@@ -77,6 +79,7 @@ export type Database = {
           phone?: string | null
           pm?: string | null
           products?: string | null
+          report_reps?: string[] | null
           reps?: string[]
           rs?: string | null
           sale?: string | null

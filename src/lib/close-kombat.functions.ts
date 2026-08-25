@@ -5,7 +5,9 @@ import type { SyncSummary } from "@/lib/block-cards.server";
 
 /**
  * Close Kombat sync: pull Block-board cards from Monday into block_cards.
- * scope "active" = this week's two boards (seconds, safe to spam);
+ * scope "active" = this week's two boards PLUS last week's (the office
+ * finalizes Saturday's sales through Monday — same grace window the
+ * webhook rotation keeps; seconds, safe to spam);
  * scope "all" = every SD/OC Block board Monday still lists (backfill —
  * up to ~50 boards, sequential); boardIds = bounded manual chunks if a
  * full-history run ever outgrows the serverless time budget.

@@ -229,6 +229,7 @@ serve(async (req) => {
 
     const activeBoardOC = String((settingsRow as any)?.active_monday_board_oc || '')
     const activeBoardSD = String((settingsRow as any)?.active_monday_board_sd || '')
+    const templateBoardId = String((settingsRow as any)?.monday_template_board_id || '')
     let boardOffice: string | null = null
     if (boardId && activeBoardOC && boardId === activeBoardOC) boardOffice = 'Orange County'
     else if (boardId && activeBoardSD && boardId === activeBoardSD) boardOffice = 'San Diego'
@@ -417,24 +418,88 @@ serve(async (req) => {
     // canvasser counters. Full-state idempotent upsert — redeliveries,
     // outcome flips, and rep reassignments all self-heal. Never breaks the
     // counter pipeline.
-    if (!isIncomingLeadsBoard && boardOffice) {
+    //
+    // Grace-window boards (owner, 2026-08-25): rotate-boards keeps LAST
+    // week's hooks alive one extra rotation because the office finalizes
+    // Saturday's sales through Monday — but those boards aren't the active
+    // pair, so boardOffice is null and this snapshot used to drop their
+    // deliveries silently (a rep added Monday morning to last week's card
+    // never split its volume until a manual full sync). Resolve the
+    // SNAPSHOT's office from the board name prefix instead, exactly like
+    // the server sync does for historical boards. Snapshot-LOCAL on
+    // purpose: boardOffice itself feeds the canvasser counters below and
+    // must not widen.
+    const snapshotBoardName = String(item.board?.name ?? '').trim()
+    // Flat resolution, matching the office-text branch above; the template
+    // board is excluded (its id is settings-known and it must never mirror).
+    const isTemplateBoard = templateBoardId !== '' && boardId === templateBoardId
+    let snapshotOffice = boardOffice
+    if (!snapshotOffice && !isTemplateBoard) {
+      if (/^OC\s+Block/i.test(snapshotBoardName)) snapshotOffice = 'Orange County'
+      else if (/^SD\s+Block/i.test(snapshotBoardName)) snapshotOffice = 'San Diego'
+    }
+    if (!isIncomingLeadsBoard && snapshotOffice) {
       try {
-        const weekStart =
-          parseBoardWeekStart(String(item.board?.name ?? '')) ?? mondayOfISO(todayLA())
-        const cardRow = buildBlockCardRow(item, boardId, boardOffice, weekStart, todayLA())
-        const { error: cardErr } = await supabaseAdmin
-          .from('block_cards')
-          .upsert(cardRow, { onConflict: 'monday_item_id' })
-        await supabaseAdmin.from('webhook_logs').insert({
-          step: cardErr ? 'Rep_Card_Snapshot_Error' : 'Rep_Card_Snapshot',
-          data: {
-            pulseId: String(pulseId),
-            card_date: cardRow.card_date,
-            reps: cardRow.reps,
-            sale: cardRow.sale,
-            error: cardErr?.message ?? null,
-          },
-        })
+        const graceWindow = boardOffice === null
+        const parsedWeek = parseBoardWeekStart(snapshotBoardName)
+        // The snapshot honors the same window rotation keeps hooks alive
+        // for: this week's boards plus last week's. A stray hook on an
+        // older board (rotate-boards tolerates failed delete_webhook calls)
+        // must not keep writing rows the routine sync never reconciles —
+        // and a retired board may never guess dates from "today".
+        const thisWeekISO = mondayOfISO(todayLA())
+        const prevWeekISO = (() => {
+          const [y, m, d] = thisWeekISO.split('-').map(Number)
+          const t = new Date(Date.UTC(y, m - 1, d, 12))
+          t.setUTCDate(t.getUTCDate() - 7)
+          return t.toISOString().slice(0, 10)
+        })()
+        const inGraceWindow = parsedWeek === thisWeekISO || parsedWeek === prevWeekISO
+        if (graceWindow && (!parsedWeek || !inGraceWindow)) {
+          await supabaseAdmin.from('webhook_logs').insert({
+            step: 'Rep_Card_Snapshot_Skipped',
+            data: {
+              pulseId: String(pulseId),
+              boardName: snapshotBoardName,
+              reason: !parsedWeek
+                ? 'week not parseable from board name'
+                : `board week ${parsedWeek} outside the grace window`,
+            },
+          })
+        } else {
+          const weekStart = parsedWeek ?? mondayOfISO(todayLA())
+          // Grace boards also never stamp "today" on a non-weekday group —
+          // last week's unfiled card must not land in the current week.
+          const cardRow = buildBlockCardRow(
+            item,
+            boardId,
+            snapshotOffice,
+            weekStart,
+            graceWindow ? null : todayLA(),
+          )
+          // A null card_date is "no date derivable", never a fact: omit the
+          // key so an existing row keeps the date it had while the board
+          // was active (the upsert only writes the keys it carries; a fresh
+          // insert defaults to null). Wiping it would drop the card — and
+          // its sale — out of every date-filtered view.
+          const payload: Record<string, unknown> = { ...cardRow }
+          if (cardRow.card_date === null) delete payload.card_date
+          const { error: cardErr } = await supabaseAdmin
+            .from('block_cards')
+            .upsert(payload, { onConflict: 'monday_item_id' })
+          await supabaseAdmin.from('webhook_logs').insert({
+            step: cardErr ? 'Rep_Card_Snapshot_Error' : 'Rep_Card_Snapshot',
+            data: {
+              pulseId: String(pulseId),
+              card_date: cardRow.card_date,
+              reps: cardRow.reps,
+              sale: cardRow.sale,
+              office: snapshotOffice,
+              graceWindow,
+              error: cardErr?.message ?? null,
+            },
+          })
+        }
       } catch (snapErr) {
         try {
           await supabaseAdmin.from('webhook_logs').insert({

@@ -122,7 +122,12 @@ export function deriveCardDate(
   return noon.toISOString().slice(0, 10)
 }
 
-/** One row per Monday card — matches public.block_cards. */
+/** One row per Monday card — matches public.block_cards, MINUS the two
+ *  Sales-Report stamps: `wcc` and `report_reps` are deliberately absent so
+ *  the live upsert can never clobber what the Sales-Report pass wrote
+ *  (owner, 2026-07-30 for wcc; 2026-08-25 for report_reps). KEEP IN SYNC
+ *  with Omit<BlockCard, "wcc" | "report_reps"> in
+ *  src/lib/block-cards.server.ts. */
 export type BlockCardRow = {
   monday_item_id: string
   board_id: string
