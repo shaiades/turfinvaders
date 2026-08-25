@@ -12,8 +12,23 @@
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { monday } from "@/lib/monday.server";
-import { laTodayISO, weekStartOfISO, addDaysISO } from "@/lib/dates";
-import { SOLD_VALUES, type BlockCard } from "@/lib/close-kombat";
+import {
+  laTodayISO,
+  laWeekStartISO,
+  weekStartOfISO,
+  addDaysISO,
+  monthStartISO,
+  nextMonthStartISO,
+} from "@/lib/dates";
+import {
+  SOLD_VALUES,
+  chooseReportReps,
+  cleanReps,
+  isCanSave,
+  sameRepSet,
+  type BlockCard,
+  type ReportRepHit,
+} from "@/lib/close-kombat";
 
 type MondayCol = {
   id: string;
@@ -99,15 +114,15 @@ function colText(cols: MondayCol[], title: string): string | null {
 }
 
 /** Monday item → block_cards row (Reps people column `.text` is Monday's
- *  comma-separated display names). Deliberately WITHOUT wcc: the upsert
- *  must never clobber what the Sales-Report pass stamped there. */
+ *  comma-separated display names). Deliberately WITHOUT wcc or report_reps:
+ *  the upsert must never clobber what the Sales-Report pass stamped there. */
 export function buildBlockCardRow(
   item: MondayItem,
   boardId: string,
   office: string,
   weekStartISO: string | null,
   fallbackISO: string | null,
-): Omit<BlockCard, "wcc"> {
+): Omit<BlockCard, "wcc" | "report_reps"> {
   const cols: MondayCol[] = item.column_values ?? [];
   const groupTitle = item.group?.title == null ? null : String(item.group.title);
   const saleCol = findSaleOutcomeCol(cols);
@@ -168,12 +183,32 @@ export type WccReportResult = {
   cancelled: number;
   /** Cancelled report rows the matcher couldn't tie to a sold Block card. */
   unmatched: string[];
+  /** Office the board name is prefixed with (null for legacy un-prefixed
+   *  boards) and the month span its name declares — the report_reps heal
+   *  only clears stamps inside months that walked successfully. */
+  office: string | null;
+  month_start: string | null;
+  month_end: string | null;
+  /** Rows existed but no "Sales Rep" column resolved — report_reps for this
+   *  board silently stayed untouched; a title rename would look like this. */
+  reps_column_missing?: boolean;
 };
 
 export type SyncSummary = {
   results: BoardSyncResult[];
   skipped: Array<{ board_id: string; name: string; reason: string }>;
-  wcc: { reports: WccReportResult[]; updated: number; errors: string[] };
+  wcc: {
+    reports: WccReportResult[];
+    updated: number;
+    /** Cards whose report_reps STAMP was written this pass (credit granted
+     *  or corrected). Never counts clears — see reps_cleared. */
+    reps_updated: number;
+    /** Cards whose report_reps stamp was CLEARED this pass (merge-loop
+     *  removals + orphan heals). Kept separate so a mass-clear can never
+     *  masquerade as a mass credit grant in the UI. */
+    reps_cleared: number;
+    errors: string[];
+  };
 };
 
 export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSummary> {
@@ -209,10 +244,23 @@ export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSumm
       id: String(b.id),
       name: b.name,
     }));
+    // Quick syncs also walk LAST week's boards (owner, 2026-08-25): rotation
+    // keeps their webhooks alive one extra week because the office finalizes
+    // Saturday's sales through Monday — the sync must cover the same window
+    // or a rep added Monday morning to last week's card only lands on a full
+    // backfill. Matched by PARSED week (names are hand-typed), same as
+    // rotate-boards.
+    const prevWeekISO = addDaysISO(laWeekStartISO(), -7);
     targets =
       input.scope === "all"
         ? boards.filter((b) => /^(SD|OC)\s+Block/i.test(b.name) && b.id !== templateId)
-        : boards.filter((b) => activeIds.has(b.id));
+        : boards.filter(
+            (b) =>
+              activeIds.has(b.id) ||
+              (/^(SD|OC)\s+Block/i.test(b.name) &&
+                b.id !== templateId &&
+                parseBoardWeekStart(b.name) === prevWeekISO),
+          );
   }
 
   const results: BoardSyncResult[] = [];
@@ -258,7 +306,7 @@ export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSumm
 
       // Full cursor walk. Any page error throws — the board is skipped and,
       // critically, its delete-reconcile never runs on a partial fetch.
-      const rows: Array<Omit<BlockCard, "wcc">> = [];
+      const rows: Array<Omit<BlockCard, "wcc" | "report_reps">> = [];
       let cursor: string | null = null;
       do {
         const data: Record<string, unknown> = cursor
@@ -283,7 +331,25 @@ export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSumm
         cursor = page.cursor ?? null;
       } while (cursor);
 
-      for (const batch of chunks(rows, CHUNK)) {
+      // A null card_date is "no date derivable", not a fact: on retired
+      // boards the fallback is null by design (never guess history), but a
+      // card that HAD a date while its board was active must not have it
+      // wiped — that would drop the card (and its sale) out of every
+      // date-filtered view. Upserts only write the keys they carry, so rows
+      // with no derivable date simply omit card_date: fresh inserts default
+      // to null, existing rows keep what they have. PostgREST bulk payloads
+      // must be key-uniform, hence the two groups.
+      const dated = rows.filter((r) => r.card_date !== null);
+      const undated = rows
+        .filter((r) => r.card_date === null)
+        .map(({ card_date: _drop, ...rest }) => rest);
+      for (const batch of chunks(dated, CHUNK)) {
+        const { error } = await supabaseAdmin
+          .from("block_cards")
+          .upsert(batch, { onConflict: "monday_item_id" });
+        if (error) throw new Error(error.message);
+      }
+      for (const batch of chunks(undated, CHUNK)) {
         const { error } = await supabaseAdmin
           .from("block_cards")
           .upsert(batch, { onConflict: "monday_item_id" });
@@ -335,15 +401,25 @@ export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSumm
     }
   }
 
-  // ── WCC pass ── cancelled sales are only recorded on the monthly
-  // "... Sales Report" boards (owner, 2026-07-29: WCC column, "Cancelled").
-  // Two phases: COLLECT every report row's best-match sold Block card across
-  // ALL boards, then MERGE per card with cancel-wins and write once. One
-  // customer spans several report rows (sale + reload + "(copy)" siblings,
-  // often "Completed"/unset) — row-by-row writes let a later row erase an
-  // earlier Cancelled stamp (seen live 2026-07-29: 15 cancels collapsed to
-  // 1). Never fatal to the block sync.
-  const wcc: SyncSummary["wcc"] = { reports: [], updated: 0, errors: [] };
+  // ── Sales-Report pass ── two stamps come from the monthly "... Sales
+  // Report" boards. WCC: cancelled sales are only recorded there (owner,
+  // 2026-07-29: WCC column, "Cancelled"). report_reps (owner, 2026-08-25):
+  // the office sometimes records the second closer only on the report's
+  // Sales Rep column — the Shark Tank splits volume by it, so the app's
+  // volume split follows it. Two phases: COLLECT every report row's
+  // best-match sold Block card across ALL boards, then MERGE per card
+  // (cancel-wins for wcc, best-single-row for report_reps) and write once.
+  // One customer spans several report rows (sale + reload + "(copy)"
+  // siblings, often "Completed"/unset) — row-by-row writes let a later row
+  // erase an earlier Cancelled stamp (seen live 2026-07-29: 15 cancels
+  // collapsed to 1). Never fatal to the block sync.
+  const wcc: SyncSummary["wcc"] = {
+    reports: [],
+    updated: 0,
+    reps_updated: 0,
+    reps_cleared: 0,
+    errors: [],
+  };
   try {
     const data = await monday(
       token,
@@ -360,9 +436,17 @@ export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSumm
       );
     }
     if (reportBoards.length > 0) {
-      const soldCards = await fetchCandidateCards();
-      // card monday_item_id → every matching report row's WCC label + Sale Amt.
-      const matches = new Map<string, ReportRowHit[]>();
+      const { cards: soldCards, repsAvailable } = await fetchCandidateCards();
+      if (!repsAvailable) {
+        // Column missing (deploy raced the migration, or a rollback): the
+        // reps pass stands down for this run; the wcc cancel heal continues
+        // exactly as before the column existed.
+        wcc.errors.push(
+          "report_reps column missing from block_cards — reps pass skipped, wcc heal unaffected",
+        );
+      }
+      // card monday_item_id → every matching report row's evidence.
+      const matches = new Map<string, ReportRepHit[]>();
       for (const rb of reportBoards) {
         try {
           wcc.reports.push(await collectReportBoard(token, rb, soldCards, matches));
@@ -370,29 +454,144 @@ export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSumm
           wcc.errors.push(`${rb.name}: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
+
+      // Can/Save lookup for the MATCHED cards only. Comments are long free
+      // text — fetching them for every candidate row would multiply the
+      // whole-table read; the few hundred matched ids are the only ones the
+      // reps decision consults.
+      const canSaveIds = new Set<string>();
+      if (repsAvailable) {
+        for (const batch of chunks([...matches.keys()], CHUNK)) {
+          const { data: rows, error } = await supabaseAdmin
+            .from("block_cards")
+            .select("monday_item_id, comments")
+            .in("monday_item_id", batch);
+          if (error) {
+            wcc.errors.push(`can/save lookup: ${error.message}`);
+            continue;
+          }
+          for (const r of rows ?? []) {
+            if (isCanSave({ comments: r.comments })) canSaveIds.add(r.monday_item_id);
+          }
+        }
+      }
+
       const byId = new Map(soldCards.map((c) => [c.monday_item_id, c]));
+      // report_reps writes are GROUPED by desired stamp: distinct rep sets
+      // across two offices are tens, matched cards on a backfill are
+      // thousands — one UPDATE ... IN (...) per distinct set instead of one
+      // round-trip per card.
+      const stampGroups = new Map<string, { set: string[] | null; ids: string[] }>();
       for (const [cardId, hits] of matches) {
         const card = byId.get(cardId);
         if (!card) continue;
         const desired = chooseWcc(hits.map((h) => h.wcc));
-        // WCC label ONLY. The Sales Report must never write a sale price:
-        // owner, 2026-07-30, after a card whose Block Sale Price was blank
-        // showed $10,000 in Revenue because this pass copied the report's
-        // Sale Amt in. The Block board's Sale Price column is the single
-        // source of truth for volume — blank means $0, not "look elsewhere".
-        const patch: { wcc?: string | null } = {};
-        if ((card.wcc ?? null) !== (desired ?? null)) patch.wcc = desired;
-        if (Object.keys(patch).length === 0) continue;
-        const { error } = await supabaseAdmin
-          .from("block_cards")
-          .update(patch)
-          .eq("monday_item_id", cardId);
-        if (error) {
-          wcc.errors.push(`update ${cardId}: ${error.message}`);
-          continue;
+        // WCC label ONLY here. The Sales Report must never write a sale
+        // price: owner, 2026-07-30, after a card whose Block Sale Price was
+        // blank showed $10,000 in Revenue because this pass copied the
+        // report's Sale Amt in. The Block board's Sale Price column is the
+        // single source of truth for volume — blank means $0, not "look
+        // elsewhere". report_reps (who SHARES the volume) is the second
+        // lawful stamp, written separately below so a missing column can
+        // never take the cancel heal down with it.
+        if ((card.wcc ?? null) !== (desired ?? null)) {
+          const { error } = await supabaseAdmin
+            .from("block_cards")
+            .update({ wcc: desired })
+            .eq("monday_item_id", cardId);
+          if (error) {
+            wcc.errors.push(`update ${cardId}: ${error.message}`);
+          } else {
+            card.wcc = desired;
+            wcc.updated += 1;
+          }
         }
-        if (patch.wcc !== undefined) card.wcc = patch.wcc;
-        wcc.updated += 1;
+        if (!repsAvailable) continue;
+        // null decision = weak evidence (no date-anchored row from a board
+        // whose Sales Rep column resolved): the stored stamp stays. A stamp
+        // is only cleared by evidence as strong as what set it.
+        const decision = chooseReportReps(hits, {
+          sale_price: card.sale_price,
+          card_date: card.card_date,
+          can_save: canSaveIds.has(cardId),
+        });
+        if (decision === null) continue;
+        if (sameRepSet(decision.set ?? [], card.report_reps ?? [])) continue;
+        const key = JSON.stringify(decision.set);
+        const group = stampGroups.get(key) ?? { set: decision.set, ids: [] };
+        group.ids.push(cardId);
+        stampGroups.set(key, group);
+        card.report_reps = decision.set;
+      }
+      for (const { set, ids } of stampGroups.values()) {
+        for (const batch of chunks(ids, CHUNK)) {
+          const { error } = await supabaseAdmin
+            .from("block_cards")
+            .update({ report_reps: set })
+            .in("monday_item_id", batch);
+          if (error) {
+            wcc.errors.push(`report_reps ×${batch.length}: ${error.message}`);
+          } else if (set === null) {
+            wcc.reps_cleared += batch.length;
+          } else {
+            wcc.reps_updated += batch.length;
+          }
+        }
+      }
+
+      // ── report_reps heal ── a card whose matched report rows vanished
+      // outright (row deleted/renamed, or rebound to another card) keeps a
+      // stale stamp that OVERRIDES the Block board's reps. Clear orphans,
+      // but only where this pass produced PROOF of absence: spans from
+      // boards that walked successfully, had rows, resolved the Sales Rep
+      // column, and carry an office prefix — a legacy un-prefixed board
+      // must never authorize clearing another office's month, and a renamed
+      // column must never read as "the office removed everyone". Boundary
+      // cards can be stamped by the ADJACENT month's board (Date Sold binds
+      // within ±SALE_DATE_WINDOW_DAYS), so the card's whole window must be
+      // covered before absence counts — otherwise a September quick sync
+      // (Sept+Aug boards) would strip an Aug-1 card stamped from the July
+      // report, and the next full sync would put it back, forever.
+      if (repsAvailable) {
+        const healSpans = wcc.reports
+          .filter(
+            (r) =>
+              r.month_start !== null &&
+              r.month_end !== null &&
+              r.office !== null &&
+              r.rows > 0 &&
+              !r.reps_column_missing,
+          )
+          .map((r) => ({ office: r.office as string, start: r.month_start as string, end: r.month_end as string }));
+        const coveredDay = (office: string, day: string) =>
+          healSpans.some((s) => s.office === office && day >= s.start && day < s.end);
+        const orphanIds: string[] = [];
+        for (const card of soldCards) {
+          if (card.report_reps == null) continue;
+          if (matches.has(card.monday_item_id)) continue; // merge loop owns it
+          const date = card.card_date;
+          if (date === null) continue;
+          const lo = addDaysISO(date, -SALE_DATE_WINDOW_DAYS);
+          const hi = addDaysISO(date, SALE_DATE_WINDOW_DAYS);
+          // Spans are whole months, so covering both endpoints and the date
+          // itself covers the contiguous window between them.
+          if (!coveredDay(card.office_location, lo)) continue;
+          if (!coveredDay(card.office_location, date)) continue;
+          if (!coveredDay(card.office_location, hi)) continue;
+          orphanIds.push(card.monday_item_id);
+          card.report_reps = null;
+        }
+        for (const batch of chunks(orphanIds, CHUNK)) {
+          const { error } = await supabaseAdmin
+            .from("block_cards")
+            .update({ report_reps: null })
+            .in("monday_item_id", batch);
+          if (error) {
+            wcc.errors.push(`report_reps heal ×${batch.length}: ${error.message}`);
+          } else {
+            wcc.reps_cleared += batch.length;
+          }
+        }
       }
     }
   } catch (err) {
@@ -467,6 +666,10 @@ type SoldCardLite = {
   card_date: string | null;
   wcc: string | null;
   sale_price: number | null;
+  /** Current report_reps stamp — the merge diffs against it (no-op writes
+   *  would churn updated_at/realtime) and the heal clears orphans. Always
+   *  null when the pass runs with repsAvailable=false. */
+  report_reps: string[] | null;
   /** Sale cell still carries a sold label. Cancelled sales usually get the
    *  Block card's Sale cell reverted too (the webhook's Sale_Lead_Voided
    *  flow), so cancel rows must be allowed to match non-sold cards. */
@@ -476,18 +679,52 @@ type SoldCardLite = {
 };
 
 /** EVERY Block card, paged past PostgREST's 1000-row cap. Non-cancel report
- *  rows only stamp sold cards; cancel rows may stamp any card (see `sold`). */
-async function fetchCandidateCards(): Promise<SoldCardLite[]> {
+ *  rows only stamp sold cards; cancel rows may stamp any card (see `sold`).
+ *  Comments are deliberately NOT selected — they're long free text needed
+ *  only for the few hundred matched cards, fetched separately.
+ *
+ *  repsAvailable=false when block_cards has no report_reps column yet (a
+ *  deploy that raced the migration, or a rollback): the caller degrades to
+ *  wcc-only for the pass instead of losing the cancel heal too. */
+async function fetchCandidateCards(): Promise<{
+  cards: SoldCardLite[];
+  repsAvailable: boolean;
+}> {
   const soldSet = new Set(SOLD_VALUES as readonly string[]);
+  let repsAvailable = true;
+  type PageRow = Pick<
+    BlockCard,
+    "monday_item_id" | "lead_name" | "office_location" | "card_date" | "sale" | "sale_price" | "wcc"
+  > & { report_reps?: string[] | null };
   const out: SoldCardLite[] = [];
   for (let from = 0; ; from += 1000) {
-    const { data, error } = await supabaseAdmin
-      .from("block_cards")
-      .select("monday_item_id, lead_name, office_location, card_date, sale, sale_price, wcc")
-      .order("monday_item_id")
-      .range(from, from + 999);
-    if (error) throw new Error(error.message);
-    for (const r of data ?? []) {
+    let rows: PageRow[] | null = null;
+    if (repsAvailable) {
+      const { data, error } = await supabaseAdmin
+        .from("block_cards")
+        .select(
+          "monday_item_id, lead_name, office_location, card_date, sale, sale_price, wcc, report_reps",
+        )
+        .order("monday_item_id")
+        .range(from, from + 999);
+      if (error && /report_reps/i.test(error.message)) {
+        repsAvailable = false; // fall through to the reps-less select below
+      } else if (error) {
+        throw new Error(error.message);
+      } else {
+        rows = data;
+      }
+    }
+    if (!repsAvailable) {
+      const { data, error } = await supabaseAdmin
+        .from("block_cards")
+        .select("monday_item_id, lead_name, office_location, card_date, sale, sale_price, wcc")
+        .order("monday_item_id")
+        .range(from, from + 999);
+      if (error) throw new Error(error.message);
+      rows = data;
+    }
+    for (const r of rows ?? []) {
       out.push({
         monday_item_id: r.monday_item_id,
         lead_name: r.lead_name,
@@ -495,14 +732,15 @@ async function fetchCandidateCards(): Promise<SoldCardLite[]> {
         card_date: r.card_date,
         wcc: r.wcc,
         sale_price: r.sale_price,
+        report_reps: repsAvailable ? (r.report_reps ?? null) : null,
         sold: soldSet.has((r.sale ?? "").trim().toLowerCase()),
         _norm: normalizeCustomer(r.lead_name ?? ""),
         _tkey: customerTokens(r.lead_name ?? "").join(" "),
       });
     }
-    if (!data || data.length < 1000) break;
+    if (!rows || rows.length < 1000) break;
   }
-  return out;
+  return { cards: out, repsAvailable };
 }
 
 /** How far a card's date may sit from the report row's Date Sold and still be
@@ -544,17 +782,19 @@ export function matchReportRow(
   office: string | null,
   saleDateISO: string | null,
   fallbackISO: string | null,
-): SoldCardLite | null {
+): { card: SoldCardLite; dateTrue: boolean } | null {
   if (saleDateISO) {
     for (const pool of pools) {
       const near = withinDays(pool, saleDateISO, SALE_DATE_WINDOW_DAYS);
       const hit = bestSoldMatch(near, reportNorm, office, saleDateISO);
-      if (hit) return hit;
+      // dateTrue: the row carried a real Date Sold and the card ran within
+      // the window of it — the only tier trusted to rewrite report_reps.
+      if (hit) return { card: hit, dateTrue: true };
     }
   }
   for (const pool of pools) {
     const hit = bestSoldMatch(pool, reportNorm, office, saleDateISO ?? fallbackISO);
-    if (hit) return hit;
+    if (hit) return { card: hit, dateTrue: false };
   }
   return null;
 }
@@ -637,17 +877,16 @@ export function chooseWcc(values: Array<string | null>): string | null {
   return values.find((v) => v !== null) ?? null;
 }
 
-/** One report row's contribution to a matched card. Only `wcc` is ever
- *  written to block_cards — `amt` is carried for logging/diagnostics and must
- *  NOT flow into sale_price (owner, 2026-07-30: the Block board's Sale Price
- *  column is the only source of volume). */
-export type ReportRowHit = { wcc: string | null; amt: number | null };
+// ReportRepHit (one report row's evidence) and chooseReportReps (the
+// best-single-row decision ladder) live in src/lib/close-kombat.ts so the
+// verify suite can exercise them — this module drags in supabaseAdmin and
+// can't be imported by a pure test script.
 
 async function collectReportBoard(
   token: string,
   board: { id: string; name: string },
   soldCards: SoldCardLite[],
-  matches: Map<string, ReportRowHit[]>,
+  matches: Map<string, ReportRepHit[]>,
 ): Promise<WccReportResult> {
   const office = /^OC\b/i.test(board.name.trim())
     ? "Orange County"
@@ -656,9 +895,15 @@ async function collectReportBoard(
       : null;
   // Mid-month fallback for rows without a parseable Date Sold.
   const m = board.name.match(new RegExp(`(${MONTH_NAMES.join("|")})\\s+(\\d{4})`, "i"));
-  const monthMidISO = m
-    ? `${m[2]}-${String(MONTH_NAMES.findIndex((n) => n.toLowerCase() === m[1].toLowerCase()) + 1).padStart(2, "0")}-15`
-    : null;
+  const monthIdx = m
+    ? MONTH_NAMES.findIndex((n) => n.toLowerCase() === m[1].toLowerCase()) + 1
+    : 0;
+  const monthMidISO = m ? `${m[2]}-${String(monthIdx).padStart(2, "0")}-15` : null;
+  // Month span [start, end) for the report_reps heal — only months that
+  // walked successfully may clear stale stamps. Derived from the mid-month
+  // date via the shared LA date helpers (dates.ts), not hand-rolled math.
+  const reportMonthStart = monthMidISO ? monthStartISO(monthMidISO) : null;
+  const reportMonthEnd = monthMidISO ? nextMonthStartISO(monthMidISO) : null;
 
   const result: WccReportResult = {
     board_id: board.id,
@@ -666,7 +911,11 @@ async function collectReportBoard(
     rows: 0,
     cancelled: 0,
     unmatched: [],
+    office,
+    month_start: reportMonthStart,
+    month_end: reportMonthEnd,
   };
+  let sawRepsCol = false;
 
   // Pool order handed to matchReportRow: sold cards first, and for cancel rows
   // every card after them (a dead sale usually had its Sale cell reverted).
@@ -709,6 +958,16 @@ async function collectReportBoard(
       // Only a REAL Date Sold may narrow by date; monthMidISO is a guess off
       // the board name (the 15th), so it stays a tiebreaker, never a filter.
       const saleDate = dateSold && !Number.isNaN(Date.parse(dateSold)) ? dateSold : null;
+      // The row's "Sales Rep" people column (exact title — the boards also
+      // carry a "Sales Rep count" formula this must not hit). One find
+      // yields both the cell text and the column-presence fact: an
+      // all-empty month is data, a never-resolving title is a rename that
+      // must read as "unknown" downstream, never as "reps removed".
+      const repsCol = cols.find(
+        (c) => (c.column?.title || "").trim().toLowerCase() === "sales rep",
+      );
+      if (repsCol) sawRepsCol = true;
+      const rowReps = cleanReps((repsCol?.text || "").split(","));
       // Non-cancel rows only stamp cards still marked sold; a CANCEL row
       // falls back to any card for that customer — the sale's Block card
       // usually had its Sale cell reverted when the job died.
@@ -725,14 +984,27 @@ async function collectReportBoard(
         continue;
       }
       // Collect only — the caller merges every board's rows per card
-      // (cancel-wins) and writes the WCC label once. Sale Amt rides along for
-      // diagnostics only; it never becomes a card's sale_price.
-      const list = matches.get(match.monday_item_id) ?? [];
-      list.push({ wcc: wccStored, amt: parseMoney(colText(cols, "sale amt")) });
-      matches.set(match.monday_item_id, list);
+      // (cancel-wins for wcc, best-single-row for report_reps) and writes
+      // once. Sale Amt rides along for the best-row tiebreak and diagnostics
+      // only; it never becomes a card's sale_price. display_value covers a
+      // formula-typed Sale Amt column, matching findSalePriceCol's readers.
+      const amtCol = cols.find(
+        (c) => (c.column?.title || "").trim().toLowerCase() === "sale amt",
+      );
+      const list = matches.get(match.card.monday_item_id) ?? [];
+      list.push({
+        wcc: wccStored,
+        amt: parseMoney(amtCol?.text || amtCol?.display_value || ""),
+        reps: rowReps,
+        saleDate,
+        dateTrue: match.dateTrue,
+        repsKnown: repsCol !== undefined,
+      });
+      matches.set(match.card.monday_item_id, list);
     }
     cursor = page.cursor ?? null;
   } while (cursor);
 
+  if (result.rows > 0 && !sawRepsCol) result.reps_column_missing = true;
   return result;
 }

@@ -11,7 +11,9 @@ import {
   aggregateCloseKombat,
   auditBlockCards,
   cardOutcome,
+  chooseReportReps,
   type BlockCard,
+  type ReportRepHit,
 } from "../src/lib/close-kombat";
 
 let n = 0;
@@ -35,6 +37,7 @@ const card = (over: Partial<BlockCard>): BlockCard => ({
   wcc: null,
   comments: null,
   phone: null,
+  report_reps: null,
   ...over,
 });
 const many = (c: number, over: Partial<BlockCard>) => Array.from({ length: c }, () => card(over));
@@ -713,6 +716,210 @@ eq(
   "audit: OL card not flagged",
   audit([card({ group_title: "Thursday", ol: "OL", card_date: "2026-08-01" })]).length,
   0,
+);
+
+// ---- Report reps (owner, 2026-08-25): volume follows the Sales Report ----
+// THE HAGMANN CASE: the office put the second closer only on the Sales
+// Report's Sales Rep column. The sync stamps report_reps; the volume split
+// follows it while result counts stay with the Block card's own reps.
+const hagmann = aggregateCloseKombat([
+  card({
+    reps: ["Daniel Figueiredo"],
+    report_reps: ["Daniel Figueiredo", "Jonathan Paz"],
+    sale: "Sold",
+    sale_price: 10000,
+  }),
+]);
+eq("report split: totals one sold", hagmann.totals.sold, 1);
+eq("report split: totals whole volume", hagmann.totals.revenue, 10000);
+const rrDaniel = hagmann.reps.find((r) => r.rep === "Daniel Figueiredo");
+const rrJon = hagmann.reps.find((r) => r.rep === "Jonathan Paz");
+eq("report split: Daniel keeps the Sold", rrDaniel?.sold, 1);
+eq("report split: Daniel keeps the appt", rrDaniel?.appts, 1);
+eq("report split: Daniel gets half", rrDaniel?.revenue, 5000);
+eq("report split: Jonathan gets half", rrJon?.revenue, 5000);
+eq("report split: Jonathan volume only, no Sold", rrJon?.sold, 0);
+eq("report split: Jonathan is not an appt", rrJon?.appts, 0);
+
+// An empty stamp behaves exactly like no stamp.
+const rrEmpty = aggregateCloseKombat([
+  card({ reps: ["A"], report_reps: [], sale: "Sold", sale_price: 1000 }),
+]);
+eq("empty report_reps falls back to reps", rrEmpty.reps.find((r) => r.rep === "A")?.revenue, 1000);
+
+// Dedup: a repeated name is ONE rep — one bump, full volume, either list.
+const rrDupBlock = aggregateCloseKombat([
+  card({ reps: ["A", "A"], sale: "Sold", sale_price: 1000 }),
+]);
+const rrDupA = rrDupBlock.reps.find((r) => r.rep === "A");
+eq("dup block name: one appt", rrDupA?.appts, 1);
+eq("dup block name: one sold", rrDupA?.sold, 1);
+eq("dup block name: full volume", rrDupA?.revenue, 1000);
+const rrDupReport = aggregateCloseKombat([
+  card({ reps: ["A"], report_reps: ["A", "A"], sale: "Sold", sale_price: 1000 }),
+]);
+eq(
+  "dup report name: full volume",
+  rrDupReport.reps.find((r) => r.rep === "A")?.revenue,
+  1000,
+);
+
+// Save interplay: the original's report_reps reshapes only the ORIGINALS'
+// half; the saver's identity always comes from the save card's Block reps.
+const rrSaved = aggregateCloseKombat([
+  card({
+    monday_item_id: "orig-rr",
+    lead_name: "Shared Deal",
+    card_date: "2026-07-06",
+    reps: ["A"],
+    report_reps: ["A", "B"],
+    sale: "Sold",
+    sale_price: 30000,
+    phone: "1111111111",
+  }),
+  card({
+    monday_item_id: "save-rr",
+    lead_name: "Shared Deal",
+    card_date: "2026-07-08",
+    reps: ["C"],
+    iss: "Office Appt",
+    sale_price: 20000,
+    phone: "1111111111",
+    comments: "Can/Save",
+  }),
+]);
+eq("save+report: saver takes half", rrSaved.reps.find((r) => r.rep === "C")?.revenue, 10000);
+eq("save+report: A takes a quarter", rrSaved.reps.find((r) => r.rep === "A")?.revenue, 5000);
+eq("save+report: B takes a quarter", rrSaved.reps.find((r) => r.rep === "B")?.revenue, 5000);
+eq("save+report: B has no Sold", rrSaved.reps.find((r) => r.rep === "B")?.sold, 0);
+eq("save+report: revenue = save price, once", rrSaved.totals.revenue, 20000);
+
+// Audit: rep_mismatch fires on drift, stays silent on agreement.
+const rrCard = (over: Partial<BlockCard>) =>
+  card({ group_title: "Thursday", card_date: "2026-08-01", ...over });
+const rrMismatch = audit([
+  rrCard({ reps: ["Daniel"], report_reps: ["Daniel", "Jon"], sale: "Sold", sale_price: 100 }),
+]);
+eq("audit: rep_mismatch fires", rrMismatch[0]?.kind, "rep_mismatch");
+eq("audit: rep_mismatch is one item", rrMismatch.length, 1);
+eq(
+  "audit: same set, different order/case, silent",
+  audit([
+    rrCard({ reps: ["b", "A"], report_reps: ["a ", "B"], sale: "Sold", sale_price: 100 }),
+  ]).length,
+  0,
+);
+eq(
+  "audit: block-empty + report-present is rep_mismatch, not no_reps",
+  audit([rrCard({ reps: [], report_reps: ["A"], sale: "Sold", sale_price: 100 })])[0]?.kind,
+  "rep_mismatch",
+);
+eq(
+  "audit: both empty is still no_reps",
+  audit([rrCard({ reps: [], sale: "Sold", sale_price: 100 })])[0]?.kind,
+  "no_reps",
+);
+eq(
+  "audit: blank price outranks the mismatch (one issue per card)",
+  audit([rrCard({ reps: ["A"], report_reps: ["A", "B"], sale: "Sold", sale_price: null })])[0]
+    ?.kind,
+  "blank_price",
+);
+eq(
+  "audit: cancelled card with drift still flags",
+  audit([
+    rrCard({ reps: ["A"], report_reps: ["A", "B"], sale: "Sold", sale_price: 100, wcc: "Cancelled" }),
+  ])[0]?.kind,
+  "rep_mismatch",
+);
+// The aggregate counts a dead excluded card (CTC flip + report stamp), so
+// the audit must be able to flag its drift too — same gate, both sides.
+eq(
+  "audit: dead CTC card with drift still flags",
+  audit([
+    rrCard({ iss: "CTC", reps: ["A"], report_reps: ["A", "B"], sale_price: 100, wcc: "Cancelled" }),
+  ])[0]?.kind,
+  "rep_mismatch",
+);
+// House whitespace rule: internal runs collapse, so a hand-typed double
+// space is the same person, not a mismatch (and not a phantom rep row).
+eq(
+  "audit: double-spaced name is the same person",
+  audit([
+    rrCard({
+      reps: ["Daniel  Figueiredo"],
+      report_reps: ["Daniel Figueiredo"],
+      sale: "Sold",
+      sale_price: 100,
+    }),
+  ]).length,
+  0,
+);
+
+// ---- chooseReportReps: the best-single-row decision ladder ---------------
+const hit = (over: Partial<ReportRepHit>): ReportRepHit => ({
+  wcc: null,
+  amt: null,
+  reps: ["A", "B"],
+  saleDate: "2026-08-14",
+  dateTrue: true,
+  repsKnown: true,
+  ...over,
+});
+const ladderCard = { sale_price: 10000, card_date: "2026-08-14", can_save: false };
+eq(
+  "ladder: stamps the date-true row",
+  JSON.stringify(chooseReportReps([hit({})], ladderCard)),
+  JSON.stringify({ set: ["A", "B"] }),
+);
+eq("ladder: date-blind rows never stamp OR clear", chooseReportReps([hit({ dateTrue: false })], ladderCard), null);
+eq(
+  "ladder: unknown Sales Rep column keeps the stamp",
+  chooseReportReps([hit({ reps: [], repsKnown: false })], ladderCard),
+  null,
+);
+eq(
+  "ladder: known-empty reps clear the stamp",
+  JSON.stringify(chooseReportReps([hit({ reps: [] })], ladderCard)),
+  JSON.stringify({ set: null }),
+);
+eq(
+  "ladder: can/save cards always clear",
+  JSON.stringify(chooseReportReps([hit({})], { ...ladderCard, can_save: true })),
+  JSON.stringify({ set: null }),
+);
+eq(
+  "ladder: amt match beats nearest date",
+  chooseReportReps(
+    [
+      hit({ amt: 500, reps: ["Wrong"], saleDate: "2026-08-14" }),
+      hit({ amt: 10000, reps: ["Right"], saleDate: "2026-08-16" }),
+    ],
+    ladderCard,
+  )?.set?.[0],
+  "Right",
+);
+eq(
+  "ladder: nearest Date Sold breaks the tie",
+  chooseReportReps(
+    [
+      hit({ amt: 1, reps: ["Far"], saleDate: "2026-08-11" }),
+      hit({ amt: 2, reps: ["Near"], saleDate: "2026-08-15" }),
+    ],
+    ladderCard,
+  )?.set?.[0],
+  "Near",
+);
+eq(
+  "ladder: non-cancel row wins the last tie",
+  chooseReportReps(
+    [
+      hit({ wcc: "Cancelled", reps: ["Dead"], amt: 1, saleDate: "2026-08-14" }),
+      hit({ wcc: null, reps: ["Live"], amt: 2, saleDate: "2026-08-14" }),
+    ],
+    ladderCard,
+  )?.set?.[0],
+  "Live",
 );
 
 console.log(`checks run, ${fails.length} failure(s)`);

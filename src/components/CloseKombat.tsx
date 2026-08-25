@@ -320,6 +320,22 @@ function CloseKombatInner() {
           `${cancels} cancelled/CTC/FTD sale${cancels === 1 ? "" : "s"} on the Sales Reports`,
         );
       }
+      if (res.wcc.reps_updated > 0) {
+        toast.info(
+          `${res.wcc.reps_updated} card${res.wcc.reps_updated === 1 ? "" : "s"} took rep credit from the Sales Reports`,
+        );
+      }
+      if (res.wcc.reps_cleared > 0) {
+        toast.info(
+          `${res.wcc.reps_cleared} stale rep stamp${res.wcc.reps_cleared === 1 ? "" : "s"} cleared`,
+        );
+      }
+      const repsColMissing = res.wcc.reports.filter((r) => r.reps_column_missing);
+      if (repsColMissing.length > 0) {
+        toast.warning(
+          `No "Sales Rep" column found on ${repsColMissing.map((r) => r.name).join(", ")} — rep splits from that board are frozen until it's restored`,
+        );
+      }
       if (res.wcc.errors.length > 0) {
         toast.warning(`Cancels pass: ${res.wcc.errors.length} report board(s) failed — see logs`);
       }
@@ -788,7 +804,10 @@ function CloseKombatInner() {
         doesn&apos;t count anywhere — it joins Appts and the stats the moment a result lands, so No
         Show + No Demo + OL + Reset + PM + Sold always adds up to Appts. Reps are ranked by sale
         volume, highest first, in every range. On a shared card each rep gets full result credit but
-        the sale volume splits evenly; the All-cards row counts each card once. Sit % = (PM + Sold)
+        the sale volume splits evenly; the All-cards row counts each card once. When the monthly
+        Sales Report&apos;s Sales Rep column disagrees with the Block card, the volume split follows
+        the report (result counts stay with the Block card&apos;s own reps) and a Rep Mismatch
+        callout flags the card so the Block board can be fixed. Sit % = (PM + Sold)
         ÷ Appts · NS % = No Show ÷ Appts · ND % = No Demo ÷ Appts · OL % = OL ÷ Appts · Reset % =
         Reset ÷ Appts · Close % = Sold ÷ (PM + Sold) · Cancel % = Cancels ÷ (Sold + Cancels) · Leads
         / Sale = Appts ÷ Sold, shown as a number, not a percentage. Those are all lead metrics, so
@@ -860,6 +879,9 @@ const ATTENTION_META: Record<AttentionKind, { label: string; className: string }
   excluded_sale: { label: "Hidden Sale", className: "text-destructive" },
   no_reps: { label: "No Reps", className: "text-destructive" },
   blank_price: { label: "Blank Price", className: "text-destructive" },
+  // Amber, not red: the volume already follows the Sales Report — this is
+  // the Block board catching up, not a number counting wrong.
+  rep_mismatch: { label: "Rep Mismatch", className: "text-warning" },
   unresolved: { label: "No Result", className: "text-warning" },
   no_weekday_group: { label: "Wrong Group", className: "text-warning" },
 };
