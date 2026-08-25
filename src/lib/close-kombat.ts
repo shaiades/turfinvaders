@@ -122,6 +122,23 @@ const isCancelLabel = (v: string | null | undefined): boolean =>
 const isFtdLabel = (v: string | null | undefined): boolean =>
   /\bftd\b/i.test(v ?? "") || /financial\s*turn/i.test(v ?? "");
 
+/** Effective death label for one Sales-Report row (owner, 2026-08-25): the
+ *  WCC cell when it already carries a death label — otherwise a Cancelled
+ *  mark in the report's "Sales Count" column kills the row too. The office
+ *  records some cancels ONLY there: verified live on Hagmann and Pinel
+ *  (Aug '26), whose WCC said "Completed" (the welcome CALL completed) while
+ *  Sales Count said "Cancelled" — both had failed Can/Save attempts, both
+ *  were still counting as live volume. When Sales Count un-cancels, the
+ *  label falls back to the WCC text and the stamp heals on the next pass. */
+export function reportRowWcc(
+  wcc: string | null,
+  salesCount: string | null,
+): string | null {
+  if (isCancelLabel(wcc) || isFtdLabel(wcc)) return wcc;
+  if (/cancel/i.test(salesCount ?? "")) return "Cancelled";
+  return wcc;
+}
+
 /** A cell counts only when it carries a real label — Monday hands back ""
  *  or the literal "None" for unset status cells depending on the column. */
 const marked = (v: string | null | undefined): boolean => {
