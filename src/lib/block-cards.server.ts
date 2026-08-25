@@ -428,7 +428,10 @@ export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSumm
     );
     let reportBoards = ((data.boards as Array<{ id: string; name: string }>) ?? [])
       .map((b) => ({ id: String(b.id), name: b.name }))
-      .filter((b) => /\bsales report\b/i.test(b.name));
+      // Monday auto-creates a "Subitems of <board>" shadow board per report
+      // board — same name suffix, no WCC/Sales Rep columns, reload-titled
+      // rows that can fuzzy-bind to real cards. Never walk them.
+      .filter((b) => /\bsales report\b/i.test(b.name) && !/^subitems of/i.test(b.name.trim()));
     if (input.scope !== "all") {
       // Quick syncs only touch the current + previous month's reports.
       const labels = recentMonthLabels().map((l) => l.toLowerCase());
