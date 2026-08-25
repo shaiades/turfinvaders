@@ -25,6 +25,7 @@ import {
   chooseReportReps,
   cleanReps,
   isCanSave,
+  reportRowWcc,
   sameRepSet,
   type BlockCard,
   type ReportRepHit,
@@ -945,7 +946,11 @@ async function collectReportBoard(
       const name = item.name == null ? "" : String(item.name);
       const cols: MondayCol[] = item.column_values ?? [];
       const wccRaw = (colText(cols, "wcc") ?? "").trim();
-      const wccStored = wccRaw === "" || /^none$/i.test(wccRaw) ? null : wccRaw;
+      const wccCell = wccRaw === "" || /^none$/i.test(wccRaw) ? null : wccRaw;
+      // Some cancels live ONLY in the report's "Sales Count" column while
+      // WCC keeps the welcome-call status ("Completed") — fold them in, or
+      // the sale keeps counting as live volume (Hagmann/Pinel, Aug '26).
+      const wccStored = reportRowWcc(wccCell, colText(cols, "sales count"));
       if (!name.trim()) continue;
       result.rows += 1;
       // FTDs count with cancels here: both kill the sale, both may have had
