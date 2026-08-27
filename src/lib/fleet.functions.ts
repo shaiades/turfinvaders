@@ -76,8 +76,12 @@ export const deleteProfile = createServerFn({ method: "POST" })
   });
 
 /**
- * Owner-only Van (team) deletion. FK constraints set profiles.team_id and
- * daily_logs.team_id to NULL, so members survive as Unassigned.
+ * Owner-only Van (team) deletion, allowed only for vans with no production
+ * history. profiles.team_id FKs SET NULL so members survive as Unassigned —
+ * but the daily_logs/leads team_id snapshots are the ONLY record of which
+ * van historical production belonged to, so a van with rows must be renamed
+ * or emptied, never deleted (owner, 2026-08-27; migration 20260827010000
+ * adds the ON DELETE RESTRICT backstop in the DB).
  */
 export const deleteVan = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -97,7 +101,34 @@ export const deleteVan = createServerFn({ method: "POST" })
     if (!isOwner) throw new Error("Only owners can delete vans");
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const [logsN, leadsN, metricsN] = await Promise.all([
+      supabaseAdmin
+        .from("daily_logs")
+        .select("id", { count: "exact", head: true })
+        .eq("team_id", data.id),
+      supabaseAdmin
+        .from("leads")
+        .select("id", { count: "exact", head: true })
+        .eq("team_id", data.id),
+      supabaseAdmin
+        .from("daily_metrics")
+        .select("id", { count: "exact", head: true })
+        .eq("team_id", data.id),
+    ]);
+    if (logsN.error) throw logsN.error;
+    if (leadsN.error) throw leadsN.error;
+    // daily_metrics.team_id ships in migration 20260827010000 — before it's
+    // applied the column is missing (42703) and counts as zero history.
+    if (metricsN.error && metricsN.error.code !== "42703") throw metricsN.error;
+    const historyRows =
+      (logsN.count ?? 0) + (leadsN.count ?? 0) + (metricsN.error ? 0 : (metricsN.count ?? 0));
+    const friendly = (n: number | null) =>
+      `This van ${n ? `has ${n} production row${n === 1 ? "" : "s"}` : "still has production history"} attributed to it — deleting it would erase that history's van. Rename the van or move its people instead.`;
+    if (historyRows > 0) throw new Error(friendly(historyRows));
     const { error } = await supabaseAdmin.from("teams").delete().eq("id", data.id);
+    // 23503 = the ON DELETE RESTRICT backstop caught rows the pre-check
+    // missed; surface the same explanation, not a raw FK violation.
+    if (error?.code === "23503") throw new Error(friendly(null));
     if (error) throw error;
     return { ok: true };
   });

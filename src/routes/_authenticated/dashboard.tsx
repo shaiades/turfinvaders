@@ -44,6 +44,7 @@ import { CanvasserMission, isCanvasserTab, type CanvasserTab } from "@/component
 import { TimeClock } from "@/components/TimeClock";
 import { TimeClockReviewQueue } from "@/components/TimeClockReviewQueue";
 import { PushAlertsCard } from "@/components/PushAlertsCard";
+import { FormerBadge } from "@/components/FormerBadge";
 import {
   SuspendedBadge,
   useCanvasserStatuses,
@@ -383,7 +384,37 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
           doorsKnocked: 0,
           salesClosed: 0,
           revenueGenerated: 0,
+          former: false,
         });
+      }
+      // The log/lead fetches filter on the row SNAPSHOT team_id, so people
+      // removed from the van still arrive here. Seed roster rows for them
+      // (tagged former) instead of dropping their production — the van's
+      // history must not shrink when someone leaves (owner, 2026-08-27).
+      const missingIds = new Set<string>();
+      for (const l of logsRes.data ?? []) {
+        if (l.canvasser_id && !byId.has(l.canvasser_id)) missingIds.add(l.canvasser_id);
+      }
+      for (const s of salesRes.data ?? []) {
+        if (s.canvasser_id && !byId.has(s.canvasser_id)) missingIds.add(s.canvasser_id);
+      }
+      if (missingIds.size > 0) {
+        const formerRes = await supabase
+          .from("profiles")
+          .select("id, display_name, level")
+          .in("id", [...missingIds]);
+        if (formerRes.error) throw formerRes.error;
+        for (const p of formerRes.data ?? []) {
+          byId.set(p.id, {
+            id: p.id,
+            name: p.display_name ?? "Player",
+            level: p.level ?? 1,
+            doorsKnocked: 0,
+            salesClosed: 0,
+            revenueGenerated: 0,
+            former: true,
+          });
+        }
       }
       for (const l of logsRes.data ?? []) {
         const m = byId.get(l.canvasser_id);
@@ -396,13 +427,19 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
         if (!m) continue;
         m.revenueGenerated += Number(s.sale_amount ?? 0);
       }
-      const members = [...byId.values()].sort((a, b) => b.revenueGenerated - a.revenueGenerated);
+      // Former rows are data-carried only: zero-production ones (possible
+      // when their only rows fell outside a sub-filter) stay off the list.
+      const members = [...byId.values()]
+        .filter((m) => !m.former || m.doorsKnocked + m.salesClosed + m.revenueGenerated > 0)
+        .sort((a, b) => b.revenueGenerated - a.revenueGenerated);
       const totals = members.reduce(
         (acc, m) => ({
           doors: acc.doors + m.doorsKnocked,
           sales: acc.sales + m.salesClosed,
           revenue: acc.revenue + m.revenueGenerated,
-          members: acc.members + 1,
+          // The Roster stat card stays a CURRENT headcount; production
+          // totals above it include former members' history.
+          members: acc.members + (m.former ? 0 : 1),
         }),
         { doors: 0, sales: 0, revenue: 0, members: 0 },
       );
@@ -417,23 +454,79 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
     enabled: visibility,
     queryKey: ["captain_other_vans", range.startISO, range.endISO],
     queryFn: async () => {
-      const [teamsRes, profilesRes, metricsRes] = await Promise.all([
+      const [teamsRes, profilesRes, logsRes] = await Promise.all([
         supabase.from("teams").select("id, name, color"),
         supabase.from("profiles").select("id, team_id"),
+        // daily_logs team snapshots — van-at-the-time attribution for
+        // metrics rows, so removed members' history stays on their old van.
         supabase
-          .from("daily_metrics")
-          .select("canvasser_id, leads_submitted, leads_confirmed, sales")
-          .gte("metric_date", range.startISO)
-          .lte("metric_date", range.endISO),
+          .from("daily_logs")
+          .select("canvasser_id, team_id, log_date")
+          .gte("log_date", range.startISO)
+          .lte("log_date", range.endISO),
       ]);
       if (teamsRes.error) throw teamsRes.error;
       if (profilesRes.error) throw profilesRes.error;
-      if (metricsRes.error) throw metricsRes.error;
+      if (logsRes.error) throw logsRes.error;
+      // daily_metrics.team_id ships in migration 20260827010000 — until the
+      // owner applies it, retry without the column (42703) and lean on the
+      // log-snapshot cascade below.
+      type MetricRow = {
+        canvasser_id: string;
+        metric_date: string;
+        leads_submitted: number | null;
+        leads_confirmed: number | null;
+        sales: number | null;
+        team_id?: string | null;
+      };
+      let metricRows: MetricRow[];
+      const metricsRes = await supabase
+        .from("daily_metrics")
+        .select("canvasser_id, metric_date, leads_submitted, leads_confirmed, sales, team_id")
+        .gte("metric_date", range.startISO)
+        .lte("metric_date", range.endISO);
+      if (metricsRes.error) {
+        if (metricsRes.error.code !== "42703") throw metricsRes.error;
+        const retry = await supabase
+          .from("daily_metrics")
+          .select("canvasser_id, metric_date, leads_submitted, leads_confirmed, sales")
+          .gte("metric_date", range.startISO)
+          .lte("metric_date", range.endISO);
+        if (retry.error) throw retry.error;
+        metricRows = (retry.data ?? []) as MetricRow[];
+      } else {
+        metricRows = (metricsRes.data ?? []) as MetricRow[];
+      }
 
       const teamByCanvasser = new Map((profilesRes.data ?? []).map((p) => [p.id, p.team_id]));
+      // Same-day snapshot beats the live pointer (mid-week movers, removed
+      // members); the last fallback is the latest snapshot ON OR BEFORE the
+      // metric date — the same rule migration 20260827010000's backfill
+      // uses, so attribution doesn't shift when the owner applies it.
+      // Unattributable rows drop, as before.
+      const snapByDay = new Map<string, string>();
+      const snapsByUser = new Map<string, Array<{ date: string; teamId: string }>>();
+      for (const l of logsRes.data ?? []) {
+        if (!l.canvasser_id || !l.team_id || !l.log_date) continue;
+        snapByDay.set(`${l.canvasser_id}|${l.log_date}`, l.team_id);
+        const list = snapsByUser.get(l.canvasser_id) ?? [];
+        list.push({ date: l.log_date, teamId: l.team_id });
+        snapsByUser.set(l.canvasser_id, list);
+      }
+      const snapOnOrBefore = (cid: string, date: string) => {
+        let best: { date: string; teamId: string } | undefined;
+        for (const s of snapsByUser.get(cid) ?? []) {
+          if (s.date <= date && (!best || s.date > best.date)) best = s;
+        }
+        return best?.teamId;
+      };
       const perTeam = new Map<string, { submits: number; confirmed: number; sales: number }>();
-      for (const m of metricsRes.data ?? []) {
-        const tid = teamByCanvasser.get(m.canvasser_id);
+      for (const m of metricRows) {
+        const tid =
+          m.team_id ??
+          snapByDay.get(`${m.canvasser_id}|${m.metric_date}`) ??
+          teamByCanvasser.get(m.canvasser_id) ??
+          snapOnOrBefore(m.canvasser_id, m.metric_date);
         if (!tid) continue;
         const t = perTeam.get(tid) ?? { submits: 0, confirmed: 0, sales: 0 };
         t.submits += m.leads_submitted ?? 0;
@@ -638,6 +731,8 @@ type RosterRow = {
   doorsKnocked: number;
   salesClosed: number;
   revenueGenerated: number;
+  /** No longer on this van — row exists only for their in-range history. */
+  former: boolean;
 };
 
 function RosterTable({ members }: { members: RosterRow[] }) {
@@ -662,7 +757,8 @@ function RosterTable({ members }: { members: RosterRow[] }) {
                     >
                       {m.name}
                     </Link>
-                    {suspended && <SuspendedBadge />}
+                    {m.former && <FormerBadge />}
+                    {suspended && !m.former && <SuspendedBadge />}
                   </span>
                 }
                 right={
@@ -712,7 +808,8 @@ function RosterTable({ members }: { members: RosterRow[] }) {
                       >
                         {m.name}
                       </Link>
-                      {suspended && <SuspendedBadge />}
+                      {m.former && <FormerBadge />}
+                      {suspended && !m.former && <SuspendedBadge />}
                     </div>
                   </td>
                   <td className="py-2.5 text-right text-victory font-display text-xs">{m.level}</td>

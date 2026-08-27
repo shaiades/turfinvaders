@@ -6,6 +6,7 @@ import { MANAGER_ROLES, requireRoleBeforeLoad } from "@/lib/roles";
 import { useDateRange } from "@/hooks/useDateRange";
 import { RangeTabs } from "@/components/RangeTabs";
 import { normalizeName } from "@/lib/utils";
+import { FormerBadge } from "@/components/FormerBadge";
 
 export const Route = createFileRoute("/_authenticated/teams/$teamId")({
   head: () => ({ meta: [{ title: "Van — Knockout" }] }),
@@ -40,6 +41,10 @@ function TeamDetail() {
       ]);
       const team = teamR.data;
       if (!team) return null;
+      // The current/former partition below depends on both fetches — a
+      // failed profiles query would silently tag the whole roster Former.
+      if (profilesR.error) throw profilesR.error;
+      if (logsR.error) throw logsR.error;
       // Captain label = member(s) of this van holding the captain role.
       // teams.captain_id is seed-era data with no UI writer — never label from
       // it. Deduped by normalizeName: same-name duplicate profiles are normal.
@@ -66,11 +71,52 @@ function TeamDetail() {
         a.sits += l.demos_sits ?? 0;
         agg.set(l.canvasser_id, a);
       }
-      const members = (profilesR.data ?? []).map((p) => {
-        const a = agg.get(p.id) ?? { leads: 0, sales: 0, sits: 0 };
-        return { id: p.id, name: p.display_name ?? "Unknown", ...a, points: a.sits + a.sales * 2 };
-      }).sort((a, b) => b.points - a.points);
+      // The log fetch filters on the row SNAPSHOT team_id, so people who
+      // have since left the van still contribute rows. List them (tagged
+      // former) instead of discarding their production — van history must
+      // not shrink when someone is removed (owner, 2026-08-27).
+      const currentIds = new Set((profilesR.data ?? []).map((p) => p.id));
+      const formerIds = [...agg.keys()].filter((id) => !currentIds.has(id));
+      const formerNames = new Map<string, string | null>();
+      if (formerIds.length > 0) {
+        const formerR = await supabase
+          .from("profiles")
+          .select("id, display_name")
+          .in("id", formerIds);
+        // Throw, don't degrade: silently dropping former members would shrink
+        // the totals — the exact mismatch this fetch exists to prevent.
+        if (formerR.error) throw formerR.error;
+        for (const p of formerR.data ?? []) formerNames.set(p.id, p.display_name);
+      }
+      const members = [
+        ...(profilesR.data ?? []).map((p) => {
+          const a = agg.get(p.id) ?? { leads: 0, sales: 0, sits: 0 };
+          return {
+            id: p.id,
+            name: p.display_name ?? "Unknown",
+            ...a,
+            points: a.sits + a.sales * 2,
+            former: false,
+          };
+        }),
+        // Only ids with a surviving profile row join the list; hard-deleted
+        // ghosts stay out, exactly as before.
+        ...formerIds
+          .filter((id) => formerNames.has(id))
+          .map((id) => {
+            const a = agg.get(id) ?? { leads: 0, sales: 0, sits: 0 };
+            return {
+              id,
+              name: formerNames.get(id) ?? "Former agent",
+              ...a,
+              points: a.sits + a.sales * 2,
+              former: true,
+            };
+          }),
+      ].sort((a, b) => b.points - a.points);
 
+      // Totals fold from data rows via the member list (former included), so
+      // this page agrees with the /teams index card for the same van/range.
       const totals = members.reduce((acc, m) => ({
         leads: acc.leads + m.leads, sales: acc.sales + m.sales, sits: acc.sits + m.sits,
       }), { leads: 0, sales: 0, sits: 0 });
@@ -126,7 +172,13 @@ function TeamDetail() {
           sublabel={range.label}
           accent="victory"
         />
-        <StatCard label="Crew" value={String(members.length)} accent="warning" />
+        {/* Crew stays a CURRENT headcount (matches the /teams index card);
+            former members appear below only for their in-range history. */}
+        <StatCard
+          label="Crew"
+          value={String(members.filter((m) => !m.former).length)}
+          accent="warning"
+        />
       </div>
 
       <ArcadePanel title="Roster">
@@ -139,6 +191,7 @@ function TeamDetail() {
                 <div className="flex items-center gap-3 min-w-0">
                   <span className="font-display text-xs text-muted-foreground w-6">{String(i + 1).padStart(2, "0")}</span>
                   <Link to="/canvassers/$canvasserId" params={{ canvasserId: m.id }} className="font-medium hover:text-neon min-w-0 truncate">{m.name}</Link>
+                  {m.former && <FormerBadge />}
                 </div>
                 <div className="flex items-center gap-3 text-xs text-muted-foreground">
                   <span>{m.leads}<span className="hidden sm:inline"> leads</span></span>

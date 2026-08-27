@@ -256,6 +256,7 @@ export type Database = {
           resets: number
           sales: number
           sits_ran_today: number
+          team_id: string | null
           updated_at: string
         }
         Insert: {
@@ -278,6 +279,7 @@ export type Database = {
           resets?: number
           sales?: number
           sits_ran_today?: number
+          team_id?: string | null
           updated_at?: string
         }
         Update: {
@@ -300,6 +302,7 @@ export type Database = {
           resets?: number
           sales?: number
           sits_ran_today?: number
+          team_id?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -308,6 +311,13 @@ export type Database = {
             columns: ["canvasser_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_metrics_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
             referencedColumns: ["id"]
           },
         ]
