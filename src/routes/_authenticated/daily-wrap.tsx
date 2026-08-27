@@ -20,6 +20,8 @@ type Row = {
   weekPoints: number;
   recent: boolean;
   tracked: boolean;
+  /** false = archived/removed — off the zero lists, but earned awards stay. */
+  active: boolean;
 };
 
 /** One doughnut card for both zero lists — the freezer (2+ zeros, red) and
@@ -129,7 +131,7 @@ function DailyWrap() {
       const [profilesR, metricsR] = await Promise.all([
         supabase
           .from("profiles")
-          .select("id, display_name, status, created_at, suspension_tracked")
+          .select("id, display_name, status, created_at, suspension_tracked, is_active")
           .neq("status", "inactive"),
         supabase
           .from("daily_metrics")
@@ -160,6 +162,9 @@ function DailyWrap() {
           weekPoints: r.pts,
           recent: isRecentlyActive(today, [p.id], lastMap, (p.created_at ?? "").slice(0, 10)),
           tracked: p.suspension_tracked !== false,
+          // Archive writes is_active, never the status enum — an archived rep
+          // must leave the zero lists immediately but keep any earned awards.
+          active: p.is_active !== false,
         };
       });
     },
@@ -168,11 +173,13 @@ function DailyWrap() {
   const { suspension, doughnuts, winners, club3, bosses7 } = useMemo(() => {
     // `recent` keeps week-gone reps out of the freezer (see src/lib/suspension.ts);
     // `tracked` honors the same X-dismissals (suspension_tracked=false) as the
-    // Fleet Dispatch banner. Both gate only this list, never the award lists.
+    // Fleet Dispatch banner; `active` drops archived/removed reps the moment
+    // the archive lands. All three gate only the zero lists — awards a rep
+    // earned before removal stay on the wrap.
     const suspension = rows.filter(
-      (r) => r.todayLeads === 0 && r.ydayLeads === 0 && r.recent && r.tracked,
+      (r) => r.todayLeads === 0 && r.ydayLeads === 0 && r.recent && r.tracked && r.active,
     );
-    const doughnuts = rows.filter((r) => r.todayLeads === 0 && r.ydayLeads > 0);
+    const doughnuts = rows.filter((r) => r.todayLeads === 0 && r.ydayLeads > 0 && r.active);
     const winners = rows
       .filter((r) => r.todayLeads >= 1)
       .sort((a, b) => b.todayLeads - a.todayLeads);

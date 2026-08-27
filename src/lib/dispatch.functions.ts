@@ -51,7 +51,7 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
       supabaseAdmin
         .from("daily_logs")
         .select(
-          "canvasser_id, demos_sits, sales, no_demo, future_leads, ctc, non_core, one_legs, unmarked, office_location, log_date",
+          "canvasser_id, demos_sits, sales, no_demo, future_leads, ctc, non_core, one_legs, unmarked, office_location, log_date, team_id",
         )
         .gte("log_date", data.log_start)
         .lte("log_date", data.log_end),
@@ -59,7 +59,7 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
       // re-window below is the authoritative filter (pay-engine parity).
       supabaseAdmin
         .from("leads")
-        .select("canvasser_id, sale_amount, created_at, reviewed_at, monday_item_id")
+        .select("canvasser_id, sale_amount, created_at, reviewed_at, monday_item_id, team_id")
         .eq("status", "confirmed")
         .or(
           `and(created_at.gte.${data.vol_start},created_at.lt.${data.vol_end}),and(reviewed_at.gte.${data.vol_start},reviewed_at.lt.${data.vol_end})`,
@@ -70,6 +70,16 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
 
     const points: Record<string, number> = {};
     const results: Record<string, DispatchResults> = {};
+    // Van-at-the-time attribution for people no longer on a roster: the
+    // latest daily_logs.team_id snapshot in the log window per canvasser
+    // (leads snapshot fills in below for confirm-only weeks). The board
+    // buckets removed/archived reps' history by this, never by the live
+    // profiles.team_id that removal already nulled.
+    const snapshotTeam: Record<string, string> = {};
+    const snapshotDate: Record<string, string> = {};
+    // Dates with any daily_logs row per canvasser — the board's Day tab uses
+    // this to keep former reps only on days they actually worked.
+    const logDates: Record<string, string[]> = {};
     // Office-sliced mirrors of the same aggregates, for the cross-office
     // Confirmation van (owner, 2026-08-10): each office tab shows only that
     // office's share. daily_logs rows carry the office they were counted
@@ -88,6 +98,15 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
     });
     for (const l of logsR.data ?? []) {
       if (!l.canvasser_id) continue;
+      if (l.log_date) (logDates[l.canvasser_id] ??= []).push(l.log_date);
+      if (
+        l.team_id &&
+        l.log_date &&
+        (!(l.canvasser_id in snapshotTeam) || l.log_date > snapshotDate[l.canvasser_id])
+      ) {
+        snapshotTeam[l.canvasser_id] = l.team_id;
+        snapshotDate[l.canvasser_id] = l.log_date;
+      }
       const office = l.office_location ?? DEFAULT_OFFICE;
       const pts = weeklyPoints(l.demos_sits ?? 0, l.sales ?? 0);
       if (pts > 0) {
@@ -119,10 +138,17 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
     const volEndMs = Date.parse(data.vol_end);
     const volume: Record<string, number> = {};
     const counted: Array<{ cid: string; amt: number; mid: string | null }> = [];
+    const leadSnapAt: Record<string, number> = {};
     for (const l of leadsR.data ?? []) {
       if (!l.canvasser_id) continue;
       const at = Date.parse(l.reviewed_at ?? l.created_at ?? "");
       if (Number.isNaN(at) || at < volStartMs || at >= volEndMs) continue;
+      // Fallback snapshot for confirm-only weeks: a lead's team_id only
+      // places someone whose window has no daily_logs snapshot at all.
+      if (l.team_id && !(l.canvasser_id in snapshotDate) && at >= (leadSnapAt[l.canvasser_id] ?? 0)) {
+        snapshotTeam[l.canvasser_id] = l.team_id;
+        leadSnapAt[l.canvasser_id] = at;
+      }
       const amt = Number(l.sale_amount ?? 0);
       volume[l.canvasser_id] = (volume[l.canvasser_id] ?? 0) + amt;
       counted.push({
@@ -169,7 +195,16 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
       vo[c.cid] = (vo[c.cid] ?? 0) + c.amt;
     }
 
-    return { points, volume, results, officePoints, officeVolume, officeResults };
+    return {
+      points,
+      volume,
+      results,
+      officePoints,
+      officeVolume,
+      officeResults,
+      snapshotTeam,
+      logDates,
+    };
   });
 
 /**

@@ -64,6 +64,7 @@ import { isLeadSourceKey } from "@/lib/lead-sources";
 import { DEFAULT_OFFICE, OFFICE_LOCATIONS } from "@/lib/offices";
 import { getDispatchProduction, type DispatchResults } from "@/lib/dispatch.functions";
 import { FleetDispatchManage } from "@/components/FleetDispatchManage";
+import { FormerBadge } from "@/components/FormerBadge";
 import { AddAgentDialog } from "@/components/AddAgentDialog";
 import { RenameCanvasserDialog, type NameGroupRef } from "@/components/RenameCanvasserDialog";
 import { MergeCanvasserDialog } from "@/components/MergeCanvasserDialog";
@@ -83,7 +84,7 @@ export type RosterProfile = {
   created_at: string;
 };
 
-type BoardProfile = RosterProfile & { role: "canvasser" | "captain" };
+type BoardProfile = RosterProfile & { role: "canvasser" | "captain"; former: boolean };
 
 export type Van = {
   id: string;
@@ -109,6 +110,8 @@ type Metric = {
   no_answers: number;
   killed: number;
   future: number;
+  /** Van-at-the-time snapshot — absent until migration 20260827010000 lands. */
+  team_id?: string | null;
 };
 
 export function FleetDispatch({
@@ -313,13 +316,16 @@ function FleetDispatchInner({
   const allProfiles = rosterQuery.data?.profiles ?? [];
   const rolesByUser = rosterQuery.data?.rolesByUser ?? new Map<string, string[]>();
 
-  // Board membership keeps LiveDispatch's strict semantics: active canvassers
-  // and captains only (is_active === true — null is NOT active here, while
-  // Manage Fleet deliberately treats null as active, matching the old split).
+  // Board membership: active canvassers and captains as before (is_active
+  // === true — null is NOT active here, while Manage Fleet deliberately
+  // treats null as active, matching the old split), PLUS everyone else with
+  // a role, carried as `former`. Former rows are data-gated downstream —
+  // they render only in ranges where they actually produced, bucketed by
+  // their daily_logs/leads team snapshot — so removed people keep their
+  // history without haunting the daily roster (owner, 2026-08-27).
   const canvassers: BoardProfile[] = useMemo(() => {
     const out: BoardProfile[] = [];
     for (const p of allProfiles) {
-      if (p.is_active !== true) continue;
       const roles = rolesByUser.get(p.id) ?? [];
       const role = roles.includes("captain")
         ? "captain"
@@ -327,7 +333,7 @@ function FleetDispatchInner({
           ? "canvasser"
           : null;
       if (!role) continue;
-      out.push({ ...p, role });
+      out.push({ ...p, role, former: p.is_active !== true });
     }
     return out;
   }, [allProfiles, rolesByUser]);
@@ -357,15 +363,27 @@ function FleetDispatchInner({
   const { data: metrics = [] } = useQuery({
     queryKey: ["fleet_dispatch", "funnel", range.funnelStart, range.funnelEnd],
     queryFn: async () => {
+      // team_id ships in migration 20260827010000 — until the owner applies
+      // it, retry without the column (42703) and lean on the daily_logs
+      // snapshots for former-member bucketing.
       const { data, error } = await supabase
+        .from("daily_metrics")
+        .select(
+          "canvasser_id, metric_date, office_location, leads_confirmed, no_answers, killed, future, team_id",
+        )
+        .gte("metric_date", range.funnelStart)
+        .lte("metric_date", range.funnelEnd);
+      if (!error) return (data ?? []) as Metric[];
+      if (error.code !== "42703") throw error;
+      const retry = await supabase
         .from("daily_metrics")
         .select(
           "canvasser_id, metric_date, office_location, leads_confirmed, no_answers, killed, future",
         )
         .gte("metric_date", range.funnelStart)
         .lte("metric_date", range.funnelEnd);
-      if (error) throw error;
-      return (data ?? []) as Metric[];
+      if (retry.error) throw retry.error;
+      return (retry.data ?? []) as Metric[];
     },
   });
 
@@ -402,6 +420,46 @@ function FleetDispatchInner({
   const resultsByUser = useMemo(
     () => new Map<string, DispatchResults>(Object.entries(production.data?.results ?? {})),
     [production.data],
+  );
+  // Van-at-the-time per canvasser — buckets former reps' history into the
+  // van they earned it on, since removal already nulled their live
+  // profiles.team_id. daily_logs/leads snapshots win; daily_metrics.team_id
+  // (post-migration) covers funnel-only weeks with no log rows.
+  const snapshotTeamByUser = useMemo(() => {
+    const map = new Map<string, string>(Object.entries(production.data?.snapshotTeam ?? {}));
+    const metricTeam = new Map<string, { date: string; team: string }>();
+    for (const m of metrics) {
+      if (!m.team_id) continue;
+      const prev = metricTeam.get(m.canvasser_id);
+      if (!prev || m.metric_date > prev.date) {
+        metricTeam.set(m.canvasser_id, { date: m.metric_date, team: m.team_id });
+      }
+    }
+    for (const [cid, v] of metricTeam) {
+      if (!map.has(cid)) map.set(cid, v.team);
+    }
+    return map;
+  }, [production.data, metrics]);
+  // Dates with a daily_logs row, per canvasser — the Day tab's former gate.
+  const logDatesByUser = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    for (const [cid, dates] of Object.entries(production.data?.logDates ?? {})) {
+      m.set(cid, new Set(dates));
+    }
+    return m;
+  }, [production.data]);
+  // One effective-team rule everywhere (office admission, slicing, bucketing):
+  // current members follow their live van; former members follow the van
+  // their in-range rows were stamped with, live team_id as the fallback for
+  // webhook-re-assigned archived profiles.
+  const effectiveTeamFor = useCallback(
+    (c: { id: string; team_id: string | null; former: boolean }) =>
+      c.former ? (snapshotTeamByUser.get(c.id) ?? c.team_id) : c.team_id,
+    [snapshotTeamByUser],
+  );
+  const vanOfficeById = useMemo(
+    () => new Map(vans.map((v) => [v.id, v.office_location ?? DEFAULT_OFFICE])),
+    [vans],
   );
 
   // Suspension window: the last 14 completed worked days (Sundays excluded).
@@ -550,14 +608,27 @@ function FleetDispatchInner({
     () =>
       // Focus mode (captain Command embed) pins the board to one van and
       // ignores the office filter — a van lives in exactly one office.
+      // Former members count as on-van when their snapshot says this van,
+      // so the captain's historical ranges keep ex-members' production.
       focusTeamId
-        ? canvassers.filter((c) => c.team_id === focusTeamId)
-        : canvassers.filter(
-            (c) =>
-              matches(c.office_location ?? c.team_office) ||
-              (c.team_id !== null && crossOfficeVanIds.has(c.team_id)),
-          ),
-    [canvassers, matches, crossOfficeVanIds, focusTeamId],
+        ? canvassers.filter(
+            // Former members admit by the SAME effective team the bucketing
+            // uses (snapshot first) — OR-ing the live pointer would count a
+            // webhook-re-assigned archived rep in this van's tiles while
+            // their row buckets under the snapshot van's never-rendered card.
+            (c) => (c.former ? effectiveTeamFor(c) === focusTeamId : c.team_id === focusTeamId),
+          )
+        : canvassers.filter((c) => {
+            const eff = effectiveTeamFor(c);
+            // A former member's office follows the van their history buckets
+            // into — admission and bucketing must use the same key, or a tab's
+            // tiles count a row whose van card renders on a different tab.
+            const office = c.former
+              ? ((eff && vanOfficeById.get(eff)) ?? c.office_location ?? c.team_office)
+              : (c.office_location ?? c.team_office);
+            return matches(office) || (eff !== null && crossOfficeVanIds.has(eff));
+          }),
+    [canvassers, matches, crossOfficeVanIds, focusTeamId, effectiveTeamFor, vanOfficeById],
   );
 
   // De-duplicate by normalized display_name. If any duplicate is a captain,
@@ -567,6 +638,10 @@ function FleetDispatchInner({
     type Group = {
       key: string;
       ids: string[];
+      /** Non-former ids only — roster actions and the suspension donut must
+       *  never read an archived namesake's state (tracked flags, created
+       *  dates, activity) into an active rep's row. */
+      activeIds: string[];
       display_name: string | null;
       office_location: string | null;
       team_office: string | null;
@@ -574,6 +649,8 @@ function FleetDispatchInner({
       tracked: boolean;
       oldestCreated: string;
       team_id: string | null;
+      teamFromActive: boolean;
+      former: boolean;
     };
     const groups = new Map<string, Group>();
     for (const c of visible) {
@@ -584,29 +661,55 @@ function FleetDispatchInner({
         groups.set(key, {
           key,
           ids: [c.id],
+          activeIds: c.former ? [] : [c.id],
           display_name: c.display_name,
           office_location: c.office_location,
           team_office: c.team_office,
-          role: c.role,
-          tracked: c.suspension_tracked,
-          oldestCreated: created,
+          // Suspension inputs and the Captain chip come from active members
+          // only; former-only groups keep neutral values (never on the
+          // banner — the former gate below skips them anyway).
+          role: c.former ? "canvasser" : c.role,
+          tracked: c.former ? true : c.suspension_tracked,
+          oldestCreated: c.former ? "9999-12-31" : created,
           team_id: c.team_id,
+          teamFromActive: !c.former && !!c.team_id,
+          former: c.former,
         });
       } else {
         g.ids.push(c.id);
-        if (c.role === "captain") g.role = "captain";
         if (!g.office_location && c.office_location) g.office_location = c.office_location;
         if (!g.team_office && c.team_office) g.team_office = c.team_office;
-        if (!c.suspension_tracked) g.tracked = false;
-        if (created < g.oldestCreated) g.oldestCreated = created;
-        if (!g.team_id && c.team_id) g.team_id = c.team_id;
+        if (!c.former) {
+          g.activeIds.push(c.id);
+          if (c.role === "captain") g.role = "captain";
+          if (!c.suspension_tracked) g.tracked = false;
+          if (created < g.oldestCreated) g.oldestCreated = created;
+          // A name-group is former only when EVERY same-name profile is —
+          // an active rep absorbing an archived duplicate stays a live row.
+          g.former = false;
+        }
+        // The live van comes from an active member when one exists; an
+        // archived namesake's (webhook-re-assigned) team is only a fallback.
+        if (c.team_id) {
+          if (!c.former && !g.teamFromActive) {
+            g.team_id = c.team_id;
+            g.teamFromActive = true;
+          } else if (!g.team_id) {
+            g.team_id = c.team_id;
+          }
+        }
       }
     }
     const enriched = Array.from(groups.values()).map((g) => {
+      const effTeam = g.former
+        ? (g.ids.map((id) => snapshotTeamByUser.get(id)).find((t) => !!t) ?? g.team_id)
+        : g.team_id;
       // Confirmation-van members show only the active office's share on a
       // specific office tab (the per-office panels re-slice for "All").
-      if (officeTab !== "All" && g.team_id && crossOfficeVanIds.has(g.team_id)) {
-        return { g, ...sliceValues(g.ids, officeTab) };
+      // Keyed by the same effective team the bucketing uses, so a former
+      // member's row still slices instead of leaking both offices' numbers.
+      if (officeTab !== "All" && effTeam && crossOfficeVanIds.has(effTeam)) {
+        return { g, effTeam, ...sliceValues(g.ids, officeTab) };
       }
       let conf = 0,
         kil = 0,
@@ -639,9 +742,23 @@ function FleetDispatchInner({
       // Submitted = the sum of actioned results (owner, 2026-07-28):
       // Submitted ≡ Confirmed + Future + Blowout by construction.
       const sub = conf + fut + kil;
-      return { g, conf, kil, fut, sub, pts, vol, res };
+      return { g, effTeam, conf, kil, fut, sub, pts, vol, res };
     });
-    return enriched.sort((a, b) => {
+    // The former-row gate: removed/archived people render only in ranges
+    // where they actually produced (same predicate as the unassigned pen),
+    // so they never appear as forward-looking zero rows. Filtering HERE —
+    // before totals and bucketing — keeps the top tiles ≡ Σ van cards.
+    // The Day tab additionally requires activity ON that day (points/volume
+    // span the whole week in progress, and a rep removed Tuesday must not
+    // haunt Wednesday's live board on Monday's numbers).
+    const dayISO = tab === "day" ? range.funnelStart : null;
+    const gated = enriched.filter((r) => {
+      if (!r.g.former) return true;
+      if (!hasProduction(r)) return false;
+      if (!dayISO) return true;
+      return r.sub > 0 || r.g.ids.some((id) => logDatesByUser.get(id)?.has(dayISO));
+    });
+    return gated.sort((a, b) => {
       if (b.sub !== a.sub) return b.sub - a.sub;
       if (b.conf !== a.conf) return b.conf - a.conf;
       return (a.g.display_name ?? "").localeCompare(b.g.display_name ?? "");
@@ -655,6 +772,10 @@ function FleetDispatchInner({
     officeTab,
     crossOfficeVanIds,
     sliceValues,
+    snapshotTeamByUser,
+    logDatesByUser,
+    tab,
+    range.funnelStart,
   ]);
 
   const totals = useMemo(() => {
@@ -689,13 +810,19 @@ function FleetDispatchInner({
       ids.reduce((a, id) => a + (genByDay.get(id)?.get(day) ?? 0), 0);
     const [d1, d2] = workedDays;
     return rows.flatMap((r) => {
+      // Former members never hit the donut list — archive_agent keeps
+      // suspension_tracked on purpose, and a just-removed rep still passes
+      // the 7-day recency check, so without this they'd pop right back up.
+      if (r.g.former) return [];
       if (!r.g.tracked || dismissed.has(r.g.key)) return [];
+      // Everything below reads activeIds: an archived namesake's roles,
+      // created date, or old activity must not flag or exempt a live rep.
       // Sales reps never appear on the suspension list (owner, 2026-08-04) —
       // even when a dual-role profile also puts them on the board.
-      if (r.g.ids.some((id) => (rolesByUser.get(id) ?? []).includes("sales_rep"))) return [];
+      if (r.g.activeIds.some((id) => (rolesByUser.get(id) ?? []).includes("sales_rep"))) return [];
       if (r.g.oldestCreated > d2) return [];
-      if (!isRecentlyActive(today, r.g.ids, lastActiveBy, r.g.oldestCreated)) return [];
-      if (genOn(r.g.ids, d1) !== 0 || genOn(r.g.ids, d2) !== 0) return [];
+      if (!isRecentlyActive(today, r.g.activeIds, lastActiveBy, r.g.oldestCreated)) return [];
+      if (genOn(r.g.activeIds, d1) !== 0 || genOn(r.g.activeIds, d2) !== 0) return [];
       // Consecutive zero worked days, newest backward, only days the profile existed.
       let streak = 0;
       let capped = true;
@@ -704,7 +831,7 @@ function FleetDispatchInner({
           capped = false;
           break;
         }
-        if (genOn(r.g.ids, day) === 0) streak++;
+        if (genOn(r.g.activeIds, day) === 0) streak++;
         else {
           capped = false;
           break;
@@ -903,7 +1030,10 @@ function FleetDispatchInner({
                 supabase
                   .from("profiles")
                   .update({ suspension_tracked: false })
-                  .in("id", g.ids)
+                  // Active namesakes only — flipping an archived duplicate's
+                  // flag would silently exempt it from webhook van-sync and
+                  // from tracking after a reactivation.
+                  .in("id", g.activeIds)
                   .select("id")
                   .then(({ data, error }) => {
                     if (error || !data?.length) {
@@ -925,7 +1055,7 @@ function FleetDispatchInner({
                           supabase
                             .from("profiles")
                             .update({ suspension_tracked: true })
-                            .in("id", g.ids)
+                            .in("id", g.activeIds)
                             .then(() => {
                               setDismissed((prev) => {
                                 const n = new Set(prev);
@@ -1003,10 +1133,16 @@ type FunnelRow = {
   g: {
     key: string;
     ids: string[];
+    /** Non-former ids — the only ones roster actions may touch. */
+    activeIds: string[];
     display_name: string | null;
     role: "canvasser" | "captain";
     team_id: string | null;
+    former: boolean;
   };
+  /** The van this row buckets/slices under: live team for current members,
+   *  the in-range snapshot team for former ones. */
+  effTeam: string | null;
   sub: number;
   conf: number;
   fut: number;
@@ -1084,10 +1220,14 @@ const ROW_MIN_W = "min-w-[47rem]";
 const rowMinW = (manage: boolean) => (manage ? "min-w-[52rem]" : ROW_MIN_W);
 
 /** A row's stats without its identity — what totals and stat-cell runs share. */
-type DispatchStats = Omit<FunnelRow, "g">;
+type DispatchStats = Omit<FunnelRow, "g" | "effTeam">;
 
 /* Pure, module-level (stable identity — no useCallback needed): the board's
- * two sort orders and the van-total reducer. */
+ * two sort orders, the data-presence gate, and the van-total reducer. */
+/** Any production at all in the selected range — the gate that decides
+ *  whether a former member or unassigned lead source earns a board row. */
+const hasProduction = (r: FunnelRow) =>
+  r.sub + r.conf + r.fut + r.kil + r.pts + r.vol + r.res.lds + r.res.ol + r.res.sal > 0;
 const byProduction = (a: FunnelRow, b: FunnelRow) => b.sub - a.sub || b.conf - a.conf;
 const byProductionThenName = (a: FunnelRow, b: FunnelRow) =>
   b.sub - a.sub || (a.g.display_name ?? "").localeCompare(b.g.display_name ?? "");
@@ -1199,11 +1339,12 @@ function DispatchRow({
       <span className="text-sm truncate flex items-center gap-1.5 min-w-0">
         <span aria-hidden>{r.sub > 0 ? "🔥" : "🍩"}</span>
         <span className="truncate">{r.g.display_name ?? "—"}</span>
-        {r.g.role === "captain" && (
+        {r.g.role === "captain" && !r.g.former && (
           <span className="shrink-0 text-[9px] font-display uppercase tracking-widest px-1.5 py-0.5 rounded border border-accent/60 text-accent bg-accent/10">
             Captain
           </span>
         )}
+        {r.g.former && <FormerBadge />}
       </span>
       <DispatchStatCells s={r} />
       {gridManage && !manage && <span />}
@@ -1366,22 +1507,29 @@ function DispatchFleet({
    *  pseudo lead-source rows and targets above the viewer's pay grade. */
   const manageFor = (r: FunnelRow, currentVanId: string | null): RowManage | undefined => {
     if (!canEditRows) return undefined;
+    // Former rows are history, not roster — Move/Archive on an archived
+    // profile would set team_id without reactivating (a half-alive state).
+    // Reactivation lives in Manage Fleet → Archived Agents.
+    if (r.g.former) return undefined;
     if (isLeadSourceKey(r.g.key)) return undefined;
-    const targetRoles = r.g.ids.flatMap((id) => rolesByUser.get(id) ?? []);
+    // Roster actions touch active profiles only — moving/archiving an
+    // archived namesake alongside would set team_id on an is_active=false
+    // profile, the half-alive state the former guard above exists to block.
+    const targetRoles = r.g.activeIds.flatMap((id) => rolesByUser.get(id) ?? []);
     if (!canManageTarget(realRole, targetRoles)) return undefined;
     return {
       vans,
       currentVanId,
       busy,
       onMove: (vanId) =>
-        moveAgents.mutate({ ids: r.g.ids, vanId, name: r.g.display_name ?? "Agent" }),
+        moveAgents.mutate({ ids: r.g.activeIds, vanId, name: r.g.display_name ?? "Agent" }),
       onArchive: () => {
         if (
           confirm(
             `Remove "${r.g.display_name}" from the roster? Their history and data are kept — reactivate anytime from Archived Agents.`,
           )
         ) {
-          archiveAgents.mutate({ ids: r.g.ids, name: r.g.display_name ?? "Agent" });
+          archiveAgents.mutate({ ids: r.g.activeIds, name: r.g.display_name ?? "Agent" });
         }
       },
       onRename: () => setRenameTarget(r.g),
@@ -1401,10 +1549,13 @@ function DispatchFleet({
     const freeAgents: FunnelRow[] = [];
     const vanIds = new Set(vans.map((v) => v.id));
     for (const r of rows) {
-      if (r.g.team_id && vanIds.has(r.g.team_id)) {
-        const list = rowsByVan.get(r.g.team_id) ?? [];
+      // r.effTeam: live van for current members, in-range snapshot van for
+      // former ones (computed once in the rows memo, shared with slicing
+      // and office admission). No match → the pen, which is data-gated.
+      if (r.effTeam && vanIds.has(r.effTeam)) {
+        const list = rowsByVan.get(r.effTeam) ?? [];
         list.push(r);
-        rowsByVan.set(r.g.team_id, list);
+        rowsByVan.set(r.effTeam, list);
       } else {
         freeAgents.push(r);
       }
@@ -1430,12 +1581,7 @@ function DispatchFleet({
         p.display_name,
       ]);
     }
-    const looseActive = freeAgents
-      .filter(
-        (r) =>
-          r.sub + r.conf + r.fut + r.kil + r.pts + r.vol + r.res.lds + r.res.ol + r.res.sal > 0,
-      )
-      .sort(byProductionThenName);
+    const looseActive = freeAgents.filter(hasProduction).sort(byProductionThenName);
     return { rowsByVan, looseActive, totalsByVan, captainNamesByVan };
   }, [rows, vans, profiles, rolesByUser]);
 
@@ -1628,12 +1774,17 @@ function SuspensionBanner({
   onRemove,
 }: {
   rows: Array<{
-    g: { key: string; ids: string[]; display_name: string | null };
+    g: { key: string; ids: string[]; activeIds: string[]; display_name: string | null };
     d1: string;
     d2: string;
     streakLabel: string;
   }>;
-  onRemove?: (g: { key: string; ids: string[]; display_name: string | null }) => void;
+  onRemove?: (g: {
+    key: string;
+    ids: string[];
+    activeIds: string[];
+    display_name: string | null;
+  }) => void;
 }) {
   if (rows.length === 0) return null;
   return (

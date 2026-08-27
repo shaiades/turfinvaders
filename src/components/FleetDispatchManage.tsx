@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
@@ -793,7 +794,16 @@ export function FleetDispatchManage({
                     key={p.id}
                     className="flex items-center gap-2 px-2 py-1.5 rounded border border-border bg-surface"
                   >
-                    <span className="text-sm truncate flex-1">{p.display_name ?? "Unknown"}</span>
+                    {/* Their full history page still renders — this is the
+                        one list that reaches removed people, so link it. */}
+                    <Link
+                      to="/canvassers/$canvasserId"
+                      params={{ canvasserId: p.id }}
+                      className="text-sm truncate flex-1 hover:text-neon"
+                      onClick={() => setArchivedOpen(false)}
+                    >
+                      {p.display_name ?? "Unknown"}
+                    </Link>
                     <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
                       {p.office_location ?? "—"}
                     </span>
