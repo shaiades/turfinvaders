@@ -321,6 +321,32 @@ export function chooseReportReps(
   return { set: cleanReps(best.reps) };
 }
 
+/** Among one report row's name-matched candidate CARDS, keep only those
+ *  whose Sale Price equals one of the row's dollar figures (Sale Amt or
+ *  Cancel Amt) when any do — the card-side mirror of chooseReportReps's
+ *  amount rule. A repeat customer's sale + reload rows land days apart
+ *  (Buford, Aug '26: $9,900 sale dated 8/4 and $12,048 reload dated 8/5,
+ *  cards on 8/4 and 8/6) and nearest-card_date ties at one day each — both
+ *  cancel rows bound to the 8/4 card and the cancelled 8/6 reload kept
+ *  counting. The dollar figure is identity evidence, so it narrows before
+ *  the date tiebreak; a row with no figure, or no card at that price,
+ *  changes nothing. Zero/blank never matches — blanks are everywhere and
+ *  prove nothing. */
+export function preferAmountMatch<T extends { sale_price: number | null }>(
+  cands: T[],
+  amounts: Array<number | null>,
+): T[] {
+  if (cands.length < 2) return cands;
+  const cents = new Set(
+    amounts.filter((a): a is number => a !== null && a > 0).map((a) => Math.round(a * 100)),
+  );
+  if (cents.size === 0) return cands;
+  const priced = cands.filter(
+    (c) => c.sale_price !== null && cents.has(Math.round(c.sale_price * 100)),
+  );
+  return priced.length > 0 ? priced : cands;
+}
+
 export type RepStats = {
   rep: string;
   /** RESULTED leads only — a card with nothing marked yet isn't an appt, and
