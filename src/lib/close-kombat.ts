@@ -73,6 +73,20 @@
 //   card's own reps (the report proves who shares the money, not who sat the
 //   demo — full result credit arrives the normal way once the Block card is
 //   fixed). The rep_mismatch audit flags the drift so the board gets fixed.
+// - Save cards never count on their own (owner, 2026-08-28): the lead was
+//   already issued and counted on the ORIGINAL card, so a Can/Save card —
+//   landed, failed, or unlinked — is never an Appt, a Sold, an office tally,
+//   or revenue of its own. A landed save folds into its original; everything
+//   else counts nowhere. A PRICED save that can't find its original is
+//   flagged orphan_save (its money counts nowhere until the card is fixed);
+//   an unpriced save is a failed save and stays silent by design.
+// - Cross-range saves (owner, 2026-08-28): the re-priced volume belongs to
+//   the ORIGINAL sale's date — a July 30 sale saved on Aug 5 pays out in
+//   July's standings at the save's price, and August shows nothing for the
+//   deal. aggregateCloseKombat/auditBlockCards therefore take an optional
+//   stats window: save→original linking runs over EVERY card supplied (the
+//   UI fetches ±42 days of context around the view), while counting and
+//   flagging cover only cards inside the window.
 //
 // Pure module: no imports, unit-testable like funnel.ts.
 
@@ -468,7 +482,20 @@ function linkSaves(cards: BlockCard[]): {
   return { effects, consumed };
 }
 
-export function aggregateCloseKombat(cards: BlockCard[]): {
+/** Optional stats window (inclusive ISO dates): cards outside it still LINK
+ *  saves — a July original must be re-priceable by an August save — but never
+ *  count or get flagged. With no window every card counts (fixtures, and any
+ *  caller that already narrowed its input). A dateless card counts only when
+ *  no window is given: the UI's date-bounded fetch can't return one anyway. */
+export type KombatWindow = { start: string; end: string };
+
+const inWindow = (c: Pick<BlockCard, "card_date">, w: KombatWindow | undefined): boolean =>
+  !w || (c.card_date !== null && c.card_date >= w.start && c.card_date <= w.end);
+
+export function aggregateCloseKombat(
+  cards: BlockCard[],
+  window?: KombatWindow,
+): {
   reps: RepStats[];
   totals: KombatTotals;
 } {
@@ -525,6 +552,18 @@ export function aggregateCloseKombat(cards: BlockCard[]): {
     // A landed save card is folded into its original below — counting it
     // here too would double the deal.
     if (saves.consumed.has(card.monday_item_id)) continue;
+    // Any OTHER Can/Save card — failed, or priced but unlinked — counts
+    // NOWHERE (owner, 2026-08-28): the lead was already issued and counted
+    // on the original card, so a save attempt is never a second Appt, Sold,
+    // or office tally, whatever results the office marks on it. A priced
+    // save with no findable original is surfaced by the orphan_save audit
+    // flag rather than guessed into the stats.
+    if (isCanSave(card)) continue;
+    // Context card outside the stats window: it's here so saves can link
+    // across a range edge — it counts in its OWN range's view, never this
+    // one (owner, 2026-08-28: the re-priced deal pays on the original's
+    // date).
+    if (!inWindow(card, window)) continue;
     const save = saves.effects.get(card.monday_item_id);
     // A landed save supersedes a stale Cancelled stamp: the deal is alive
     // again, so the original counts as the sale it is. (The Sales-Report
@@ -631,6 +670,7 @@ export function aggregateCloseKombat(cards: BlockCard[]): {
 
 export type AttentionKind =
   | "excluded_sale"
+  | "orphan_save"
   | "no_reps"
   | "blank_price"
   | "rep_mismatch"
@@ -682,16 +722,24 @@ export const sameRepSet = (a: string[], b: string[]): boolean => {
  *  card, so landed-save cards (consumed into their original) are exempt from
  *  the money checks, and an original that a landed save re-priced is not
  *  "counting as $0" — the save price replaced it. */
-export function auditBlockCards(cards: BlockCard[], todayISO: string): AttentionItem[] {
+export function auditBlockCards(
+  cards: BlockCard[],
+  todayISO: string,
+  window?: KombatWindow,
+): AttentionItem[] {
   const saves = linkSaves(cards);
   const items: AttentionItem[] = [];
   for (const c of cards) {
+    // Context cards outside the stats window link saves but belong to their
+    // own range's view — flag them there, not here.
+    if (!inWindow(c, window)) continue;
     const outcome = cardOutcome(c);
     const saleLabel = (c.sale ?? "").trim();
     const carriesSale = (SOLD_VALUES as readonly string[]).includes(saleLabel.toLowerCase());
     const reps = countReps(c);
     const reportReps = cleanReps(c.report_reps);
     const excluded = isExcludedCard(c);
+    const canSave = isCanSave(c);
     const dead = isCancelLabel(c.wcc) || isFtdLabel(c.wcc);
     // A landed save card is folded into its original — the aggregate already
     // counts its price there, whatever its own Iss/reps/price cells look like.
@@ -703,12 +751,21 @@ export function auditBlockCards(cards: BlockCard[], todayISO: string): Attention
 
     let kind: AttentionKind | null = null;
     let detail = "";
-    if (!consumedSave && excluded && carriesSale && !dead) {
+    if (!consumedSave && canSave && c.sale_price !== null && c.sale_price > 0) {
+      // A landed save that linked is consumedSave; a PRICED save left over
+      // means office/phone/customer on the two cards don't line up (or the
+      // original predates the loaded context). Save cards count nowhere on
+      // their own, so this money is invisible until the cards match.
+      kind = "orphan_save";
+      detail =
+        "Can/Save with a Sale Price but no matching original sale — the save's money counts nowhere until the office, phone, or customer name lines up";
+    } else if (!consumedSave && !canSave && excluded && carriesSale && !dead) {
       // The Garcia/Nielsen/Vroom reloads, the Nguyen $41,000, Maddalena.
       kind = "excluded_sale";
       detail = `"${saleLabel}" on a "${c.iss}" card — counts NOWHERE until the Iss cell is fixed`;
     } else if (
       !consumedSave &&
+      !canSave &&
       !excluded &&
       outcome === "sold" &&
       reps.length === 0 &&
@@ -720,6 +777,7 @@ export function auditBlockCards(cards: BlockCard[], todayISO: string): Attention
       detail = `${saleLabel || "Sale"} with no reps — the money counts for the company, nobody gets credit`;
     } else if (
       !consumedSave &&
+      !canSave &&
       !excluded &&
       outcome === "sold" &&
       c.sale_price === null &&
@@ -730,6 +788,7 @@ export function auditBlockCards(cards: BlockCard[], todayISO: string): Attention
       detail = `${saleLabel || "Sale"} with a blank Sale Price — counting as $0`;
     } else if (
       !consumedSave &&
+      !canSave &&
       // Mirror the aggregate's gate exactly: an excluded card still counts
       // (and still routes volume through report_reps) when the report
       // stamped it dead — so the drift must stay visible there too.
@@ -750,7 +809,7 @@ export function auditBlockCards(cards: BlockCard[], todayISO: string): Attention
       !excluded &&
       !isOfficeAppt(c) &&
       outcome === "unmarked" &&
-      !isCanSave(c) &&
+      !canSave &&
       inWeekdayGroup &&
       c.card_date !== null &&
       c.card_date < todayISO
@@ -782,11 +841,12 @@ export function auditBlockCards(cards: BlockCard[], todayISO: string): Attention
   }
   const rank: Record<AttentionKind, number> = {
     excluded_sale: 0,
-    no_reps: 1,
-    blank_price: 2,
-    rep_mismatch: 3,
-    unresolved: 4,
-    no_weekday_group: 5,
+    orphan_save: 1,
+    no_reps: 2,
+    blank_price: 3,
+    rep_mismatch: 4,
+    unresolved: 5,
+    no_weekday_group: 6,
   };
   items.sort(
     (a, b) =>
