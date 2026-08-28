@@ -25,6 +25,7 @@ import {
   chooseReportReps,
   cleanReps,
   isCanSave,
+  preferAmountMatch,
   reportRowWcc,
   sameRepSet,
   type BlockCard,
@@ -779,25 +780,27 @@ export function withinDays(cards: SoldCardLite[], aroundISO: string, days: numbe
  *  back to the old date-blind search — a fuzzy match still beats an unmatched
  *  cancel, and the fallback keeps sloppy Date Sold entry working. `pools` is
  *  tried in order (sold cards first, then every card for cancel rows), and the
- *  date-true pass sweeps ALL pools before any date-blind one does. */
+ *  date-true pass sweeps ALL pools before any date-blind one does. `amounts`
+ *  is the row's dollar figures (Sale Amt / Cancel Amt) — see bestSoldMatch. */
 export function matchReportRow(
   pools: SoldCardLite[][],
   reportNorm: string,
   office: string | null,
   saleDateISO: string | null,
   fallbackISO: string | null,
+  amounts: Array<number | null> = [],
 ): { card: SoldCardLite; dateTrue: boolean } | null {
   if (saleDateISO) {
     for (const pool of pools) {
       const near = withinDays(pool, saleDateISO, SALE_DATE_WINDOW_DAYS);
-      const hit = bestSoldMatch(near, reportNorm, office, saleDateISO);
+      const hit = bestSoldMatch(near, reportNorm, office, saleDateISO, amounts);
       // dateTrue: the row carried a real Date Sold and the card ran within
       // the window of it — the only tier trusted to rewrite report_reps.
       if (hit) return { card: hit, dateTrue: true };
     }
   }
   for (const pool of pools) {
-    const hit = bestSoldMatch(pool, reportNorm, office, saleDateISO ?? fallbackISO);
+    const hit = bestSoldMatch(pool, reportNorm, office, saleDateISO ?? fallbackISO, amounts);
     if (hit) return { card: hit, dateTrue: false };
   }
   return null;
@@ -806,14 +809,17 @@ export function matchReportRow(
 /** Exact normalized name first, then prefix containment (≥8 chars — report
  *  and card names truncate/extend each other: "Matismo, Reuben & Eli" vs
  *  "Matismo, Reuben & Elizabeth"). Office narrows when the report board is
- *  office-prefixed; nearest card_date breaks ties. Callers should reach for
- *  matchReportRow instead — this alone is date-blind whenever a name tier
- *  produces exactly one candidate. */
+ *  office-prefixed; a card priced at one of the row's dollar figures beats
+ *  the rest (preferAmountMatch — a repeat customer's sale and reload rows
+ *  must land on their own cards); nearest card_date breaks remaining ties.
+ *  Callers should reach for matchReportRow instead — this alone is
+ *  date-blind whenever a name tier produces exactly one candidate. */
 export function bestSoldMatch(
   cards: SoldCardLite[],
   reportNorm: string,
   office: string | null,
   aroundISO: string | null,
+  amounts: Array<number | null> = [],
 ): SoldCardLite | null {
   if (!reportNorm) return null;
   const pool = office ? cards.filter((c) => c.office_location === office) : cards;
@@ -848,6 +854,7 @@ export function bestSoldMatch(
     }
   }
   if (cands.length === 0) return null;
+  cands = preferAmountMatch(cands, amounts);
   if (cands.length === 1 || !aroundISO) return cands[0];
   const target = Date.parse(aroundISO);
   return cands.reduce((best, c) => {
@@ -976,6 +983,19 @@ async function collectReportBoard(
       );
       if (repsCol) sawRepsCol = true;
       const rowReps = cleanReps((repsCol?.text || "").split(","));
+      // The row's dollar figures. Sale Amt feeds the best-row tiebreak in
+      // chooseReportReps and NEVER becomes a card's sale_price; Cancel Amt
+      // often holds a cancelled row's only figure. Both steer the matcher
+      // toward the card priced at that figure when a repeat customer has
+      // several cards in the date window (preferAmountMatch — Buford,
+      // Aug '26). display_value covers a formula-typed money column,
+      // matching findSalePriceCol's readers.
+      const colMoney = (title: string) => {
+        const c = cols.find((c) => (c.column?.title || "").trim().toLowerCase() === title);
+        return parseMoney(c?.text || c?.display_value || "");
+      };
+      const rowAmt = colMoney("sale amt");
+      const cancelAmt = colMoney("cancel amt");
       // Non-cancel rows only stamp cards still marked sold; a CANCEL row
       // falls back to any card for that customer — the sale's Block card
       // usually had its Sale cell reverted when the job died.
@@ -986,6 +1006,7 @@ async function collectReportBoard(
         office,
         saleDate,
         monthMidISO,
+        [rowAmt, cancelAmt],
       );
       if (!match) {
         if (isCancel) result.unmatched.push(name);
@@ -993,16 +1014,11 @@ async function collectReportBoard(
       }
       // Collect only — the caller merges every board's rows per card
       // (cancel-wins for wcc, best-single-row for report_reps) and writes
-      // once. Sale Amt rides along for the best-row tiebreak and diagnostics
-      // only; it never becomes a card's sale_price. display_value covers a
-      // formula-typed Sale Amt column, matching findSalePriceCol's readers.
-      const amtCol = cols.find(
-        (c) => (c.column?.title || "").trim().toLowerCase() === "sale amt",
-      );
+      // once.
       const list = matches.get(match.card.monday_item_id) ?? [];
       list.push({
         wcc: wccStored,
-        amt: parseMoney(amtCol?.text || amtCol?.display_value || ""),
+        amt: rowAmt,
         reps: rowReps,
         saleDate,
         dateTrue: match.dateTrue,

@@ -12,6 +12,7 @@ import {
   auditBlockCards,
   cardOutcome,
   chooseReportReps,
+  preferAmountMatch,
   reportRowWcc,
   type BlockCard,
   type ReportRepHit,
@@ -1071,6 +1072,40 @@ const scCancel = aggregateCloseKombat([
 eq("salescount: cancelled sale pays nothing", scCancel.totals.revenue, 0);
 eq("salescount: still a sit (PM)", scCancel.totals.pm, 1);
 eq("salescount: cancels tallied", scCancel.totals.cancels, 1);
+
+// ---- preferAmountMatch: repeat customer's rows bind their OWN cards ------
+// THE BUFORD CASE (found live 2026-08-28): the SD August report carried two
+// cancelled rows for one customer — a $9,900 sale dated 8/4 and a $12,048
+// reload dated 8/5 — against Block cards on 8/4 ($9,900) and 8/6 ($12,048).
+// Both cards sit one day from the reload row's Date Sold, so the
+// nearest-date tiebreak bound BOTH rows to the 8/4 card and the cancelled
+// 8/6 reload kept paying $12,048.
+const buford84 = { monday_item_id: "84", sale_price: 9900 };
+const buford86 = { monday_item_id: "86", sale_price: 12048 };
+const bufords = [buford84, buford86];
+const picks = (cands: Array<{ monday_item_id: string; sale_price: number | null }>) =>
+  cands.map((c) => c.monday_item_id).join(",");
+eq(
+  "amount: reload row picks the $12,048 card",
+  picks(preferAmountMatch(bufords, [12048, 12048])),
+  "86",
+);
+eq("amount: sale row picks the $9,900 card", picks(preferAmountMatch(bufords, [9900, 9900])), "84");
+eq("amount: Cancel Amt alone is enough", picks(preferAmountMatch(bufords, [null, 12048])), "86");
+eq("amount: no figure changes nothing", picks(preferAmountMatch(bufords, [null, null])), "84,86");
+eq("amount: unpriced figure changes nothing", picks(preferAmountMatch(bufords, [5000])), "84,86");
+eq(
+  "amount: $0 never matches a $0 card",
+  picks(preferAmountMatch([{ monday_item_id: "z", sale_price: 0 }, buford84], [0])),
+  "z,84",
+);
+eq(
+  "amount: blank card price never matches",
+  picks(preferAmountMatch([{ monday_item_id: "n", sale_price: null }, buford86], [12048])),
+  "86",
+);
+eq("amount: single candidate is never vetoed", picks(preferAmountMatch([buford84], [12048])), "84");
+eq("amount: sub-cent drift still matches", picks(preferAmountMatch(bufords, [9900.001])), "84");
 
 console.log(`checks run, ${fails.length} failure(s)`);
 for (const f of fails) console.log("  FAIL " + f);
