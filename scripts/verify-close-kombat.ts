@@ -383,7 +383,58 @@ eq(
   failed.reps.find((r) => r.rep === "Jonathan Paz"),
   undefined,
 );
-eq("failed save: save card is an office tally", failed.totals.officeAppts, 1);
+// Owner, 2026-08-28: a save card counts NOWHERE on its own — not even the
+// office tally its "Office Appt" Iss cell used to earn it.
+eq("failed save: save card counts nowhere", failed.totals.officeAppts, 0);
+
+// A failed save the office RESULTED (Iss left as an issued lead, PM marked
+// on the save card) must not become a second issued lead — the lead was
+// already counted on the original card (owner, 2026-08-28).
+const failedResulted = aggregateCloseKombat([
+  card({
+    monday_item_id: "ofr",
+    lead_name: "Newsom, Brian & Lorena",
+    card_date: "2026-07-10",
+    reps: ["Yakup"],
+    sale: "Sold",
+    sale_price: 22500,
+    wcc: "Cancelled",
+    phone: "6193334444",
+  }),
+  card({
+    monday_item_id: "sfr",
+    lead_name: "Newsom, Brian & Lorena",
+    card_date: "2026-07-15",
+    reps: ["Jonathan Paz"],
+    pm: "PM",
+    sale_price: null,
+    phone: "6193334444",
+    comments: "Can/Save",
+  }),
+]);
+eq("resulted failed save: only the original is an appt", failedResulted.totals.appts, 1);
+eq(
+  "resulted failed save: saver gets no row",
+  failedResulted.reps.find((r) => r.rep === "Jonathan Paz"),
+  undefined,
+);
+
+// An unlinked save marked Sold must not become a phantom sale for the saver.
+const phantom = aggregateCloseKombat([
+  card({
+    monday_item_id: "sph",
+    lead_name: "Ghost, Deal",
+    card_date: "2026-07-08",
+    reps: ["B"],
+    sale: "Sold",
+    sale_price: 27583,
+    phone: "5551112222",
+    comments: "Can/Save",
+  }),
+]);
+eq("phantom save: no sold", phantom.totals.sold, 0);
+eq("phantom save: no appt", phantom.totals.appts, 0);
+eq("phantom save: no revenue", phantom.totals.revenue, 0);
 
 // A landed save supersedes a stale Cancelled stamp on the original.
 const revived = aggregateCloseKombat([
@@ -452,6 +503,64 @@ const orphanSave = aggregateCloseKombat([
 ]);
 eq("orphan save: no revenue", orphanSave.totals.revenue, 0);
 eq("orphan save: no reload/sold", orphanSave.totals.sold + orphanSave.totals.reloads, 0);
+eq(
+  "orphan save: not an appt or office tally either",
+  orphanSave.totals.appts + orphanSave.totals.officeAppts,
+  0,
+);
+
+// ---- Cross-month save (owner, 2026-08-28): the re-priced volume pays out
+// on the ORIGINAL sale's date; the save's own month shows nothing. The
+// window narrows COUNTING only — linking sees every card supplied.
+const crossMonthCards = [
+  card({
+    monday_item_id: "ocm",
+    lead_name: "July, Sold",
+    card_date: "2026-07-30",
+    reps: ["A"],
+    sale: "Sold",
+    sale_price: 20000,
+    wcc: "Cancelled",
+    phone: "6194440000",
+  }),
+  card({
+    monday_item_id: "scm",
+    lead_name: "July, Sold",
+    card_date: "2026-08-05",
+    reps: ["B"],
+    iss: "Office Appt",
+    sale_price: 12000,
+    phone: "6194440000",
+    comments: "Can/Save",
+  }),
+];
+const julyView = aggregateCloseKombat(crossMonthCards, {
+  start: "2026-07-01",
+  end: "2026-07-31",
+});
+eq("cross-month: July carries the re-priced deal", julyView.totals.revenue, 12000);
+eq("cross-month: July revives the sale", julyView.totals.sold, 1);
+eq("cross-month: no cancel once saved", julyView.totals.cancels, 0);
+eq(
+  "cross-month: saver's half lands in July",
+  julyView.reps.find((r) => r.rep === "B")?.revenue,
+  6000,
+);
+eq(
+  "cross-month: seller's half lands in July",
+  julyView.reps.find((r) => r.rep === "A")?.revenue,
+  6000,
+);
+const augustView = aggregateCloseKombat(crossMonthCards, {
+  start: "2026-08-01",
+  end: "2026-08-31",
+});
+eq("cross-month: August shows no money", augustView.totals.revenue, 0);
+eq(
+  "cross-month: August counts no cards",
+  augustView.totals.appts + augustView.totals.officeAppts + augustView.totals.sold,
+  0,
+);
 
 // Office mismatch must not link (same phone, different office).
 const crossOffice = aggregateCloseKombat([
@@ -580,6 +689,23 @@ const aStale = audit([card({ group_title: "Saturday", card_date: "2026-08-01" })
 eq("audit: stale unmarked card flagged", aStale[0]?.kind, "unresolved");
 const aGroup = audit([card({ group_title: "Needs Assignment", bo: "No Show", card_date: TODAY })]);
 eq("audit: non-weekday group flagged", aGroup[0]?.kind, "no_weekday_group");
+// A PRICED save with no findable original: real money counting nowhere.
+const aOrphan = audit([
+  card({ sale: "Sold", sale_price: 27583, phone: "5550001111", comments: "Can/Save" }),
+]);
+eq("audit: priced unlinked save flagged", aOrphan[0]?.kind, "orphan_save");
+eq("audit: orphan save is the only flag on the card", aOrphan.length, 1);
+// The window narrows flagging the same way it narrows counting.
+const aWindowed = auditBlockCards(
+  [
+    card({ group_title: "Saturday", card_date: "2026-08-01" }),
+    card({ group_title: "Saturday", card_date: "2026-07-25" }),
+  ],
+  TODAY,
+  { start: "2026-08-01", end: "2026-08-31" },
+);
+eq("audit: context cards outside the window stay quiet", aWindowed.length, 1);
+eq("audit: in-window card still flags", aWindowed[0]?.card_date, "2026-08-01");
 
 // One issue per card, worst wins: Maddalena was excluded AND blank-priced.
 const aBoth = audit([card({ iss: "Not Issued", sale: "Upsell", sale_price: null })]);

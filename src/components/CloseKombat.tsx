@@ -160,6 +160,13 @@ const COMPANY_TILES: TileDef[] = [
   { label: "Revenue", value: (t) => fmtMoney(t.revenue), accent: "victory" },
 ];
 
+/** Link context fetched on each side of the visible window (owner,
+ *  2026-08-28): a save can land in the month after its sale, and the
+ *  re-priced deal pays out on the ORIGINAL's date — so every view needs to
+ *  see far enough both ways for linkSaves to pair the cards. Six weeks
+ *  covers any month/week edge with room for a slow save. */
+const SAVE_LINK_PAD_DAYS = 42;
+
 function CloseKombatInner() {
   const qc = useQueryClient();
   const { realRole, displayName } = useAuth();
@@ -234,10 +241,17 @@ function CloseKombatInner() {
   // Paged: PostgREST silently caps un-ranged selects at 1000 rows, and a
   // backfilled month (2 offices × ~4-5 boards) can exceed that — truncation
   // here would silently understate every stat. Walk until a short page.
-  // One walk spans BOTH windows (stats range + volume window); the two
-  // views filter client-side below.
-  const fetchStart = range.volStart < range.start ? range.volStart : range.start;
-  const fetchEnd = range.volEnd > range.end ? range.volEnd : range.end;
+  // One walk spans BOTH windows (stats range + volume window), padded by
+  // SAVE_LINK_PAD_DAYS of pure link context on each side; the aggregate
+  // takes the full set and counts only its own window.
+  const fetchStart = addDaysISO(
+    range.volStart < range.start ? range.volStart : range.start,
+    -SAVE_LINK_PAD_DAYS,
+  );
+  const fetchEnd = addDaysISO(
+    range.volEnd > range.end ? range.volEnd : range.end,
+    SAVE_LINK_PAD_DAYS,
+  );
   const cardsQuery = useQuery({
     queryKey: ["block_cards", fetchStart, fetchEnd],
     queryFn: async () => {
@@ -270,22 +284,21 @@ function CloseKombatInner() {
     () => (cardsQuery.data ?? []).filter((c) => matches(c.office_location)),
     [cardsQuery.data, matches],
   );
-  const visible = useMemo(
-    () =>
-      officeCards.filter(
-        (c) => (c.card_date ?? "") >= range.start && (c.card_date ?? "") <= range.end,
-      ),
+  // The whole padded fetch goes in; the window says what counts. Context
+  // cards outside it only serve save→original linking (a July 30 sale saved
+  // Aug 5 pays out in July at the save's price — owner, 2026-08-28).
+  const { reps, totals } = useMemo(
+    () => aggregateCloseKombat(officeCards, { start: range.start, end: range.end }),
     [officeCards, range.start, range.end],
   );
-  const { reps, totals } = useMemo(() => aggregateCloseKombat(visible), [visible]);
   // The standings' far-right money: sale volume over the week in progress on
   // the Day view (the selected range on Week/Month) — owner, 2026-08-04,
   // matching the dispatch board's convention.
   const vol = useMemo(() => {
-    const cards = officeCards.filter(
-      (c) => (c.card_date ?? "") >= range.volStart && (c.card_date ?? "") <= range.volEnd,
-    );
-    const agg = aggregateCloseKombat(cards);
+    const agg = aggregateCloseKombat(officeCards, {
+      start: range.volStart,
+      end: range.volEnd,
+    });
     return {
       byRep: new Map(agg.reps.map((r) => [r.rep, r.revenue])),
       total: agg.totals.revenue,
@@ -296,8 +309,9 @@ function CloseKombatInner() {
   // as" previews don't hide it from the owner). Same cards the stats read,
   // so the list always describes exactly the range and office on screen.
   const attention = useMemo(
-    () => (isAdmin ? auditBlockCards(visible, todayISO) : []),
-    [isAdmin, visible, todayISO],
+    () =>
+      isAdmin ? auditBlockCards(officeCards, todayISO, { start: range.start, end: range.end }) : [],
+    [isAdmin, officeCards, todayISO, range.start, range.end],
   );
   const [showAllAttention, setShowAllAttention] = useState(false);
 
@@ -807,18 +821,23 @@ function CloseKombatInner() {
         the sale volume splits evenly; the All-cards row counts each card once. When the monthly
         Sales Report&apos;s Sales Rep column disagrees with the Block card, the volume split follows
         the report (result counts stay with the Block card&apos;s own reps) and a Rep Mismatch
-        callout flags the card so the Block board can be fixed. Sit % = (PM + Sold)
-        ÷ Appts · NS % = No Show ÷ Appts · ND % = No Demo ÷ Appts · OL % = OL ÷ Appts · Reset % =
-        Reset ÷ Appts · Close % = Sold ÷ (PM + Sold) · Cancel % = Cancels ÷ (Sold + Cancels) · Leads
-        / Sale = Appts ÷ Sold, shown as a number, not a percentage. Those are all lead metrics, so
-        reloads are outside every one of them; Reload % = Reload ÷ (Sold + Reload) is the one that
-        counts both, being the share of all sales that were reloads. A ratio with nothing in its
-        denominator shows &quot;—&quot;, not 0%. Can/Save: when a sold job cancels and a rep saves
-        it (the office writes &quot;Can/Save&quot; in the save card&apos;s Comments), the
-        save&apos;s Sale Price replaces the original volume; the saver takes 50% and the original
-        rep(s) split the other 50% evenly — one seller makes it 50/50, two sellers 50/25/25. The
-        saver earns volume, not a Sold. A Can/Save card with no price is a failed save and changes
-        nothing. Saves match their original sale by office + phone within the loaded range.
+        callout flags the card so the Block board can be fixed. Sit % = (PM + Sold) ÷ Appts · NS % =
+        No Show ÷ Appts · ND % = No Demo ÷ Appts · OL % = OL ÷ Appts · Reset % = Reset ÷ Appts ·
+        Close % = Sold ÷ (PM + Sold) · Cancel % = Cancels ÷ (Sold + Cancels) · Leads / Sale = Appts
+        ÷ Sold, shown as a number, not a percentage. Those are all lead metrics, so reloads are
+        outside every one of them; Reload % = Reload ÷ (Sold + Reload) is the one that counts both,
+        being the share of all sales that were reloads. A ratio with nothing in its denominator
+        shows &quot;—&quot;, not 0%. Can/Save: when a sold job cancels and a rep saves it (the
+        office writes &quot;Can/Save&quot; in the save card&apos;s Comments), the save&apos;s Sale
+        Price replaces the original volume; the saver takes 50% and the original rep(s) split the
+        other 50% evenly — one seller makes it 50/50, two sellers 50/25/25. The saver earns volume,
+        not a Sold. A Can/Save card with no price is a failed save and changes nothing. Saves match
+        their original sale by office + phone (customer name when the save has no phone), across
+        month edges too — the re-priced volume always pays out on the original sale&apos;s date, so
+        a July sale saved in August shows in July&apos;s standings. A Can/Save card never counts as
+        an issued lead of its own — no Appt, no Sold, whatever gets marked on it — and a priced save
+        that can&apos;t find its original raises an Unlinked Save callout instead of counting
+        anywhere.
       </p>
     </div>
   );
@@ -877,6 +896,9 @@ const ATTENTION_CAP = 12;
 /** Money-impacting issues read red; bookkeeping drift reads amber. */
 const ATTENTION_META: Record<AttentionKind, { label: string; className: string }> = {
   excluded_sale: { label: "Hidden Sale", className: "text-destructive" },
+  // A priced Can/Save that linked to no original: real money counting
+  // nowhere until the cards match — as red as a hidden sale.
+  orphan_save: { label: "Unlinked Save", className: "text-destructive" },
   no_reps: { label: "No Reps", className: "text-destructive" },
   blank_price: { label: "Blank Price", className: "text-destructive" },
   // Amber, not red: the volume already follows the Sales Report — this is
