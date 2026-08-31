@@ -14,6 +14,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "verify:kombat": "npx tsx scripts/verify-close-kombat.ts",
+    "verify:blockday": "npx tsx scripts/verify-block-day.ts",
     "verify:suspension": "npx tsx scripts/verify-suspension.ts",
     "verify:overtime": "npx tsx scripts/verify-overtime.ts"
   },

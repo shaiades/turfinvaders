@@ -156,7 +156,7 @@ function FleetDispatchInner({
   const qc = useQueryClient();
   const { realRole } = useAuth();
 
-  // --- Range engine: Day (report-date clock) / Week (Mon–Sat) / Month ---
+  // --- Range engine: Day (report-date clock) / Week (Mon–Sun) / Month ---
   const [tab, setTab] = useState<RangeTab>("day");
   const [daySel, setDaySel] = useState<DaySel>("today");
   // Full calendar days (owner, 2026-08-04): "Today" is the LA calendar day,
@@ -191,7 +191,7 @@ function FleetDispatchInner({
     return () => window.clearInterval(id);
   }, []);
 
-  const week = useWeekSelector({ endOffsetDays: 5 }); // Mon–Sat, Block-board convention
+  const week = useWeekSelector({ endOffsetDays: 6 }); // Mon–Sun — Block boards carry Sunday groups (owner, 2026-08-31)
   const [monthStart, setMonthStart] = useState<string>(() => laMonthStartISO());
   const shiftMonth = (delta: 1 | -1) =>
     setMonthStart((m) => (delta > 0 ? nextMonthStartISO(m) : monthStartISO(addDaysISO(m, -1))));
@@ -205,7 +205,7 @@ function FleetDispatchInner({
       const d = dayISO;
       // Owner directive (2026-08-04): the "As Leads" half of the board reads
       // as THIS WEEK'S RESULTS IN PROGRESS — results, Points, and Volume
-      // always cover the full Mon–Sat week containing the selected day
+      // always cover the full Mon–Sun week containing the selected day
       // (matching the Weekly Results table), while "In the Field" keeps the
       // day's own funnel numbers.
       const wk = weekStartOfISO(d);
@@ -213,7 +213,7 @@ function FleetDispatchInner({
         funnelStart: d,
         funnelEnd: d,
         logStart: wk,
-        logEnd: addDaysISO(wk, 5),
+        logEnd: addDaysISO(wk, 6),
         volStartISO: laMidnightUtcISO(wk),
         volEndISO: laMidnightUtcISO(addDaysISO(wk, 7)),
         label: isViewingToday ? "Today" : d === yday ? "Yesterday" : fmtWorkedDay(d),
@@ -228,7 +228,7 @@ function FleetDispatchInner({
         logStart: week.weekStartISO,
         logEnd: week.weekEndISO,
         // Volume window is Mon 00:00 → next Mon 00:00 LA (pay-engine week
-        // attribution) even though the funnel/points label reads Mon–Sat.
+        // attribution), matching the Mon–Sun funnel/points window.
         volStartISO: laMidnightUtcISO(week.weekStartISO),
         volEndISO: laMidnightUtcISO(addDaysISO(week.weekStartISO, 7)),
         label: formatWeekRange(week.weekStart, week.weekEnd),
@@ -861,9 +861,9 @@ function FleetDispatchInner({
 
   const footnote =
     tab === "day"
-      ? "Funnel columns show the selected day, credited to the day the lead was SUBMITTED — a confirm recorded Monday for a Friday lead updates Friday, so recent days keep filling in for a few days. Lead results, Sales, and Volume are this week's results in progress — the full Mon–Sat week containing that day, Pacific time."
+      ? "Funnel columns show the selected day, credited to the day the lead was SUBMITTED — a confirm recorded Monday for a Friday lead updates Friday, so recent days keep filling in for a few days. Lead results, Sales, and Volume are this week's results in progress — the full Mon–Sun week containing that day, credited to each card's block day, Pacific time."
       : tab === "week"
-        ? "Funnel counts credit each lead's submission day, so a just-closed week keeps filling in early the next week. Points reflect Mon–Sat of the selected week, Pacific time (PM = 1 pt, Sale = 2 pts; BO/RS = 0). Volume runs Mon 12:00 AM → next Mon 12:00 AM Pacific."
+        ? "Funnel counts credit each lead's submission day, so a just-closed week keeps filling in early the next week. Lead results credit each card's BLOCK day (the weekday it ran on the Block board), Mon–Sun of the selected week, Pacific time. Points: PM = 1 pt, Sale = 2 pts; BO/RS = 0. Volume runs Mon 12:00 AM → next Mon 12:00 AM Pacific."
         : "Points cover the calendar month, Pacific time (PM = 1 pt, Sale = 2 pts). Volume resets on the 1st, 12:00 AM Pacific.";
 
   return (
@@ -1166,19 +1166,19 @@ const FUNNEL_COLS: Array<{
   },
   {
     short: "Con",
-    full: "Confirmed — credited to the lead's submission day",
+    full: "Confirmed — leads SUBMITTED this period that got confirmed (pipeline, not blocks run — compare Lds for cards run)",
     key: "conf",
     color: "victory",
   },
   {
     short: "Fut",
-    full: "Future — credited to the lead's submission day",
+    full: "Future (incl. Future Reconf) — credited to the lead's submission day",
     key: "fut",
     color: "accent",
   },
   {
     short: "BO",
-    full: "Blowout — dead-end at confirmation, credited to the lead's submission day",
+    full: "Blowout at CONFIRMATION (incl. N/As) — not the same as the door BO in Lead Results",
     key: "kil",
     color: "destructive",
   },
@@ -1192,10 +1192,10 @@ const RESULT_COLS: Array<{
   key: keyof DispatchResults;
   color: keyof typeof metricColorClass;
 }> = [
-  { short: "Lds", full: "Total Leads run", key: "lds", color: "neon" },
+  { short: "Lds", full: "Total Leads run on blocks, credited to each card's block day", key: "lds", color: "neon" },
   { short: "Sit", full: "Sits (demos, sales split out)", key: "sit", color: "victory" },
   { short: "RS", full: "Resets", key: "rs", color: "accent" },
-  { short: "BO", full: "Blowout at the door — no demo", key: "bo", color: "destructive" },
+  { short: "BO", full: "Blowout at the door — no demo (confirmation BOs live in the funnel half)", key: "bo", color: "destructive" },
   { short: "CTC", full: "CTC — couldn't contact", key: "ctc", color: "muted-foreground" },
   { short: "NC", full: "Non-Core product", key: "nc", color: "warning" },
   { short: "OL", full: "One Legs / Outside Leads", key: "ol", color: "warning" },

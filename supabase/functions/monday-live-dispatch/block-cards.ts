@@ -122,6 +122,19 @@ export function deriveCardDate(
   return noon.toISOString().slice(0, 10)
 }
 
+/** True when a copy card's own block day and its counted sibling's block day
+ *  are BOTH known and differ — a re-run appointment (Reset Tuesday, ran again
+ *  Friday) that must count fresh instead of transitioning the sibling's
+ *  outcome away (owner, 2026-08-31: the netting erased 12 RS fleet-wide in
+ *  the week of 8/24). Either side unknown → false — the conservative
+ *  transition path can never double-count. */
+export function isNewAppointmentCopy(
+  copyBlockDay: string | null,
+  siblingBlockDay: string | null | undefined,
+): boolean {
+  return copyBlockDay !== null && !!siblingBlockDay && siblingBlockDay !== copyBlockDay
+}
+
 /** One row per Monday card — matches public.block_cards, MINUS the two
  *  Sales-Report stamps: `wcc` and `report_reps` are deliberately absent so
  *  the live upsert can never clobber what the Sales-Report pass wrote
