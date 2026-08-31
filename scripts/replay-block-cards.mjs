@@ -9,9 +9,12 @@
 // dedupe markers — all with production semantics. Idempotent: re-running is
 // a stream of Same_Bucket_NoOp / Already-credited no-ops.
 //
-// Every outcome lands on TODAY's metric day (the edge fn stamps todayLA()).
-// Cards the crews marked on a PRIOR day need the companion day-move script
-// (supabase/corrections/20260804_week0803_daymove.sql) applied afterwards.
+// Since 2026-08-31 the edge fn self-dates Block-board outcomes to the card's
+// BLOCK day (board-week Monday + weekday group), so replays land on the right
+// day on their own — the companion day-move SQL
+// (supabase/corrections/20260804_week0803_daymove.sql) is only needed for
+// cards in non-weekday groups or boards outside the 2-week rotation window
+// (those still stamp todayLA()).
 //
 // Prereq: system_settings.active_monday_board_sd/oc must already point at the
 // boards being replayed (else the office can't resolve and the block_cards

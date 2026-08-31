@@ -4,9 +4,11 @@ import { fetchItemBatched } from './monday.ts'
 import {
   buildBlockCardRow,
   copyBaseName,
+  deriveCardDate,
   findSaleOutcomeCol,
   findSalePriceCol,
   isCopyName,
+  isNewAppointmentCopy,
   mondayOfISO,
   parseBoardWeekStart,
   parseMoney,
@@ -438,24 +440,25 @@ serve(async (req) => {
       if (/^OC\s+Block/i.test(snapshotBoardName)) snapshotOffice = 'Orange County'
       else if (/^SD\s+Block/i.test(snapshotBoardName)) snapshotOffice = 'San Diego'
     }
+    // Board-week context, shared by the snapshot below AND the block-day
+    // attribution of canvasser counters further down. The board's week
+    // (parsed from its name) is trusted only inside the window rotation
+    // keeps hooks alive for: this week's boards plus last week's grace
+    // boards. A stray hook on an older board (rotate-boards tolerates
+    // failed delete_webhook calls) must never rewrite closed history.
+    const parsedWeek = parseBoardWeekStart(snapshotBoardName)
+    const thisWeekISO = mondayOfISO(todayLA())
+    const prevWeekISO = (() => {
+      const [y, m, d] = thisWeekISO.split('-').map(Number)
+      const t = new Date(Date.UTC(y, m - 1, d, 12))
+      t.setUTCDate(t.getUTCDate() - 7)
+      return t.toISOString().slice(0, 10)
+    })()
+    const boardWeekInWindow = parsedWeek === thisWeekISO || parsedWeek === prevWeekISO
     if (!isIncomingLeadsBoard && snapshotOffice) {
       try {
         const graceWindow = boardOffice === null
-        const parsedWeek = parseBoardWeekStart(snapshotBoardName)
-        // The snapshot honors the same window rotation keeps hooks alive
-        // for: this week's boards plus last week's. A stray hook on an
-        // older board (rotate-boards tolerates failed delete_webhook calls)
-        // must not keep writing rows the routine sync never reconciles —
-        // and a retired board may never guess dates from "today".
-        const thisWeekISO = mondayOfISO(todayLA())
-        const prevWeekISO = (() => {
-          const [y, m, d] = thisWeekISO.split('-').map(Number)
-          const t = new Date(Date.UTC(y, m - 1, d, 12))
-          t.setUTCDate(t.getUTCDate() - 7)
-          return t.toISOString().slice(0, 10)
-        })()
-        const inGraceWindow = parsedWeek === thisWeekISO || parsedWeek === prevWeekISO
-        if (graceWindow && (!parsedWeek || !inGraceWindow)) {
+        if (graceWindow && (!parsedWeek || !boardWeekInWindow)) {
           await supabaseAdmin.from('webhook_logs').insert({
             step: 'Rep_Card_Snapshot_Skipped',
             data: {
@@ -518,6 +521,21 @@ serve(async (req) => {
     // down (dedicated columns only; Setter Report parity).
     const { bucket, nonCore, ol } = deriveCanvassState(cols)
 
+    // ── Block-day attribution ── (owner, 2026-08-31) a Block-board outcome
+    // counts on the card's APPOINTMENT day — board-week Monday + weekday
+    // offset from its group title — matching the marketing report, which
+    // tallies blocks by day run, not by when the office marks the card
+    // (Saturday cards finalized Monday used to land in the next week).
+    // Only boards inside the rotation window may self-date; non-weekday
+    // groups ("Needs Assignment") and unparseable board names fall back to
+    // the flip day. Transition undo is unaffected: decrements always hit
+    // the day stored in the previous marker, whichever convention wrote it.
+    const cardGroupTitle = item.group?.title == null ? null : String(item.group.title)
+    const blockDay = !isIncomingLeadsBoard && boardWeekInWindow
+      ? deriveCardDate(cardGroupTitle, parsedWeek, null)
+      : null
+    const metric_date = blockDay ?? todayLA()
+
     // ── Copy gate ── Duplicated Monday items ("Endy and Rebecca Kuo (copy)")
     // get fresh pulseIds, so the triggerUuid/pulseId dedupe can't catch them —
     // they double-credit sits/points (seen live 2026-07-21). But a blanket
@@ -535,6 +553,13 @@ serve(async (req) => {
     let siblingPulseIds: string[] = []
     let siblingOutcome: MarkerRow | null = null
     let siblingOl: MarkerRow | null = null
+    // True when this copy sits in a DIFFERENT weekday group than the sibling
+    // whose outcome was counted — a re-run appointment (Reset Tuesday, ran
+    // again Friday). The board counts each card as its own outcome, so the
+    // copy counts fresh instead of transitioning the sibling's day away
+    // (owner, 2026-08-31 — the netting erased 12 RS fleet-wide in wk 8/24).
+    let copyIsNewAppointment = false
+    const siblingCardDates = new Map<string, string>()
     if (isCopyName(item.name)) {
       const { data: ownMarkers } = await supabaseAdmin
         .from('webhook_logs')
@@ -557,13 +582,16 @@ serve(async (req) => {
         if (base) {
           const { data: boardCards } = await supabaseAdmin
             .from('block_cards')
-            .select('monday_item_id, lead_name')
+            .select('monday_item_id, lead_name, card_date')
             .eq('board_id', boardId)
-          siblingPulseIds = (boardCards ?? [])
+          const siblings = (boardCards ?? [])
             .filter((c) =>
               String(c.monday_item_id) !== String(pulseId) &&
               copyBaseName(c.lead_name ?? '') === base)
-            .map((c) => String(c.monday_item_id))
+          siblingPulseIds = siblings.map((c) => String(c.monday_item_id))
+          for (const c of siblings) {
+            if (c.card_date) siblingCardDates.set(String(c.monday_item_id), String(c.card_date))
+          }
         }
         if (siblingPulseIds.length === 0 && base) {
           // The office copies-then-DELETES originals, and the next full sync
@@ -609,10 +637,20 @@ serve(async (req) => {
             latestSiblingMarker('Card_OL_Recorded'),
           ])
         }
-        const sibData = (siblingOutcome?.data ?? null) as { bucket?: string | null; nonCore?: boolean } | null
+        const sibData = (siblingOutcome?.data ?? null) as {
+          bucket?: string | null; nonCore?: boolean; pulseId?: string; blockDay?: string | null
+        } | null
         const sibBucket = (sibData?.bucket ?? null) as ScheduleBucket
         const sibNonCore = !!sibBucket && !!sibData?.nonCore
-        if (siblingOutcome && sibBucket === bucket && sibNonCore === nonCore) {
+        // The counted sibling's appointment day: its block_cards.card_date
+        // first, else the blockDay its marker recorded (covers ghosts whose
+        // card the sync purged). Either side unknowable → not a new
+        // appointment — the conservative transition path can't double-count.
+        const sibPulse = sibData?.pulseId ? String(sibData.pulseId) : null
+        const sibBlockDay =
+          (sibPulse ? siblingCardDates.get(sibPulse) : undefined) ?? sibData?.blockDay ?? null
+        copyIsNewAppointment = !!siblingOutcome && isNewAppointmentCopy(blockDay, sibBlockDay)
+        if (!copyIsNewAppointment && siblingOutcome && sibBucket === bucket && sibNonCore === nonCore) {
           // The duplicate still carries the family's MONEY: the office
           // copies-then-deletes cards, so a Sale Price entered on the copy
           // is the only copy of that number — returning without syncing it
@@ -649,7 +687,7 @@ serve(async (req) => {
                 const sibCanvasser =
                   (siblingOutcome.data as { canvasser_id?: string } | null)?.canvasser_id ?? null
                 if (sibCanvasser) {
-                  const pinned = `${todayLA()}T20:00:00.000Z`
+                  const pinned = `${metric_date}T20:00:00.000Z`
                   const { data: createdLead, error: leadErr } = await supabaseAdmin
                     .from('leads')
                     .insert({
@@ -693,11 +731,14 @@ serve(async (req) => {
           data: {
             pulseId, itemName: item.name, canvasserName, siblingPulseIds,
             siblingBucket: siblingOutcome ? sibBucket : null,
+            ...(copyIsNewAppointment ? { blockDay, siblingBlockDay: sibBlockDay } : {}),
             note: siblingPulseIds.length === 0
               ? 'No same-board sibling card — the copy is the card'
-              : siblingOutcome
-                ? 'Sibling recorded a different state — processing as a transition'
-                : 'Sibling cards exist but none recorded an outcome',
+              : copyIsNewAppointment
+                ? 'Sibling counted on a different block day — new appointment, counting fresh'
+                : siblingOutcome
+                  ? 'Sibling recorded a different state — processing as a transition'
+                  : 'Sibling cards exist but none recorded an outcome',
           },
         })
       }
@@ -866,8 +907,9 @@ serve(async (req) => {
     // "Lead Status" column on the Incoming Leads board drive the Live Dispatch
     // funnel: Pending / Confirmed / Future / Blow-Out / N/A. Any card with an
     // exact-matching Agent credits, wherever it now sits on the board, and
-    // Rep Reset cards count (owner decisions 2026-07-24). "Future Reconf" is
-    // deliberately unmapped. Counts are attributed to the day the lead was
+    // Rep Reset cards count (owner decisions 2026-07-24). "Future Reconf"
+    // counts as Future (owner, 2026-08-31 — it left 15 leads out of every
+    // funnel cell in wk 8/24). Counts are attributed to the day the lead was
     // SUBMITTED (Jorge Najera, 2026-08-24) — a Friday lead confirmed Monday
     // updates Friday's funnel, not Monday's. Transition semantics mirror the
     // Block path: undo the previous bucket on the day it was counted (the
@@ -878,7 +920,7 @@ serve(async (req) => {
         const v = (value || '').trim().toLowerCase()
         if (!v) return null
         if (v === 'confirmed') return 'leads_confirmed'
-        if (v === 'future') return 'future'
+        if (v === 'future' || v === 'future reconf') return 'future'
         if (v === 'blowout' || v === 'disconnected') return 'killed'
         if (v === 'unconfirmed' || v === 'room lead') return 'pending'
         if (v.startsWith('n/a')) return 'no_answers'
@@ -1117,8 +1159,10 @@ serve(async (req) => {
     // markers). Marks on any other column re-derive the same state and no-op.
     // A copy card with no history of its own inherits the counted state of
     // its same-board sibling (the card it was duplicated from), so outcome
-    // flips on a copy apply as transitions instead of double-counts.
-    const metric_date = todayLA()
+    // flips on a copy apply as transitions instead of double-counts — UNLESS
+    // the copy sits in a different weekday group (a re-run appointment),
+    // which counts fresh (copyIsNewAppointment, set in the copy gate).
+    // metric_date (block-day attribution) is computed above the copy gate.
     const office_location = boardOffice ?? match.office_location ?? 'San Diego'
     const [{ data: lastOutcomeRows }, { data: lastOlRows }] = await Promise.all([
       supabaseAdmin.from('webhook_logs').select('data, created_at')
@@ -1148,7 +1192,11 @@ serve(async (req) => {
     let outcomeChanged = false
     let olChanged = false
     const computeTransition = () => {
-      const effOutcome = ownOutcome ?? siblingOutcome
+      // A new-appointment copy never seeds from its sibling's outcome: it
+      // counts fresh on its own block day, and the sibling's day keeps its
+      // count. OL still seeds — the outside-lead flag belongs to the
+      // customer, not the re-run, and must not tick twice.
+      const effOutcome = ownOutcome ?? (copyIsNewAppointment ? null : siblingOutcome)
       const effOl = ownOl ?? siblingOl
       const rec = (effOutcome?.data ?? {}) as {
         bucket?: string | null; nonCore?: boolean; metric_date?: string; office_location?: string
@@ -1405,11 +1453,17 @@ serve(async (req) => {
     const outcomeMarkerData = () => ({
       pulseId: String(pulseId), bucket, nonCore, prev: prevBucket,
       canvasser_id: match.id, metric_date, office_location,
+      groupTitle: cardGroupTitle, blockDay,
       itemName: item.name ?? null,
-      ...(ownOutcome == null && siblingOutcome != null ? { seededFromSiblings: siblingPulseIds } : {}),
+      ...(copyIsNewAppointment
+        ? { newAppointmentFromSiblings: siblingPulseIds }
+        : ownOutcome == null && siblingOutcome != null
+          ? { seededFromSiblings: siblingPulseIds }
+          : {}),
     })
     const olMarkerData = () => ({
       pulseId: String(pulseId), ol, canvasser_id: match.id, metric_date, office_location,
+      groupTitle: cardGroupTitle, blockDay,
     })
     if (outcomeChanged || olChanged) {
       const isMissingRpc = (e: { code?: string; message?: string }) =>
@@ -1700,6 +1754,8 @@ serve(async (req) => {
         nonCore,
         ol,
         metric_date,
+        blockDay,
+        newAppointment: copyIsNewAppointment || undefined,
       },
     })
 
