@@ -612,16 +612,26 @@ serve(async (req) => {
           // 2026-08-07: Miguel Munoz's Denardo CTC counted on the original
           // Thu and again on the copy Fri). Two board generations of markers
           // bound the name match; older same-name families are new cards.
+          //
+          // Case-INSENSITIVE on purpose: `base` is lowercased by
+          // copyBaseName, while markers store Monday's raw itemName
+          // ("Mike and Patti Frugone"), so the old .eq/.like never matched a
+          // mixed-case name and the fallback silently never fired — every
+          // moved-then-copied original counted twice (wk 8/24 audit: Ernie's
+          // Frugone BO, Rugnetta CTC and a Kathy Potter SALE each counted on
+          // both the original's day and the copy's). Name wildcards are
+          // escaped so a customer named "50% Off Bob" can't widen the match.
           const since = new Date(Date.now() - 14 * 86400000).toISOString()
+          const escLike = (s: string) => s.replace(/([\\%_])/g, '\\$1')
           const [exact, copies] = await Promise.all([
             supabaseAdmin.from('webhook_logs').select('data')
               .eq('step', 'Card_Outcome_Recorded')
-              .eq('data->>itemName', base)
+              .ilike('data->>itemName', escLike(base))
               .gte('created_at', since)
               .order('created_at', { ascending: false }).limit(5),
             supabaseAdmin.from('webhook_logs').select('data')
               .eq('step', 'Card_Outcome_Recorded')
-              .like('data->>itemName', `${base} (copy%`)
+              .ilike('data->>itemName', `${escLike(base)} (copy%`)
               .gte('created_at', since)
               .order('created_at', { ascending: false }).limit(5),
           ])
