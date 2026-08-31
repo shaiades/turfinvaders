@@ -5,10 +5,12 @@ import {
   buildBlockCardRow,
   copyBaseName,
   deriveCardDate,
+  findIssCol,
   findSaleOutcomeCol,
   findSalePriceCol,
   isCopyName,
   isNewAppointmentCopy,
+  isOfficeIss,
   isSameStateRerun,
   mondayOfISO,
   parseBoardWeekStart,
@@ -520,7 +522,29 @@ serve(async (req) => {
     // The card's CURRENT canvasser state, derived once from the re-fetched
     // column set — used by the copy gate below and the outcome diff further
     // down (dedicated columns only; Setter Report parity).
-    const { bucket, nonCore, ol } = deriveCanvassState(cols)
+    const derived = deriveCanvassState(cols)
+
+    // ── Office-appointment credit gate ── (owner, restated 2026-08-31)
+    // The office books its own appointments — job walks, upsells, reloads,
+    // check pickups — and marks them "Office Appt" on the Iss column. A
+    // canvasser only earns credit for a lead they knocked, so these cards
+    // must never tick canvasser counters, whatever the office wrote in
+    // Canvass Stats. Live example: OC "Chemberlen , Janet" (Iss=Office Appt,
+    // Canvass Stats=Sale, $25,948) credited Eduardo ordaz a sale he never
+    // knocked. Board census 8/03–8/30: 103 office cards, of which 21 carried
+    // a Canvass Stats result — this gate's entire blast radius.
+    //
+    // Zeroing the state (rather than returning early) is deliberate: a card
+    // that was ALREADY counted for a real canvasser then walks the ordinary
+    // transition machinery below — bucket null vs its recorded bucket means
+    // outcomeChanged, so the decrement lands on that person's own recorded
+    // day, and the sale-revert path voids the lead they should never have
+    // held. Money is handled separately in the sale sync (search
+    // officeAppt) so company revenue stays visible.
+    const officeAppt = !isIncomingLeadsBoard && isOfficeIss(findIssCol(cols)?.text)
+    const bucket = officeAppt ? null : derived.bucket
+    const nonCore = officeAppt ? false : derived.nonCore
+    const ol = officeAppt ? false : derived.ol
 
     // ── Block-day attribution ── (owner, 2026-08-31) a Block-board outcome
     // counts on the card's APPOINTMENT day — board-week Monday + weekday
@@ -1316,7 +1340,11 @@ serve(async (req) => {
         })
       }
 
-      if (bucket === 'sales' || (isPriceEvent && itemIsSold)) {
+      // Office-appointment money still belongs to the COMPANY — it just
+      // never belongs to a canvasser. `bucket` was zeroed by the credit gate
+      // above, so the card is admitted here on its own sold state instead,
+      // and the credit is repointed to the lead-source channel below.
+      if (bucket === 'sales' || (isPriceEvent && itemIsSold) || (officeAppt && itemIsSold)) {
         // Ensure the one lead for this Monday item exists and mirrors the
         // current price. Timestamps are pinned to ~noon PT of the business
         // date so the sale lands in the correct Mon–Sat pay week (the pay
@@ -1358,12 +1386,67 @@ serve(async (req) => {
           })
         }
 
-        if (!existingLead) {
+        // ── Who holds an office appointment's money ──────────────────────
+        // Never a person. It goes to the lead-source channel the Source
+        // column names (Job Walk / Reload / Upsell / …) — the same pseudo
+        // profiles the blank-Agent path has credited since 2026-08-10, so
+        // company revenue stays visible on the Command board while no
+        // canvasser is paid for it. Resolution is a lookup ONLY: if the
+        // channel profile is missing we skip the lead and say so loudly,
+        // because falling through to `match` is the exact bug being fixed.
+        // An office card whose lead already belongs to a real person is
+        // logged, never silently repointed — reattributing a past week
+        // would move payroll numbers, and the house rule is roll-forward.
+        let officeCreditId: string | null = null
+        if (officeAppt) {
+          const srcCol =
+            cols.find((c) => (c.column?.title || '').trim().toLowerCase() === 'source') ??
+            cols.find((c) => c.id === 'text' || c.column?.id === 'text')
+          const srcText = (srcCol?.text || '').trim().toLowerCase().replace(/\s+/g, ' ')
+          const CHANNELS: Record<string, string> = {
+            'self gen': 'Self Gen', 'selfgen': 'Self Gen', 'job walk': 'Job Walk',
+            'reload': 'Reload', 'upsell': 'Upsell',
+            'rehash': 'Rehash / Cynthia King', 'rehash / cynthia king': 'Rehash / Cynthia King',
+          }
+          // Job Walk is the catch-all: an office booking with an unreadable
+          // Source is still an office booking, never a canvasser's lead.
+          const channelName = CHANNELS[srcText] ?? 'Job Walk'
+          const { data: chan } = await supabaseAdmin
+            .from('profiles').select('id, display_name')
+            .ilike('display_name', channelName).limit(1)
+          officeCreditId = (chan?.[0]?.id as string | undefined) ?? null
+          await supabaseAdmin.from('webhook_logs').insert({
+            step: officeCreditId ? 'Office_Appt_Credit_Routed' : 'Office_Appt_Channel_Missing',
+            data: {
+              pulseId: mondayItemId, channelName, source: srcText || null,
+              agentOnCard: match.display_name ?? null, salePrice,
+              note: officeCreditId
+                ? 'Office appointment — money to the lead-source channel, no canvasser credit'
+                : 'Channel profile not found; lead skipped rather than credited to a person',
+            },
+          })
+        }
+
+        if (officeAppt && existingLead) {
+          // Roll-forward only: flag, do not rewrite a lead a real person
+          // already holds (that is a correction file + owner decision).
+          await supabaseAdmin.from('webhook_logs').insert({
+            step: 'Office_Appt_Lead_Needs_Reattribution',
+            data: {
+              pulseId: mondayItemId, leadId: (existingLead as { id: string }).id,
+              salePrice, note: 'Existing lead predates the office-appt gate — reattribute via a correction',
+            },
+          })
+        }
+
+        if (officeAppt && !existingLead && !officeCreditId) {
+          // Logged above. Skipping beats crediting the wrong person.
+        } else if (!existingLead) {
           const { data: createdLead, error: leadErr } = await supabaseAdmin
             .from('leads')
             .insert({
-              canvasser_id: match.id,
-              team_id: match.team_id ?? null,
+              canvasser_id: officeCreditId ?? match.id,
+              team_id: officeCreditId ? null : (match.team_id ?? null),
               status: 'confirmed',
               is_sale: true,
               customer_name: item.name ?? null,
