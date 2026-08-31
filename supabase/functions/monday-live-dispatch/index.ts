@@ -9,6 +9,7 @@ import {
   findSalePriceCol,
   isCopyName,
   isNewAppointmentCopy,
+  isSameStateRerun,
   mondayOfISO,
   parseBoardWeekStart,
   parseMoney,
@@ -535,6 +536,16 @@ serve(async (req) => {
       ? deriveCardDate(cardGroupTitle, parsedWeek, null)
       : null
     const metric_date = blockDay ?? todayLA()
+    // Was THIS delivery a change on the Canvass Stats column itself? The
+    // same-state-rerun path below requires it: only an actual re-mark of the
+    // outcome column may open a new appointment — a bare group drag or a
+    // closer-side column edit that re-derives the same state must stay a
+    // no-op even when the card now sits in a different weekday group.
+    const canvassCol = cols.find((c) =>
+      c.id === 'color' || c.column?.id === 'color' ||
+      (c.column?.title || '').trim().toLowerCase() === 'canvass stats')
+    const isCanvassStatsEvent = !!changedColumnId && !!canvassCol &&
+      (changedColumnId === canvassCol.id || changedColumnId === canvassCol.column?.id)
 
     // ── Copy gate ── Duplicated Monday items ("Endy and Rebecca Kuo (copy)")
     // get fresh pulseIds, so the triggerUuid/pulseId dedupe can't catch them —
@@ -1191,6 +1202,7 @@ serve(async (req) => {
     let prevOlOffice = office_location
     let outcomeChanged = false
     let olChanged = false
+    let sameStateRerun = false
     const computeTransition = () => {
       // A new-appointment copy never seeds from its sibling's outcome: it
       // counts fresh on its own block day, and the sibling's day keeps its
@@ -1200,6 +1212,7 @@ serve(async (req) => {
       const effOl = ownOl ?? siblingOl
       const rec = (effOutcome?.data ?? {}) as {
         bucket?: string | null; nonCore?: boolean; metric_date?: string; office_location?: string
+        blockDay?: string | null
       }
       prevBucket = (rec.bucket as ScheduleBucket) ?? null
       prevNonCore = !!prevBucket && !!rec.nonCore
@@ -1211,6 +1224,13 @@ serve(async (req) => {
       prevOlOffice = olRec.office_location ?? office_location
       outcomeChanged = bucket !== prevBucket || nonCore !== prevNonCore
       olChanged = ol !== prevOl
+      // Same card, same status, DIFFERENT block day, via a real Canvass Stats
+      // re-mark: the re-hash re-ran this very card in a new weekday group
+      // (Grace Barnett pattern). +1 on the new day; the prior day keeps its
+      // count. Gated on the previous marker carrying blockDay so pre-cutover
+      // markers can never trigger it.
+      sameStateRerun = !outcomeChanged && isCanvassStatsEvent &&
+        isSameStateRerun(bucket, prevBucket, blockDay, rec.blockDay ?? null)
     }
     computeTransition()
 
@@ -1404,10 +1424,10 @@ serve(async (req) => {
       return new Response('Price event handled', { status: 200, headers: corsHeaders })
     }
 
-    // Traffic cop: no state change and no new-lead credit → nothing to do.
-    // This is where closer-side column marks (BO/RS/PM/Rep Stats) and other
-    // edits land: the card re-derives to the state already recorded.
-    if (!outcomeChanged && !olChanged && !creditNew) {
+    // Traffic cop: no state change, no re-run, and no new-lead credit →
+    // nothing to do. This is where closer-side column marks (BO/RS/PM/Rep
+    // Stats) and other edits land: the card re-derives to the recorded state.
+    if (!outcomeChanged && !olChanged && !creditNew && !sameStateRerun) {
       if (!bucket && !prevBucket && !ol) {
         await supabaseAdmin.from('webhook_logs').insert({
           step: 'Ignored_Unmapped_Outcome',
@@ -1455,6 +1475,7 @@ serve(async (req) => {
       canvasser_id: match.id, metric_date, office_location,
       groupTitle: cardGroupTitle, blockDay,
       itemName: item.name ?? null,
+      ...(sameStateRerun ? { rerun: true, prevDayKept: prevOutcomeDate } : {}),
       ...(copyIsNewAppointment
         ? { newAppointmentFromSiblings: siblingPulseIds }
         : ownOutcome == null && siblingOutcome != null
@@ -1465,7 +1486,7 @@ serve(async (req) => {
       pulseId: String(pulseId), ol, canvasser_id: match.id, metric_date, office_location,
       groupTitle: cardGroupTitle, blockDay,
     })
-    if (outcomeChanged || olChanged) {
+    if (outcomeChanged || olChanged || sameStateRerun) {
       const isMissingRpc = (e: { code?: string; message?: string }) =>
         e.code === 'PGRST202' || e.code === '42883' ||
         /could not find the function/i.test(e.message ?? '')
@@ -1474,7 +1495,7 @@ serve(async (req) => {
         attempt++
         const { data: claimData, error: claimErr } = await supabaseAdmin.rpc('claim_block_card_transition', {
           _pulse_id: String(pulseId),
-          _claim_outcome: outcomeChanged,
+          _claim_outcome: outcomeChanged || sameStateRerun,
           _expected_outcome: ownOutcome
             ? {
                 exists: true,
@@ -1482,7 +1503,7 @@ serve(async (req) => {
                 nonCore: !!(ownOutcome.data as { nonCore?: boolean } | null)?.nonCore,
               }
             : { exists: false },
-          _outcome_data: outcomeChanged ? outcomeMarkerData() : null,
+          _outcome_data: (outcomeChanged || sameStateRerun) ? outcomeMarkerData() : null,
           _claim_ol: olChanged,
           _expected_ol: ownOl
             ? { exists: true, ol: !!(ownOl.data as { ol?: boolean } | null)?.ol }
@@ -1497,7 +1518,7 @@ serve(async (req) => {
               step: 'Claim_RPC_Missing',
               data: { pulseId: String(pulseId), note: 'Run 20260804010000_webhook_claim_gates.sql to close the double-count race' },
             })
-            if (outcomeChanged) {
+            if (outcomeChanged || sameStateRerun) {
               const { data: legacyOutcome } = await supabaseAdmin.from('webhook_logs').insert({
                 step: 'Card_Outcome_Recorded', data: outcomeMarkerData(),
               }).select('id').single()
@@ -1533,10 +1554,10 @@ serve(async (req) => {
         }
         // Lost to a concurrent delivery — adopt the actually-recorded own
         // state for the claims we asked about, then re-diff.
-        if (outcomeChanged) ownOutcome = (res.actual_outcome as MarkerRow | null) ?? null
+        if (outcomeChanged || sameStateRerun) ownOutcome = (res.actual_outcome as MarkerRow | null) ?? null
         if (olChanged) ownOl = (res.actual_ol as MarkerRow | null) ?? null
         computeTransition()
-        if (!outcomeChanged && !olChanged) {
+        if (!outcomeChanged && !olChanged && !sameStateRerun) {
           await supabaseAdmin.from('webhook_logs').insert({
             step: 'Outcome_Claim_Superseded',
             data: {
@@ -1578,6 +1599,11 @@ serve(async (req) => {
     if (outcomeChanged) {
       const decC = prevBucket ? METRIC_COL[prevBucket] : undefined
       if (decC) addMetricDelta(prevOutcomeDate, prevOutcomeOffice, decC, -1)
+      const incC = bucket ? METRIC_COL[bucket] : undefined
+      if (incC) addMetricDelta(metric_date, office_location, incC, +1)
+    } else if (sameStateRerun) {
+      // Re-run of the same card on a new block day: the new appointment
+      // counts, the prior day's count stays (no decrement).
       const incC = bucket ? METRIC_COL[bucket] : undefined
       if (incC) addMetricDelta(metric_date, office_location, incC, +1)
     }
@@ -1659,6 +1685,9 @@ serve(async (req) => {
       })
       if (outcomeChanged) {
         addLogVec(prevOutcomeDate, prevOutcomeOffice, bucketVec(prevBucket, prevNonCore), -1)
+        addLogVec(metric_date, office_location, bucketVec(bucket, nonCore), +1)
+      } else if (sameStateRerun) {
+        // New appointment on the same card — increment only, keep the prior day.
         addLogVec(metric_date, office_location, bucketVec(bucket, nonCore), +1)
       }
       if (olChanged) {
@@ -1756,6 +1785,7 @@ serve(async (req) => {
         metric_date,
         blockDay,
         newAppointment: copyIsNewAppointment || undefined,
+        sameStateRerun: sameStateRerun || undefined,
       },
     })
 

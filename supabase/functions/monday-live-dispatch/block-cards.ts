@@ -135,6 +135,24 @@ export function isNewAppointmentCopy(
   return copyBlockDay !== null && !!siblingBlockDay && siblingBlockDay !== copyBlockDay
 }
 
+/** Same status re-marked on the SAME card but on a DIFFERENT block day —
+ *  the telemarketing re-hash recycles a card into a new weekday group and
+ *  runs it again (Grace Barnett wk 8/24: No Demo Wed under Ernie, re-issued
+ *  Sat under Cynthia, No Show — the Sat mark used to no-op as "same state").
+ *  Counts as a NEW appointment: +1 on the new day, prior day untouched.
+ *  Requires the previous marker to carry its blockDay (post-2026-08-31
+ *  markers); old flip-day markers stay inert so the mixed-marker window can
+ *  never spuriously double-count. */
+export function isSameStateRerun(
+  bucket: string | null,
+  prevBucket: string | null,
+  blockDay: string | null,
+  prevBlockDay: string | null | undefined,
+): boolean {
+  return bucket !== null && bucket === prevBucket &&
+    blockDay !== null && !!prevBlockDay && prevBlockDay !== blockDay
+}
+
 /** One row per Monday card — matches public.block_cards, MINUS the two
  *  Sales-Report stamps: `wcc` and `report_reps` are deliberately absent so
  *  the live upsert can never clobber what the Sales-Report pass wrote
