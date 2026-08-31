@@ -11,10 +11,13 @@
 
 import {
   deriveCardDate,
+  findIssCol,
   isNewAppointmentCopy,
+  isOfficeIss,
   isSameStateRerun,
   mondayOfISO,
   parseBoardWeekStart,
+  type MondayCol,
 } from "../supabase/functions/monday-live-dispatch/block-cards";
 
 let failures = 0;
@@ -72,6 +75,44 @@ check("unmarked card → never", isSameStateRerun(null, null, "2026-08-29", "202
 check("old marker without blockDay → inert", isSameStateRerun("blowouts", "blowouts", "2026-08-29", null), false);
 check("old marker undefined blockDay → inert", isSameStateRerun("blowouts", "blowouts", "2026-08-29", undefined), false);
 check("card without derivable block day → inert", isSameStateRerun("blowouts", "blowouts", null, "2026-08-26"), false);
+
+console.log("— isOfficeIss: office bookings never credit a canvasser —");
+check("exact label", isOfficeIss("Office Appt"), true);
+check("board truncation", isOfficeIss("Office A…"), true);
+check("case-insensitive", isOfficeIss("office appointment"), true);
+check("issued lead keeps credit", isOfficeIss("Iss"), false);
+check("blank Iss IS an issued lead", isOfficeIss(""), false);
+check("null Iss IS an issued lead", isOfficeIss(null), false);
+check("Not Issued is a pipeline state, not an office appt", isOfficeIss("Not Issued"), false);
+check("CTC is a pipeline state", isOfficeIss("CTC"), false);
+check("Add Rep is a pipeline state", isOfficeIss("Add Rep"), false);
+
+console.log("— the gate must NOT catch knocked production —");
+const col = (title: string, text: string | null): MondayCol => ({
+  id: title.toLowerCase(), text, column: { id: title.toLowerCase(), title },
+});
+check("door upsell on an issued lead still credits",
+  isOfficeIss(findIssCol([col("Iss", "Iss"), col("Sale", "Upsell")])?.text), false);
+check("canvasser reset still credits",
+  isOfficeIss(findIssCol([col("Iss", null), col("Canvass Stats", "Reset")])?.text), false);
+check("a Job Walk Source alone never condemns a card",
+  isOfficeIss(findIssCol([col("Iss", "Iss"), col("Source", "Job Walk")])?.text), false);
+check("office reload IS caught",
+  isOfficeIss(findIssCol([col("Iss", "Office Appt"), col("Sale", "Reload")])?.text), true);
+
+console.log("— findIssCol —");
+check("exact title beats a lookalike",
+  findIssCol([col("Issues", "Office"), col("Iss", "Iss")])?.text, "Iss");
+check("renamed column → undefined, gate fails OPEN",
+  findIssCol([col("Sale", "Sold")]), undefined);
+check("failing open keeps credit", isOfficeIss(findIssCol([col("Sale", "Sold")])?.text), false);
+
+console.log("— Chemberlen regression (OC pulse 12898859448) —");
+const chemberlen = [
+  col("Iss", "Office Appt"), col("Source", "Job Walk"), col("Agent", ""),
+  col("Canvass Stats", "Sale"), col("Sale", "Sold"), col("Sale Price", "25948"),
+];
+check("detected as office-generated", isOfficeIss(findIssCol(chemberlen)?.text), true);
 
 if (failures > 0) {
   console.error(`\n${failures} check(s) failed`);
