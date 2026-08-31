@@ -895,6 +895,9 @@ const ATTENTION_CAP = 12;
 
 /** Money-impacting issues read red; bookkeeping drift reads amber. */
 const ATTENTION_META: Record<AttentionKind, { label: string; className: string }> = {
+  // The Monday copy-step double (an automation copies new sale cards): one
+  // deal counting twice — money-doubling, the reddest flag there is.
+  duplicate_sale: { label: "Duplicate Sale", className: "text-destructive" },
   excluded_sale: { label: "Hidden Sale", className: "text-destructive" },
   // A priced Can/Save that linked to no original: real money counting
   // nowhere until the cards match — as red as a hidden sale.

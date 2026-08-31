@@ -803,6 +803,145 @@ const drifted = audit([card({ group_title: "Needs Assignment", card_date: "2026-
 eq("audit: drifted card flags wrong group", drifted[0]?.kind, "no_weekday_group");
 eq("audit: drifted card is one item", drifted.length, 1);
 
+// ---- Duplicate sales (owner, 2026-08-31) ---------------------------------
+// THE LIBIRAN CASE: a Block-board automation copies each new sale card
+// seconds after it's created — same customer, phone, price and date, one
+// card named "... (copy)" (Aida Libiran 8/28 $32,695, Jen Hauser 8/28
+// $17,504, the Ortegas 8/29 $49,584). Both carry a sold result, so one deal
+// pays twice. Detection only: the audit flags BOTH cards; the aggregate
+// keeps counting both until the office deletes the extra on Monday.
+const libiranPair = [
+  card({
+    monday_item_id: "dup-o",
+    lead_name: "Aida Libiran",
+    card_date: "2026-08-28",
+    group_title: "Friday",
+    reps: ["Bergan Lundak", "Garett Koltun"],
+    sale: "Sold",
+    sale_price: 32695,
+    phone: "16191234567",
+  }),
+  card({
+    monday_item_id: "dup-c",
+    lead_name: "Aida Libiran (copy)",
+    card_date: "2026-08-28",
+    group_title: "Friday",
+    reps: ["Bergan Lundak", "Garett Koltun"],
+    sale: "Sold",
+    sale_price: 32695,
+    // Different formatting, same phoneKey — the copy must still match.
+    phone: "+1 (619) 123-4567",
+  }),
+];
+const aDup = audit(libiranPair);
+eq("dup: both cards flagged", aDup.length, 2);
+eq("dup: first is duplicate_sale", aDup[0]?.kind, "duplicate_sale");
+eq("dup: second is duplicate_sale", aDup[1]?.kind, "duplicate_sale");
+eq("dup: detail names the twin", /Aida Libiran \(copy\)/.test(aDup[0]?.detail ?? ""), true);
+// Never dedupe in the aggregate — board = ground truth (owner rule).
+const dupAgg = aggregateCloseKombat(libiranPair);
+eq("dup: aggregate still counts both sales", dupAgg.totals.sold, 2);
+eq("dup: aggregate still counts both dollars", dupAgg.totals.revenue, 65390);
+// Money-doubling sorts above every other flag, hidden sales included.
+const aDupSort = audit([
+  card({ iss: "Not Issued", sale: "Sold", sale_price: 1, card_date: "2026-08-01" }),
+  ...libiranPair,
+]);
+eq("dup: sorts ahead of a hidden sale", aDupSort[0]?.kind, "duplicate_sale");
+// THE CHEMBERLEN CASE (8/25): the automation doubled a Can/Save card too —
+// two landed save cards for one original. linkSaves absorbs both into the
+// original (latest wins), so they are NOT duplicates and stay quiet.
+const chemberlen = [
+  card({
+    monday_item_id: "ch-o",
+    lead_name: "Chemberlen, Dana",
+    card_date: "2026-08-20",
+    group_title: "Thursday",
+    reps: ["A"],
+    sale: "Sold",
+    sale_price: 30000,
+    wcc: "Cancelled",
+    phone: "6195550101",
+  }),
+  card({
+    monday_item_id: "ch-s1",
+    lead_name: "Chemberlen, Dana",
+    card_date: "2026-08-25",
+    group_title: "Tuesday",
+    reps: ["B"],
+    iss: "Office Appt",
+    sale: "Sold",
+    sale_price: 24000,
+    phone: "6195550101",
+    comments: "Can/Save",
+  }),
+  card({
+    monday_item_id: "ch-s2",
+    lead_name: "Chemberlen, Dana (copy)",
+    card_date: "2026-08-25",
+    group_title: "Tuesday",
+    reps: ["B"],
+    iss: "Office Appt",
+    sale: "Sold",
+    sale_price: 24000,
+    phone: "6195550101",
+    comments: "Can/Save",
+  }),
+];
+eq("dup: landed dup save pair stays quiet", audit(chemberlen).length, 0);
+eq(
+  "dup: saved deal still counts once",
+  aggregateCloseKombat(chemberlen).totals.revenue,
+  24000,
+);
+// Same price + date on DIFFERENT customers (different phones): coincidence,
+// not a copy — stays quiet.
+eq(
+  "dup: same price, different customers, quiet",
+  audit([
+    card({
+      lead_name: "Smith, Pat",
+      card_date: "2026-08-28",
+      group_title: "Friday",
+      sale: "Sold",
+      sale_price: 17504,
+      phone: "6191110001",
+    }),
+    card({
+      lead_name: "Jones, Sam",
+      card_date: "2026-08-28",
+      group_title: "Friday",
+      sale: "Sold",
+      sale_price: 17504,
+      phone: "6192220002",
+    }),
+  ]).length,
+  0,
+);
+// A blank phone proves nothing — two phoneless same-price cards never group.
+eq(
+  "dup: blank phones never group",
+  audit([
+    card({
+      lead_name: "NoPhone, A",
+      card_date: "2026-08-28",
+      group_title: "Friday",
+      sale: "Sold",
+      sale_price: 9000,
+      phone: null,
+    }),
+    card({
+      lead_name: "NoPhone, B",
+      card_date: "2026-08-28",
+      group_title: "Friday",
+      sale: "Sold",
+      sale_price: 9000,
+      phone: null,
+    }),
+  ]).length,
+  0,
+);
+
 // ---- OL is a result (owner, 2026-08-03): ran, not demoed ----------------
 eq(
   "ol outcome",

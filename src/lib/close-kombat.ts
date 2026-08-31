@@ -695,6 +695,7 @@ export function aggregateCloseKombat(
 // says (see the never-invent rule); fixing happens on Monday, then a sync.
 
 export type AttentionKind =
+  | "duplicate_sale"
   | "excluded_sale"
   | "orphan_save"
   | "no_reps"
@@ -754,6 +755,41 @@ export function auditBlockCards(
   window?: KombatWindow,
 ): AttentionItem[] {
   const saves = linkSaves(cards);
+
+  // Duplicate sales (owner, 2026-08-31): an automation on the SD Block board
+  // doubles a new sale card seconds after it's created — same customer,
+  // phone, price and date, one card named "... (copy)" (Libiran and Hauser
+  // 8/28, the Ortegas 8/29). Both cards carry a sold result, so one deal
+  // pays twice until the office deletes the extra on Monday. Detection only:
+  // board = ground truth, the aggregate keeps counting both. Membership
+  // mirrors what actually counts as sold money — Can/Save cards never join
+  // (two landed save cards for one original, the Chemberlen 8/25 pair, are
+  // absorbed by linkSaves and are NOT duplicates), excluded cards don't
+  // count in the first place, and a blank phone or price proves nothing.
+  const dupKey = (c: BlockCard): string | null => {
+    if (isCanSave(c) || isExcludedCard(c)) return null;
+    if (cardOutcome(c) !== "sold") return null;
+    if (!(c.sale_price !== null && c.sale_price > 0)) return null;
+    const phone = phoneKey(c.phone);
+    if (phone === "" || c.card_date === null) return null;
+    return [c.office_location, phone, c.sale_price, c.card_date].join("|");
+  };
+  const dupGroups = new Map<string, BlockCard[]>();
+  for (const c of cards) {
+    const k = dupKey(c);
+    if (k === null) continue;
+    const g = dupGroups.get(k);
+    if (g) g.push(c);
+    else dupGroups.set(k, [c]);
+  }
+  // Every card in a group gets flagged, each naming its twin(s) — whichever
+  // card the office keeps, the flag dies with the deleted one.
+  const dupTwins = new Map<string, BlockCard[]>();
+  for (const g of dupGroups.values()) {
+    if (g.length < 2) continue;
+    for (const c of g) dupTwins.set(c.monday_item_id, g.filter((o) => o !== c));
+  }
+
   const items: AttentionItem[] = [];
   for (const c of cards) {
     // Context cards outside the stats window link saves but belong to their
@@ -775,9 +811,19 @@ export function auditBlockCards(
     const savePriced = saves.effects.has(c.monday_item_id);
     const inWeekdayGroup = isWeekdayGroup(c.group_title);
 
+    const twins = dupTwins.get(c.monday_item_id);
+
     let kind: AttentionKind | null = null;
     let detail = "";
-    if (!consumedSave && canSave && c.sale_price !== null && c.sale_price > 0) {
+    if (twins) {
+      // The Monday copy-step double: worst issue a card can have — real
+      // money counting more than once.
+      kind = "duplicate_sale";
+      const names = twins.map((t) => `"${t.lead_name ?? "(unnamed card)"}"`).join(", ");
+      detail =
+        `same phone, $${(c.sale_price ?? 0).toLocaleString("en-US")} and date as ${names} — ` +
+        `the sale counts ${twins.length + 1} times until the extra card is deleted`;
+    } else if (!consumedSave && canSave && c.sale_price !== null && c.sale_price > 0) {
       // A landed save that linked is consumedSave; a PRICED save left over
       // means office/phone/customer on the two cards don't line up (or the
       // original predates the loaded context). Save cards count nowhere on
@@ -866,13 +912,14 @@ export function auditBlockCards(
     });
   }
   const rank: Record<AttentionKind, number> = {
-    excluded_sale: 0,
-    orphan_save: 1,
-    no_reps: 2,
-    blank_price: 3,
-    rep_mismatch: 4,
-    unresolved: 5,
-    no_weekday_group: 6,
+    duplicate_sale: 0,
+    excluded_sale: 1,
+    orphan_save: 2,
+    no_reps: 3,
+    blank_price: 4,
+    rep_mismatch: 5,
+    unresolved: 6,
+    no_weekday_group: 7,
   };
   items.sort(
     (a, b) =>
