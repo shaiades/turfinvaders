@@ -12,6 +12,7 @@
 import {
   deriveCardDate,
   isNewAppointmentCopy,
+  isSameStateRerun,
   mondayOfISO,
   parseBoardWeekStart,
 } from "../supabase/functions/monday-live-dispatch/block-cards";
@@ -62,6 +63,15 @@ check("copy day unknown → conservative", isNewAppointmentCopy(null, "2026-08-2
 check("sibling day unknown → conservative", isNewAppointmentCopy("2026-08-28", null), false);
 check("sibling day undefined → conservative", isNewAppointmentCopy("2026-08-28", undefined), false);
 check("both unknown → conservative", isNewAppointmentCopy(null, null), false);
+
+console.log("— isSameStateRerun (Grace Barnett pattern) —");
+check("same status, new block day → re-run counts", isSameStateRerun("blowouts", "blowouts", "2026-08-29", "2026-08-26"), true);
+check("same status, same block day → no-op", isSameStateRerun("blowouts", "blowouts", "2026-08-26", "2026-08-26"), false);
+check("different status → not a rerun (transition path)", isSameStateRerun("sit", "blowouts", "2026-08-29", "2026-08-26"), false);
+check("unmarked card → never", isSameStateRerun(null, null, "2026-08-29", "2026-08-26"), false);
+check("old marker without blockDay → inert", isSameStateRerun("blowouts", "blowouts", "2026-08-29", null), false);
+check("old marker undefined blockDay → inert", isSameStateRerun("blowouts", "blowouts", "2026-08-29", undefined), false);
+check("card without derivable block day → inert", isSameStateRerun("blowouts", "blowouts", null, "2026-08-26"), false);
 
 if (failures > 0) {
   console.error(`\n${failures} check(s) failed`);
