@@ -263,6 +263,19 @@ function FleetDispatchInner({
     isCurrentMonth,
   ]);
 
+  // Date stamped on the "In the Field" caption. On the Day tab the funnel
+  // half covers just the selected day (unlike "As Leads", which spans the
+  // week), so it gets the day's own date rather than range.label's
+  // "Today"/"Yesterday" wording. Week uses numeric M/D endpoints — the
+  // spelled-out range wraps the caption at the row's mobile min-width.
+  const mdShort = (d: Date) => `${d.getMonth() + 1}/${d.getDate()}`;
+  const fieldDateLabel =
+    tab === "day"
+      ? fmtWorkedDay(dayISO)
+      : tab === "week"
+        ? `${mdShort(week.weekStart)} – ${mdShort(week.weekEnd)}`
+        : range.label;
+
   // --- Queries (one key family; realtime prefix-invalidates all of it) ---
 
   // Roster serves BOTH the board and Manage Fleet from one fetch so the two
@@ -1087,6 +1100,7 @@ function FleetDispatchInner({
           profiles={allProfiles}
           rolesByUser={rolesByUser}
           focusTeamId={focusTeamId}
+          fieldDateLabel={fieldDateLabel}
         />
       )}
 
@@ -1410,12 +1424,19 @@ function DispatchRow({
 }
 
 /** Section captions over the two halves of the continuous row. */
-function DispatchGroupCaption({ manage = false }: { manage?: boolean }) {
+function DispatchGroupCaption({
+  manage = false,
+  dateLabel,
+}: {
+  manage?: boolean;
+  dateLabel?: string;
+}) {
   return (
     <div className={`${rowGrid(manage)} px-2`}>
       <span />
       <span className="col-span-4 text-center text-[8px] font-display uppercase tracking-widest text-muted-foreground/70 border-b border-border/60 pb-0.5">
         In the Field
+        {dateLabel && <span className="text-muted-foreground/50"> · {dateLabel}</span>}
       </span>
       <span />
       <span className="col-span-10 text-center text-[8px] font-display uppercase tracking-widest text-muted-foreground/70 border-b border-border/60 pb-0.5">
@@ -1482,6 +1503,7 @@ function DispatchFleet({
   profiles,
   rolesByUser,
   focusTeamId = null,
+  fieldDateLabel,
 }: {
   rows: FunnelRow[];
   vans: Van[];
@@ -1491,6 +1513,7 @@ function DispatchFleet({
   profiles: RosterProfile[];
   rolesByUser: Map<string, string[]>;
   focusTeamId?: string | null;
+  fieldDateLabel?: string;
 }) {
   const { office: activeOffice, matches } = useOfficeFilter();
   const { realRole } = useAuth();
@@ -1663,7 +1686,7 @@ function DispatchFleet({
                     ) : (
                       <div className="overflow-x-auto">
                         <div className={`space-y-1.5 ${rowMinW(canEditRows)}`}>
-                          <DispatchGroupCaption manage={canEditRows} />
+                          <DispatchGroupCaption manage={canEditRows} dateLabel={fieldDateLabel} />
                           <DispatchColHeader manage={canEditRows} />
                           {/* The whole van at a glance — every stat the
                               canvassers below sum into. */}
@@ -1706,7 +1729,7 @@ function DispatchFleet({
           </div>
           <div className="overflow-x-auto">
             <div className={`space-y-1.5 ${rowMinW(canEditRows)}`}>
-              <DispatchGroupCaption manage={canEditRows} />
+              <DispatchGroupCaption manage={canEditRows} dateLabel={fieldDateLabel} />
               <DispatchColHeader manage={canEditRows} />
               {/* Junk name variants pile up exactly here (the Bouncer drops
                   unmatched Monday names into this pen), so unassigned rows
