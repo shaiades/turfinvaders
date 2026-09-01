@@ -263,18 +263,27 @@ function FleetDispatchInner({
     isCurrentMonth,
   ]);
 
-  // Date stamped on the "In the Field" caption. On the Day tab the funnel
-  // half covers just the selected day (unlike "As Leads", which spans the
-  // week), so it gets the day's own date rather than range.label's
-  // "Today"/"Yesterday" wording. Week uses numeric M/D endpoints — the
-  // spelled-out range wraps the caption at the row's mobile min-width.
-  const mdShort = (d: Date) => `${d.getMonth() + 1}/${d.getDate()}`;
+  // Dates stamped on the section captions. On the Day tab the two halves
+  // cover DIFFERENT windows: "In the Field" is the selected day alone,
+  // "As Leads" spans that day's Mon–Sun week (owner directive 2026-08-04),
+  // so each caption stamps its own window — the day's own date rather than
+  // range.label's "Today"/"Yesterday" wording, and the log window's week
+  // for the results half. Numeric M/D endpoints and the short month name —
+  // spelled-out forms ("Aug 31 – Sep 6, 2026", "September 2026") wrap the
+  // caption at the row's mobile min-width.
+  const mdISO = (iso: string) => `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}`;
+  const monthShortLabel = new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    year: "numeric",
+  }).format(dateFromISO(monthStart));
   const fieldDateLabel =
     tab === "day"
       ? fmtWorkedDay(dayISO)
       : tab === "week"
-        ? `${mdShort(week.weekStart)} – ${mdShort(week.weekEnd)}`
-        : range.label;
+        ? `${mdISO(range.funnelStart)} – ${mdISO(range.funnelEnd)}`
+        : monthShortLabel;
+  const leadsDateLabel =
+    tab === "month" ? monthShortLabel : `${mdISO(range.logStart)} – ${mdISO(range.logEnd)}`;
 
   // --- Queries (one key family; realtime prefix-invalidates all of it) ---
 
@@ -1101,6 +1110,7 @@ function FleetDispatchInner({
           rolesByUser={rolesByUser}
           focusTeamId={focusTeamId}
           fieldDateLabel={fieldDateLabel}
+          leadsDateLabel={leadsDateLabel}
         />
       )}
 
@@ -1427,9 +1437,11 @@ function DispatchRow({
 function DispatchGroupCaption({
   manage = false,
   dateLabel,
+  leadsDateLabel,
 }: {
   manage?: boolean;
   dateLabel?: string;
+  leadsDateLabel?: string;
 }) {
   return (
     <div className={`${rowGrid(manage)} px-2`}>
@@ -1441,6 +1453,7 @@ function DispatchGroupCaption({
       <span />
       <span className="col-span-10 text-center text-[8px] font-display uppercase tracking-widest text-muted-foreground/70 border-b border-border/60 pb-0.5">
         As Leads
+        {leadsDateLabel && <span className="text-muted-foreground/50"> · {leadsDateLabel}</span>}
       </span>
       {manage && <span />}
     </div>
@@ -1504,6 +1517,7 @@ function DispatchFleet({
   rolesByUser,
   focusTeamId = null,
   fieldDateLabel,
+  leadsDateLabel,
 }: {
   rows: FunnelRow[];
   vans: Van[];
@@ -1514,6 +1528,7 @@ function DispatchFleet({
   rolesByUser: Map<string, string[]>;
   focusTeamId?: string | null;
   fieldDateLabel?: string;
+  leadsDateLabel?: string;
 }) {
   const { office: activeOffice, matches } = useOfficeFilter();
   const { realRole } = useAuth();
@@ -1686,7 +1701,11 @@ function DispatchFleet({
                     ) : (
                       <div className="overflow-x-auto">
                         <div className={`space-y-1.5 ${rowMinW(canEditRows)}`}>
-                          <DispatchGroupCaption manage={canEditRows} dateLabel={fieldDateLabel} />
+                          <DispatchGroupCaption
+                            manage={canEditRows}
+                            dateLabel={fieldDateLabel}
+                            leadsDateLabel={leadsDateLabel}
+                          />
                           <DispatchColHeader manage={canEditRows} />
                           {/* The whole van at a glance — every stat the
                               canvassers below sum into. */}
@@ -1729,7 +1748,11 @@ function DispatchFleet({
           </div>
           <div className="overflow-x-auto">
             <div className={`space-y-1.5 ${rowMinW(canEditRows)}`}>
-              <DispatchGroupCaption manage={canEditRows} dateLabel={fieldDateLabel} />
+              <DispatchGroupCaption
+                manage={canEditRows}
+                dateLabel={fieldDateLabel}
+                leadsDateLabel={leadsDateLabel}
+              />
               <DispatchColHeader manage={canEditRows} />
               {/* Junk name variants pile up exactly here (the Bouncer drops
                   unmatched Monday names into this pen), so unassigned rows
