@@ -65,14 +65,19 @@
 //   Verified on July 2026: 4 saves, 1 landed (Leon — Josh OConnor sold
 //   $37,884, wife killed it, Bergan Lundak saved at $27,583 → $13,791.50
 //   each, matching the Shark Tank dashboard exactly).
-// - Report reps (owner, 2026-08-25): the office sometimes records the second
-//   closer ONLY on the monthly Sales Report's Sales Rep column, never on the
-//   Block card (Hagmann/Pinel, Aug '26) — and the Shark Tank splits volume by
-//   exactly that column. When the Sales-Report pass stamped report_reps on a
-//   card, the VOLUME split follows it; result counts stay with the Block
-//   card's own reps (the report proves who shares the money, not who sat the
-//   demo — full result credit arrives the normal way once the Block card is
-//   fixed). The rep_mismatch audit flags the drift so the board gets fixed.
+// - Report reps (owner, 2026-08-25; corrected 2026-09-02): the office writes
+//   who SHARES THE MONEY in the monthly Sales Report's Sales Rep column — and
+//   the Shark Tank splits volume by exactly that column. When the Sales-Report
+//   pass stamped report_reps on a card, the VOLUME split follows it; result
+//   counts stay with the Block card's own reps. A report row that merely ADDS
+//   a name to the Block card's crew is the office splitting the money, not
+//   board drift: Hagmann and Pinel (Aug '26) — the cards that originally
+//   motivated a "fix the Block card" flag — were sold-cancelled-rescued deals,
+//   and the added name (Jonathan Paz) was the SAVER of each, who earns half
+//   the volume and must never be added to the Block card (that would mint a
+//   Sold he didn't close). The rep_mismatch audit therefore flags only
+//   CONTRADICTIONS — a Block rep the report dropped or replaced, or a report
+//   crediting a card whose Reps cell is empty — never pure additions.
 // - Save cards never count on their own (owner, 2026-08-28): the lead was
 //   already issued and counted on the ORIGINAL card, so a Can/Save card —
 //   landed, failed, or unlinked — is never an Appt, a Sold, an office tally,
@@ -141,9 +146,11 @@ const isFtdLabel = (v: string | null | undefined): boolean =>
  *  mark in the report's "Sales Count" column kills the row too. The office
  *  records some cancels ONLY there: verified live on Hagmann and Pinel
  *  (Aug '26), whose WCC said "Completed" (the welcome CALL completed) while
- *  Sales Count said "Cancelled" — both had failed Can/Save attempts, both
- *  were still counting as live volume. When Sales Count un-cancels, the
- *  label falls back to the WCC text and the stamp heals on the next pass. */
+ *  Sales Count said "Cancelled" — at the time both read as failed Can/Save
+ *  attempts still counting as live volume (Jonathan Paz's saves later landed
+ *  and the deals came back; see the Report reps bullet). When Sales Count
+ *  un-cancels, the label falls back to the WCC text and the stamp heals on
+ *  the next pass. */
 export function reportRowWcc(
   wcc: string | null,
   salesCount: string | null,
@@ -617,8 +624,11 @@ export function aggregateCloseKombat(
     // top (owner, 2026-08-01): 50% to whoever saved it, the other 50% split
     // evenly among the original rep(s) — so 1 seller + saver = 50/50, and
     // 2 sellers + saver = 50/25/25. A rep on both cards earns both shares.
-    // Result credit stays with the card's own reps: the saver earns volume,
-    // not a Sold.
+    // The office sometimes writes the save split into the report row's rep
+    // pair too (Hagmann/Pinel, Aug '26): a saver's name THERE is the same
+    // 50% already paid off the top, never a second cut of the originals'
+    // half. Result credit stays with the card's own reps: the saver earns
+    // volume, not a Sold.
     if (cardOutcome(card) === "sold") {
       totals.revenue += save ? save.price : (card.sale_price ?? 0);
       const volNames = volumeReps(card);
@@ -630,9 +640,22 @@ export function aggregateCloseKombat(
         const saverPool = savers.length > 0 ? save.price / 2 : 0;
         const originalPool = save.price - saverPool;
         for (const name of savers) repRow(name).revenue += saverPool / savers.length;
+        // A saver who reached volNames only through the REPORT STAMP already
+        // took the save half above — drop them from the originals' half, or
+        // the office writing the split into the report pair pays them twice
+        // (75/25 on a one-seller deal instead of the owner's 50/50). A saver
+        // the BLOCK card itself names sold the deal too, and a rep on both
+        // cards earns both shares — they stay.
+        const blockSet = new Set(countNames.map((r) => r.toLowerCase()));
+        const saverSet = new Set(savers.map((r) => r.toLowerCase()));
+        const originals = volNames.filter(
+          (n) => !saverSet.has(n.toLowerCase()) || blockSet.has(n.toLowerCase()),
+        );
+        const originalNames = originals.length > 0 ? originals : volNames;
         // No original reps recorded: their half stays uncredited (company
         // totals keep the whole price) — never invent a recipient.
-        for (const name of volNames) repRow(name).revenue += originalPool / volNames.length;
+        for (const name of originalNames)
+          repRow(name).revenue += originalPool / originalNames.length;
       } else {
         const price = card.sale_price ?? 0;
         for (const name of volNames) repRow(name).revenue += price / volNames.length;
@@ -740,6 +763,18 @@ export const sameRepSet = (a: string[], b: string[]): boolean => {
   const key = (xs: string[]) =>
     [...new Set(cleanReps(xs).map((r) => r.toLowerCase()))].sort().join("|");
   return key(a) === key(b);
+};
+
+/** The report kept every Block rep and only ADDED names — and the card
+ *  actually names its crew. That shape is the office splitting the money
+ *  (a saver written into the pay pair — Hagmann/Pinel, Aug '26), never
+ *  board drift, so the audit stays quiet on it. An empty Reps cell doesn't
+ *  qualify: a report crediting people the board doesn't name at all is a
+ *  contradiction, not an addition. */
+export const reportOnlyAdds = (report: string[], block: string[]): boolean => {
+  const rep = new Set(cleanReps(report).map((r) => r.toLowerCase()));
+  const blk = cleanReps(block).map((r) => r.toLowerCase());
+  return blk.length > 0 && blk.every((b) => rep.has(b)) && rep.size > blk.length;
 };
 
 /** ONE issue per card, worst first — a Not Issued card carrying a sale also
@@ -867,16 +902,22 @@ export function auditBlockCards(
       (!excluded || dead) &&
       (outcome === "sold" || outcome === "cancelled") &&
       reportReps.length > 0 &&
-      !sameRepSet(reportReps, reps)
+      !sameRepSet(reportReps, reps) &&
+      // A report row that merely ADDS names is the office paying a saver
+      // (owner, 2026-09-02 — Hagmann/Pinel: sold, cancelled, rescued by
+      // Jonathan Paz, and the report pair IS the 50/50 save split). The
+      // board is already right — the saver earns volume, never a result —
+      // so "add him to the Block card" would mint a Sold he didn't close.
+      !reportOnlyAdds(reportReps, reps)
     ) {
-      // The Hagmann/Pinel drift: the report's Sales Rep column disagrees
-      // with the Block card. Rep credit already follows the report
-      // (volumeReps), so the numbers are right — this flags the board fix
-      // that grants the missing rep full RESULT credit too.
+      // The boards CONTRADICT each other: a Block rep the report dropped or
+      // replaced, or a report crediting a card whose Reps cell is empty.
+      // Volume already follows the report (volumeReps); result credit
+      // follows the card — someone has it wrong, so surface it.
       kind = "rep_mismatch";
       detail =
         `Sales Report credits ${reportReps.join(", ")}; the Block card's Reps say ` +
-        `${reps.join(", ") || "nobody"} — rep credit follows the report; fix the Block card`;
+        `${reps.join(", ") || "nobody"} — volume follows the report, result credit follows the card; make the boards agree`;
     } else if (
       !excluded &&
       !isOfficeAppt(c) &&
