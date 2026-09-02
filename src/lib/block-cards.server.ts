@@ -26,7 +26,6 @@ import {
   cleanReps,
   isCanSave,
   preferAmountMatch,
-  reportRowWcc,
   sameRepSet,
   type BlockCard,
   type ReportRepHit,
@@ -956,11 +955,14 @@ async function collectReportBoard(
       const name = item.name == null ? "" : String(item.name);
       const cols: MondayCol[] = item.column_values ?? [];
       const wccRaw = (colText(cols, "wcc") ?? "").trim();
-      const wccCell = wccRaw === "" || /^none$/i.test(wccRaw) ? null : wccRaw;
-      // Some cancels live ONLY in the report's "Sales Count" column while
-      // WCC keeps the welcome-call status ("Completed") — fold them in, or
-      // the sale keeps counting as live volume (Hagmann/Pinel, Aug '26).
-      const wccStored = reportRowWcc(wccCell, colText(cols, "sales count"));
+      // The WCC column is the ONLY cancel authority (owner, 2026-09-02):
+      // "LVM"/"Completed" = good sale even when the row's Sales Count says
+      // "Cancelled" — on a rescued deal Sales Count keeps recording the
+      // pre-save cancellation (Hagmann/Pinel/Chemberlen, Aug '26), and the
+      // 8/25 fallback that read it was killing exactly those saved deals.
+      // The stamp keeps following the current WCC text, so a later label
+      // change flips the card either way on the next pass.
+      const wccStored = wccRaw === "" || /^none$/i.test(wccRaw) ? null : wccRaw;
       if (!name.trim()) continue;
       result.rows += 1;
       // FTDs count with cancels here: both kill the sale, both may have had

@@ -23,6 +23,15 @@
 //   sit ("5 PM + 2 sales, 1 cancels" reads as 6 PM + 1 sale, still 7 sits).
 //   The Cancels column is a tally that rides alongside the PM, not a bucket
 //   of its own, so results still sum to Appts and Close % takes the hit.
+//   Owner, 2026-09-02: the WCC COLUMN is the ONLY cancel authority on the
+//   report — "LVM"/"Completed" there means a good sale even when the row's
+//   Sales Count column says "Cancelled" (Sales Count is bookkeeping: on a
+//   rescued deal it keeps recording the pre-save cancellation — Hagmann,
+//   Pinel, Chemberlen, Aug '26; scanned Jun–Sep '26: those three rows were
+//   the only WCC/Sales-Count splits). Supersedes the 8/25 Sales-Count
+//   fallback, which had killed exactly those saved deals. The stamp follows
+//   the CURRENT WCC text on every pass, so a later label change flips the
+//   card either way.
 // - FTD (owner, 2026-07-30, supersedes its own column): WCC label "FTD" =
 //   financial turn down. The demo ran and the money fell through, so it now
 //   counts as a PM — no separate FTD tally anywhere.
@@ -140,25 +149,6 @@ const isCancelLabel = (v: string | null | undefined): boolean =>
   /cancel/i.test(v ?? "") || /\bctc\b/i.test(v ?? "");
 const isFtdLabel = (v: string | null | undefined): boolean =>
   /\bftd\b/i.test(v ?? "") || /financial\s*turn/i.test(v ?? "");
-
-/** Effective death label for one Sales-Report row (owner, 2026-08-25): the
- *  WCC cell when it already carries a death label — otherwise a Cancelled
- *  mark in the report's "Sales Count" column kills the row too. The office
- *  records some cancels ONLY there: verified live on Hagmann and Pinel
- *  (Aug '26), whose WCC said "Completed" (the welcome CALL completed) while
- *  Sales Count said "Cancelled" — at the time both read as failed Can/Save
- *  attempts still counting as live volume (Jonathan Paz's saves later landed
- *  and the deals came back; see the Report reps bullet). When Sales Count
- *  un-cancels, the label falls back to the WCC text and the stamp heals on
- *  the next pass. */
-export function reportRowWcc(
-  wcc: string | null,
-  salesCount: string | null,
-): string | null {
-  if (isCancelLabel(wcc) || isFtdLabel(wcc)) return wcc;
-  if (/cancel/i.test(salesCount ?? "")) return "Cancelled";
-  return wcc;
-}
 
 /** A cell counts only when it carries a real label — Monday hands back ""
  *  or the literal "None" for unset status cells depending on the column. */
