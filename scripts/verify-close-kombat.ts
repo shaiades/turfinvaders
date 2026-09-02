@@ -986,9 +986,11 @@ eq(
 );
 
 // ---- Report reps (owner, 2026-08-25): volume follows the Sales Report ----
-// THE HAGMANN CASE: the office put the second closer only on the Sales
-// Report's Sales Rep column. The sync stamps report_reps; the volume split
-// follows it while result counts stay with the Block card's own reps.
+// THE HAGMANN CASE (corrected 2026-09-02): Daniel sold the job, it cancelled,
+// Jonathan Paz saved it, and the office wrote the 50/50 save split as the
+// report row's rep pair. The sync stamps report_reps; the volume split
+// follows it while result counts stay with the Block card's own reps — the
+// saver earns money, never a Sold, and the Block card needs no fix.
 const hagmann = aggregateCloseKombat([
   card({
     reps: ["Daniel Figueiredo"],
@@ -1061,14 +1063,67 @@ eq("save+report: B takes a quarter", rrSaved.reps.find((r) => r.rep === "B")?.re
 eq("save+report: B has no Sold", rrSaved.reps.find((r) => r.rep === "B")?.sold, 0);
 eq("save+report: revenue = save price, once", rrSaved.totals.revenue, 20000);
 
-// Audit: rep_mismatch fires on drift, stays silent on agreement.
+// The office wrote the save split into the report pair TOO (Hagmann-style)
+// while a priced save card links: the saver's report listing is the same
+// 50% already paid off the top — 50/50, never 75/25.
+const rrOverlap = aggregateCloseKombat([
+  card({
+    monday_item_id: "orig-ov",
+    lead_name: "Overlap Deal",
+    card_date: "2026-07-06",
+    reps: ["A"],
+    report_reps: ["A", "C"],
+    sale: "Sold",
+    sale_price: 30000,
+    phone: "2223334444",
+  }),
+  card({
+    monday_item_id: "save-ov",
+    lead_name: "Overlap Deal",
+    card_date: "2026-07-08",
+    reps: ["C"],
+    iss: "Office Appt",
+    sale_price: 20000,
+    phone: "2223334444",
+    comments: "Can/Save",
+  }),
+]);
+eq(
+  "save+report overlap: stamped saver takes half, once",
+  rrOverlap.reps.find((r) => r.rep === "C")?.revenue,
+  10000,
+);
+eq(
+  "save+report overlap: seller keeps the whole originals' half",
+  rrOverlap.reps.find((r) => r.rep === "A")?.revenue,
+  10000,
+);
+eq("save+report overlap: revenue = save price, once", rrOverlap.totals.revenue, 20000);
+
+// Audit (corrected 2026-09-02): a report row that only ADDS names is the
+// office paying a saver — the Hagmann/Pinel shape — and stays SILENT; a
+// CONTRADICTION (a Block rep dropped or replaced) still flags.
 const rrCard = (over: Partial<BlockCard>) =>
   card({ group_title: "Thursday", card_date: "2026-08-01", ...over });
+eq(
+  "audit: report adding the saver is silent (Hagmann/Pinel)",
+  audit([
+    rrCard({ reps: ["Daniel"], report_reps: ["Daniel", "Jon"], sale: "Sold", sale_price: 100 }),
+  ]).length,
+  0,
+);
 const rrMismatch = audit([
-  rrCard({ reps: ["Daniel"], report_reps: ["Daniel", "Jon"], sale: "Sold", sale_price: 100 }),
+  rrCard({ reps: ["Daniel"], report_reps: ["Jon"], sale: "Sold", sale_price: 100 }),
 ]);
-eq("audit: rep_mismatch fires", rrMismatch[0]?.kind, "rep_mismatch");
+eq("audit: rep_mismatch fires on a replaced rep", rrMismatch[0]?.kind, "rep_mismatch");
 eq("audit: rep_mismatch is one item", rrMismatch.length, 1);
+eq(
+  "audit: report dropping a Block rep still flags",
+  audit([
+    rrCard({ reps: ["A", "B"], report_reps: ["A"], sale: "Sold", sale_price: 100 }),
+  ])[0]?.kind,
+  "rep_mismatch",
+);
 eq(
   "audit: same set, different order/case, silent",
   audit([
@@ -1088,23 +1143,32 @@ eq(
 );
 eq(
   "audit: blank price outranks the mismatch (one issue per card)",
-  audit([rrCard({ reps: ["A"], report_reps: ["A", "B"], sale: "Sold", sale_price: null })])[0]
+  audit([rrCard({ reps: ["A"], report_reps: ["B"], sale: "Sold", sale_price: null })])[0]
     ?.kind,
   "blank_price",
 );
 eq(
-  "audit: cancelled card with drift still flags",
+  "audit: cancelled card with a contradiction still flags",
   audit([
-    rrCard({ reps: ["A"], report_reps: ["A", "B"], sale: "Sold", sale_price: 100, wcc: "Cancelled" }),
+    rrCard({ reps: ["A"], report_reps: ["B"], sale: "Sold", sale_price: 100, wcc: "Cancelled" }),
   ])[0]?.kind,
   "rep_mismatch",
+);
+// A cancelled sale whose report merely adds a name is save bookkeeping on a
+// dead deal — nothing on the Block board to fix, so it stays quiet too.
+eq(
+  "audit: cancelled card with an added name is silent",
+  audit([
+    rrCard({ reps: ["A"], report_reps: ["A", "B"], sale: "Sold", sale_price: 100, wcc: "Cancelled" }),
+  ]).length,
+  0,
 );
 // The aggregate counts a dead excluded card (CTC flip + report stamp), so
 // the audit must be able to flag its drift too — same gate, both sides.
 eq(
-  "audit: dead CTC card with drift still flags",
+  "audit: dead CTC card with a contradiction still flags",
   audit([
-    rrCard({ iss: "CTC", reps: ["A"], report_reps: ["A", "B"], sale_price: 100, wcc: "Cancelled" }),
+    rrCard({ iss: "CTC", reps: ["A"], report_reps: ["B"], sale_price: 100, wcc: "Cancelled" }),
   ])[0]?.kind,
   "rep_mismatch",
 );

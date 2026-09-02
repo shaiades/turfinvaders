@@ -904,8 +904,10 @@ const ATTENTION_META: Record<AttentionKind, { label: string; className: string }
   orphan_save: { label: "Unlinked Save", className: "text-destructive" },
   no_reps: { label: "No Reps", className: "text-destructive" },
   blank_price: { label: "Blank Price", className: "text-destructive" },
-  // Amber, not red: the volume already follows the Sales Report — this is
-  // the Block board catching up, not a number counting wrong.
+  // Amber, not red: volume already follows the Sales Report, so nothing
+  // counts wrong — but the boards CONTRADICT each other on who sat the deal.
+  // (A report row that only ADDS names is the office's save split — the
+  // saver in the pay pair — and never flags; owner, 2026-09-02.)
   rep_mismatch: { label: "Rep Mismatch", className: "text-warning" },
   unresolved: { label: "No Result", className: "text-warning" },
   no_weekday_group: { label: "Wrong Group", className: "text-warning" },
