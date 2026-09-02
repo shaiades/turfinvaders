@@ -13,7 +13,6 @@ import {
   cardOutcome,
   chooseReportReps,
   preferAmountMatch,
-  reportRowWcc,
   type BlockCard,
   type ReportRepHit,
 } from "../src/lib/close-kombat";
@@ -1253,28 +1252,46 @@ eq(
   "Live",
 );
 
-// ---- reportRowWcc: Sales-Count-only cancels kill the row -----------------
-// THE HAGMANN/PINEL CASE (owner, 2026-08-25): WCC said "Completed" (the
-// welcome call ran) while Sales Count said "Cancelled" — the sale died and
-// must not count as volume.
-eq("salescount: WCC death label wins as-is", reportRowWcc("Cancelled", "Sale"), "Cancelled");
-eq("salescount: CTC in WCC survives verbatim", reportRowWcc("CTC", "Cancelled"), "CTC");
-eq("salescount: FTD in WCC survives verbatim", reportRowWcc("FTD", null), "FTD");
-eq(
-  "salescount: Completed + Cancelled count = Cancelled",
-  reportRowWcc("Completed", "Cancelled"),
-  "Cancelled",
-);
-eq("salescount: LVM + Cancelled count = Cancelled", reportRowWcc("LVM", "Cancelled"), "Cancelled");
-eq("salescount: un-cancel heals back to the WCC text", reportRowWcc("Completed", "Sale"), "Completed");
-eq("salescount: nothing dead stays as-is", reportRowWcc(null, "Reload"), null);
-// End-to-end: a card stamped this way loses its volume but keeps the sit.
-const scCancel = aggregateCloseKombat([
+// ---- WCC column is the only cancel authority (owner, 2026-09-02) --------
+// Supersedes the 8/25 Sales-Count fallback (reportRowWcc, deleted): a row
+// whose WCC says "LVM"/"Completed" is a GOOD sale even when its Sales Count
+// column says "Cancelled" — on a rescued deal Sales Count keeps recording
+// the pre-save cancellation (Hagmann/Pinel/Chemberlen, Aug '26). Only a
+// WCC-stamped cancel kills volume; the sit stays either way.
+const wccCancel = aggregateCloseKombat([
   card({ sale: "Sold", sale_price: 14549, wcc: "Cancelled", reps: ["Daniel Figueiredo"] }),
 ]);
-eq("salescount: cancelled sale pays nothing", scCancel.totals.revenue, 0);
-eq("salescount: still a sit (PM)", scCancel.totals.pm, 1);
-eq("salescount: cancels tallied", scCancel.totals.cancels, 1);
+eq("wcc-only: WCC-cancelled sale pays nothing", wccCancel.totals.revenue, 0);
+eq("wcc-only: still a sit (PM)", wccCancel.totals.pm, 1);
+eq("wcc-only: cancels tallied", wccCancel.totals.cancels, 1);
+// The Hagmann shape after the rule change: WCC "Completed" stamp, pair in
+// report_reps — a live sale, volume split 50/50, Sold stays with the seller.
+const wccGood = aggregateCloseKombat([
+  card({
+    sale: "Sold",
+    sale_price: 14549,
+    wcc: "Completed",
+    reps: ["Daniel Figueiredo"],
+    report_reps: ["Daniel Figueiredo", "Jonathan Paz"],
+  }),
+]);
+eq("wcc-only: Completed stamp counts as sold", wccGood.totals.sold, 1);
+eq("wcc-only: no cancel tallied", wccGood.totals.cancels, 0);
+eq(
+  "wcc-only: seller takes half",
+  wccGood.reps.find((r) => r.rep === "Daniel Figueiredo")?.revenue,
+  7274.5,
+);
+eq(
+  "wcc-only: saver takes half, no Sold",
+  wccGood.reps.find((r) => r.rep === "Jonathan Paz")?.revenue,
+  7274.5,
+);
+eq(
+  "wcc-only: saver has no Sold",
+  wccGood.reps.find((r) => r.rep === "Jonathan Paz")?.sold,
+  0,
+);
 
 // ---- preferAmountMatch: repeat customer's rows bind their OWN cards ------
 // THE BUFORD CASE (found live 2026-08-28): the SD August report carried two
