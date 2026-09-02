@@ -89,6 +89,19 @@ const deadReload = aggregateCloseKombat([
 eq("cancelled reload isn't a reload", deadReload.totals.reloads, 0);
 eq("cancelled reload pays nothing", deadReload.totals.revenue, 0);
 
+// THE LEDGER CASE (owner count, 2026-09-02): reloads live on office-appt
+// cards, and a cancel there must still hit the Cancels tally — office
+// tally kept, no appt, no PM, no money.
+const deadOfficeReload = aggregateCloseKombat([
+  card({ iss: "Office Appt", sale: "Reload", sale_price: 30500, wcc: "Cancelled" }),
+]);
+eq("office-appt reload cancel: tallied", deadOfficeReload.totals.cancels, 1);
+eq("office-appt reload cancel: still an office appt", deadOfficeReload.totals.officeAppts, 1);
+eq("office-appt reload cancel: not an appt", deadOfficeReload.totals.appts, 0);
+eq("office-appt reload cancel: no PM", deadOfficeReload.totals.pm, 0);
+eq("office-appt reload cancel: not a reload", deadOfficeReload.totals.reloads, 0);
+eq("office-appt reload cancel: pays nothing", deadOfficeReload.totals.revenue, 0);
+
 // ---- 3. Full sweep on a hand-countable set -------------------------------
 // Lead funnel: 10 no show, 8 no demo, 6 reset, 4 pm, 2 ftd(->pm), 5 sold, 2 cancels
 // Separate channel: 3 reloads (office-marked, as they are in real data)
