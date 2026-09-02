@@ -25,6 +25,7 @@ import {
   chooseReportReps,
   cleanReps,
   isCanSave,
+  phoneKey,
   preferAmountMatch,
   sameRepSet,
   type BlockCard,
@@ -404,10 +405,13 @@ export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSumm
 
   // ── Sales-Report pass ── two stamps come from the monthly "... Sales
   // Report" boards. WCC: cancelled sales are only recorded there (owner,
-  // 2026-07-29: WCC column, "Cancelled"). report_reps (owner, 2026-08-25):
-  // the office sometimes records the second closer only on the report's
-  // Sales Rep column — the Shark Tank splits volume by it, so the app's
-  // volume split follows it. Two phases: COLLECT every report row's
+  // 2026-07-29: WCC column, "Cancelled"; owner 2026-09-02: the WCC column
+  // is the ONLY cancel authority — Sales Count is bookkeeping). report_reps
+  // (owner, 2026-08-25): the office records who SHARES THE MONEY in the
+  // report's Sales Rep column — the Shark Tank splits volume by it, so the
+  // app's volume split follows it. Rows bind to cards by customer name,
+  // falling back to the customer PHONE when every name tier misses
+  // (Bunzal/Punzal, Aug '26 — see bestSoldMatch). Two phases: COLLECT every report row's
   // best-match sold Block card across ALL boards, then MERGE per card
   // (cancel-wins for wcc, best-single-row for report_reps) and write once.
   // One customer spans several report rows (sale + reload + "(copy)"
@@ -680,6 +684,9 @@ type SoldCardLite = {
   sold: boolean;
   _norm: string;
   _tkey: string;
+  /** phoneKey of the card's phone ("" when none) — the last-resort match
+   *  when the two sides spell the customer differently (Bunzal/Punzal). */
+  _phone: string;
 };
 
 /** EVERY Block card, paged past PostgREST's 1000-row cap. Non-cancel report
@@ -698,7 +705,14 @@ async function fetchCandidateCards(): Promise<{
   let repsAvailable = true;
   type PageRow = Pick<
     BlockCard,
-    "monday_item_id" | "lead_name" | "office_location" | "card_date" | "sale" | "sale_price" | "wcc"
+    | "monday_item_id"
+    | "lead_name"
+    | "office_location"
+    | "card_date"
+    | "sale"
+    | "sale_price"
+    | "wcc"
+    | "phone"
   > & { report_reps?: string[] | null };
   const out: SoldCardLite[] = [];
   for (let from = 0; ; from += 1000) {
@@ -707,7 +721,7 @@ async function fetchCandidateCards(): Promise<{
       const { data, error } = await supabaseAdmin
         .from("block_cards")
         .select(
-          "monday_item_id, lead_name, office_location, card_date, sale, sale_price, wcc, report_reps",
+          "monday_item_id, lead_name, office_location, card_date, sale, sale_price, wcc, phone, report_reps",
         )
         .order("monday_item_id")
         .range(from, from + 999);
@@ -722,7 +736,7 @@ async function fetchCandidateCards(): Promise<{
     if (!repsAvailable) {
       const { data, error } = await supabaseAdmin
         .from("block_cards")
-        .select("monday_item_id, lead_name, office_location, card_date, sale, sale_price, wcc")
+        .select("monday_item_id, lead_name, office_location, card_date, sale, sale_price, wcc, phone")
         .order("monday_item_id")
         .range(from, from + 999);
       if (error) throw new Error(error.message);
@@ -740,6 +754,7 @@ async function fetchCandidateCards(): Promise<{
         sold: soldSet.has((r.sale ?? "").trim().toLowerCase()),
         _norm: normalizeCustomer(r.lead_name ?? ""),
         _tkey: customerTokens(r.lead_name ?? "").join(" "),
+        _phone: phoneKey(r.phone),
       });
     }
     if (!rows || rows.length < 1000) break;
@@ -780,7 +795,9 @@ export function withinDays(cards: SoldCardLite[], aroundISO: string, days: numbe
  *  cancel, and the fallback keeps sloppy Date Sold entry working. `pools` is
  *  tried in order (sold cards first, then every card for cancel rows), and the
  *  date-true pass sweeps ALL pools before any date-blind one does. `amounts`
- *  is the row's dollar figures (Sale Amt / Cancel Amt) — see bestSoldMatch. */
+ *  is the row's dollar figures (Sale Amt / Cancel Amt) — see bestSoldMatch.
+ *  `phone` is the row's phone digits (phoneKey), the last-resort tier when
+ *  every name tier misses — see the Bunzal/Punzal note on bestSoldMatch. */
 export function matchReportRow(
   pools: SoldCardLite[][],
   reportNorm: string,
@@ -788,18 +805,19 @@ export function matchReportRow(
   saleDateISO: string | null,
   fallbackISO: string | null,
   amounts: Array<number | null> = [],
+  phone: string | null = null,
 ): { card: SoldCardLite; dateTrue: boolean } | null {
   if (saleDateISO) {
     for (const pool of pools) {
       const near = withinDays(pool, saleDateISO, SALE_DATE_WINDOW_DAYS);
-      const hit = bestSoldMatch(near, reportNorm, office, saleDateISO, amounts);
+      const hit = bestSoldMatch(near, reportNorm, office, saleDateISO, amounts, phone);
       // dateTrue: the row carried a real Date Sold and the card ran within
       // the window of it — the only tier trusted to rewrite report_reps.
       if (hit) return { card: hit, dateTrue: true };
     }
   }
   for (const pool of pools) {
-    const hit = bestSoldMatch(pool, reportNorm, office, saleDateISO ?? fallbackISO, amounts);
+    const hit = bestSoldMatch(pool, reportNorm, office, saleDateISO ?? fallbackISO, amounts, phone);
     if (hit) return { card: hit, dateTrue: false };
   }
   return null;
@@ -811,6 +829,15 @@ export function matchReportRow(
  *  office-prefixed; a card priced at one of the row's dollar figures beats
  *  the rest (preferAmountMatch — a repeat customer's sale and reload rows
  *  must land on their own cards); nearest card_date breaks remaining ties.
+ *  Phone fallback (owner, 2026-09-02): when EVERY name tier misses, cards
+ *  sharing the row's phone digits qualify — the office spelled one side's
+ *  customer wrong (report "Punzal, Melissa & Ray" vs Block card "Melissa and
+ *  Ray Bunzal", Aug '26: the row never bound, so the rep-pair stamp never
+ *  landed and Jovanny kept the whole split). Names first, always: the phone
+ *  tier never overrides a name match, and a customer's other same-phone
+ *  cards (office appts, resets) are held off by the pool order (sold cards
+ *  first), the amount preference, and the nearest-date tiebreak — the same
+ *  guards every name tier relies on.
  *  Callers should reach for matchReportRow instead — this alone is
  *  date-blind whenever a name tier produces exactly one candidate. */
 export function bestSoldMatch(
@@ -819,6 +846,7 @@ export function bestSoldMatch(
   office: string | null,
   aroundISO: string | null,
   amounts: Array<number | null> = [],
+  phone: string | null = null,
 ): SoldCardLite | null {
   if (!reportNorm) return null;
   const pool = office ? cards.filter((c) => c.office_location === office) : cards;
@@ -851,6 +879,11 @@ export function bestSoldMatch(
         );
       });
     }
+  }
+  if (cands.length === 0 && phone !== null && phone !== "") {
+    // Last resort: the customer's phone digits — see the Bunzal/Punzal note
+    // above. Only reached when every name tier found nothing.
+    cands = pool.filter((c) => c._phone !== "" && c._phone === phone);
   }
   if (cands.length === 0) return null;
   cands = preferAmountMatch(cands, amounts);
@@ -998,6 +1031,9 @@ async function collectReportBoard(
       };
       const rowAmt = colMoney("sale amt");
       const cancelAmt = colMoney("cancel amt");
+      // The row's phone digits, for the matcher's last-resort tier when the
+      // two sides spell the customer differently (Bunzal/Punzal, Aug '26).
+      const rowPhone = phoneKey(colText(cols, "phone"));
       // Non-cancel rows only stamp cards still marked sold; a CANCEL row
       // falls back to any card for that customer — the sale's Block card
       // usually had its Sale cell reverted when the job died.
@@ -1009,6 +1045,7 @@ async function collectReportBoard(
         saleDate,
         monthMidISO,
         [rowAmt, cancelAmt],
+        rowPhone,
       );
       if (!match) {
         if (isCancel) result.unmatched.push(name);
