@@ -366,9 +366,12 @@ export type RepStats = {
    *  Appt", which it almost always does. Money still counts in Revenue. */
   reloads: number;
   /** Sales later cancelled on the monthly report (Cancelled / CTC) — out of
-   *  Sold and Revenue. A TALLY, not a bucket: each one is already counted in
-   *  `pm` (owner, 2026-07-30 — the demo ran), so never add this to the
-   *  result columns or Appts will double-count. */
+   *  Sold and Revenue. A TALLY, not a bucket: a LEAD sale's cancel is
+   *  already counted in `pm` (owner, 2026-07-30 — the demo ran), so never
+   *  add this to the result columns or Appts will double-count. A cancel on
+   *  an office-appt card (a dead reload/upsell — Ledger, Aug '26) is tallied
+   *  here WITHOUT a pm: no lead was sat, but the owner counts every dead
+   *  written sale. */
   cancels: number;
   /** Cards with no result yet — internal tally only: NOT in appts and never
    *  displayed (owner, 2026-07-30). */
@@ -555,6 +558,12 @@ export function aggregateCloseKombat(
       // Job visit / upsale / check pickup: not a lead and not a reload, so
       // only the office tally — but its money still lands in revenue below.
       s.officeAppts += 1;
+      // A written sale that DIED on an office-appt card still joins the
+      // Cancels tally (owner counts every dead sale: "5 cancelled sales in
+      // SD and 1 in OC", 2026-09-02 — the 1 was Ledger's $30,500 reload
+      // cancel, invisible here because reloads live on office-appt cards).
+      // No appt and no PM: an office appt is never a lead sit.
+      if (outcome === "cancelled") s.cancels += 1;
     } else if (outcome === "unmarked") {
       // No result on the board yet: not an appt at all (owner, 2026-07-30) —
       // internal tally only, the card joins the stats once it's resulted.
