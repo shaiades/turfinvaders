@@ -12,10 +12,17 @@ import {
   auditBlockCards,
   cardOutcome,
   chooseReportReps,
+  phoneKey,
   preferAmountMatch,
   type BlockCard,
   type ReportRepHit,
 } from "../src/lib/close-kombat";
+import {
+  bestSoldMatch,
+  customerTokens,
+  matchReportRow,
+  normalizeCustomer,
+} from "../src/lib/block-cards.server";
 
 let n = 0;
 const card = (over: Partial<BlockCard>): BlockCard => ({
@@ -1339,6 +1346,98 @@ eq(
 );
 eq("amount: single candidate is never vetoed", picks(preferAmountMatch([buford84], [12048])), "84");
 eq("amount: sub-cent drift still matches", picks(preferAmountMatch(bufords, [9900.001])), "84");
+
+// ---- bestSoldMatch: amount-guided tier fallthrough (2026-09-08) ----------
+// THE DANG CASE: the cancel row "Dang, Nate & Andy (copy)" (Cancel Amt
+// $68,200) is an exact TOKEN match for the customer's $3,000 reload card,
+// while the $68,200 sale card ("Nate (Son) Andy (Father) Dang") only
+// matches one tier deeper via token containment. The row's dollar figure
+// must pull the bind down to the cents-exact card — the September reload
+// must not die for August's cancel.
+const lite = (over: {
+  monday_item_id: string;
+  lead_name: string;
+  card_date: string;
+  sale_price: number | null;
+  phone?: string;
+  sold?: boolean;
+}) => ({
+  monday_item_id: over.monday_item_id,
+  lead_name: over.lead_name,
+  office_location: "San Diego",
+  card_date: over.card_date,
+  wcc: null,
+  sale_price: over.sale_price,
+  report_reps: null,
+  sold: over.sold ?? true,
+  _norm: normalizeCustomer(over.lead_name),
+  _tkey: customerTokens(over.lead_name).join(" "),
+  _phone: phoneKey(over.phone ?? null),
+});
+const dangSale = lite({
+  monday_item_id: "dang-sale",
+  lead_name: "Nate (Son) Andy (Father) Dang (copy)",
+  card_date: "2026-08-31",
+  sale_price: 68200,
+});
+const dangReload = lite({
+  monday_item_id: "dang-reload",
+  lead_name: "Nate & Andy Dang (copy)",
+  card_date: "2026-09-01",
+  sale_price: 3000,
+});
+const dangNorm = normalizeCustomer("Dang, Nate & Andy (copy)");
+eq(
+  "tiers: row amount pulls the bind past an exact-token tier",
+  bestSoldMatch([dangReload, dangSale], dangNorm, "San Diego", "2026-08-31", [null, 68200])
+    ?.monday_item_id,
+  "dang-sale",
+);
+eq(
+  "tiers: without a figure the exact-token tier stands",
+  bestSoldMatch([dangReload, dangSale], dangNorm, "San Diego", "2026-08-31", [null, null])
+    ?.monday_item_id,
+  "dang-reload",
+);
+eq(
+  "tiers: figure matching the winning tier stays put",
+  bestSoldMatch([dangReload, dangSale], dangNorm, "San Diego", "2026-09-01", [3000, null])
+    ?.monday_item_id,
+  "dang-reload",
+);
+eq(
+  "tiers: no cents-exact card anywhere leaves the winner unchanged",
+  bestSoldMatch([dangReload, dangSale], dangNorm, "San Diego", "2026-08-31", [50000, null])
+    ?.monday_item_id,
+  "dang-reload",
+);
+// Phone stays the last resort AND can supply the cents-exact card when the
+// name tiers hold a wrong-priced candidate (both guards at once).
+const bunzal = lite({
+  monday_item_id: "bunzal",
+  lead_name: "Melissa and Ray Bunzal (copy)",
+  card_date: "2026-08-25",
+  sale_price: 30296,
+  phone: "8588372776",
+});
+eq(
+  "tiers: all name tiers miss, phone still binds",
+  bestSoldMatch([bunzal], normalizeCustomer("Punzal, Melissa & Ray (copy)"), "San Diego", "2026-08-25", [null, 23796], "8588372776")
+    ?.monday_item_id,
+  "bunzal",
+);
+eq(
+  "tiers: matchReportRow date-true pass carries the fallthrough",
+  matchReportRow(
+    [[dangReload, dangSale]],
+    dangNorm,
+    "San Diego",
+    "2026-08-31",
+    null,
+    [null, 68200],
+  )?.card.monday_item_id,
+  "dang-sale",
+);
 
 console.log(`checks run, ${fails.length} failure(s)`);
 for (const f of fails) console.log("  FAIL " + f);
