@@ -12,7 +12,16 @@ export type RealtimeTable = string | { table: string; event?: RealtimeEvent };
  * through a ref so changing them retargets the invalidation without tearing
  * down the socket. Keep channel names unique per mounted consumer — two
  * co-mounted subscribers to the same table must not share a name.
+ *
+ * Invalidations are TRAILING-DEBOUNCED (2026-09-02): a full-history sync
+ * upserts ~1,400 block_cards rows, and invalidating per event made the open
+ * Close Kombat page cancel-and-refire its 2-3-page fetch continuously for
+ * minutes — the cancelled pages kept running (see the abortSignal note in
+ * CloseKombat.tsx) and ~1,000 zombie requests briefly saturated prod REST.
+ * One flush per quiet burst is enough: live edits land within a second, and
+ * a long write storm resolves to a single refetch when it ends.
  */
+const INVALIDATE_DEBOUNCE_MS = 1000;
 export function useRealtimeInvalidate({
   channel,
   tables,
@@ -38,13 +47,20 @@ export function useRealtimeInvalidate({
     if (!enabled) return;
     const specs = JSON.parse(tablesKey) as Array<{ table: string; event: RealtimeEvent }>;
     const ch = supabase.channel(channel);
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const flush = () => {
+      timer = null;
+      for (const key of keysRef.current) qc.invalidateQueries({ queryKey: key });
+    };
     for (const spec of specs) {
       ch.on("postgres_changes", { event: spec.event, schema: "public", table: spec.table }, () => {
-        for (const key of keysRef.current) qc.invalidateQueries({ queryKey: key });
+        if (timer !== null) clearTimeout(timer);
+        timer = setTimeout(flush, INVALIDATE_DEBOUNCE_MS);
       });
     }
     ch.subscribe();
     return () => {
+      if (timer !== null) clearTimeout(timer);
       supabase.removeChannel(ch);
     };
   }, [qc, channel, enabled, tablesKey]);
