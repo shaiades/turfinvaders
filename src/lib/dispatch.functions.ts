@@ -77,9 +77,6 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
     // profiles.team_id that removal already nulled.
     const snapshotTeam: Record<string, string> = {};
     const snapshotDate: Record<string, string> = {};
-    // Dates with any daily_logs row per canvasser — the board's Day tab uses
-    // this to keep former reps only on days they actually worked.
-    const logDates: Record<string, string[]> = {};
     // Office-sliced mirrors of the same aggregates, for the cross-office
     // Confirmation van (owner, 2026-08-10): each office tab shows only that
     // office's share. daily_logs rows carry the office they were counted
@@ -98,7 +95,6 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
     });
     for (const l of logsR.data ?? []) {
       if (!l.canvasser_id) continue;
-      if (l.log_date) (logDates[l.canvasser_id] ??= []).push(l.log_date);
       if (
         l.team_id &&
         l.log_date &&
@@ -203,7 +199,6 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
       officeVolume,
       officeResults,
       snapshotTeam,
-      logDates,
     };
   });
 
