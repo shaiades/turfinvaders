@@ -52,7 +52,6 @@ import {
   lastWorkedDaysBefore,
   monthStartISO,
   nextMonthStartISO,
-  weekStartOfISO,
 } from "@/lib/dates";
 import { useWeekSelector } from "@/hooks/useWeekSelector";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
@@ -203,19 +202,18 @@ function FleetDispatchInner({
   const range: ResolvedRange = useMemo(() => {
     if (tab === "day") {
       const d = dayISO;
-      // Owner directive (2026-08-04): the "As Leads" half of the board reads
-      // as THIS WEEK'S RESULTS IN PROGRESS — results, Points, and Volume
-      // always cover the full Mon–Sun week containing the selected day
-      // (matching the Weekly Results table), while "In the Field" keeps the
-      // day's own funnel numbers.
-      const wk = weekStartOfISO(d);
+      // Every column reads the SELECTED DAY (owner, 2026-09-08 — supersedes
+      // the 2026-08-04 week-in-progress directive): funnel = leads submitted
+      // that day, results/Points/Sales = cards run on that block day, Volume
+      // = sale dollars confirmed that day (midnight → midnight PT). Day
+      // cells sum to the Week tab across its Mon–Sun.
       return {
         funnelStart: d,
         funnelEnd: d,
-        logStart: wk,
-        logEnd: addDaysISO(wk, 6),
-        volStartISO: laMidnightUtcISO(wk),
-        volEndISO: laMidnightUtcISO(addDaysISO(wk, 7)),
+        logStart: d,
+        logEnd: d,
+        volStartISO: laMidnightUtcISO(d),
+        volEndISO: laMidnightUtcISO(addDaysISO(d, 1)),
         label: isViewingToday ? "Today" : d === yday ? "Yesterday" : fmtWorkedDay(d),
         sub: d,
         isLive: isViewingToday,
@@ -263,27 +261,24 @@ function FleetDispatchInner({
     isCurrentMonth,
   ]);
 
-  // Dates stamped on the section captions. On the Day tab the two halves
-  // cover DIFFERENT windows: "In the Field" is the selected day alone,
-  // "As Leads" spans that day's Mon–Sun week (owner directive 2026-08-04),
-  // so each caption stamps its own window — the day's own date rather than
-  // range.label's "Today"/"Yesterday" wording, and the log window's week
-  // for the results half. Numeric M/D endpoints and the short month name —
-  // spelled-out forms ("Aug 31 – Sep 6, 2026", "September 2026") wrap the
-  // caption at the row's mobile min-width.
+  // Date stamped on the section captions. Both halves cover the SAME window
+  // on every tab now (day = the selected day, week = Mon–Sun, month = the
+  // calendar month), so one label serves "In the Field" and "As Leads" alike
+  // — the day's own date rather than range.label's "Today"/"Yesterday"
+  // wording. Numeric M/D endpoints and the short month name — spelled-out
+  // forms ("Aug 31 – Sep 6, 2026", "September 2026") wrap the caption at the
+  // row's mobile min-width.
   const mdISO = (iso: string) => `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}`;
   const monthShortLabel = new Intl.DateTimeFormat(undefined, {
     month: "short",
     year: "numeric",
   }).format(dateFromISO(monthStart));
-  const fieldDateLabel =
+  const rangeDateLabel =
     tab === "day"
       ? fmtWorkedDay(dayISO)
       : tab === "week"
         ? `${mdISO(range.funnelStart)} – ${mdISO(range.funnelEnd)}`
         : monthShortLabel;
-  const leadsDateLabel =
-    tab === "month" ? monthShortLabel : `${mdISO(range.logStart)} – ${mdISO(range.logEnd)}`;
 
   // --- Queries (one key family; realtime prefix-invalidates all of it) ---
 
@@ -462,14 +457,6 @@ function FleetDispatchInner({
     }
     return map;
   }, [production.data, metrics]);
-  // Dates with a daily_logs row, per canvasser — the Day tab's former gate.
-  const logDatesByUser = useMemo(() => {
-    const m = new Map<string, Set<string>>();
-    for (const [cid, dates] of Object.entries(production.data?.logDates ?? {})) {
-      m.set(cid, new Set(dates));
-    }
-    return m;
-  }, [production.data]);
   // One effective-team rule everywhere (office admission, slicing, bucketing):
   // current members follow their live van; former members follow the van
   // their in-range rows were stamped with, live team_id as the fallback for
@@ -770,16 +757,10 @@ function FleetDispatchInner({
     // where they actually produced (same predicate as the unassigned pen),
     // so they never appear as forward-looking zero rows. Filtering HERE —
     // before totals and bucketing — keeps the top tiles ≡ Σ van cards.
-    // The Day tab additionally requires activity ON that day (points/volume
-    // span the whole week in progress, and a rep removed Tuesday must not
-    // haunt Wednesday's live board on Monday's numbers).
-    const dayISO = tab === "day" ? range.funnelStart : null;
-    const gated = enriched.filter((r) => {
-      if (!r.g.former) return true;
-      if (!hasProduction(r)) return false;
-      if (!dayISO) return true;
-      return r.sub > 0 || r.g.ids.some((id) => logDatesByUser.get(id)?.has(dayISO));
-    });
+    // Every query window is scoped to the selected range now (the Day tab
+    // included), so in-range production alone decides — a rep removed
+    // Tuesday shows on Monday's day view and on no later day.
+    const gated = enriched.filter((r) => !r.g.former || hasProduction(r));
     return gated.sort((a, b) => {
       if (b.sub !== a.sub) return b.sub - a.sub;
       if (b.conf !== a.conf) return b.conf - a.conf;
@@ -795,9 +776,6 @@ function FleetDispatchInner({
     crossOfficeVanIds,
     sliceValues,
     snapshotTeamByUser,
-    logDatesByUser,
-    tab,
-    range.funnelStart,
   ]);
 
   const totals = useMemo(() => {
@@ -883,10 +861,10 @@ function FleetDispatchInner({
 
   const footnote =
     tab === "day"
-      ? "Funnel columns show the selected day, credited to the day the lead was SUBMITTED — a confirm recorded Monday for a Friday lead updates Friday, so recent days keep filling in for a few days. Lead results, Sales, and Volume are this week's results in progress — the full Mon–Sun week containing that day, credited to each card's block day, Pacific time."
+      ? "Every number shows the selected day. Funnel columns credit the day the lead was SUBMITTED — a confirm recorded Monday for a Friday lead updates Friday, so recent days keep filling in for a few days. Lead results, Sales, and Points credit each card's BLOCK day (the weekday it ran on the Block board). Volume is sale dollars confirmed that day, midnight to midnight Pacific."
       : tab === "week"
         ? "Funnel counts credit each lead's submission day, so a just-closed week keeps filling in early the next week. Lead results credit each card's BLOCK day (the weekday it ran on the Block board), Mon–Sun of the selected week, Pacific time. Points: PM = 1 pt, Sale = 2 pts; BO/RS = 0. Volume runs Mon 12:00 AM → next Mon 12:00 AM Pacific."
-        : "Points cover the calendar month, Pacific time (PM = 1 pt, Sale = 2 pts). Volume resets on the 1st, 12:00 AM Pacific.";
+        : "Every number covers the calendar month, Pacific time — funnel counts on each lead's submission day, lead results on each card's block day. Points: PM = 1 pt, Sale = 2 pts. Volume resets on the 1st, 12:00 AM Pacific.";
 
   return (
     <div className="space-y-4">
@@ -1109,8 +1087,8 @@ function FleetDispatchInner({
           profiles={allProfiles}
           rolesByUser={rolesByUser}
           focusTeamId={focusTeamId}
-          fieldDateLabel={fieldDateLabel}
-          leadsDateLabel={leadsDateLabel}
+          fieldDateLabel={rangeDateLabel}
+          leadsDateLabel={rangeDateLabel}
         />
       )}
 
