@@ -252,26 +252,42 @@ function CloseKombatInner() {
     range.volEnd > range.end ? range.volEnd : range.end,
     SAVE_LINK_PAD_DAYS,
   );
+  // Exactly the BlockCard fields — select("*") also dragged created_at /
+  // updated_at across the wire for thousands of rows, for nothing.
+  const CARD_COLUMNS =
+    "monday_item_id, board_id, office_location, card_date, group_title, lead_name, reps, " +
+    "iss, bo, ol, rs, pm, sale, sale_price, products, canvass_stats, wcc, comments, phone, " +
+    "report_reps";
   const cardsQuery = useQuery({
     queryKey: ["block_cards", fetchStart, fetchEnd],
-    queryFn: async () => {
+    // The abort signal MUST reach every page request (2026-09-02): a
+    // full-history sync's realtime storm invalidated this query over and
+    // over, react-query cancelled each stale fetch — but the un-wired page
+    // requests kept running. ~1,000 zombie queries piled onto prod REST and
+    // froze the page. With the signal wired, a cancelled refetch actually
+    // aborts its in-flight pages.
+    queryFn: async ({ signal }) => {
       const PAGE = 1000;
       const all: BlockCard[] = [];
       for (let from = 0; ; from += PAGE) {
         const { data, error } = await supabase
           .from("block_cards")
-          .select("*")
+          .select(CARD_COLUMNS)
           .gte("card_date", fetchStart)
           .lte("card_date", fetchEnd)
           .order("monday_item_id")
-          .range(from, from + PAGE - 1);
+          .range(from, from + PAGE - 1)
+          .abortSignal(signal);
         if (error) throw error;
-        all.push(...((data ?? []) as BlockCard[]));
+        all.push(...((data ?? []) as unknown as BlockCard[]));
         if (!data || data.length < PAGE) break;
       }
       return all;
     },
     staleTime: 15_000,
+    // Range/view flips keep showing the previous range's real numbers for
+    // the second the new fetch takes — all-zero tiles read as data loss.
+    placeholderData: (prev) => prev,
   });
 
   useRealtimeInvalidate({
