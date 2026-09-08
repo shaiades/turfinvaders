@@ -838,6 +838,16 @@ export function matchReportRow(
  *  cards (office appts, resets) are held off by the pool order (sold cards
  *  first), the amount preference, and the nearest-date tiebreak — the same
  *  guards every name tier relies on.
+ *  Amount-guided tier fallthrough (2026-09-08): when the winning name tier
+ *  holds NO card at any of the row's dollar figures, a DEEPER tier whose
+ *  card is cents-exact wins instead — the dollar figure is identity
+ *  evidence (preferAmountMatch's rule) and it must arbitrate ACROSS tiers
+ *  too. The Dang cancel row (Cancel Amt $68,200, "Dang, Nate & Andy") was
+ *  an exact token match for the customer's $3,000 reload card and killed
+ *  it, while the $68,200 sale card ("Nate (Son) Andy (Father) Dang") sat
+ *  one tier deeper in token containment. Names still gate everything: the
+ *  probe only visits tiers below the winner, so a probed card matched the
+ *  customer by name (or shares the row's phone) either way.
  *  Callers should reach for matchReportRow instead — this alone is
  *  date-blind whenever a name tier produces exactly one candidate. */
 export function bestSoldMatch(
@@ -850,46 +860,79 @@ export function bestSoldMatch(
 ): SoldCardLite | null {
   if (!reportNorm) return null;
   const pool = office ? cards.filter((c) => c.office_location === office) : cards;
-  let cands = pool.filter((c) => c._norm === reportNorm);
-  if (cands.length === 0 && reportNorm.length >= 8) {
-    cands = pool.filter(
-      (c) =>
-        c._norm.length >= 8 && (c._norm.startsWith(reportNorm) || reportNorm.startsWith(c._norm)),
-    );
-  }
-  if (cands.length === 0) {
-    // Order-insensitive tiers: "Muilwyk, Wolfgang & Trudi" (report) is
-    // "Wolfgang and Trudi Muilwyk" (card). Exact sorted-token key first,
-    // then full containment of the shorter name — the report shortens
-    // "Norma(Daughter)& Jesus(Dad)&Rachel(mom) Miranda" to "Miranda, Norma",
-    // so every one of the shorter side's tokens (≥2 of them, at least one
-    // ≥4 chars as a surname-ish anchor) must appear in the longer side.
-    const tokens = customerTokens(reportNorm);
-    const tkey = tokens.join(" ");
-    cands = pool.filter((c) => c._tkey !== "" && c._tkey === tkey);
-    if (cands.length === 0 && tokens.length >= 2) {
-      const tset = new Set(tokens);
-      cands = pool.filter((c) => {
-        const ctokens = c._tkey.split(" ").filter((t) => t !== "");
-        if (ctokens.length < 2) return false;
-        const [small, big] =
-          ctokens.length <= tokens.length ? [ctokens, tset] : [tokens, new Set(ctokens)];
-        return (
-          small.length >= 2 && small.some((t) => t.length >= 4) && small.every((t) => big.has(t))
-        );
-      });
+  // Order-insensitive tiers: "Muilwyk, Wolfgang & Trudi" (report) is
+  // "Wolfgang and Trudi Muilwyk" (card). Exact sorted-token key after the
+  // norm tiers, then full containment of the shorter name — the report
+  // shortens "Norma(Daughter)& Jesus(Dad)&Rachel(mom) Miranda" to
+  // "Miranda, Norma", so every one of the shorter side's tokens (≥2 of
+  // them, at least one ≥4 chars as a surname-ish anchor) must appear in
+  // the longer side. The phone tier stays last — see the Bunzal/Punzal
+  // note above; it is only reached when every name tier found nothing.
+  const tokens = customerTokens(reportNorm);
+  const tkey = tokens.join(" ");
+  const tset = new Set(tokens);
+  const tiers: Array<() => SoldCardLite[]> = [
+    () => pool.filter((c) => c._norm === reportNorm),
+    () =>
+      reportNorm.length >= 8
+        ? pool.filter(
+            (c) =>
+              c._norm.length >= 8 &&
+              (c._norm.startsWith(reportNorm) || reportNorm.startsWith(c._norm)),
+          )
+        : [],
+    () => pool.filter((c) => c._tkey !== "" && c._tkey === tkey),
+    () =>
+      tokens.length >= 2
+        ? pool.filter((c) => {
+            const ctokens = c._tkey.split(" ").filter((t) => t !== "");
+            if (ctokens.length < 2) return false;
+            const [small, big] =
+              ctokens.length <= tokens.length ? [ctokens, tset] : [tokens, new Set(ctokens)];
+            return (
+              small.length >= 2 &&
+              small.some((t) => t.length >= 4) &&
+              small.every((t) => big.has(t))
+            );
+          })
+        : [],
+    () =>
+      phone !== null && phone !== ""
+        ? pool.filter((c) => c._phone !== "" && c._phone === phone)
+        : [],
+  ];
+  let cands: SoldCardLite[] = [];
+  let tierIdx = tiers.length;
+  for (let i = 0; i < tiers.length; i++) {
+    const t = tiers[i]();
+    if (t.length > 0) {
+      cands = t;
+      tierIdx = i;
+      break;
     }
   }
-  if (cands.length === 0 && phone !== null && phone !== "") {
-    // Last resort: the customer's phone digits — see the Bunzal/Punzal note
-    // above. Only reached when every name tier found nothing.
-    cands = pool.filter((c) => c._phone !== "" && c._phone === phone);
-  }
   if (cands.length === 0) return null;
-  cands = preferAmountMatch(cands, amounts);
-  if (cands.length === 1 || !aroundISO) return cands[0];
+  const cents = new Set(
+    amounts.filter((a): a is number => a !== null && a > 0).map((a) => Math.round(a * 100)),
+  );
+  const atAmount = (list: SoldCardLite[]) =>
+    list.filter((c) => c.sale_price !== null && cents.has(Math.round(c.sale_price * 100)));
+  let final = preferAmountMatch(cands, amounts);
+  if (cents.size > 0 && atAmount(cands).length === 0) {
+    // The Dang fallthrough (see the doc comment): the winning tier has no
+    // card at the row's figure — a deeper tier's cents-exact card is the
+    // better read. Without one, the winner stands unchanged.
+    for (let i = tierIdx + 1; i < tiers.length; i++) {
+      const exact = atAmount(tiers[i]());
+      if (exact.length > 0) {
+        final = exact;
+        break;
+      }
+    }
+  }
+  if (final.length === 1 || !aroundISO) return final[0];
   const target = Date.parse(aroundISO);
-  return cands.reduce((best, c) => {
+  return final.reduce((best, c) => {
     const d = (x: SoldCardLite) =>
       x.card_date ? Math.abs(Date.parse(x.card_date) - target) : Number.MAX_SAFE_INTEGER;
     return d(c) < d(best) ? c : best;
