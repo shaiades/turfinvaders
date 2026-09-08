@@ -31,7 +31,6 @@ import {
   laTodayISO,
   monthStartISO,
   nextMonthStartISO,
-  weekStartOfISO,
 } from "@/lib/dates";
 import {
   aggregateCloseKombat,
@@ -71,11 +70,6 @@ type DayPreset = "today" | "yesterday";
 type ResolvedRange = {
   start: string;
   end: string;
-  /** Volume window for the standings' far-right money (owner, 2026-08-04,
-   *  same convention as the dispatch board): the Mon–Sun week containing
-   *  the day on the Day view; the selected range on Week/Month. */
-  volStart: string;
-  volEnd: string;
   label: string;
   sub: string;
   isLive: boolean;
@@ -191,12 +185,9 @@ function CloseKombatInner() {
   const range: ResolvedRange = useMemo(() => {
     if (tab === "day") {
       const d = dayPreset === "yesterday" ? addDaysISO(todayISO, -1) : todayISO;
-      const wk = weekStartOfISO(d);
       return {
         start: d,
         end: d,
-        volStart: wk,
-        volEnd: addDaysISO(wk, 6),
         label: dayPreset === "yesterday" ? "Yesterday" : "Today",
         sub: d,
         isLive: dayPreset === "today",
@@ -206,8 +197,6 @@ function CloseKombatInner() {
       return {
         start: week.weekStartISO,
         end: week.weekEndISO,
-        volStart: week.weekStartISO,
-        volEnd: week.weekEndISO,
         label: formatWeekRange(week.weekStart, week.weekEnd),
         sub: `${week.weekStartISO} → ${week.weekEndISO}`,
         isLive: week.isCurrentWeek,
@@ -217,8 +206,6 @@ function CloseKombatInner() {
     return {
       start: monthStart,
       end: monthEnd,
-      volStart: monthStart,
-      volEnd: monthEnd,
       label: monthLabel,
       sub: `${monthStart} → ${monthEnd}`,
       isLive: isCurrentMonth,
@@ -245,13 +232,10 @@ function CloseKombatInner() {
   // SAVE_LINK_PAD_DAYS of pure link context on each side; the aggregate
   // takes the full set and counts only its own window.
   const fetchStart = addDaysISO(
-    range.volStart < range.start ? range.volStart : range.start,
+    range.start,
     -SAVE_LINK_PAD_DAYS,
   );
-  const fetchEnd = addDaysISO(
-    range.volEnd > range.end ? range.volEnd : range.end,
-    SAVE_LINK_PAD_DAYS,
-  );
+  const fetchEnd = addDaysISO(range.end, SAVE_LINK_PAD_DAYS);
   // Exactly the BlockCard fields — select("*") also dragged created_at /
   // updated_at across the wire for thousands of rows, for nothing.
   const CARD_COLUMNS =
@@ -307,19 +291,10 @@ function CloseKombatInner() {
     () => aggregateCloseKombat(officeCards, { start: range.start, end: range.end }),
     [officeCards, range.start, range.end],
   );
-  // The standings' far-right money: sale volume over the week in progress on
-  // the Day view (the selected range on Week/Month) — owner, 2026-08-04,
-  // matching the dispatch board's convention.
-  const vol = useMemo(() => {
-    const agg = aggregateCloseKombat(officeCards, {
-      start: range.volStart,
-      end: range.volEnd,
-    });
-    return {
-      byRep: new Map(agg.reps.map((r) => [r.rep, r.revenue])),
-      total: agg.totals.revenue,
-    };
-  }, [officeCards, range.volStart, range.volEnd]);
+  // The standings' far-right money is the view's OWN range (owner,
+  // 2026-09-08, superseding the 2026-08-04 week-in-progress convention the
+  // dispatch board also dropped that day in PR #141): Today shows today's
+  // volume, never yesterday's sale riding along on the week.
 
   // Board-hygiene callouts for the office (ADMIN tier — realRole, so "View
   // as" previews don't hide it from the owner). Same cards the stats read,
@@ -612,7 +587,7 @@ function CloseKombatInner() {
                     <th className="text-right py-2 px-2 font-normal">Leads / Sale</th>
                     <th
                       className="text-right py-2 pl-2 font-normal"
-                      title="Sale volume — Mon–Sun week in progress on the Day view; the selected range on Week/Month"
+                      title="Sale volume over the range on screen — Today shows today's money only"
                     >
                       Volume
                     </th>
@@ -703,10 +678,10 @@ function CloseKombatInner() {
                       <td
                         className={cn(
                           "py-2.5 pl-2 text-right tabular-nums",
-                          metricText(vol.byRep.get(r.rep) ?? 0, "text-kombat-gold"),
+                          metricText(r.revenue, "text-kombat-gold"),
                         )}
                       >
-                        {fmtMoney(vol.byRep.get(r.rep) ?? 0)}
+                        {fmtMoney(r.revenue)}
                       </td>
                     </tr>
                   ))}
@@ -765,7 +740,7 @@ function CloseKombatInner() {
                     <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
                       {fmtRatio(totals.leadsToSale)}
                     </td>
-                    <td className="py-2.5 pl-2 text-right tabular-nums">{fmtMoney(vol.total)}</td>
+                    <td className="py-2.5 pl-2 text-right tabular-nums">{fmtMoney(totals.revenue)}</td>
                   </tr>
                 </tfoot>
               </table>
@@ -791,8 +766,8 @@ function CloseKombatInner() {
                       </span>
                     }
                     right={
-                      <span className={metricText(vol.byRep.get(r.rep) ?? 0, "text-kombat-gold")}>
-                        {fmtMoney(vol.byRep.get(r.rep) ?? 0)}
+                      <span className={metricText(r.revenue, "text-kombat-gold")}>
+                        {fmtMoney(r.revenue)}
                       </span>
                     }
                   />
@@ -806,7 +781,7 @@ function CloseKombatInner() {
                       All cards
                     </span>
                   }
-                  right={<span className="text-victory">{fmtMoney(vol.total)}</span>}
+                  right={<span className="text-victory">{fmtMoney(totals.revenue)}</span>}
                 />
                 <StatLine s={totals} />
               </MobileCard>
