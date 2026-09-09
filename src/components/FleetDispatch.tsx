@@ -56,6 +56,7 @@ import {
 } from "@/lib/dates";
 import { useWeekSelector } from "@/hooks/useWeekSelector";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
+import { Link } from "@tanstack/react-router";
 import { useAuth } from "@/hooks/useAuth";
 import { canManageTarget, isManagerRole } from "@/lib/roles";
 import { isRecentlyActive, lastActiveMap } from "@/lib/suspension";
@@ -1348,13 +1349,30 @@ function DispatchRow({
   manage?: RowManage;
   gridManage?: boolean;
 }) {
+  const { realRole } = useAuth();
+  // Managers drill from the board into the player's full profile (the
+  // canvassers/$id route is MANAGER_ROLES-guarded, so peers keep a plain
+  // name — a link would only bounce them). A merged row links to its
+  // canonical (first) id.
+  const profileId = isManagerRole(realRole) ? (r.g.ids[0] ?? null) : null;
+  const name = r.g.display_name ?? "—";
   return (
     <div
       className={`${rowGrid(gridManage || !!manage)} px-2 py-1.5 rounded border border-border bg-surface transition-colors duration-200 hover:border-neon/60`}
     >
       <span className="text-sm truncate flex items-center gap-1.5 min-w-0">
         <span aria-hidden>{r.sub > 0 ? "🔥" : "🍩"}</span>
-        <span className="truncate">{r.g.display_name ?? "—"}</span>
+        {profileId ? (
+          <Link
+            to="/canvassers/$canvasserId"
+            params={{ canvasserId: profileId }}
+            className="truncate hover:text-neon hover:underline"
+          >
+            {name}
+          </Link>
+        ) : (
+          <span className="truncate">{name}</span>
+        )}
         {r.g.role === "captain" && !r.g.former && (
           <span className="shrink-0 text-[9px] font-display uppercase tracking-widest px-1.5 py-0.5 rounded border border-accent/60 text-accent bg-accent/10">
             Captain

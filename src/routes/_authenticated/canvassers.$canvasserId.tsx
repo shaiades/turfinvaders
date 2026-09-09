@@ -1,10 +1,22 @@
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
-import { StatCard, ArcadePanel, TeamBadge, ArcadeCard } from "@/components/arcade";
+import {
+  StatCard,
+  ArcadePanel,
+  TeamBadge,
+  ArcadeCard,
+  MobileCardList,
+  MobileCard,
+  MobileCardHeader,
+  MobileStatGrid,
+  MobileStat,
+  metricText,
+} from "@/components/arcade";
 import { useAuth } from "@/hooks/useAuth";
 import { isAdminRole, isManagerRole, MANAGER_ROLES, requireRoleBeforeLoad } from "@/lib/roles";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { formatCurrency } from "@/lib/utils";
+import { addDaysISO, fmtWorkedDay, laTodayISO } from "@/lib/dates";
 import { useDateRange } from "@/hooks/useDateRange";
 import { RangeTabs } from "@/components/RangeTabs";
 import {
@@ -26,6 +38,24 @@ export const Route = createFileRoute("/_authenticated/canvassers/$canvasserId")(
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Month starts at midnight America/Los_Angeles on the 1st (LA calendar).
+
+type DayActivity = {
+  date: string;
+  doors: number;
+  contacts: number;
+  leadsCalledIn: number;
+  sits: number;
+  sales: number;
+};
+
+const ZERO_DAY = (date: string): DayActivity => ({
+  date,
+  doors: 0,
+  contacts: 0,
+  leadsCalledIn: 0,
+  sits: 0,
+  sales: 0,
+});
 
 function CanvasserProfile() {
   const { canvasserId } = Route.useParams();
@@ -104,7 +134,9 @@ function CanvasserProfile() {
   const canReadLogs = isSelf || isAdminRole(role) || role === "captain";
   const canViewRevenue = canReadLogs;
 
-  // Production stats from real daily_logs, scoped to the selected range.
+  // Production stats from real daily_logs, scoped to the selected range —
+  // the range TOTALS plus a per-day breakdown (a rep can have two rows on one
+  // day when they work SD + OC, so days are summed across offices).
   const statsQuery = useQuery({
     enabled: isRealUser && canReadLogs,
     queryKey: ["canvasser_stats", canvasserId, range.startISO, range.endISO],
@@ -112,21 +144,36 @@ function CanvasserProfile() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("daily_logs")
-        .select("doors_knocked, people_talked_to, confirmed_leads, demos_sits, sales")
+        .select(
+          "log_date, doors_knocked, people_talked_to, leads_called_in, confirmed_leads, demos_sits, sales",
+        )
         .eq("canvasser_id", canvasserId)
         .gte("log_date", range.startISO)
         .lte("log_date", range.endISO);
       if (error) throw error;
-      return (data ?? []).reduce(
+      const rows = data ?? [];
+      const byDay = new Map<string, DayActivity>();
+      for (const r of rows) {
+        const d = byDay.get(r.log_date) ?? ZERO_DAY(r.log_date);
+        d.doors += r.doors_knocked ?? 0;
+        d.contacts += r.people_talked_to ?? 0;
+        d.leadsCalledIn += r.leads_called_in ?? 0;
+        d.sits += r.demos_sits ?? 0;
+        d.sales += r.sales ?? 0;
+        byDay.set(r.log_date, d);
+      }
+      const total = rows.reduce(
         (acc, r) => ({
           doors: acc.doors + (r.doors_knocked ?? 0),
           contacts: acc.contacts + (r.people_talked_to ?? 0),
+          leadsCalledIn: acc.leadsCalledIn + (r.leads_called_in ?? 0),
           leads: acc.leads + (r.confirmed_leads ?? 0),
           sits: acc.sits + (r.demos_sits ?? 0),
           sales: acc.sales + (r.sales ?? 0),
         }),
-        { doors: 0, contacts: 0, leads: 0, sits: 0, sales: 0 },
+        { doors: 0, contacts: 0, leadsCalledIn: 0, leads: 0, sits: 0, sales: 0 },
       );
+      return { ...total, byDay };
     },
   });
 
@@ -153,6 +200,27 @@ function CanvasserProfile() {
   const level = profileQuery.data?.level ?? 0;
   const stats = statsQuery.data;
   const revenue = revenueQuery.data ?? 0;
+
+  // Per-day activity for the range, newest first, zero-filling worked-but-idle
+  // days so gaps are visible — capped at today so a mid-month view doesn't
+  // list future dates.
+  const activityDays: DayActivity[] = (() => {
+    if (!stats) return [];
+    const today = laTodayISO();
+    const last = range.endISO < today ? range.endISO : today;
+    const out: DayActivity[] = [];
+    for (let d = range.startISO; d <= last; d = addDaysISO(d, 1)) {
+      out.push(stats.byDay.get(d) ?? ZERO_DAY(d));
+    }
+    return out.reverse();
+  })();
+  const funnelEmpty =
+    !stats ||
+    (stats.doors === 0 &&
+      stats.contacts === 0 &&
+      stats.leads === 0 &&
+      stats.sits === 0 &&
+      stats.sales === 0);
 
   return (
     <div className="space-y-8">
@@ -223,6 +291,41 @@ function CanvasserProfile() {
             />
           </div>
 
+          {/* Daily Activity — the front of the funnel (doors → talks → leads
+              called in) that Fleet Dispatch doesn't carry, day by day. */}
+          <ArcadePanel
+            title="Daily Activity"
+            action={
+              <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                {range.label}
+              </span>
+            }
+          >
+            {!canReadLogs ? (
+              <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                <EyeOff className="w-4 h-4" />
+                Activity is visible to the player, their captain, and the office.
+              </div>
+            ) : statsQuery.isPending ? (
+              <div className="text-sm text-muted-foreground">Loading activity…</div>
+            ) : statsQuery.isError ? (
+              <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                Couldn't load activity for this range.
+              </div>
+            ) : (
+              <DailyActivity
+                days={activityDays}
+                total={{
+                  doors: stats?.doors ?? 0,
+                  contacts: stats?.contacts ?? 0,
+                  leadsCalledIn: stats?.leadsCalledIn ?? 0,
+                  sits: stats?.sits ?? 0,
+                  sales: stats?.sales ?? 0,
+                }}
+              />
+            )}
+          </ArcadePanel>
+
           {canViewRevenue ? (
             <ArcadePanel title="Revenue · Confirmed Sales">
               <StatCard
@@ -251,7 +354,7 @@ function CanvasserProfile() {
                   </span>
                 }
               >
-                {Object.values(stats).every((v) => v === 0) ? (
+                {funnelEmpty ? (
                   <div className="text-sm text-muted-foreground">
                     No funnel activity in this range yet.
                   </div>
@@ -298,3 +401,101 @@ function CanvasserProfile() {
   );
 }
 
+/** Range totals + a per-day grind table (newest first). Zeros dim, real
+ *  numbers ignite (metricText), same rule as the dispatch board. */
+function DailyActivity({
+  days,
+  total,
+}: {
+  days: DayActivity[];
+  total: { doors: number; contacts: number; leadsCalledIn: number; sits: number; sales: number };
+}) {
+  const COLS: Array<{
+    key: "doors" | "contacts" | "leadsCalledIn" | "sits" | "sales";
+    label: string;
+    lit: string;
+  }> = [
+    { key: "doors", label: "Doors", lit: "text-neon" },
+    { key: "contacts", label: "Talked To", lit: "text-warning" },
+    { key: "leadsCalledIn", label: "Leads Called In", lit: "text-accent" },
+    { key: "sits", label: "Sits", lit: "text-accent" },
+    { key: "sales", label: "Sales", lit: "text-victory" },
+  ];
+  return (
+    <div className="space-y-4">
+      {/* range totals */}
+      <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
+        {COLS.map((c) => (
+          <div key={c.key} className="min-w-0">
+            <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground truncate">
+              {c.label}
+            </div>
+            <div
+              className={`font-display text-2xl tabular-nums ${metricText(total[c.key], c.lit)}`}
+            >
+              {total[c.key].toLocaleString()}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {days.length === 0 ? (
+        <div className="text-sm text-muted-foreground">No days in this range yet.</div>
+      ) : (
+        <>
+          {/* Desktop: one row per day */}
+          <div className="hidden md:block overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border">
+                  <th className="py-2 pr-3 font-normal">Day</th>
+                  {COLS.map((c) => (
+                    <th key={c.key} className="py-2 px-3 text-right font-normal">
+                      {c.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {days.map((d) => (
+                  <tr key={d.date} className="border-b border-border/40">
+                    <td className="py-2 pr-3 font-medium whitespace-nowrap">
+                      {fmtWorkedDay(d.date)}
+                    </td>
+                    {COLS.map((c) => (
+                      <td
+                        key={c.key}
+                        className={`py-2 px-3 text-right tabular-nums ${metricText(d[c.key] as number, c.lit)}`}
+                      >
+                        {(d[c.key] as number).toLocaleString()}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Phone: a card per day */}
+          <MobileCardList>
+            {days.map((d) => (
+              <MobileCard key={d.date}>
+                <MobileCardHeader left={fmtWorkedDay(d.date)} />
+                <MobileStatGrid cols={3}>
+                  {COLS.map((c) => (
+                    <MobileStat
+                      key={c.key}
+                      label={c.label}
+                      value={d[c.key] as number}
+                      lit={c.lit}
+                    />
+                  ))}
+                </MobileStatGrid>
+              </MobileCard>
+            ))}
+          </MobileCardList>
+        </>
+      )}
+    </div>
+  );
+}
