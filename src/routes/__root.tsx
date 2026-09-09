@@ -62,10 +62,16 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "twitter:title", content: "Turf Invaders" },
       { property: "og:description", content: "Turf Invaders — the arcade-style canvassing tracker. Claim territory, rack up points, level up your crew." },
       { name: "twitter:description", content: "Turf Invaders — the arcade-style canvassing tracker. Claim territory, rack up points, level up your crew." },
-      { property: "og:image", content: "https://turfinvaders.com/turf-invaders-hero.png" },
-      { name: "twitter:image", content: "https://turfinvaders.com/turf-invaders-hero.png" },
+      { property: "og:image", content: "https://turfinvaders.com/turf-invaders-hero.jpg" },
+      { name: "twitter:image", content: "https://turfinvaders.com/turf-invaders-hero.jpg" },
       { name: "twitter:card", content: "summary_large_image" },
       { property: "og:type", content: "website" },
+      // Installed-PWA chrome: dark status bar + brand tint (canvassers run
+      // this from the home screen all shift).
+      { name: "theme-color", content: "#16141f" },
+      { name: "apple-mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
+      { name: "apple-mobile-web-app-title", content: "Turf Invaders" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },

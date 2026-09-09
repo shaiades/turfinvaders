@@ -12,11 +12,11 @@ import { useCanvasserStats } from "@/hooks/useCanvasserStats";
 import { ArcadeCard, TeamBadge } from "@/components/arcade";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { RankPill, RANK_PERKS } from "@/components/RankPill";
+import { PushAlertsCard } from "@/components/PushAlertsCard";
 import { TimeClock } from "@/components/TimeClock";
 import { PlanPanel } from "@/components/PlanPanel";
 import { DailyLogPanel } from "@/components/DailyLogPanel";
 import { CanvasserStats } from "@/components/CanvasserStats";
-import { LearnPanel } from "@/components/LearnPanel";
 
 /**
  * The canvasser Mission page — Stats, Playbook, and the Daily Log merged
@@ -29,7 +29,9 @@ import { LearnPanel } from "@/components/LearnPanel";
 
 const dashboardRoute = getRouteApi("/_authenticated/dashboard");
 
-export const CANVASSER_TABS = ["plan", "log", "stats", "learn"] as const;
+// "learn" left this list 2026-09-08 — Learn is a bottom-bar tab (/learn) now.
+// Old ?tab=learn deep links coerce through isCanvasserTab → last-viewed tab.
+export const CANVASSER_TABS = ["plan", "log", "stats"] as const;
 export type CanvasserTab = (typeof CANVASSER_TABS)[number];
 export const isCanvasserTab = (t: unknown): t is CanvasserTab =>
   (CANVASSER_TABS as readonly unknown[]).includes(t);
@@ -116,22 +118,32 @@ export function CanvasserMission({
         )}
       </div>
 
-      <TimeClock userId={userId} />
-      <TakeHomeWidget
-        userId={userId}
-        weeklyPay={stats.weeklyPay}
-        hourlyRate={stats.hourlyRate}
-        weekPoints={stats.weekPoints}
-      />
+      <div data-tour="mission-clock">
+        <TimeClock userId={userId} />
+      </div>
+      <div data-tour="mission-pay">
+        <TakeHomeWidget
+          userId={userId}
+          weeklyPay={stats.weeklyPay}
+          hourlyRate={stats.hourlyRate}
+          weekPoints={stats.weekPoints}
+        />
+      </div>
       <SCCERankBanner userId={userId} />
+      <PushAlertsCard
+        title="Alerts"
+        description="Turf drops and schedule changes, straight to your phone."
+      />
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as CanvasserTab)}>
-        <div className="-mx-4 px-4 sm:mx-0 sm:px-0 overflow-x-auto scrollbar-hide">
-          <TabsList className="flex w-max min-w-full flex-nowrap whitespace-nowrap md:grid md:w-full md:grid-cols-4 bg-surface border border-border p-1 h-auto">
+        <div
+          className="-mx-4 px-4 sm:mx-0 sm:px-0 overflow-x-auto scrollbar-hide"
+          data-tour="mission-tabs"
+        >
+          <TabsList className="flex w-max min-w-full flex-nowrap whitespace-nowrap md:grid md:w-full md:grid-cols-3 bg-surface border border-border p-1 h-auto">
             <ArcadeTab value="plan">Plan</ArcadeTab>
             <ArcadeTab value="log">Log</ArcadeTab>
             <ArcadeTab value="stats">Stats</ArcadeTab>
-            <ArcadeTab value="learn">Learn</ArcadeTab>
           </TabsList>
         </div>
 
@@ -146,10 +158,6 @@ export function CanvasserMission({
         <TabsContent value="stats" className="mt-6">
           <CanvasserStats stats={stats} userId={userId} onEditGoal={() => setTab("plan")} />
         </TabsContent>
-
-        <TabsContent value="learn" className="mt-6">
-          <LearnPanel />
-        </TabsContent>
       </Tabs>
     </div>
   );
@@ -159,6 +167,7 @@ function ArcadeTab({ value, children }: { value: string; children: React.ReactNo
   return (
     <TabsTrigger
       value={value}
+      data-tour={`tab-${value}`}
       className="font-display text-[10px] uppercase tracking-widest data-[state=active]:bg-[color-mix(in_oklab,var(--neon)_15%,transparent)] data-[state=active]:text-neon data-[state=active]:shadow-[0_0_18px_-4px_var(--neon)] py-2.5"
     >
       {children}

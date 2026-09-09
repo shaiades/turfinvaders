@@ -15,9 +15,10 @@ import {
 import { Clapperboard, PlayCircle, ScrollText, Search, X } from "lucide-react";
 
 /**
- * The Mission page's Learn tab: the SCCE training library (YouTube-unlisted
- * embeds + local mlx-whisper transcripts searched client-side, jump straight
- * to the moment a phrase is said) and the Objection Dojo below it.
+ * The Learn page (own bottom-bar tab for canvassers since 2026-09-08): the
+ * SCCE training library (YouTube-unlisted embeds + local mlx-whisper
+ * transcripts searched client-side, jump straight to the moment a phrase is
+ * said) and the Objection Dojo below it.
  */
 
 type SearchHit = {
@@ -94,50 +95,53 @@ export function LearnPanel() {
 
   return (
     <div className="space-y-8">
-      <ArcadePanel
-        title="Training Search"
-        action={
-          <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-            {TRAINING_VIDEOS.length} videos · word-for-word
-          </span>
-        }
-      >
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder='Search everything said in training — try "urgency"'
-            className="pl-9"
-          />
-        </div>
-        {query.trim().length >= MIN_QUERY && (
-          <ul className="mt-4 divide-y divide-border">
-            {hits.length === 0 ? (
-              <li className="py-3 text-sm text-muted-foreground">
-                No mention of that yet — try a shorter phrase.
-              </li>
-            ) : (
-              hits.map((h, i) => (
-                <li key={`${h.video.id}-${h.start}-${i}`}>
-                  <button
-                    type="button"
-                    onClick={() => open(h.video, h.start)}
-                    className="w-full text-left py-2.5 px-2 rounded hover:bg-surface"
-                  >
-                    <span className="flex items-center gap-2 text-[10px] font-display uppercase tracking-widest text-neon">
-                      <PlayCircle className="w-3.5 h-3.5" />
-                      {h.video.title}
-                      {h.video.speaker ? ` · ${h.video.speaker}` : ""} · {formatTimestamp(h.start)}
-                    </span>
-                    <span className="mt-1 block text-sm text-muted-foreground">“{h.text}”</span>
-                  </button>
+      <div data-tour="learn-search">
+        <ArcadePanel
+          title="Training Search"
+          action={
+            <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+              {TRAINING_VIDEOS.length} videos · word-for-word
+            </span>
+          }
+        >
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder='Search everything said in training — try "urgency"'
+              className="pl-9"
+            />
+          </div>
+          {query.trim().length >= MIN_QUERY && (
+            <ul className="mt-4 divide-y divide-border">
+              {hits.length === 0 ? (
+                <li className="py-3 text-sm text-muted-foreground">
+                  No mention of that yet — try a shorter phrase.
                 </li>
-              ))
-            )}
-          </ul>
-        )}
-      </ArcadePanel>
+              ) : (
+                hits.map((h, i) => (
+                  <li key={`${h.video.id}-${h.start}-${i}`}>
+                    <button
+                      type="button"
+                      onClick={() => open(h.video, h.start)}
+                      className="w-full text-left py-2.5 px-2 rounded hover:bg-surface"
+                    >
+                      <span className="flex items-center gap-2 text-[10px] font-display uppercase tracking-widest text-neon">
+                        <PlayCircle className="w-3.5 h-3.5" />
+                        {h.video.title}
+                        {h.video.speaker ? ` · ${h.video.speaker}` : ""} ·{" "}
+                        {formatTimestamp(h.start)}
+                      </span>
+                      <span className="mt-1 block text-sm text-muted-foreground">“{h.text}”</span>
+                    </button>
+                  </li>
+                ))
+              )}
+            </ul>
+          )}
+        </ArcadePanel>
+      </div>
 
       {player && (
         <div id="learn-player">
@@ -230,7 +234,9 @@ export function LearnPanel() {
         </div>
       </div>
 
-      <ObjectionDojo />
+      <div data-tour="learn-dojo">
+        <ObjectionDojo />
+      </div>
     </div>
   );
 }

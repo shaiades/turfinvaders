@@ -16,7 +16,9 @@ function LeaderboardPage() {
           Leaderboard
         </h1>
       </div>
-      <FleetDispatch readOnly />
+      <div data-tour="leaders-board">
+        <FleetDispatch readOnly />
+      </div>
     </div>
   );
 }

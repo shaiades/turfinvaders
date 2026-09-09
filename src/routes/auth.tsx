@@ -4,7 +4,7 @@ import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { destinationByRole } from "@/lib/redirect-by-role";
 import { toast } from "sonner";
-const turfInvadersHeroUrl = "/turf-invaders-hero.png";
+const turfInvadersHeroUrl = "/turf-invaders-hero.jpg";
 
 export const Route = createFileRoute("/auth")({
   head: () => ({ meta: [{ title: "Turf Invaders" }] }),

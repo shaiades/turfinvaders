@@ -505,7 +505,8 @@ export function NeonMap({
   me?: LatLng | null;
   mode?: Mode;
   center?: LatLng;
-  height?: number;
+  /** px number (capped at 65vh) or any CSS length verbatim, e.g. "42dvh". */
+  height?: number | string;
   follow?: boolean;
   /** Clamp pan/zoom to the union of these rings (all of a canvasser's turfs). */
   lockPolygons?: LatLng[][];
@@ -555,8 +556,9 @@ export function NeonMap({
     <div
       className="relative rounded-lg overflow-hidden border border-[color-mix(in_oklab,var(--neon)_35%,var(--border))]"
       style={{
-        // Cap at 65vh so short phones keep room for controls below the map
-        height: `min(${height}px, 65vh)`,
+        // Cap px heights at 65vh so short phones keep room for controls below
+        // the map; string heights (e.g. Active Run's clamp()) pass verbatim.
+        height: typeof height === "number" ? `min(${height}px, 65vh)` : height,
         boxShadow: "0 0 24px -8px color-mix(in oklab, var(--neon) 50%, transparent), inset 0 0 80px -20px color-mix(in oklab, var(--neon) 25%, transparent)",
       }}
     >

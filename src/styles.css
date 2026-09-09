@@ -350,3 +350,92 @@
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);
 }
+
+/* ---- Canvasser tutorial (first-login guided tour) ----------------------
+ * One spotlight div dims the whole screen via a giant box-shadow and rings
+ * the current target; the cursor glides between targets and "taps" on a
+ * loop. All viewport-fixed — the overlay disables page scroll while open. */
+.ti-tour-spot {
+  position: fixed;
+  pointer-events: none;
+  border: 2px solid var(--neon);
+  border-radius: 14px;
+  box-shadow:
+    0 0 0 200vmax color-mix(in oklab, oklch(0.10 0.02 270) 82%, transparent),
+    0 0 22px 2px color-mix(in oklab, var(--neon) 65%, transparent),
+    inset 0 0 18px -6px color-mix(in oklab, var(--neon) 55%, transparent);
+  transition:
+    top 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+    left 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+    width 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+    height 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.3s ease;
+}
+.ti-tour-cursor {
+  position: fixed;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  transition:
+    left 0.65s cubic-bezier(0.22, 1, 0.36, 1),
+    top 0.65s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.25s ease;
+}
+.ti-tour-cursor-icon {
+  position: absolute;
+  left: -6px;
+  top: -6px;
+  width: 34px;
+  height: 34px;
+  color: white;
+  fill: var(--neon);
+  filter: drop-shadow(0 0 8px color-mix(in oklab, var(--neon) 80%, transparent))
+    drop-shadow(0 2px 4px rgb(0 0 0 / 0.6));
+  transform-origin: 18% 18%;
+  animation: ti-cursor-tap 1.8s ease-in-out infinite;
+}
+.ti-tour-cursor-ring {
+  position: absolute;
+  left: -17px;
+  top: -17px;
+  width: 34px;
+  height: 34px;
+  border: 2px solid var(--neon);
+  border-radius: 9999px;
+  opacity: 0;
+  animation: ti-cursor-ring 1.8s ease-out infinite;
+}
+@keyframes ti-cursor-tap {
+  0%, 100% { transform: scale(1); }
+  10% { transform: scale(0.78); }
+  22% { transform: scale(1.05); }
+  30% { transform: scale(1); }
+}
+@keyframes ti-cursor-ring {
+  0%, 9% { transform: scale(0.2); opacity: 0; }
+  14% { opacity: 0.85; }
+  55% { transform: scale(2.1); opacity: 0; }
+  100% { transform: scale(2.1); opacity: 0; }
+}
+.ti-tour-card {
+  transition: opacity 0.3s ease;
+}
+.ti-tour-card-top {
+  top: calc(env(safe-area-inset-top) + 12px);
+}
+.ti-tour-card-bottom {
+  bottom: calc(env(safe-area-inset-bottom) + 16px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ti-tour-spot,
+  .ti-tour-cursor {
+    transition: opacity 0.25s ease;
+  }
+  .ti-tour-cursor-icon,
+  .ti-tour-cursor-ring {
+    animation: none;
+  }
+  .ti-tour-cursor-ring {
+    opacity: 0.5;
+  }
+}

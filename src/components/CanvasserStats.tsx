@@ -18,6 +18,7 @@ import {
   funnelStages,
 } from "@/components/ConversionPanels";
 import { LiveLeadCounter } from "@/components/LiveLeadCounter";
+import { QueryStateCard } from "@/components/QueryStateCard";
 import { Button } from "@/components/ui/button";
 import type { CanvasserStatsData } from "@/hooks/useCanvasserStats";
 import {
@@ -62,18 +63,21 @@ export function CanvasserStats({
         />
         <GrindCounter
           label="Leads Called In"
+          counterLabel="LEADS · TODAY"
           value={today.leads_called_in}
           icon={<PhoneCall className="w-4 h-4" />}
           accent="var(--neon)"
         />
         <GrindCounter
           label="Confirmed Next Day Leads"
+          counterLabel="NEXT DAYS · TODAY"
           value={today.next_days}
           icon={<CalendarClock className="w-4 h-4" />}
           accent="var(--victory)"
         />
         <GrindCounter
           label="Confirmed Future Leads"
+          counterLabel="FUTURE LEADS · TODAY"
           value={today.future_leads}
           icon={<CalendarDays className="w-4 h-4" />}
           accent="var(--accent)"
@@ -91,6 +95,7 @@ export function CanvasserStats({
         accent="var(--neon)"
       />
       <PaycheckEngineWidget
+        pending={stats.funnelRates.isLoading}
         points={stats.weekPoints}
         hours={stats.weekHours}
         hourlyRate={stats.hourlyRate}
@@ -125,6 +130,8 @@ export function CanvasserStats({
         goal={stats.monthlyGoal}
         pct={stats.goalProgress}
         onEditGoal={onEditGoal}
+        profile={stats.profile}
+        earningsLoading={stats.earnings.isLoading}
       />
     </div>
   );
@@ -146,7 +153,9 @@ function GrindCounter({
   accent,
 }: {
   label: string;
-  counterLabel?: string;
+  /** The inner ticker's own metric name — LiveLeadCounter's default label is
+   *  leads-specific and reads wrong on every other counter. */
+  counterLabel: string;
   value: number;
   icon: React.ReactNode;
   accent: string;
@@ -168,7 +177,7 @@ function GrindCounter({
           {icon} {label}
         </div>
         <div className="mt-3 flex items-end gap-2">
-          <LiveLeadCounter value={value} size="lg" {...(counterLabel ? { label: counterLabel } : {})} />
+          <LiveLeadCounter value={value} size="lg" label={counterLabel} />
         </div>
         <div className="mt-2 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
           TODAY · LIVE
@@ -223,6 +232,7 @@ function BigStat({
 }
 
 function PaycheckEngineWidget({
+  pending,
   points,
   hours,
   hourlyRate,
@@ -230,6 +240,10 @@ function PaycheckEngineWidget({
   commission,
   revenue,
 }: {
+  /** The 60d-logs query behind `points` — the clocked-hours and sales-revenue
+   *  legs expose neither pending nor error via stats (see useCanvasserStats),
+   *  so a failed fetch on those still shows as zeros. */
+  pending: boolean;
   points: number;
   hours: number;
   hourlyRate: number;
@@ -244,15 +258,22 @@ function PaycheckEngineWidget({
   const pct = Math.min(1, points / POINTS_TIER_TOP);
   const commissionPct = Math.round(commissionRateForPoints(points) * 100);
   const accent = atTop ? "var(--victory)" : "var(--neon)";
+  const action = (
+    <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+      Auto · Weekly
+    </span>
+  );
+  // Zero ≠ error: never flash the $18/hr floor and 0 pts while the week is
+  // still loading.
+  if (pending) {
+    return (
+      <ArcadePanel title="Paycheck Engine" action={action}>
+        <QueryStateCard pending what="this week's paycheck" />
+      </ArcadePanel>
+    );
+  }
   return (
-    <ArcadePanel
-      title="Paycheck Engine"
-      action={
-        <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-          Auto · Weekly
-        </span>
-      }
-    >
+    <ArcadePanel title="Paycheck Engine" action={action}>
       <div className="grid sm:grid-cols-3 gap-4">
         <div>
           <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
@@ -344,23 +365,33 @@ function ConversionFunnelPanel({
         </span>
       }
     >
-      {allZero ? (
-        <div className="text-sm text-muted-foreground">
-          No funnel activity this week yet — NH pins log doors; talks, confirmed leads, sits and
-          sales fill in as they land.
-        </div>
+      {stats.funnelRates.isLoading ? (
+        // funnelRates.isLoading carries the same 60d-logs query that produces
+        // stats.week — the only pending signal the stats prop exposes here. A
+        // FAILED logs fetch still reads all-zero (no error flag reaches this
+        // file; see useCanvasserStats).
+        <QueryStateCard pending what="this week's funnel" />
       ) : (
-        <FunnelStageBars stages={stages} />
+        <>
+          {allZero ? (
+            <div className="text-sm text-muted-foreground">
+              No funnel activity this week yet — Not-Home pins (NH) log doors; talks, confirmed
+              leads, sits and sales fill in as they land.
+            </div>
+          ) : (
+            <FunnelStageBars stages={stages} />
+          )}
+          <div className="mt-4 flex items-center justify-between gap-3 flex-wrap border-t border-border pt-3">
+            <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+              <Filter className="inline w-3 h-3 mr-1" />
+              {rateNote}
+            </span>
+            <Button variant="ghost" onClick={onOpenPlan}>
+              Reverse-engineer my goal →
+            </Button>
+          </div>
+        </>
       )}
-      <div className="mt-4 flex items-center justify-between gap-3 flex-wrap border-t border-border pt-3">
-        <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-          <Filter className="inline w-3 h-3 mr-1" />
-          {rateNote}
-        </span>
-        <Button variant="ghost" onClick={onOpenPlan}>
-          Reverse-engineer my goal →
-        </Button>
-      </div>
     </ArcadePanel>
   );
 }
@@ -416,12 +447,21 @@ function GoalBar({
   goal,
   pct,
   onEditGoal,
+  profile,
+  earningsLoading,
 }: {
   earned: number;
   goal: number;
   pct: number;
   onEditGoal: () => void;
+  /** The profiles query behind `goal` — a failed fetch must not pass the
+   *  $10k default off as the canvasser's real goal. */
+  profile: CanvasserStatsData["profile"];
+  /** The pay-engine RPCs behind `earned` (useMyEarnings exposes loading
+   *  only — a failed RPC still reads $0 earned). */
+  earningsLoading: boolean;
 }) {
+  const pending = profile.isPending || earningsLoading;
   return (
     <ArcadePanel
       title="Monthly Goal"
@@ -431,29 +471,39 @@ function GoalBar({
         </Button>
       }
     >
-      <div className="flex items-end justify-between gap-4 flex-wrap">
-        <div>
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-            Earned MTD · All Pay Combined
+      {pending || profile.isError ? (
+        <QueryStateCard
+          pending={pending}
+          what="your monthly goal"
+          onRetry={() => profile.refetch()}
+        />
+      ) : (
+        <>
+          <div className="flex items-end justify-between gap-4 flex-wrap">
+            <div>
+              <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                Earned MTD · All Pay Combined
+              </div>
+              <div className="font-display text-4xl md:text-5xl text-mega-victory leading-none mt-1">
+                {formatCurrency(earned)}
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                Goal
+              </div>
+              <div className="font-display text-2xl text-neon">{formatCurrency(goal)}</div>
+            </div>
           </div>
-          <div className="font-display text-4xl md:text-5xl text-mega-victory leading-none mt-1">
-            {formatCurrency(earned)}
+          <NeonBar pct={pct} accent="var(--victory)" tall />
+          <div className="mt-2 flex justify-between text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            <span>{(pct * 100).toFixed(0)}% complete</span>
+            <span>
+              {pct >= 1 ? "🏆 Goal smashed" : `${formatCurrency(Math.max(0, goal - earned))} to go`}
+            </span>
           </div>
-        </div>
-        <div className="text-right">
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-            Goal
-          </div>
-          <div className="font-display text-2xl text-neon">{formatCurrency(goal)}</div>
-        </div>
-      </div>
-      <NeonBar pct={pct} accent="var(--victory)" tall />
-      <div className="mt-2 flex justify-between text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-        <span>{(pct * 100).toFixed(0)}% complete</span>
-        <span>
-          {pct >= 1 ? "🏆 Goal smashed" : `${formatCurrency(Math.max(0, goal - earned))} to go`}
-        </span>
-      </div>
+        </>
+      )}
     </ArcadePanel>
   );
 }

@@ -9,7 +9,7 @@ import { normalizeName } from "@/lib/utils";
 import { FormerBadge } from "@/components/FormerBadge";
 
 export const Route = createFileRoute("/_authenticated/teams/$teamId")({
-  head: () => ({ meta: [{ title: "Van — Knockout" }] }),
+  head: () => ({ meta: [{ title: "Van — Turf Invaders" }] }),
   // Leadership-only: canvassers/sales reps bounce in beforeLoad (real DB
   // roles), before the page mounts or fires any queries.
   beforeLoad: requireRoleBeforeLoad(MANAGER_ROLES),

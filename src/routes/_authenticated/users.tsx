@@ -20,7 +20,7 @@ import { useSetUserRole } from "@/hooks/useSetUserRole";
 import { useAuth } from "@/hooks/useAuth";
 
 export const Route = createFileRoute("/_authenticated/users")({
-  head: () => ({ meta: [{ title: "Manage Users — Knockout" }] }),
+  head: () => ({ meta: [{ title: "Manage Users — Turf Invaders" }] }),
   // Owners + Admins only (owner decision 2026-08-12) — captains manage their
   // rosters from the Fleet Dispatch board instead.
   beforeLoad: requireRoleBeforeLoad(ADMIN_ROLES),

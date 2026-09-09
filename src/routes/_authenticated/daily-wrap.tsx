@@ -1,9 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { ArcadeCard, ArcadePanel } from "@/components/arcade";
-import { AlertTriangle, Trophy } from "lucide-react";
+import { GlossarySheet } from "@/components/GlossarySheet";
+import { AlertTriangle, Info, Trophy } from "lucide-react";
 import { addDaysISO, reportDates } from "@/lib/dates";
 import { isRecentlyActive, lastActiveMap, SUSPENSION_RECENCY_DAYS } from "@/lib/suspension";
 
@@ -22,6 +23,8 @@ type Row = {
   tracked: boolean;
   /** false = archived/removed — off the zero lists, but earned awards stay. */
   active: boolean;
+  /** First-week rookie with no credited day yet — off the zero lists. */
+  graced: boolean;
 };
 
 /** One doughnut card for both zero lists — the freezer (2+ zeros, red) and
@@ -120,6 +123,7 @@ function AwardSection({ tier, rows }: { tier: (typeof AWARD_TIERS)[number]; rows
 
 function DailyWrap() {
   const { today, yday, wkStart, locked } = reportDates();
+  const [glossaryOpen, setGlossaryOpen] = useState(false);
 
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ["daily_wrap", today],
@@ -165,6 +169,11 @@ function DailyWrap() {
           // Archive writes is_active, never the status enum — an archived rep
           // must leave the zero lists immediately but keep any earned awards.
           active: p.is_active !== false,
+          // 1-week rookie grace (owner decision 2026-09-09) — display-side only;
+          // real suspension tracking in lib/suspension.ts is untouched. The
+          // metrics fetch reaches at least `cutoff` back, so lastMap covers a
+          // graced rookie's whole tenure.
+          graced: (p.created_at ?? "").slice(0, 10) >= cutoff && !lastMap.has(p.id),
         };
       });
     },
@@ -174,12 +183,16 @@ function DailyWrap() {
     // `recent` keeps week-gone reps out of the freezer (see src/lib/suspension.ts);
     // `tracked` honors the same X-dismissals (suspension_tracked=false) as the
     // Fleet Dispatch banner; `active` drops archived/removed reps the moment
-    // the archive lands. All three gate only the zero lists — awards a rep
-    // earned before removal stay on the wrap.
+    // the archive lands; `graced` is the 1-week rookie grace (see Row.graced).
+    // All four gate only the zero lists — awards a rep earned before removal
+    // stay on the wrap.
     const suspension = rows.filter(
-      (r) => r.todayLeads === 0 && r.ydayLeads === 0 && r.recent && r.tracked && r.active,
+      (r) =>
+        r.todayLeads === 0 && r.ydayLeads === 0 && r.recent && r.tracked && r.active && !r.graced,
     );
-    const doughnuts = rows.filter((r) => r.todayLeads === 0 && r.ydayLeads > 0 && r.active);
+    const doughnuts = rows.filter(
+      (r) => r.todayLeads === 0 && r.ydayLeads > 0 && r.active && !r.graced,
+    );
     const winners = rows
       .filter((r) => r.todayLeads >= 1)
       .sort((a, b) => b.todayLeads - a.todayLeads);
@@ -205,8 +218,17 @@ function DailyWrap() {
           ⚡ Live Preview · Report finalizes at 7:00 PM Pacific
         </div>
       )}
-      <div>
-        <h1 className="font-display text-2xl text-neon">DAILY WRAP-UP</h1>
+      <div data-tour="wrap-header">
+        <div className="flex items-center gap-1">
+          <h1 className="font-display text-2xl text-neon">DAILY WRAP-UP</h1>
+          <button
+            onClick={() => setGlossaryOpen(true)}
+            className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
+            aria-label="What the shorthand means"
+          >
+            <Info className="w-5 h-5" />
+          </button>
+        </div>
         <p className="text-xs text-muted-foreground mt-1 font-display uppercase tracking-widest">
           End of Day Report · Locks at 7:00 PM Pacific
         </p>
@@ -278,6 +300,8 @@ function DailyWrap() {
           <AwardSection tier={AWARD_TIERS[1]} rows={club3} />
         </div>
       </ArcadePanel>
+
+      <GlossarySheet open={glossaryOpen} onOpenChange={setGlossaryOpen} />
     </div>
   );
 }

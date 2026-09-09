@@ -4,7 +4,7 @@ import { weeklyPoints } from "@/lib/pay";
 import { ArcadePanel } from "@/components/arcade";
 import { LiveFeed } from "@/components/LiveFeed";
 import { laWeekStartISO } from "@/lib/dates";
-const turfInvadersHero = { url: "/turf-invaders-hero.png" };
+const turfInvadersHero = { url: "/turf-invaders-hero.jpg" };
 
 type Props = {
   /** Restrict to a single van (Captain view). Omit for company-wide. */

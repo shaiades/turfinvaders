@@ -5,7 +5,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { DailyLogPanel } from "@/components/DailyLogPanel";
 
 export const Route = createFileRoute("/_authenticated/log")({
-  head: () => ({ meta: [{ title: "Daily Log — Knockout" }] }),
+  head: () => ({ meta: [{ title: "Daily Log — Turf Invaders" }] }),
   component: LogPage,
 });
 

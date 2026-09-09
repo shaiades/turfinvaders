@@ -15,7 +15,7 @@ import { Check, X, Inbox } from "lucide-react";
 import { ObjectionReviewPanel } from "@/components/ObjectionReviewPanel";
 
 export const Route = createFileRoute("/_authenticated/confirmation-desk")({
-  head: () => ({ meta: [{ title: "Confirmation Desk — Knockout" }] }),
+  head: () => ({ meta: [{ title: "Confirmation Desk — Turf Invaders" }] }),
   beforeLoad: requireRoleBeforeLoad(ADMIN_ROLES),
   component: ConfirmationDesk,
 });

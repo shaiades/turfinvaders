@@ -8,7 +8,7 @@ import { RangeTabs } from "@/components/RangeTabs";
 import { normalizeName } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/teams/")({
-  head: () => ({ meta: [{ title: "Vans — Knockout" }] }),
+  head: () => ({ meta: [{ title: "Vans — Turf Invaders" }] }),
   // Leadership-only: canvassers/sales reps bounce in beforeLoad (real DB
   // roles), before the page mounts or fires any queries.
   beforeLoad: requireRoleBeforeLoad(MANAGER_ROLES),
