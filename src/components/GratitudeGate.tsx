@@ -37,6 +37,9 @@ export function GratitudeGate({
       window.localStorage.setItem(storageKey(userId), JSON.stringify({ text: v, at: new Date().toISOString() }));
     } catch { /* ignore */ }
     setUnlocked(true);
+    // The canvasser tutorial defers its field-screen pop until the gate
+    // opens (teaching buttons the gate hides would point at nothing).
+    window.dispatchEvent(new Event("ti-gratitude-unlocked"));
   };
 
   return (

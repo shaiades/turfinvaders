@@ -33,11 +33,11 @@ type NavItem = {
 
 // Routes a Canvasser is allowed to visit. Anything else → redirect to /field.
 // /dashboard is the Mission page (Plan/Log/Stats merged, 2026-08-14).
-// /log MUST stay here even though canvassers get redirected off it — the
-// guard below fires on pathname before the route's own <Navigate> runs, so
-// dropping it would bounce old /log bookmarks to /field instead of the Log
-// tab. /playbook redirects in beforeLoad (throws before the location
-// commits), so it can stay off this list.
+// /log and /my-territory MUST stay here even though canvassers get
+// redirected off them — the guard below fires on pathname before the routes'
+// own <Navigate> runs, so dropping either would bounce old bookmarks to
+// /field the hard way (or loop). /playbook redirects in beforeLoad (throws
+// before the location commits), so it can stay off this list.
 const CANVASSER_ALLOWED = [
   "/field",
   "/my-territory",
@@ -89,16 +89,16 @@ export function AppShell({ children }: { children: ReactNode }) {
       return [{ to: "/close-kombat", label: "Close Kombat", icon: Swords }];
     }
     if (role === "canvasser") {
-      // Chronological day order (2026-08-14): run → territory → Mission
-      // (Plan/Log/Stats tabs) → leaders → wrap. Exactly 5 items, so the
-      // bottom tab bar and swipe nav cover every canvass screen. Mission
-      // deliberately carries NO search — activeOptions then matches on
-      // pathname only, keeping the item lit while the inner tabs rewrite
-      // ?tab=.
+      // Chronological day order, map merged (2026-09-08): Active Run now IS
+      // the territory map + tallies, and Learn takes the freed slot (owner
+      // decision). Exactly 5 items, so the bottom tab bar and swipe nav
+      // cover every canvass screen. Mission deliberately carries NO search —
+      // activeOptions then matches on pathname only, keeping the item lit
+      // while the inner tabs rewrite ?tab=.
       return [
         { to: "/field", label: "Active Run", icon: Zap },
-        { to: "/my-territory", label: "Territory", icon: MapPin },
         { to: "/dashboard", label: "Mission", icon: Target },
+        { to: "/learn", label: "Learn", icon: GraduationCap },
         { to: "/leaderboard", label: "Leaders", icon: Trophy },
         { to: "/daily-wrap", label: "Wrap", icon: Sparkles },
       ];

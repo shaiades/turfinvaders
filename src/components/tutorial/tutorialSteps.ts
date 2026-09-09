@@ -6,8 +6,14 @@
  * welcome/HUD/help bracket wrapped around it; the header "?" replays the
  * current screen's tips on demand.
  *
+ * Reshaped for the Active Run merge (2026-09-08): the old field+territory
+ * tours are one "field" tour now, and Learn — promoted to the bottom bar —
+ * gets its own. Old `territory` seen-flags simply go unread: veterans who
+ * finished the old field tour aren't re-popped (their `field` flag holds),
+ * and "?" replays the merged tour on demand.
+ *
  * Every step points the cursor at a [data-tour="…"] anchor; `target` may
- * list fallbacks (first visible wins — e.g. the Territory map vs. the
+ * list fallbacks (first visible wins — e.g. the Active Run map vs. the
  * Gratitude Gate that hides it before check-in). `optional` steps auto-skip
  * when their anchor isn't on screen (gated/empty states).
  */
@@ -31,13 +37,14 @@ export type TutorialStep = {
   showWordmark?: boolean;
 };
 
-export type TourPageId = "field" | "territory" | "mission" | "leaders" | "wrap";
+export type TourPageId = "field" | "mission" | "leaders" | "wrap" | "learn";
 
-/** Which tour a pathname belongs to (canvasser routes only). */
+/** Which tour a pathname belongs to (canvasser routes only — canvassers
+ *  bounce off /my-territory to /field since the merge). */
 export function pageIdForPathname(pathname: string): TourPageId | null {
   if (pathname === "/field") return "field";
-  if (pathname === "/my-territory") return "territory";
   if (pathname === "/dashboard") return "mission";
+  if (pathname === "/learn") return "learn";
   if (pathname === "/leaderboard") return "leaders";
   if (pathname === "/daily-wrap") return "wrap";
   return null;
@@ -46,12 +53,27 @@ export function pageIdForPathname(pathname: string): TourPageId | null {
 export const PAGE_TOURS: Record<TourPageId, TutorialStep[]> = {
   field: [
     {
+      id: "field-map",
+      target: ["field-map", "gratitude-gate"],
+      cursorAt: { x: 0.5, y: 0.3 }, // gate: the question · map: where turf sits
+      title: "Your turf, live",
+      body: "The streets assigned to you, on a live map — every pin you drop lands here. Each morning, a one-line gratitude check-in unlocks the day.",
+    },
+    {
+      id: "field-chips",
+      target: "field-chips",
+      optional: true, // hides behind the gate / before turf is assigned
+      padding: 6,
+      title: "Pin any house",
+      body: "Pick a result — Lead, Not Home, Go Back, Renter, NI, Appt — then tap that house on the map. Tonight's go-backs start here.",
+    },
+    {
       id: "field-tallies",
       target: "field-tallies",
       padding: 6,
       cursorAt: { x: 0.26, y: 0.28 }, // tap the Log Knock button, not the gap
-      title: "Active Run",
-      body: "Your shift lives here — one tap per door. 🚪 knocked, 🗣️ talked, 🛑 not interested. Every tap also drops a GPS pin on your map, so keep Location on.",
+      title: "One tap per door",
+      body: "The door you're standing at: 🚪 knocked, 🗣️ talked, 🛑 not interested. Every tap drops the pin for you — keep Location on.",
     },
     {
       id: "field-lead",
@@ -59,22 +81,6 @@ export const PAGE_TOURS: Record<TourPageId, TutorialStep[]> = {
       cursorAt: { x: 0.5, y: 0.68 }, // tap under the label so it stays readable
       title: "Got a yes?",
       body: "Smash ⚡ Submit New Lead. It pins the house and opens the lead form — fill it out right on the doorstep while it's hot.",
-    },
-  ],
-  territory: [
-    {
-      id: "territory",
-      target: ["territory-map", "gratitude-gate"],
-      cursorAt: { x: 0.5, y: 0.3 }, // gate: the question · map: where turf sits
-      title: "My Territory",
-      body: "The streets assigned to you, on a live map — your pins land here as you work. Each morning, a one-line gratitude check-in unlocks it.",
-    },
-    {
-      id: "territory-pins",
-      target: "territory-pins",
-      optional: true,
-      title: "Drop result pins",
-      body: "Pick a result — Lead, Not Home, Go Back, Renter, NI, Appt — then tap that house on the map. Tonight's go-backs start here.",
     },
   ],
   mission: [
@@ -117,13 +123,20 @@ export const PAGE_TOURS: Record<TourPageId, TutorialStep[]> = {
       title: "Stats",
       body: "Today, this week, this month — your funnel, points, and money. Know your numbers, grow your numbers.",
     },
+  ],
+  learn: [
     {
-      id: "tab-learn",
-      route: "/dashboard",
-      search: { tab: "learn" },
-      target: "tab-learn",
-      title: "Learn",
-      body: "Training videos, scripts, and the Objection Dojo — drill your comebacks until no door can shake you.",
+      id: "learn-search",
+      target: "learn-search",
+      title: "Search the training",
+      body: 'Every word of every training video, searchable — try "urgency" and jump straight to the moment it\'s said.',
+    },
+    {
+      id: "learn-dojo",
+      target: "learn-dojo",
+      cursorAt: { x: 0.5, y: 0.15 }, // the dojo runs long — point at its header
+      title: "Objection Dojo",
+      body: "Record your comeback to a real objection and send it in — drill until no door can shake you.",
     },
   ],
   leaders: [

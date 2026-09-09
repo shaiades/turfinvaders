@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { MousePointer2, X } from "lucide-react";
 import confetti from "canvas-confetti";
 import { supabase } from "@/integrations/supabase/client";
+import { hasPassedGratitudeGate } from "@/components/GratitudeGate";
 import {
   HELP_STEP,
   PAGE_TOURS,
@@ -122,8 +123,17 @@ export function CanvasserTutorial({ userId }: { userId: string }) {
   const fetchTourMeta = useCallback(async (): Promise<TourMeta> => {
     if (metaRef.current) return metaRef.current;
     try {
-      const { data } = await supabase.auth.getUser();
-      metaRef.current = (data.user?.user_metadata ?? {}) as TourMeta;
+      // getSession (local, no network) instead of getUser, and raced against
+      // a timeout: supabase-js's auth lock can stall these calls indefinitely
+      // (verified live 2026-09-08 — getUser never even hit the network), and
+      // a hung read must never eat the auto-pop. localStorage is the primary
+      // seen-store; metadata is best-effort cross-device dedupe.
+      metaRef.current = await Promise.race([
+        supabase.auth
+          .getSession()
+          .then(({ data }) => (data.session?.user?.user_metadata ?? {}) as TourMeta),
+        new Promise<TourMeta>((resolve) => window.setTimeout(() => resolve({}), 1200)),
+      ]);
     } catch {
       metaRef.current = {};
     }
@@ -283,8 +293,12 @@ export function CanvasserTutorial({ userId }: { userId: string }) {
     if (!page) return;
     if (readLocal(pageKey(userId, page))) return;
     let cancelled = false;
-    const t = window.setTimeout(async () => {
+    const tryPop = async () => {
       if (cancelled || openRef.current) return;
+      // The field tour waits for the Gratitude Gate: teaching buttons the
+      // gate is hiding would point at nothing. The gate's submit dispatches
+      // ti-gratitude-unlocked, which retries below.
+      if (page === "field" && !hasPassedGratitudeGate(userId)) return;
       const meta = await fetchTourMeta();
       if (cancelled || openRef.current) return;
       if (meta.ti_page_tours?.[page]) {
@@ -293,10 +307,14 @@ export function CanvasserTutorial({ userId }: { userId: string }) {
       }
       const welcome = !readLocal(welcomeKey(userId)) && !meta.ti_tour_welcome;
       begin(page, { welcome });
-    }, 1000);
+    };
+    const t = window.setTimeout(tryPop, 1000);
+    const onUnlock = () => window.setTimeout(tryPop, 700); // let the map mount
+    window.addEventListener("ti-gratitude-unlocked", onUnlock);
     return () => {
       cancelled = true;
       window.clearTimeout(t);
+      window.removeEventListener("ti-gratitude-unlocked", onUnlock);
     };
   }, [pathname, userId, fetchTourMeta, begin]);
 
