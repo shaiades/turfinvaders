@@ -83,6 +83,10 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
 
 function Dashboard() {
   const { role, loading, teamId, displayName, user } = useAuth();
+  // CanvasserMission is route-agnostic — this route owns its ?tab search
+  // (captains mount the same component on /mission with that route's ?tab).
+  const { tab: rawTab } = Route.useSearch();
+  const navigate = Route.useNavigate();
 
   const { data: settings } = useQuery({
     queryKey: ["company_settings"],
@@ -100,7 +104,13 @@ function Dashboard() {
   if (role === "captain")
     return <CaptainDashboard teamId={teamId} visibility={!!settings?.global_visibility} />;
   return user?.id ? (
-    <CanvasserMission displayName={displayName} teamId={teamId} userId={user.id} />
+    <CanvasserMission
+      displayName={displayName}
+      teamId={teamId}
+      userId={user.id}
+      rawTab={rawTab}
+      setTab={(t) => navigate({ search: { tab: t }, replace: true })}
+    />
   ) : (
     <div className="text-sm text-muted-foreground">Loading your dashboard…</div>
   );
