@@ -191,11 +191,12 @@ export function PlanPanel({ userId }: { userId: string }) {
         {!math.ready && (
           <div className="rounded-lg border border-border bg-background/40 p-6 text-center">
             <div className="font-display text-sm uppercase tracking-widest text-muted-foreground">
-              Playbook unavailable
+              Playbook warming up
             </div>
             <p className="mt-2 text-xs text-muted-foreground max-w-md mx-auto">
-              We need conversion data — from your own recent logs (200+ doors knocked) or the
-              company-wide 60-day baseline — plus a goal and average commission above.
+              Your Playbook turns your income goal into today's door math. It needs real conversion
+              data — yours after ~200 doors, or the company's recent baseline. Until then: set your
+              goal above and aim for the starter target — 90 doors a day.
             </p>
           </div>
         )}

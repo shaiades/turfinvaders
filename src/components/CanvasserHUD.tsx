@@ -33,6 +33,9 @@ export function CanvasserHUD({ userId }: { userId: string }) {
   const totals = sumLogCounters(logs.data);
   const points = weeklyPoints(totals.demos_sits, totals.sales);
   const called = totals.leads_called_in;
+  // Zero ≠ error: a dead fetch must not flash a live-looking 0 mid-street —
+  // it reads as a muted dash until the next successful refetch.
+  const broken = logs.isError || profile.isError;
 
   return (
     <div
@@ -42,10 +45,18 @@ export function CanvasserHUD({ userId }: { userId: string }) {
       <RankPill rank={profile.data?.current_rank ?? "Jr. Silver"} />
       <div className="flex items-center gap-4 tabular-nums">
         <span className="text-muted-foreground">
-          Leads Today · <span className={metricText(called, "text-neon")}>{called}</span>
+          Leads Today ·{" "}
+          <span className={broken ? "text-muted-foreground/40" : metricText(called, "text-neon")}>
+            {broken ? "—" : called}
+          </span>
         </span>
         <span className="text-muted-foreground">
-          Pts Today · <span className={metricText(points, "text-victory")}>{points}</span>
+          Pts Today ·{" "}
+          <span
+            className={broken ? "text-muted-foreground/40" : metricText(points, "text-victory")}
+          >
+            {broken ? "—" : points}
+          </span>
         </span>
       </div>
     </div>

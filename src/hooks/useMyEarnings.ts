@@ -15,7 +15,9 @@ import { HOURLY_BASE } from "@/lib/pay";
  *   engine's own monthly definition, and the same row TakeHomeWidget shows,
  *   so "earned so far" can never disagree with the take-home number beside it.
  * - avgDailyBase projects future hourly: MTD clocked hours ÷ distinct clocked
- *   days × the current week's tier rate (best forward-looking rate).
+ *   days × the current week's tier rate (best forward-looking rate); with zero
+ *   clocked days it seeds a full 8h shift at that rate. Projection only —
+ *   never feeds a paid number.
  */
 export function useMyEarnings(userId: string): {
   weekEarned: number;
@@ -71,7 +73,9 @@ export function useMyEarnings(userId: string): {
   const mtdHours = clockQ.data?.mtdHours ?? 0;
   const clockDays = clockQ.data?.clockDays ?? 0;
   const forwardRate = weekQ.data?.hourly_rate ?? HOURLY_BASE;
-  const avgDailyBase = clockDays > 0 ? (mtdHours / clockDays) * forwardRate : 0;
+  // day-one seed: a rookie's projected week assumes full base shifts until
+  // real clock data lands (go-live audit 2026-09-09)
+  const avgDailyBase = clockDays > 0 ? (mtdHours / clockDays) * forwardRate : forwardRate * 8;
 
   return {
     weekEarned: Number(weekQ.data?.total_pay ?? 0),

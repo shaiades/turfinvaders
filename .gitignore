@@ -41,3 +41,8 @@ dist-ssr
 *.sln
 *.sw?
 supabase/.temp/
+
+# dev-only tour harness — must never deploy
+public/tour-harness.html
+# full-res image masters (resized copies live in public/)
+scripts/assets/

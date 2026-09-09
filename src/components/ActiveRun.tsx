@@ -9,7 +9,7 @@ import { getMondayFormUrl } from "@/lib/monday-form";
 import { useGeoWatch, useFieldPins, type ActivePin } from "@/hooks/useFieldPins";
 import { dailyLogKeys, sumLogCounters, useTodayLogs, type DailyLogRow } from "@/hooks/useDailyLogs";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
-import { GratitudeGate } from "@/components/GratitudeGate";
+import { GratitudeGate, hasPassedGratitudeGate } from "@/components/GratitudeGate";
 import { NeonMap, type Territory, type LatLng } from "@/components/NeonMap";
 import { PinActionSheet } from "@/components/PinActionSheet";
 import { ArcadePanel } from "@/components/arcade";
@@ -20,7 +20,7 @@ import {
   Home,
   Sparkles,
   Crosshair,
-  CircleHelp,
+  Info,
   Pencil,
   ThumbsDown,
   KeyRound,
@@ -137,7 +137,18 @@ export function ActiveRun({
   const { user, role, loading } = useAuth();
   const qc = useQueryClient();
   const isCaptain = variant === "captain";
-  const { me, geoStatus } = useGeoWatch();
+
+  // Hold the OS location prompt until the Gratitude Gate is answered — day
+  // one used to stack the prompt, the gate, and the keyboard all at once.
+  // Roles the gate bypasses get GPS immediately.
+  const [gatePassed, setGatePassed] = useState(false);
+  useEffect(() => {
+    const check = () => setGatePassed(hasPassedGratitudeGate(user?.id));
+    check();
+    window.addEventListener("ti-gratitude-unlocked", check);
+    return () => window.removeEventListener("ti-gratitude-unlocked", check);
+  }, [user?.id]);
+  const { me, geoStatus } = useGeoWatch(!loading && (!requiresGratitudeGate(role) || gatePassed));
   const pins = useFieldPins(user?.id, me);
 
   const [active, setActive] = useState<ActivePin>("lead");
@@ -176,7 +187,7 @@ export function ActiveRun({
     enabled: !!user?.id,
   });
 
-  // "New area assigned" awareness — without this a mid-shift reassignment
+  // Turf-arrival awareness — without this a mid-shift reassignment
   // (realtime refetch) just silently snaps the map to a different polygon.
   // Canvasser-only: captains see all turfs, so assignment churn would spam.
   useEffect(() => {
@@ -196,7 +207,12 @@ export function ActiveRun({
       const fresh = turfs.filter(
         (t) => stored[t.id] === undefined || (t.assigned_at ?? "") > stored[t.id],
       );
-      if (fresh.length > 0) toast.info("New area assigned — your map has been updated");
+      if (fresh.length > 0) {
+        const nm = fresh[0]?.name?.trim();
+        toast.success(
+          nm ? `🗺️ Turf assigned — ${nm}!` : "🗺️ New turf assigned — it's on your map!",
+        );
+      }
     }
     try {
       localStorage.setItem(key, JSON.stringify(snapshot));
@@ -213,11 +229,16 @@ export function ActiveRun({
         color: assigneeColor(t.assigned_user_id),
         polygon: (t.polygon_coordinates ?? []) as LatLng[],
         dashed: !t.assigned_user_id,
-        assignmentLabel: t.assigned_user_id
-          ? (t.assignee?.display_name ?? "Assigned")
-          : "Unassigned",
+        // Canvassers get the turf's NAME on the pill — labeling their own map
+        // with their own name told them nothing (go-live audit 2026-09-09).
+        // Captains see all turfs, so assignee names stay the useful label.
+        assignmentLabel: isCaptain
+          ? t.assigned_user_id
+            ? (t.assignee?.display_name ?? "Assigned")
+            : "Unassigned"
+          : t.name?.trim() || "Your turf",
       })),
-    [turfsQuery.data],
+    [turfsQuery.data, isCaptain],
   );
 
   // Memoized (structural sharing keeps turfsQuery.data stable) — this screen
@@ -252,6 +273,13 @@ export function ActiveRun({
 
   async function bump(key: TallyKey) {
     if (!user?.id) return;
+    // Block BEFORE the optimistic +1 (mirror of guardedMapDrop): without
+    // this, a no-GPS tap counted up, waited out the 8 s fix timeout, then
+    // silently rewound — a rookie's first knock looked like a glitch.
+    if (!me) {
+      toast.error("No GPS fix yet — enable Location and try again.");
+      return;
+    }
     const pin_type = TALLY_TO_PIN[key];
     const todayKey = dailyLogKeys.today(user.id, log_date);
     setPending(pin_type);
@@ -278,6 +306,10 @@ export function ActiveRun({
   }
 
   async function openLead() {
+    if (!me) {
+      toast.error("No GPS fix yet — enable Location and try again.");
+      return;
+    }
     setPending("lead");
     try {
       const res = await pins.dropAtDevice("lead");
@@ -327,12 +359,15 @@ export function ActiveRun({
                 <Pencil className="w-3.5 h-3.5" /> Turf Tools
               </button>
             )}
+            {/* Info, not CircleHelp — the header's "?" replays the tour, and
+                two identical glyphs with different behaviors confused the
+                audit's rookie pass. */}
             <button
               onClick={() => setHelpOpen(true)}
               aria-label="How Active Run works"
               className="md:hidden min-w-11 min-h-11 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-surface-elevated"
             >
-              <CircleHelp className="w-5 h-5" />
+              <Info className="w-5 h-5" />
             </button>
           </div>
         </div>
@@ -359,15 +394,15 @@ export function ActiveRun({
                lands on the "no turf yet" panel too) ---- */}
           <div className="md:col-span-3" data-tour="field-map">
             {mapGate === "loading" && (
-              <ArcadePanel title="My Area">
+              <ArcadePanel title="My Turf">
                 <div className="text-sm text-muted-foreground">Loading your turf…</div>
               </ArcadePanel>
             )}
             {mapGate === "error" && (
-              <ArcadePanel title="My Area">
+              <ArcadePanel title="My Turf">
                 <div className="space-y-3">
                   <div className="text-sm text-muted-foreground">
-                    Couldn't load your area. Check your signal and try again.
+                    Couldn't load your turf. Check your signal and try again.
                   </div>
                   <Button variant="outline" onClick={() => turfsQuery.refetch()}>
                     Retry
@@ -376,10 +411,10 @@ export function ActiveRun({
               </ArcadePanel>
             )}
             {mapGate === "empty" && (
-              <ArcadePanel title="My Area">
+              <ArcadePanel title="My Turf">
                 <div className="text-sm text-muted-foreground">
-                  No area assigned yet — your manager assigns turf before the shift. The tally
-                  buttons below still work; your map fills in the moment turf lands.
+                  No turf assigned yet — your manager assigns it before the shift. The tally buttons
+                  below still work; your map fills in the moment your turf lands.
                 </div>
               </ArcadePanel>
             )}
@@ -417,7 +452,7 @@ export function ActiveRun({
                         type="button"
                         aria-label={`${r.label} — arm this result`}
                         onClick={() => setActive(r.type)}
-                        className="relative flex h-10 w-10 items-center justify-center rounded-full"
+                        className="relative flex h-11 w-11 items-center justify-center rounded-full"
                         style={{
                           color: r.color,
                           background: isArmed
@@ -543,7 +578,7 @@ function HowItWorksList() {
   return (
     <ul className="text-sm text-muted-foreground space-y-1.5">
       <li>• The big buttons log the door you're standing at — one tap each.</li>
-      <li>• Your assigned area appears as a colored boundary on the map.</li>
+      <li>• Your turf appears as a colored, named boundary on the map.</li>
       <li>• For other houses: pick a result on the map bar, then tap that house.</li>
       <li>
         • <span className="text-[#39ff14]">Lead</span> ·{" "}
@@ -631,7 +666,7 @@ function LeadSheet({ onClose }: { onClose: () => void }) {
           type="button"
           onClick={onClose}
           aria-label="Close"
-          className="rounded-full p-2 hover:bg-surface active:scale-95 transition"
+          className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-full hover:bg-surface active:scale-95 transition"
         >
           <X className="w-6 h-6" />
         </button>

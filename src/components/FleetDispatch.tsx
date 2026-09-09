@@ -32,6 +32,7 @@ import {
   ArrowRightLeft,
   Pencil,
   Merge,
+  Info,
 } from "lucide-react";
 import {
   Select,
@@ -63,6 +64,7 @@ import { isLeadSourceKey } from "@/lib/lead-sources";
 import { DEFAULT_OFFICE, OFFICE_LOCATIONS } from "@/lib/offices";
 import { getDispatchProduction, type DispatchResults } from "@/lib/dispatch.functions";
 import { FleetDispatchManage } from "@/components/FleetDispatchManage";
+import { GlossarySheet } from "@/components/GlossarySheet";
 import { FormerBadge } from "@/components/FormerBadge";
 import { AddAgentDialog } from "@/components/AddAgentDialog";
 import { RenameCanvasserDialog, type NameGroupRef } from "@/components/RenameCanvasserDialog";
@@ -177,6 +179,7 @@ function FleetDispatchInner({
   // suspension_tracked flag persists server-side.
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
   const [manageOpen, setManageOpen] = useState(false);
+  const [glossaryOpen, setGlossaryOpen] = useState(false);
   const { office: officeTab, matches } = useOfficeFilter();
 
   // Roll to the new calendar day at midnight PT.
@@ -883,6 +886,16 @@ function FleetDispatchInner({
                   : "READ-ONLY · MONDAY.COM FEED"}
             </div>
           </div>
+          {/* Column tooltips are hover-only (dead on phones) — the decoder
+              sheet is every viewer's tap path to the same definitions. */}
+          <button
+            type="button"
+            onClick={() => setGlossaryOpen(true)}
+            aria-label="What the shorthand means"
+            className="min-w-11 min-h-11 inline-flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+          >
+            <Info className="w-4 h-4" />
+          </button>
         </div>
         {!readOnly && (
           <div className="flex items-center gap-2">
@@ -890,6 +903,7 @@ function FleetDispatchInner({
             <OfficeFilterToggle />
           </div>
         )}
+        <GlossarySheet open={glossaryOpen} onOpenChange={setGlossaryOpen} />
       </div>
 
       {/* Range tabs: Day / Week / Month, plus each range's own controls */}

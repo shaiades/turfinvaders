@@ -28,19 +28,26 @@ import { useCanvasserProfile } from "@/hooks/useCanvasserProfile";
  * Mission page's Log tab AND the leadership /log page.
  */
 
-const VOCAB: { key: LogKey; label: string }[] = [
+// hint = rookie-readable sublabel. Wording follows the FleetDispatch column
+// tooltips / GlossarySheet / pay.ts, never invented; if a term's meaning
+// changes there, change it here.
+const VOCAB: { key: LogKey; label: string; hint?: string }[] = [
   { key: "doors_knocked", label: "Doors Knocked" },
   { key: "people_talked_to", label: "People Talked To" },
-  { key: "renters", label: "Renters" },
-  { key: "leads_called_in", label: "Leads Called In" },
-  { key: "confirmed_leads", label: "Confirmed Leads" },
-  { key: "next_days", label: "Next Days" },
-  { key: "future_leads", label: "Future Leads" },
-  { key: "demos_sits", label: "Demos / Sits" },
+  { key: "renters", label: "Renters", hint: "A renter answered — not the owner" },
+  { key: "leads_called_in", label: "Leads Called In", hint: "Leads you phoned in to the office" },
+  {
+    key: "confirmed_leads",
+    label: "Confirmed Leads",
+    hint: "Called-in leads the office confirmed",
+  },
+  { key: "next_days", label: "Next Days", hint: "Confirmed to run tomorrow" },
+  { key: "future_leads", label: "Future Leads", hint: "Confirmed for a later date" },
+  { key: "demos_sits", label: "Demos / Sits", hint: "You sat the demo at the table" },
   { key: "sales", label: "Sales" },
-  { key: "one_legs", label: "One Legs" },
-  { key: "no_shows", label: "No Shows" },
-  { key: "no_demo", label: "No Demo" },
+  { key: "one_legs", label: "One Legs", hint: "Only one decision-maker was home" },
+  { key: "no_shows", label: "No Shows", hint: "Customer wasn't there when it ran" },
+  { key: "no_demo", label: "No Demo", hint: "Ran but no demo happened" },
 ];
 
 type LogKey =
@@ -97,6 +104,7 @@ export function DailyLogPanel({ canEditMondayUrl }: { canEditMondayUrl: boolean 
   const homeRow = findOfficeRow(todayLogs.data, myOffice);
 
   const [form, setForm] = useState<LogState>(EMPTY);
+  const [showBackupForm, setShowBackupForm] = useState(false);
   // Fields the user has actually edited. Save sends ONLY these, so a pin
   // bumped into an untouched column between load and Save survives; the
   // hydration effect below also skips them so a background refetch can't
@@ -194,6 +202,9 @@ export function DailyLogPanel({ canEditMondayUrl }: { canEditMondayUrl: boolean 
               <Label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
                 {v.label}
               </Label>
+              {v.hint && (
+                <p className="mt-0.5 text-[10px] leading-tight text-muted-foreground">{v.hint}</p>
+              )}
               <Input
                 type="number"
                 min={0}
@@ -223,7 +234,20 @@ export function DailyLogPanel({ canEditMondayUrl }: { canEditMondayUrl: boolean 
 
       <NewLeadCard userId={user?.id} teamId={teamId} />
 
-      <MondayEmbed canEdit={canEditMondayUrl} />
+      {/* The Monday.com form is a second, differently-shaped lead form; the
+          internal card above is the primary path, so the embed stays behind a
+          collapsed disclosure (which also defers the iframe load). */}
+      <div>
+        <button
+          type="button"
+          aria-expanded={showBackupForm}
+          onClick={() => setShowBackupForm((s) => !s)}
+          className="min-h-11 flex items-center gap-1.5 font-display text-[10px] uppercase tracking-widest text-muted-foreground hover:text-foreground"
+        >
+          Lead form (backup) {showBackupForm ? "▾" : "▸"}
+        </button>
+        {showBackupForm && <MondayEmbed canEdit={canEditMondayUrl} />}
+      </div>
 
       <MyRecentLeads userId={user?.id} />
     </div>
@@ -302,7 +326,7 @@ function NewLeadCard({ userId, teamId }: { userId?: string; teamId: string | nul
           </div>
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
-              <Label className="flex items-center gap-2">
+              <Label className="min-h-11 flex items-center gap-2">
                 <input
                   type="checkbox"
                   className="w-5 h-5"

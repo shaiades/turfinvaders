@@ -63,8 +63,10 @@ export function GratitudeGate({
             One sentence is enough. The map unlocks the moment you answer.
           </p>
           <div className="space-y-3 text-left">
+            {/* No autoFocus: it used to raise the keyboard in the same commit
+                as the gate (and, before the GPS deferral, the location
+                prompt) — let the rookie read the question first. */}
             <Input
-              autoFocus
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") submit(); }}

@@ -45,12 +45,16 @@ function haversineMeters(a: LatLng, b: LatLng) {
 export type GeoStatus = "acquiring" | "ok" | "denied" | "unavailable";
 
 /** One GPS watch for the whole screen (mounting it also fires the browser's
- *  permission prompt — no separate one-shot needed). */
-export function useGeoWatch(): { me: LatLng | null; geoStatus: GeoStatus } {
+ *  permission prompt — no separate one-shot needed). `enabled` lets Active
+ *  Run hold the OS location prompt until the Gratitude Gate is answered —
+ *  day one used to stack the prompt, the gate, and the keyboard in one
+ *  commit (go-live audit 2026-09-09). */
+export function useGeoWatch(enabled = true): { me: LatLng | null; geoStatus: GeoStatus } {
   const [me, setMe] = useState<LatLng | null>(null);
   const [geoStatus, setGeoStatus] = useState<GeoStatus>("acquiring");
 
   useEffect(() => {
+    if (!enabled) return;
     if (!navigator.geolocation) {
       setGeoStatus("unavailable");
       return;
@@ -75,7 +79,7 @@ export function useGeoWatch(): { me: LatLng | null; geoStatus: GeoStatus } {
       { enableHighAccuracy: true, maximumAge: 15000 },
     );
     return () => navigator.geolocation.clearWatch(id);
-  }, []);
+  }, [enabled]);
 
   return { me, geoStatus };
 }

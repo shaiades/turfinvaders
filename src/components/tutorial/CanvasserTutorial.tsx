@@ -453,7 +453,7 @@ export function CanvasserTutorial({ userId }: { userId: string }) {
             </div>
             <button
               onClick={() => close("skipped")}
-              className="min-w-9 min-h-9 -mt-1.5 -mr-1.5 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-surface-elevated"
+              className="min-w-11 min-h-11 -mt-2.5 -mr-2.5 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-surface-elevated"
               aria-label="Skip tips"
             >
               <X className="w-4 h-4" />

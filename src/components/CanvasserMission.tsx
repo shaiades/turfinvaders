@@ -12,6 +12,7 @@ import { useCanvasserStats } from "@/hooks/useCanvasserStats";
 import { ArcadeCard, TeamBadge } from "@/components/arcade";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { RankPill, RANK_PERKS } from "@/components/RankPill";
+import { PushAlertsCard } from "@/components/PushAlertsCard";
 import { TimeClock } from "@/components/TimeClock";
 import { PlanPanel } from "@/components/PlanPanel";
 import { DailyLogPanel } from "@/components/DailyLogPanel";
@@ -129,6 +130,10 @@ export function CanvasserMission({
         />
       </div>
       <SCCERankBanner userId={userId} />
+      <PushAlertsCard
+        title="Alerts"
+        description="Turf drops and schedule changes, straight to your phone."
+      />
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as CanvasserTab)}>
         <div

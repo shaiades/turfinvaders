@@ -16,7 +16,7 @@ import {
 import { Lock, EyeOff } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/canvassers/$canvasserId")({
-  head: () => ({ meta: [{ title: "Player profile — Knockout" }] }),
+  head: () => ({ meta: [{ title: "Player profile — Turf Invaders" }] }),
   // Leadership-only: canvassers/sales reps bounce in beforeLoad (real DB
   // roles) before any queries fire. Also gates the /field child route.
   beforeLoad: requireRoleBeforeLoad(MANAGER_ROLES),

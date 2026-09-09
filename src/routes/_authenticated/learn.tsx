@@ -5,7 +5,7 @@ import { LearnPanel } from "@/components/LearnPanel";
 // 2026-09-08 (owner decision): canvassers get it as their own bottom-bar tab
 // now — the old redirect into Mission's Learn tab is gone along with that tab.
 export const Route = createFileRoute("/_authenticated/learn")({
-  head: () => ({ meta: [{ title: "Learn — Knockout" }] }),
+  head: () => ({ meta: [{ title: "Learn — Turf Invaders" }] }),
   component: LearnPage,
 });
 

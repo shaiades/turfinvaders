@@ -21,7 +21,7 @@ import { toast } from "sonner";
 import { Crosshair, Pencil, MapPin, Trash2, Zap } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/my-territory")({
-  head: () => ({ meta: [{ title: "My Territory — Knockout" }] }),
+  head: () => ({ meta: [{ title: "My Territory — Turf Invaders" }] }),
   component: MyTerritoryPage,
 });
 

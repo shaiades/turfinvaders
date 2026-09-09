@@ -54,10 +54,12 @@ export const PAGE_TOURS: Record<TourPageId, TutorialStep[]> = {
   field: [
     {
       id: "field-map",
+      // gratitude-gate fallback only matters on a "?" replay while gated —
+      // the auto-pop deliberately waits until the gate is passed.
       target: ["field-map", "gratitude-gate"],
-      cursorAt: { x: 0.5, y: 0.3 }, // gate: the question · map: where turf sits
+      cursorAt: { x: 0.5, y: 0.3 },
       title: "Your turf, live",
-      body: "The streets assigned to you, on a live map — every pin you drop lands here. Each morning, a one-line gratitude check-in unlocks the day.",
+      body: "Your turf shows here as a named boundary on a live map, and every pin you drop lands on it. Empty right now? Your manager assigns turf before the shift — it pops in the moment it lands.",
     },
     {
       id: "field-chips",
@@ -70,6 +72,7 @@ export const PAGE_TOURS: Record<TourPageId, TutorialStep[]> = {
     {
       id: "field-tallies",
       target: "field-tallies",
+      optional: true, // hidden behind the gate on a pre-check-in "?" replay
       padding: 6,
       cursorAt: { x: 0.26, y: 0.28 }, // tap the Log Knock button, not the gap
       title: "One tap per door",
@@ -78,6 +81,7 @@ export const PAGE_TOURS: Record<TourPageId, TutorialStep[]> = {
     {
       id: "field-lead",
       target: "field-lead",
+      optional: true, // hidden behind the gate on a pre-check-in "?" replay
       cursorAt: { x: 0.5, y: 0.68 }, // tap under the label so it stays readable
       title: "Got a yes?",
       body: "Smash ⚡ Submit New Lead. It pins the house and opens the lead form — fill it out right on the doorstep while it's hot.",
@@ -97,7 +101,7 @@ export const PAGE_TOURS: Record<TourPageId, TutorialStep[]> = {
       id: "mission-pay",
       target: "mission-pay",
       title: "Watch your pay",
-      body: "Your weekly pay updates live as points land, with your hourly rate and this month's volume bonus right below it.",
+      body: "Your weekly pay updates live as points land, with your hourly rate right below it. Sits and sales push both up.",
     },
     {
       id: "tab-plan",
@@ -105,7 +109,7 @@ export const PAGE_TOURS: Record<TourPageId, TutorialStep[]> = {
       search: { tab: "plan" },
       target: "tab-plan",
       title: "Plan",
-      body: "Set your income goal and Plan back-solves it — how many doors and leads today gets you there.",
+      body: "Set your income goal and the Playbook turns it into today's door math. It gets sharper as your own numbers land.",
     },
     {
       id: "tab-log",
@@ -170,7 +174,7 @@ export const WELCOME_STEPS: TutorialStep[] = [
     id: "hud",
     target: "hud",
     title: "Your score strip",
-    body: "Rank, leads called in, and points today — pinned to the top of every screen, so you always know where you stand.",
+    body: "Your rank, Leads Today, and Pts Today — pinned to the top of every screen, so you always know where you stand.",
   },
 ];
 

@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 
 import { ArcadePanel } from "@/components/arcade";
+import { Button } from "@/components/ui/button";
 
 function fmtDuration(ms: number) {
   if (ms < 0) ms = 0;
@@ -44,7 +45,14 @@ export function TimeClock({ userId }: { userId: string }) {
     return () => clearInterval(t);
   }, []);
 
-  const { data: openEntry } = useQuery({
+  // Punch state must be known, not assumed: a failed/pending read renders as
+  // unknown (no punch buttons), never as "Off the clock" — double-punch risk.
+  const {
+    data: openEntry,
+    isPending: openPending,
+    isError: openError,
+    refetch: refetchOpen,
+  } = useQuery({
     queryKey: ["time-clock-open", userId],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -227,6 +235,7 @@ export function TimeClock({ userId }: { userId: string }) {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const openLoaded = !openPending && !openError;
   const isClockedIn = !!openEntry;
   const liveMs = useMemo(() => {
     if (!openEntry) return 0;
@@ -282,12 +291,20 @@ export function TimeClock({ userId }: { userId: string }) {
             {openMeal ? <Utensils className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
           </div>
           <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-            {openMeal ? "On lunch" : isClockedIn ? "On the clock" : "Off the clock"}
+            {openError
+              ? "—"
+              : openPending
+                ? "Loading…"
+                : openMeal
+                  ? "On lunch"
+                  : isClockedIn
+                    ? "On the clock"
+                    : "Off the clock"}
           </div>
         </div>
 
         <div className="timer-display text-5xl sm:text-6xl text-center">
-          {isClockedIn ? fmtDuration(liveMs) : "00:00:00"}
+          {!openLoaded ? "—" : isClockedIn ? fmtDuration(liveMs) : "00:00:00"}
         </div>
 
         <div className="text-xs text-muted-foreground text-center">
@@ -304,7 +321,16 @@ export function TimeClock({ userId }: { userId: string }) {
           )}
         </div>
 
-        {attesting ? (
+        {openError ? (
+          <div className="w-full max-w-md rounded-lg border border-warning/50 bg-warning/10 p-3 space-y-2">
+            <div className="text-sm text-foreground/90 text-center">
+              Couldn't load your clock state — punches are disabled until it loads.
+            </div>
+            <Button variant="outline" className="w-full min-h-11" onClick={() => refetchOpen()}>
+              Retry
+            </Button>
+          </div>
+        ) : openPending ? null : attesting ? (
           <div className="w-full max-w-md rounded-lg border border-warning/50 bg-warning/10 p-4 space-y-3">
             <div className="text-sm text-foreground text-center">
               This shift ran past {MEAL_REQUIRED_AFTER_HOURS} hours and no 30-minute lunch was
@@ -328,7 +354,7 @@ export function TimeClock({ userId }: { userId: string }) {
             </button>
             <button
               onClick={() => setAttesting(false)}
-              className="w-full text-[10px] uppercase tracking-widest text-muted-foreground py-1"
+              className="w-full min-h-11 inline-flex items-center justify-center text-[10px] uppercase tracking-widest text-muted-foreground"
             >
               Cancel — stay clocked in
             </button>

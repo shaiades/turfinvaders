@@ -3,6 +3,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { isAdminRole } from "@/lib/roles";
+import { destinationByRole } from "@/lib/redirect-by-role";
 import { useQuery } from "@tanstack/react-query";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { supabase } from "@/integrations/supabase/client";
@@ -68,7 +69,7 @@ type DashboardTab = OwnerTab | CanvasserTab;
 const isOwnerTab = (t: unknown): t is OwnerTab => (OWNER_TABS as readonly unknown[]).includes(t);
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
-  head: () => ({ meta: [{ title: "Dashboard — Knockout" }] }),
+  head: () => ({ meta: [{ title: "Dashboard — Turf Invaders" }] }),
   validateSearch: (s: Record<string, unknown>): { tab: DashboardTab } => {
     // Legacy bookmarks: the old Fleet tab AND the old Executive Dashboard tab
     // both merged into Fleet Dispatch (2026-08-04).
@@ -112,10 +113,12 @@ function Loading() {
 /** Day-1 waiting room. Roles are Owner/Captain-granted (security decision
  *  2026-08-12 — signup must NOT self-assign), so instead of a dead card this
  *  screen watches user_roles and unlocks itself the moment the grant lands:
- *  refreshSession() retriggers useAuth's hydrate via onAuthStateChange, with
- *  a hard reload as the fallback. */
+ *  refreshSession(), then a HARD navigation to the granted role's home
+ *  screen — a full load guarantees a fresh role hydrate, and canvassers land
+ *  on /field (Active Run) as the card promises, not this route's Mission. */
 function NoRole() {
   const { user } = useAuth();
+  const userId = user?.id;
   const { data: hasRole } = useQuery({
     enabled: !!user,
     queryKey: ["waiting_room_role", user?.id],
@@ -127,12 +130,17 @@ function NoRole() {
   });
 
   useEffect(() => {
-    if (!hasRole) return;
+    if (!hasRole || !userId) return;
     toast.success("You're on the roster — loading your run!");
-    supabase.auth.refreshSession();
-    const fallback = setTimeout(() => window.location.reload(), 3000);
-    return () => clearTimeout(fallback);
-  }, [hasRole]);
+    // Deliberately un-cancelled: even when refreshSession()'s soft hydrate
+    // unmounts this card first, the hard navigation must still fire so the
+    // destination — not this route's role fan-out — decides the screen.
+    (async () => {
+      await supabase.auth.refreshSession();
+      const dest = await destinationByRole(userId);
+      window.location.assign(dest.search ? `${dest.to}?tab=${dest.search.tab}` : dest.to);
+    })().catch(() => window.location.reload());
+  }, [hasRole, userId]);
 
   // Signup intent (a claim, never a grant) personalizes the wait. The email
   // form collects it at signup; OAuth (Google) accounts arrive without one,

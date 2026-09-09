@@ -11,7 +11,7 @@ import { isManagerRole } from "@/lib/roles";
 import { laDateISO, laMidnightUtcISO, addDaysISO, weekStartOfISO } from "@/lib/dates";
 
 export const Route = createFileRoute("/_authenticated/canvassers/$canvasserId/field")({
-  head: () => ({ meta: [{ title: "Field Activity — Knockout" }] }),
+  head: () => ({ meta: [{ title: "Field Activity — Turf Invaders" }] }),
   component: FieldActivityPage,
 });
 
