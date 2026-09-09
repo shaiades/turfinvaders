@@ -42,6 +42,10 @@ const CANVASSER_ALLOWED = [
   "/field",
   "/my-territory",
   "/dashboard",
+  // /mission is the captain split-out of the Mission surface; a canvasser who
+  // lands here (stray link/bookmark) is redirected to /dashboard by the route
+  // itself, so keep it allowed rather than hard-bouncing them to /field.
+  "/mission",
   "/log",
   "/learn",
   "/leaderboard",
@@ -104,15 +108,22 @@ export function AppShell({ children }: { children: ReactNode }) {
       ];
     }
     if (role === "captain") {
-      // Captains get their own five (owner decision 2026-08-25): no Payroll
-      // (CaptainDashboard has no ?tab views — the admin link was a silent
-      // no-op) and no Desk (/confirmation-desk is Admin-tier and bounces).
-      // Command carries no search so activeOptions matches on pathname alone
-      // (Mission precedent above); Fleet Dispatch points at the live board —
-      // the read-only leaderboard IS the captain management surface
-      // (row edits stay role-gated inside FleetDispatch).
+      // Captains knock doors too (owner request 2026-09-09), so they get the
+      // FULL canvasser toolkit + their leadership privileges: Mission (/mission,
+      // the personal clock/pay/Plan/Log/Stats surface a canvasser has on
+      // /dashboard) plus Command (CaptainDashboard, the van overview). The two
+      // live on separate routes so both stay lit and neither collides on
+      // /dashboard's ?tab. No Payroll (CaptainDashboard has no ?tab views) and
+      // no Desk (/confirmation-desk is Admin-tier and bounces). Territory IS
+      // the Active Run canvass map + Turf Tools; Fleet Dispatch points at the
+      // live board (row edits stay role-gated inside FleetDispatch). Six items
+      // (the mobile bar widens to 6 for captains) — everything a canvasser
+      // reaches, plus the two they don't. Each carries no search so
+      // activeOptions matches on pathname alone (Mission precedent above),
+      // keeping the item lit while inner ?tab= rewrites.
       return [
         { to: "/dashboard", label: "Command", icon: LayoutDashboard },
+        { to: "/mission", label: "Mission", icon: Target },
         { to: "/my-territory", label: "Territory", icon: MapPin },
         { to: "/leaderboard", label: "Fleet Dispatch", icon: Truck },
         { to: "/learn", label: "Learn", icon: GraduationCap },
@@ -134,6 +145,12 @@ export function AppShell({ children }: { children: ReactNode }) {
       { to: "/daily-wrap", label: "Wrap", icon: Sparkles },
     ];
   })();
+
+  // Mobile bottom bar caps at 5 for everyone except captains, who carry a 6th
+  // (Mission joined their canvasser toolkit 2026-09-09) — all six are field
+  // tools, so none should hide off the phone. Admins keep 5 (their overflow is
+  // desktop-only clutter; they don't canvass from a phone).
+  const bottomBarMax = role === "captain" ? 6 : 5;
 
   async function signOut() {
     await supabase.auth.signOut();
@@ -317,10 +334,10 @@ export function AppShell({ children }: { children: ReactNode }) {
           <ul
             className="grid"
             style={{
-              gridTemplateColumns: `repeat(${Math.min(navItems.length, 5)}, minmax(0, 1fr))`,
+              gridTemplateColumns: `repeat(${Math.min(navItems.length, bottomBarMax)}, minmax(0, 1fr))`,
             }}
           >
-            {navItems.slice(0, 5).map((item) => (
+            {navItems.slice(0, bottomBarMax).map((item) => (
               <li key={`bt-${item.to}-${item.label}`}>
                 <Link
                   to={item.to}

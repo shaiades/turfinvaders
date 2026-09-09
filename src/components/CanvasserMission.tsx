@@ -1,5 +1,4 @@
 import { useEffect } from "react";
-import { getRouteApi } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { formatCurrency } from "@/lib/utils";
@@ -23,11 +22,12 @@ import { CanvasserStats } from "@/components/CanvasserStats";
  * into one screen (2026-08-14). Always-on header stack (time clock, pay,
  * SCCE rank), then three tabs in day order: Plan (goal → funnel back-solve),
  * Log (today's counts + lead submission), Stats (today/week/MTD review).
- * Tab selection lives in /dashboard's ?tab= search param so /playbook and
- * /log deep links can land on the right tab.
+ * Tab selection lives in the host route's ?tab= search param so /playbook and
+ * /log deep links can land on the right tab. The host route owns the search
+ * value + navigate (canvassers mount this on /dashboard, captains on /mission),
+ * so this component is route-agnostic — it takes the raw ?tab value and a
+ * setter as props rather than binding to one route's API.
  */
-
-const dashboardRoute = getRouteApi("/_authenticated/dashboard");
 
 // "learn" left this list 2026-09-08 — Learn is a bottom-bar tab (/learn) now.
 // Old ?tab=learn deep links coerce through isCanvasserTab → last-viewed tab.
@@ -50,13 +50,17 @@ export function CanvasserMission({
   userId,
   displayName,
   teamId,
+  rawTab,
+  setTab,
 }: {
   userId: string;
   displayName: string | null;
   teamId: string | null;
+  /** The host route's raw ?tab value (any type — coerced below). */
+  rawTab: unknown;
+  /** Writes the host route's ?tab (e.g. dashboard/mission navigate, replace). */
+  setTab: (t: CanvasserTab) => void;
 }) {
-  const { tab: rawTab } = dashboardRoute.useSearch();
-  const navigate = dashboardRoute.useNavigate();
   // Foreign tab values reach here constantly — the logo link and old Stats
   // bookmarks carry ?tab=dispatch, and the search-less bottom-bar item and
   // swipe nav commit the validateSearch default ("dispatch") too. Coerce in
@@ -64,7 +68,6 @@ export function CanvasserMission({
   // their leadership tab), falling back to the last tab this session viewed
   // so returning to Mission via swipe/bottom bar doesn't reset to Log.
   const tab: CanvasserTab = isCanvasserTab(rawTab) ? rawTab : getStoredTab();
-  const setTab = (t: CanvasserTab) => navigate({ search: { tab: t }, replace: true });
   useEffect(() => {
     try {
       sessionStorage.setItem(LAST_TAB_KEY, tab);
