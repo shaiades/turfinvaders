@@ -265,10 +265,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                 search={item.search as never}
                 data-tour={`nav${item.to.replaceAll("/", "-")}`}
                 activeOptions={{ includeSearch: !!item.search, exact: !item.search }}
-                className="flex items-center gap-2 px-3 py-2 min-h-11 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-surface-elevated transition-colors"
+                className="flex items-center gap-2 px-2 py-2 min-h-11 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-surface-elevated transition-colors"
                 activeProps={{
                   className:
-                    "flex items-center gap-2 px-3 py-2 min-h-11 rounded-md text-sm text-primary bg-surface-elevated ring-1 ring-primary/40",
+                    "flex items-center gap-2 px-2 py-2 min-h-11 rounded-md text-sm text-primary bg-surface-elevated ring-1 ring-primary/40",
                 }}
               >
                 <item.icon className="w-4 h-4" />
