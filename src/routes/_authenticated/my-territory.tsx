@@ -38,44 +38,49 @@ type TurfRow = {
   assigner: { display_name: string | null } | null;
 };
 
-type ZipHit = { bounds: [[number, number], [number, number]]; label: string };
+type PlaceHit = { bounds: [[number, number], [number, number]]; label: string };
 
-// One lookup per ZIP per session — Nominatim asks for restraint, and a
-// dispatch morning re-types the same handful of ZIPs.
-const zipCache = new Map<string, ZipHit>();
+// One lookup per query per session — Nominatim asks for restraint, and a
+// dispatch morning re-types the same handful of ZIPs and streets.
+const placeCache = new Map<string, PlaceHit>();
 
-/** ZIP → bounding box via OpenStreetMap's free geocoder (keyless, CORS-open).
- *  Returns null for unknown ZIPs; throws only on network failure. */
-async function lookupZip(zip: string): Promise<ZipHit | null> {
-  const cached = zipCache.get(zip);
+const isZip = (q: string) => /^\d{5}$/.test(q);
+
+/** ZIP or free text (street, city, place) → bounding box via OpenStreetMap's
+ *  free geocoder (keyless, CORS-open, US-scoped). A 5-digit query uses the
+ *  structured postcode field; anything else is a free-text search — so
+ *  "Manchester Ave, Encinitas" or "Balboa Park San Diego" both work. Returns
+ *  null for no match; throws only on network failure. */
+async function lookupPlace(query: string): Promise<PlaceHit | null> {
+  const key = query.toLowerCase();
+  const cached = placeCache.get(key);
   if (cached) return cached;
+  const field = isZip(query) ? `postalcode=${query}` : `q=${encodeURIComponent(query)}`;
   const res = await fetch(
-    `https://nominatim.openstreetmap.org/search?postalcode=${zip}&countrycodes=us&format=jsonv2&limit=1`,
+    `https://nominatim.openstreetmap.org/search?${field}&countrycodes=us&format=jsonv2&limit=1`,
   );
   if (!res.ok) throw new Error(`geocoder ${res.status}`);
   const rows = (await res.json()) as Array<{ display_name?: string; boundingbox?: string[] }>;
   const bb = rows[0]?.boundingbox; // [south, north, west, east]
   if (!bb || bb.length !== 4) return null;
-  let [s, n, w, e] = bb.map(Number);
+  const [s, n, w, e] = bb.map(Number);
   if ([s, n, w, e].some(Number.isNaN)) return null;
-  // Centroid-only postcodes come back with a county-sized default box —
-  // clamp to ~a ZIP's worth of map so the jump lands, not orbits.
-  if (n - s > 0.12 || e - w > 0.15) {
-    const cLat = (n + s) / 2;
-    const cLng = (e + w) / 2;
-    [s, n, w, e] = [cLat - 0.06, cLat + 0.06, cLng - 0.075, cLng + 0.075];
-  }
-  const hit: ZipHit = {
+  // Normalize the frame to a neighborhood: a single street segment comes back
+  // as a ~30 m sliver (too tight to draw in), a centroid-only ZIP as a
+  // county-sized box (orbits). Re-center on the match and clamp the span to a
+  // comfortable draw-level range in both cases.
+  const cLat = (n + s) / 2;
+  const cLng = (e + w) / 2;
+  const halfLat = Math.min(Math.max(n - s, 0.03), 0.12) / 2;
+  const halfLng = Math.min(Math.max(e - w, 0.03), 0.15) / 2;
+  const hit: PlaceHit = {
     bounds: [
-      [s, w],
-      [n, e],
+      [cLat - halfLat, cLng - halfLng],
+      [cLat + halfLat, cLng + halfLng],
     ],
-    // display_name leads with the postal code we already show — strip it.
-    label:
-      rows[0]?.display_name?.replace(new RegExp(`^${zip},\\s*`), "").split(", United States")[0] ??
-      zip,
+    label: rows[0]?.display_name?.split(", United States")[0]?.slice(0, 72) ?? query,
   };
-  zipCache.set(zip, hit);
+  placeCache.set(key, hit);
   return hit;
 }
 
@@ -110,29 +115,35 @@ function ManagerTerritoryView({ onBackToCanvassing }: { onBackToCanvassing?: () 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTurfId, setEditingTurfId] = useState<string | null>(null);
   const [listDeleteId, setListDeleteId] = useState<string | null>(null);
-  const [zip, setZip] = useState("");
-  const [zipBusy, setZipBusy] = useState(false);
+  const [query, setQuery] = useState("");
+  const [searchBusy, setSearchBusy] = useState(false);
   const [flyTo, setFlyTo] = useState<{
     bounds: [[number, number], [number, number]];
     key: number;
   } | null>(null);
 
-  async function jumpToZip(e: React.FormEvent) {
+  async function jumpToPlace(e: React.FormEvent) {
     e.preventDefault();
-    if (!/^\d{5}$/.test(zip) || zipBusy) return;
-    setZipBusy(true);
+    const q = query.trim();
+    if (q.length < 3 || searchBusy) return;
+    setSearchBusy(true);
     try {
-      const hit = await lookupZip(zip);
+      const hit = await lookupPlace(q);
       if (!hit) {
-        toast.error("Couldn't find that ZIP — double-check the number.");
+        toast.error(
+          isZip(q)
+            ? "Couldn't find that ZIP — double-check the number."
+            : "No match — try adding a city (e.g. “Main St, Encinitas”).",
+        );
         return;
       }
       setFlyTo((prev) => ({ bounds: hit.bounds, key: (prev?.key ?? 0) + 1 }));
-      toast.success(`📍 ${zip} — ${hit.label}`);
+      // Echo the match so a wrong guess on an ambiguous street is obvious.
+      toast.success(`📍 ${hit.label}`);
     } catch {
-      toast.error("ZIP lookup failed. Check your signal and try again.");
+      toast.error("Search failed. Check your signal and try again.");
     } finally {
-      setZipBusy(false);
+      setSearchBusy(false);
     }
   }
 
@@ -428,25 +439,25 @@ function ManagerTerritoryView({ onBackToCanvassing }: { onBackToCanvassing?: () 
           <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
             {drawing ? "Drag on the map to draw an area" : `${territories.length} area(s) drawn`}
           </span>
-          {/* Jump the map to a ZIP — dispatch mornings shouldn't start with a
-              cross-county pan hunt. */}
-          <form onSubmit={jumpToZip} className="flex items-center gap-2">
+          {/* Jump the map to a ZIP or a street/place — dispatch mornings
+              shouldn't start with a cross-county pan hunt. Street names are
+              ambiguous, so the toast echoes the match and the placeholder
+              nudges toward adding a city. */}
+          <form onSubmit={jumpToPlace} className="flex items-center gap-2">
             <Input
-              value={zip}
-              onChange={(e) => setZip(e.target.value.replace(/\D/g, "").slice(0, 5))}
-              inputMode="numeric"
-              maxLength={5}
-              placeholder="ZIP"
-              aria-label="Jump to ZIP code"
-              className="w-24"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="ZIP or street, city"
+              aria-label="Search by ZIP, street, or place"
+              className="w-44"
             />
             <Button
               type="submit"
               variant="outline"
-              disabled={!/^\d{5}$/.test(zip) || zipBusy}
+              disabled={query.trim().length < 3 || searchBusy}
               className="gap-1.5"
             >
-              <MapPin className="w-3.5 h-3.5" /> {zipBusy ? "…" : "Go"}
+              <MapPin className="w-3.5 h-3.5" /> {searchBusy ? "…" : "Go"}
             </Button>
           </form>
           {onBackToCanvassing && (
