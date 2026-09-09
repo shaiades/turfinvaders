@@ -41,8 +41,11 @@ export function GratitudeGate({
 
   return (
     <div className="min-h-[70vh] flex items-center justify-center px-4">
-      <div className="relative w-full max-w-xl overflow-hidden rounded-2xl border border-[color-mix(in_oklab,var(--neon)_45%,var(--border))] bg-[linear-gradient(160deg,#08080d,#0e0a18)] p-8 md:p-10"
-           style={{ boxShadow: "0 0 60px -20px var(--neon), inset 0 0 60px -20px var(--neon)" }}>
+      <div
+        data-tour="gratitude-gate"
+        className="relative w-full max-w-xl overflow-hidden rounded-2xl border border-[color-mix(in_oklab,var(--neon)_45%,var(--border))] bg-[linear-gradient(160deg,#08080d,#0e0a18)] p-8 md:p-10"
+        style={{ boxShadow: "0 0 60px -20px var(--neon), inset 0 0 60px -20px var(--neon)" }}
+      >
         <div className="absolute inset-0 pointer-events-none scanlines opacity-20" />
         <div className="relative space-y-6 text-center">
           <div className="inline-flex items-center gap-2 text-[10px] font-display uppercase tracking-[0.3em] text-neon">

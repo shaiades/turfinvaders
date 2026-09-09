@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth, setDevRoleOverride, type AppRole } from "@/hooks/useAuth";
 import { useSwipeNav } from "@/hooks/useSwipeNav";
 import { CanvasserHUD } from "@/components/CanvasserHUD";
+import { CanvasserTutorial, startCanvasserTutorial } from "@/components/tutorial/CanvasserTutorial";
 import { CLOSE_KOMBAT_ROLES, canUseViewAs } from "@/lib/roles";
 import {
   LogOut,
@@ -19,6 +20,7 @@ import {
   Truck,
   Swords,
   GraduationCap,
+  CircleHelp,
 } from "lucide-react";
 const turfInvadersWordmark = { url: "/turf-invaders-wordmark.png" };
 
@@ -193,9 +195,21 @@ export function AppShell({ children }: { children: ReactNode }) {
           the status-bar strip; zero everywhere else. */}
       <header className="border-b border-border bg-background/95 backdrop-blur sticky top-0 z-20 pt-safe">
         {/* Mobile header: centered logo only. Side slots are 44px twins so
-            the wordmark stays optically centered. */}
+            the wordmark stays optically centered. Canvassers get the tutorial
+            replay in the left slot; everyone else keeps the spacer. */}
         <div className="md:hidden flex items-center justify-between px-4 py-2">
-          <div className="w-11" />
+          {user && role === "canvasser" ? (
+            <button
+              onClick={startCanvasserTutorial}
+              data-tour="help"
+              className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
+              aria-label="Replay the app tutorial"
+            >
+              <CircleHelp className="w-5 h-5" />
+            </button>
+          ) : (
+            <div className="w-11" />
+          )}
           <Link
             to="/dashboard"
             search={{ tab: "dispatch" }}
@@ -229,6 +243,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 key={`${item.to}-${item.label}`}
                 to={item.to}
                 search={item.search as never}
+                data-tour={`nav${item.to.replaceAll("/", "-")}`}
                 activeOptions={{ includeSearch: !!item.search, exact: !item.search }}
                 className="flex items-center gap-2 px-3 py-2 min-h-11 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-surface-elevated transition-colors"
                 activeProps={{
@@ -257,6 +272,16 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="flex items-center gap-3 justify-end">
             {user && (
               <>
+                {role === "canvasser" && (
+                  <button
+                    onClick={startCanvasserTutorial}
+                    data-tour="help"
+                    className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
+                    aria-label="Replay the app tutorial"
+                  >
+                    <CircleHelp className="w-5 h-5" />
+                  </button>
+                )}
                 <div className="text-right">
                   <div className="text-xs text-muted-foreground uppercase tracking-wider">
                     {role}
@@ -300,6 +325,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Link
                   to={item.to}
                   search={item.search as never}
+                  data-tour={`nav${item.to.replaceAll("/", "-")}`}
                   activeOptions={{ includeSearch: !!item.search, exact: !item.search }}
                   className="flex flex-col items-center justify-center gap-1 py-2.5 text-[10px] font-display uppercase tracking-wider text-muted-foreground min-h-14"
                   activeProps={{
@@ -315,6 +341,11 @@ export function AppShell({ children }: { children: ReactNode }) {
           </ul>
         </nav>
       )}
+
+      {/* Per-page discovery tips: each screen's mini-tour auto-pops the first
+          time this account opens it; the header "?" replays the current
+          screen's tips. Canvassers only. */}
+      {user && role === "canvasser" && <CanvasserTutorial userId={user.id} />}
     </div>
   );
 }

@@ -205,7 +205,7 @@ function DailyWrap() {
           ⚡ Live Preview · Report finalizes at 7:00 PM Pacific
         </div>
       )}
-      <div>
+      <div data-tour="wrap-header">
         <h1 className="font-display text-2xl text-neon">DAILY WRAP-UP</h1>
         <p className="text-xs text-muted-foreground mt-1 font-display uppercase tracking-widest">
           End of Day Report · Locks at 7:00 PM Pacific

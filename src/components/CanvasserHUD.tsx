@@ -35,7 +35,10 @@ export function CanvasserHUD({ userId }: { userId: string }) {
   const called = totals.leads_called_in;
 
   return (
-    <div className="border-t border-border/60 px-4 py-1.5 flex items-center justify-between gap-3 text-[10px] font-display uppercase tracking-widest">
+    <div
+      data-tour="hud"
+      className="border-t border-border/60 px-4 py-1.5 flex items-center justify-between gap-3 text-[10px] font-display uppercase tracking-widest"
+    >
       <RankPill rank={profile.data?.current_rank ?? "Jr. Silver"} />
       <div className="flex items-center gap-4 tabular-nums">
         <span className="text-muted-foreground">

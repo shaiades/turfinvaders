@@ -183,7 +183,7 @@ export function FieldMode() {
         </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:gap-4">
+      <div data-tour="field-tallies" className="grid grid-cols-2 gap-3 sm:gap-4">
         {TALLIES.map((t) => (
           <TallyButton
             key={t.key}
@@ -197,7 +197,7 @@ export function FieldMode() {
             subtle={t.subtle}
           />
         ))}
-        <div className="pulse-glow-wrapper">
+        <div className="pulse-glow-wrapper" data-tour="field-lead">
           <button
             type="button"
             onClick={openLead}

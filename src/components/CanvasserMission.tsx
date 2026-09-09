@@ -116,17 +116,24 @@ export function CanvasserMission({
         )}
       </div>
 
-      <TimeClock userId={userId} />
-      <TakeHomeWidget
-        userId={userId}
-        weeklyPay={stats.weeklyPay}
-        hourlyRate={stats.hourlyRate}
-        weekPoints={stats.weekPoints}
-      />
+      <div data-tour="mission-clock">
+        <TimeClock userId={userId} />
+      </div>
+      <div data-tour="mission-pay">
+        <TakeHomeWidget
+          userId={userId}
+          weeklyPay={stats.weeklyPay}
+          hourlyRate={stats.hourlyRate}
+          weekPoints={stats.weekPoints}
+        />
+      </div>
       <SCCERankBanner userId={userId} />
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as CanvasserTab)}>
-        <div className="-mx-4 px-4 sm:mx-0 sm:px-0 overflow-x-auto scrollbar-hide">
+        <div
+          className="-mx-4 px-4 sm:mx-0 sm:px-0 overflow-x-auto scrollbar-hide"
+          data-tour="mission-tabs"
+        >
           <TabsList className="flex w-max min-w-full flex-nowrap whitespace-nowrap md:grid md:w-full md:grid-cols-4 bg-surface border border-border p-1 h-auto">
             <ArcadeTab value="plan">Plan</ArcadeTab>
             <ArcadeTab value="log">Log</ArcadeTab>
@@ -159,6 +166,7 @@ function ArcadeTab({ value, children }: { value: string; children: React.ReactNo
   return (
     <TabsTrigger
       value={value}
+      data-tour={`tab-${value}`}
       className="font-display text-[10px] uppercase tracking-widest data-[state=active]:bg-[color-mix(in_oklab,var(--neon)_15%,transparent)] data-[state=active]:text-neon data-[state=active]:shadow-[0_0_18px_-4px_var(--neon)] py-2.5"
     >
       {children}

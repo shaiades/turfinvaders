@@ -719,7 +719,7 @@ function MyTerritoryPage() {
 
         {/* Canvasser knock-result picker */}
         {!isManager && canvasserGate === "ready" && (
-          <div className="grid grid-cols-3 gap-2 sm:gap-3">
+          <div data-tour="territory-pins" className="grid grid-cols-3 gap-2 sm:gap-3">
             {KNOCK_RESULTS.map((r) => (
               <PinPicker
                 key={r.type}
@@ -735,7 +735,7 @@ function MyTerritoryPage() {
         )}
 
         {canvasserGate === "ready" && (
-          <div className="relative">
+          <div className="relative" data-tour="territory-map">
             <NeonMap
               territories={territories}
               // Captains canvass too — they keep their own today-pins over the
