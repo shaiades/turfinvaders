@@ -664,7 +664,12 @@ export function NeonMap({
                   <button
                     type="button"
                     className="nm-pop-btn"
-                    onClick={() => onTerritoryClick!(t.id)}
+                    onClick={() => {
+                      // Close the on-map card before the sheet takes over, so
+                      // it isn't left open behind (and after) the sheet.
+                      mapRef.current?.closePopup();
+                      onTerritoryClick!(t.id);
+                    }}
                   >
                     Assign / edit →
                   </button>
