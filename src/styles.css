@@ -439,3 +439,60 @@
     opacity: 0.5;
   }
 }
+
+/* Turf-history popup on the manager map — Leaflet's popup chrome is white by
+ * default; theme it to the arcade surface (2026-09-09). */
+.turf-popup .leaflet-popup-content-wrapper {
+  background: var(--surface);
+  color: var(--foreground);
+  border: 1px solid color-mix(in oklab, var(--neon) 40%, var(--border));
+  border-radius: 12px;
+  box-shadow: 0 0 22px -6px color-mix(in oklab, var(--neon) 55%, transparent);
+}
+.turf-popup .leaflet-popup-tip {
+  background: var(--surface);
+  border: 1px solid color-mix(in oklab, var(--neon) 40%, var(--border));
+}
+.turf-popup .leaflet-popup-content { margin: 10px 12px; }
+.turf-popup a.leaflet-popup-close-button { color: var(--muted-foreground); }
+.turf-popup .nm-pop-title {
+  font-family: var(--font-display);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--neon);
+  margin-bottom: 4px;
+}
+.turf-popup .nm-pop-now { font-size: 13px; margin-bottom: 8px; }
+.turf-popup .nm-pop-head {
+  font-family: var(--font-display);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted-foreground);
+  margin-bottom: 3px;
+}
+.turf-popup .nm-pop-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  padding: 1px 0;
+}
+.turf-popup .nm-pop-when { color: var(--muted-foreground); white-space: nowrap; }
+.turf-popup .nm-pop-empty { font-size: 12px; color: var(--muted-foreground); }
+.turf-popup .nm-pop-btn {
+  margin-top: 10px;
+  width: 100%;
+  min-height: 38px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in oklab, var(--neon) 55%, transparent);
+  background: color-mix(in oklab, var(--neon) 18%, transparent);
+  color: var(--neon);
+  font-family: var(--font-display);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+}
+.turf-popup .nm-pop-btn:hover { background: color-mix(in oklab, var(--neon) 28%, transparent); }

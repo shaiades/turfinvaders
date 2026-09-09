@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MapContainer, TileLayer, Polygon, Polyline, Marker, useMapEvents, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Polygon, Polyline, Marker, Popup, useMapEvents, useMap } from "react-leaflet";
 import L from "leaflet";
 import { LocateFixed } from "lucide-react";
 import { PIN_COLORS, type PinType } from "@/lib/pin-results";
@@ -18,6 +18,10 @@ export type Territory = {
   assignmentLabel?: string;
   /** Unassigned turfs render gray + dashed. */
   dashed?: boolean;
+  /** Current assignee display name (drives the on-map popup); null = unassigned. */
+  currentAssignee?: string | null;
+  /** Past assignments newest-first, dates pre-formatted for the popup. */
+  history?: Array<{ name: string; when: string }>;
 };
 
 export type FieldPin = {
@@ -518,6 +522,7 @@ export function NeonMap({
   onPinClick,
   pendingPolygon,
   flyTo,
+  territoryPopups = false,
 }: {
   territories: Territory[];
   pins?: FieldPin[];
@@ -539,6 +544,10 @@ export function NeonMap({
   pendingPolygon?: LatLng[] | null;
   /** Animated jump target (SW/NE bounds); bump `key` to re-fly. */
   flyTo?: { bounds: [[number, number], [number, number]]; key: number } | null;
+  /** Manager mode: tapping a turf opens an on-map popup (current assignee +
+   *  recent history + an edit button) instead of firing onTerritoryClick
+   *  directly. The popup's button calls onTerritoryClick to open the sheet. */
+  territoryPopups?: boolean;
 }) {
   const [draft, setDraft] = useState<LatLng[]>([]);
   const mapRef = useRef<L.Map | null>(null);
@@ -611,21 +620,59 @@ export function NeonMap({
         {hasLock && <LockToPolygon polygons={lockPolygons!} me={me} />}
         {follow ? <FollowMe me={me} disableLock={hasLock} paused={mode.kind === "draw"} /> : allPoints.length > 0 && !hasLock && <FitBounds points={allPoints} />}
 
-        {territories.map((t) => (
-          <Polygon
-            key={t.id}
-            positions={t.polygon.map((p) => [p.lat, p.lng] as [number, number])}
-            pathOptions={{
-              color: t.color,
-              weight: 2,
-              fillColor: t.color,
-              ...(t.dashed
-                ? { dashArray: "6 8", fillOpacity: 0.06 }
-                : { fillOpacity: 0.15 }),
-            }}
-            eventHandlers={onTerritoryClick ? { click: () => onTerritoryClick(t.id) } : undefined}
-          />
-        ))}
+        {territories.map((t) => {
+          // Popup mode: click opens the on-map card (below), not the sheet —
+          // the card's button opens the sheet. Otherwise keep the plain
+          // click→onTerritoryClick used by the canvasser/spectator maps.
+          const withPopup = territoryPopups && !!onTerritoryClick;
+          // "Earlier" = history minus the current assignment (usually the
+          // newest row); if currently unassigned, show all recent rows.
+          const earlier = (t.history ?? []).slice(t.currentAssignee ? 1 : 0, t.currentAssignee ? 5 : 4);
+          return (
+            <Polygon
+              key={t.id}
+              positions={t.polygon.map((p) => [p.lat, p.lng] as [number, number])}
+              pathOptions={{
+                color: t.color,
+                weight: 2,
+                fillColor: t.color,
+                ...(t.dashed ? { dashArray: "6 8", fillOpacity: 0.06 } : { fillOpacity: 0.15 }),
+              }}
+              eventHandlers={
+                !withPopup && onTerritoryClick ? { click: () => onTerritoryClick(t.id) } : undefined
+              }
+            >
+              {withPopup && (
+                <Popup className="turf-popup" minWidth={190}>
+                  <div className="nm-pop-title">{t.name?.trim() || "Area"}</div>
+                  <div className="nm-pop-now">
+                    Now · <b>{t.currentAssignee ?? "Unassigned"}</b>
+                  </div>
+                  {earlier.length > 0 ? (
+                    <div className="nm-pop-hist">
+                      <div className="nm-pop-head">Earlier</div>
+                      {earlier.map((h, i) => (
+                        <div key={i} className="nm-pop-row">
+                          <span className="nm-pop-name">{h.name}</span>
+                          <span className="nm-pop-when">{h.when}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="nm-pop-empty">No earlier assignments</div>
+                  )}
+                  <button
+                    type="button"
+                    className="nm-pop-btn"
+                    onClick={() => onTerritoryClick!(t.id)}
+                  >
+                    Assign / edit →
+                  </button>
+                </Popup>
+              )}
+            </Polygon>
+          );
+        })}
 
         {territories.map((t) => {
           if (!t.assignmentLabel || t.polygon.length < 3) return null;

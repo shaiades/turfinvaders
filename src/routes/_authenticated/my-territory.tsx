@@ -249,6 +249,54 @@ function ManagerTerritoryView({ onBackToCanvassing }: { onBackToCanvassing?: () 
     },
   });
 
+  // Recent history for EVERY turf, so the on-map popup can show each area's
+  // past assignees without a per-turf round trip. Managers have a modest
+  // number of turfs; one ordered read + client-side grouping is plenty.
+  const allHistoryQuery = useQuery({
+    enabled: !!user?.id,
+    queryKey: ["turf_history_all", user?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("turf_assignment_history")
+        .select(
+          `turf_id, assigned_at,
+           worker:profiles!turf_assignment_history_assigned_user_id_fkey(display_name)`,
+        )
+        .order("assigned_at", { ascending: false })
+        .limit(500);
+      if (error) throw error;
+      return (data ?? []) as unknown as Array<{
+        turf_id: string;
+        assigned_at: string;
+        worker: { display_name: string | null } | null;
+      }>;
+    },
+  });
+
+  useRealtimeInvalidate({
+    channel: "my-territory-history",
+    tables: ["turf_assignment_history"],
+    invalidateKeys: [["turf_history_all"], ["turf_history"]],
+    enabled: !!user?.id,
+  });
+
+  const historyByTurf = useMemo(() => {
+    const short = (iso: string) =>
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: "America/Los_Angeles",
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      }).format(new Date(iso));
+    const map = new Map<string, Array<{ name: string; when: string }>>();
+    for (const h of allHistoryQuery.data ?? []) {
+      const list = map.get(h.turf_id) ?? [];
+      list.push({ name: h.worker?.display_name ?? "Former member", when: short(h.assigned_at) });
+      map.set(h.turf_id, list);
+    }
+    return map;
+  }, [allHistoryQuery.data]);
+
   const territories: Territory[] = useMemo(
     () =>
       (turfsQuery.data ?? []).map((t) => ({
@@ -260,8 +308,10 @@ function ManagerTerritoryView({ onBackToCanvassing }: { onBackToCanvassing?: () 
         assignmentLabel: t.assigned_user_id
           ? (t.assignee?.display_name ?? "Assigned")
           : "Unassigned",
+        currentAssignee: t.assigned_user_id ? (t.assignee?.display_name ?? "Assigned") : null,
+        history: historyByTurf.get(t.id) ?? [],
       })),
-    [turfsQuery.data],
+    [turfsQuery.data, historyByTurf],
   );
 
   const saveTurf = useMutation({
@@ -505,6 +555,10 @@ function ManagerTerritoryView({ onBackToCanvassing }: { onBackToCanvassing?: () 
                   }
                 : undefined
             }
+            // Tapping a turf opens an on-map card (current assignee + recent
+            // history + an edit button) rather than jumping straight to the
+            // sheet. Disabled mid-draw so a stray tap doesn't fight drawing.
+            territoryPopups={!drawing}
           />
 
           {/* Floating fallback: always visible when a polygon is pending */}
