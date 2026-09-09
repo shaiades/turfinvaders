@@ -15,6 +15,7 @@ import {
   type AssignableUser,
   type AreaDetailsTurf,
   type LastWorked,
+  type AssignmentHistoryEntry,
 } from "@/components/AreaDetailsSheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -221,8 +222,9 @@ function ManagerTerritoryView({ onBackToCanvassing }: { onBackToCanvassing?: () 
     },
   });
 
-  // "Who worked this area last" — most recent history entry for the turf
-  // being edited (drives the don't-assign-twice-in-a-row warning).
+  // Full assignment history for the turf being edited — who has had this area
+  // and who assigned them. Drives both the visible "Assignment history" list
+  // and the most-recent-worker line + don't-assign-twice-in-a-row warning.
   const historyQuery = useQuery({
     enabled: !!editingTurfId,
     queryKey: ["turf_history", editingTurfId],
@@ -231,16 +233,18 @@ function ManagerTerritoryView({ onBackToCanvassing }: { onBackToCanvassing?: () 
         .from("turf_assignment_history")
         .select(
           `assigned_user_id, assigned_at,
-           worker:profiles!turf_assignment_history_assigned_user_id_fkey(display_name)`,
+           worker:profiles!turf_assignment_history_assigned_user_id_fkey(display_name),
+           assigner:profiles!turf_assignment_history_assigned_by_fkey(display_name)`,
         )
         .eq("turf_id", editingTurfId!)
         .order("assigned_at", { ascending: false })
-        .limit(5);
+        .limit(25);
       if (error) throw error;
       return (data ?? []) as unknown as Array<{
         assigned_user_id: string | null;
         assigned_at: string;
         worker: { display_name: string | null } | null;
+        assigner: { display_name: string | null } | null;
       }>;
     },
   });
@@ -379,6 +383,18 @@ function ManagerTerritoryView({ onBackToCanvassing }: { onBackToCanvassing?: () 
       at: row.assigned_at,
     };
   }, [historyQuery.data]);
+
+  const assignmentHistory: AssignmentHistoryEntry[] = useMemo(
+    () =>
+      (historyQuery.data ?? []).map((h) => ({
+        userId: h.assigned_user_id,
+        // A profile deleted after assignment nulls the FK (ON DELETE SET NULL).
+        name: h.worker?.display_name ?? "Former member",
+        at: h.assigned_at,
+        assignerName: h.assigner?.display_name ?? null,
+      })),
+    [historyQuery.data],
+  );
 
   const listDeleting = listDeleteId
     ? ((turfsQuery.data ?? []).find((t) => t.id === listDeleteId) ?? null)
@@ -587,6 +603,7 @@ function ManagerTerritoryView({ onBackToCanvassing }: { onBackToCanvassing?: () 
         }
         users={canvassersQuery.data ?? []}
         lastWorked={editingTurf ? lastWorked : null}
+        history={editingTurf ? assignmentHistory : []}
         saving={saveTurf.isPending || updateTurf.isPending}
         deleting={deleteTurf.isPending}
         onSave={(assigneeId, name) => {

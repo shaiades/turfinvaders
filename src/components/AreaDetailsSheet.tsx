@@ -5,7 +5,7 @@
 // repeat-assignment warning, and Delete behind a confirm dialog.
 
 import { useEffect, useMemo, useState } from "react";
-import { Trash2, Check, TriangleAlert } from "lucide-react";
+import { Trash2, Check, TriangleAlert, History, ChevronDown } from "lucide-react";
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter,
 } from "@/components/ui/sheet";
@@ -36,6 +36,14 @@ export type AreaDetailsTurf = {
 };
 
 export type LastWorked = { userId: string; name: string; at: string };
+
+/** One past assignment of this area, newest first. */
+export type AssignmentHistoryEntry = {
+  userId: string | null;
+  name: string;
+  at: string;
+  assignerName: string | null;
+};
 
 function subtitle(u: AssignableUser): string {
   return `${u.office_location ?? "No Office"} | ${u.team_name ?? "No Van"}`;
@@ -76,7 +84,7 @@ export function DeleteAreaConfirmDialog({
 }
 
 export function AreaDetailsSheet({
-  open, onOpenChange, mode, turf, vertexCount, users, lastWorked,
+  open, onOpenChange, mode, turf, vertexCount, users, lastWorked, history = [],
   saving, deleting, onSave, onDelete,
 }: {
   open: boolean;
@@ -86,6 +94,8 @@ export function AreaDetailsSheet({
   vertexCount: number;
   users: AssignableUser[];
   lastWorked: LastWorked | null;
+  /** Past assignments of this area, newest first (edit mode only). */
+  history?: AssignmentHistoryEntry[];
   saving: boolean;
   deleting: boolean;
   onSave: (assigneeId: string | null, name: string) => void;
@@ -96,6 +106,7 @@ export function AreaDetailsSheet({
   const [query, setQuery] = useState("");
   const [name, setName] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   // Latched copy of what the sheet displays: while the close animation plays,
   // the parent clears editingTurfId and the live props flip edit→create —
   // rendering from `view` keeps the closing sheet from visibly morphing.
@@ -113,6 +124,7 @@ export function AreaDetailsSheet({
       setTouched(false);
       setQuery("");
       setConfirmingDelete(false);
+      setShowHistory(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, mode, vertexCount, turf?.id, turf?.assigned_user_id, turf?.assigned_at, turf?.name]);
@@ -187,6 +199,61 @@ export function AreaDetailsSheet({
           </SheetHeader>
 
           <div className="space-y-3 overflow-y-auto px-4 pt-3">
+            {isEdit && history.length > 0 && (
+              <div className="rounded-lg border border-border">
+                <button
+                  type="button"
+                  onClick={() => setShowHistory((v) => !v)}
+                  aria-expanded={showHistory}
+                  className="flex w-full items-center gap-2 px-3 py-2.5 text-left"
+                >
+                  <History className="w-4 h-4 text-muted-foreground shrink-0" />
+                  <span className="flex-1 text-sm font-medium">
+                    Assignment history{" "}
+                    <span className="text-muted-foreground">· {history.length}</span>
+                  </span>
+                  <ChevronDown
+                    className={`w-4 h-4 text-muted-foreground shrink-0 transition-transform ${showHistory ? "rotate-180" : ""}`}
+                  />
+                </button>
+                {showHistory && (
+                  <ol className="border-t border-border divide-y divide-border">
+                    {history.map((h, i) => {
+                      const color = h.userId ? assigneeColor(h.userId) : UNASSIGNED_COLOR;
+                      const current = i === 0 && h.userId === shownTurf?.assigned_user_id;
+                      return (
+                        <li
+                          key={`${h.at}-${i}`}
+                          className="flex items-center gap-3 px-3 py-2 min-w-0"
+                        >
+                          <span
+                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-black"
+                            style={{ background: color }}
+                          >
+                            {initials(h.name)}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-medium">
+                              {h.name}
+                              {current && (
+                                <span className="ml-2 text-[9px] uppercase tracking-widest text-neon">
+                                  Current
+                                </span>
+                              )}
+                            </span>
+                            <span className="block truncate text-[10px] uppercase tracking-widest text-muted-foreground">
+                              {laDateTimeLabel(h.at)}
+                              {h.assignerName ? ` · by ${h.assignerName}` : ""}
+                            </span>
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                )}
+              </div>
+            )}
+
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
