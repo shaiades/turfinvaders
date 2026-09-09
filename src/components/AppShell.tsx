@@ -121,11 +121,14 @@ export function AppShell({ children }: { children: ReactNode }) {
       // reaches, plus the two they don't. Each carries no search so
       // activeOptions matches on pathname alone (Mission precedent above),
       // keeping the item lit while inner ?tab= rewrites.
+      // Short labels so all six fit the mobile bottom bar without truncating
+      // (six 62px cells at 375px). "Turf" is the canonical word (go-live
+      // decision); "Dispatch" keeps the meaningful half of Fleet Dispatch.
       return [
         { to: "/dashboard", label: "Command", icon: LayoutDashboard },
         { to: "/mission", label: "Mission", icon: Target },
-        { to: "/my-territory", label: "Territory", icon: MapPin },
-        { to: "/leaderboard", label: "Fleet Dispatch", icon: Truck },
+        { to: "/my-territory", label: "Turf", icon: MapPin },
+        { to: "/leaderboard", label: "Dispatch", icon: Truck },
         { to: "/learn", label: "Learn", icon: GraduationCap },
         { to: "/daily-wrap", label: "Wrap", icon: Sparkles },
       ];
