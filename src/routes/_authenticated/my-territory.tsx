@@ -17,6 +17,7 @@ import {
   type LastWorked,
 } from "@/components/AreaDetailsSheet";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { Crosshair, Pencil, MapPin, Trash2, Zap } from "lucide-react";
 
@@ -36,6 +37,47 @@ type TurfRow = {
   assignee: { display_name: string | null } | null;
   assigner: { display_name: string | null } | null;
 };
+
+type ZipHit = { bounds: [[number, number], [number, number]]; label: string };
+
+// One lookup per ZIP per session — Nominatim asks for restraint, and a
+// dispatch morning re-types the same handful of ZIPs.
+const zipCache = new Map<string, ZipHit>();
+
+/** ZIP → bounding box via OpenStreetMap's free geocoder (keyless, CORS-open).
+ *  Returns null for unknown ZIPs; throws only on network failure. */
+async function lookupZip(zip: string): Promise<ZipHit | null> {
+  const cached = zipCache.get(zip);
+  if (cached) return cached;
+  const res = await fetch(
+    `https://nominatim.openstreetmap.org/search?postalcode=${zip}&countrycodes=us&format=jsonv2&limit=1`,
+  );
+  if (!res.ok) throw new Error(`geocoder ${res.status}`);
+  const rows = (await res.json()) as Array<{ display_name?: string; boundingbox?: string[] }>;
+  const bb = rows[0]?.boundingbox; // [south, north, west, east]
+  if (!bb || bb.length !== 4) return null;
+  let [s, n, w, e] = bb.map(Number);
+  if ([s, n, w, e].some(Number.isNaN)) return null;
+  // Centroid-only postcodes come back with a county-sized default box —
+  // clamp to ~a ZIP's worth of map so the jump lands, not orbits.
+  if (n - s > 0.12 || e - w > 0.15) {
+    const cLat = (n + s) / 2;
+    const cLng = (e + w) / 2;
+    [s, n, w, e] = [cLat - 0.06, cLat + 0.06, cLng - 0.075, cLng + 0.075];
+  }
+  const hit: ZipHit = {
+    bounds: [
+      [s, w],
+      [n, e],
+    ],
+    // display_name leads with the postal code we already show — strip it.
+    label:
+      rows[0]?.display_name?.replace(new RegExp(`^${zip},\\s*`), "").split(", United States")[0] ??
+      zip,
+  };
+  zipCache.set(zip, hit);
+  return hit;
+}
 
 // Role fan-out (dashboard.tsx pattern). Since the Active Run merge
 // (2026-09-08) canvassing lives on /field — canvassers bounce there, captains
@@ -68,6 +110,31 @@ function ManagerTerritoryView({ onBackToCanvassing }: { onBackToCanvassing?: () 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTurfId, setEditingTurfId] = useState<string | null>(null);
   const [listDeleteId, setListDeleteId] = useState<string | null>(null);
+  const [zip, setZip] = useState("");
+  const [zipBusy, setZipBusy] = useState(false);
+  const [flyTo, setFlyTo] = useState<{
+    bounds: [[number, number], [number, number]];
+    key: number;
+  } | null>(null);
+
+  async function jumpToZip(e: React.FormEvent) {
+    e.preventDefault();
+    if (!/^\d{5}$/.test(zip) || zipBusy) return;
+    setZipBusy(true);
+    try {
+      const hit = await lookupZip(zip);
+      if (!hit) {
+        toast.error("Couldn't find that ZIP — double-check the number.");
+        return;
+      }
+      setFlyTo((prev) => ({ bounds: hit.bounds, key: (prev?.key ?? 0) + 1 }));
+      toast.success(`📍 ${zip} — ${hit.label}`);
+    } catch {
+      toast.error("ZIP lookup failed. Check your signal and try again.");
+    } finally {
+      setZipBusy(false);
+    }
+  }
 
   // Managers see every turf (canvasser self-scoping lives in ActiveRun now)
   const turfsQuery = useQuery({
@@ -361,6 +428,27 @@ function ManagerTerritoryView({ onBackToCanvassing }: { onBackToCanvassing?: () 
           <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
             {drawing ? "Drag on the map to draw an area" : `${territories.length} area(s) drawn`}
           </span>
+          {/* Jump the map to a ZIP — dispatch mornings shouldn't start with a
+              cross-county pan hunt. */}
+          <form onSubmit={jumpToZip} className="flex items-center gap-2">
+            <Input
+              value={zip}
+              onChange={(e) => setZip(e.target.value.replace(/\D/g, "").slice(0, 5))}
+              inputMode="numeric"
+              maxLength={5}
+              placeholder="ZIP"
+              aria-label="Jump to ZIP code"
+              className="w-24"
+            />
+            <Button
+              type="submit"
+              variant="outline"
+              disabled={!/^\d{5}$/.test(zip) || zipBusy}
+              className="gap-1.5"
+            >
+              <MapPin className="w-3.5 h-3.5" /> {zipBusy ? "…" : "Go"}
+            </Button>
+          </form>
           {onBackToCanvassing && (
             <Button variant="outline" onClick={onBackToCanvassing} className="ml-auto gap-2">
               <Zap className="w-3.5 h-3.5" /> Back to Canvassing
@@ -369,13 +457,17 @@ function ManagerTerritoryView({ onBackToCanvassing }: { onBackToCanvassing?: () 
         </div>
 
         <div className="relative">
+          {/* No `follow`: managers open framing ALL turfs (FitBounds) instead
+              of zoom-18 on their own position — with GPS granted, FollowMe's
+              2 km self-cage made cross-county turf hunting impossible. The
+              me-dot still renders; recenter still jumps to it. */}
           <NeonMap
             territories={territories}
             pins={[]}
             houses={[]}
             me={me}
             height={560}
-            follow
+            flyTo={flyTo}
             pendingPolygon={pendingPolygon}
             mode={mapMode}
             onTerritoryClick={

@@ -216,6 +216,27 @@ function LockToPolygon({ polygons, me, paddingRatio = 0.08 }: { polygons: LatLng
   return null;
 }
 
+/** Animated jump to an external target (the Turf Tools ZIP search). Clears
+ *  any standing maxBounds/minZoom clamp first — FollowMe's 2 km self-cage
+ *  would otherwise swallow the flight. Keyed so repeating the same search
+ *  re-flies. */
+function FlyTo({
+  target,
+}: {
+  target: { bounds: [[number, number], [number, number]]; key: number } | null | undefined;
+}) {
+  const map = useMap();
+  const lastKey = useRef<number | null>(null);
+  useEffect(() => {
+    if (!target || target.key === lastKey.current) return;
+    lastKey.current = target.key;
+    map.setMaxBounds(null as unknown as L.LatLngBoundsExpression);
+    map.setMinZoom(0);
+    map.flyToBounds(L.latLngBounds(target.bounds), { padding: [30, 30], maxZoom: 16 });
+  }, [map, target]);
+  return null;
+}
+
 function InvalidateOnMount() {
   const map = useMap();
   useEffect(() => {
@@ -496,6 +517,7 @@ export function NeonMap({
   onTerritoryClick,
   onPinClick,
   pendingPolygon,
+  flyTo,
 }: {
   territories: Territory[];
   pins?: FieldPin[];
@@ -515,6 +537,8 @@ export function NeonMap({
   onPinClick?: (id: string) => void;
   /** A drawn-but-unsaved ring, previewed dashed white until saved/discarded. */
   pendingPolygon?: LatLng[] | null;
+  /** Animated jump target (SW/NE bounds); bump `key` to re-fly. */
+  flyTo?: { bounds: [[number, number], [number, number]]; key: number } | null;
 }) {
   const [draft, setDraft] = useState<LatLng[]>([]);
   const mapRef = useRef<L.Map | null>(null);
@@ -582,6 +606,7 @@ export function NeonMap({
           maxZoom={20}
         />
         <InvalidateOnMount />
+        <FlyTo target={flyTo} />
         <ClickCapture onClick={handleClick} />
         {hasLock && <LockToPolygon polygons={lockPolygons!} me={me} />}
         {follow ? <FollowMe me={me} disableLock={hasLock} paused={mode.kind === "draw"} /> : allPoints.length > 0 && !hasLock && <FitBounds points={allPoints} />}
