@@ -11,6 +11,15 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 
 const SECTIONS: Array<{ heading: string; terms: Array<[string, string]> }> = [
   {
+    heading: "Door work",
+    terms: [
+      ["Drs", "Doors Knocked — knock and not-home pins on the map, plus Mission Log entries"],
+      ["Tlk", "Talked To — talked-to, renter, and go-back pins, plus Mission Log entries"],
+      ["NI", "Not Interested — NI pins from the field map (no Mission Log field)"],
+      ["Rnt", "Renters — Mission Log only; a Renter pin counts under Tlk"],
+    ],
+  },
+  {
     heading: "Leads (funnel half)",
     terms: [
       ["Sub", "Submitted — actioned leads, credited to the day they were submitted"],
