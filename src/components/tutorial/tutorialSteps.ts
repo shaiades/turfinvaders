@@ -74,9 +74,9 @@ export const PAGE_TOURS: Record<TourPageId, TutorialStep[]> = {
       target: "field-tallies",
       optional: true, // hidden behind the gate on a pre-check-in "?" replay
       padding: 6,
-      cursorAt: { x: 0.26, y: 0.28 }, // tap the Log Knock button, not the gap
+      cursorAt: { x: 0.26, y: 0.28 }, // tap the Log Knock key, not the gap
       title: "One tap per door",
-      body: "The door you're standing at: 🚪 knocked, 🗣️ talked, 🛑 not interested. Every tap drops the pin for you — keep Location on.",
+      body: "The door you're standing at: knocked, talked to, not interested, or a renter — one tap each. Every tap drops the pin for you — keep Location on.",
     },
     {
       id: "field-lead",

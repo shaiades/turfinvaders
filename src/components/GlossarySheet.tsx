@@ -16,7 +16,10 @@ const SECTIONS: Array<{ heading: string; terms: Array<[string, string]> }> = [
       ["Drs", "Doors Knocked — knock and not-home pins on the map, plus Mission Log entries"],
       ["Tlk", "Talked To — talked-to, renter, and go-back pins, plus Mission Log entries"],
       ["NI", "Not Interested — NI pins from the field map (no Mission Log field)"],
-      ["Rnt", "Renters — Mission Log only; a Renter pin counts under Tlk"],
+      [
+        "Rnt",
+        "Renters — Renter pins (tally key or map) plus Mission Log; each also counts under Tlk",
+      ],
     ],
   },
   {

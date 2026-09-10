@@ -38,8 +38,8 @@ import {
  * ACTIVE RUN — the one canvass screen (owner decision 2026-09-08, merging the
  * old /field tally page and /my-territory map page). Layout is one phone
  * screen: header strip, the live turf map with the armed-result switcher
- * floating on it, then the four big tally buttons. The Gratitude Gate fronts
- * the WHOLE screen now (it used to guard only the map).
+ * floating on it, then the four tally keys + the Submit New Lead CTA. The
+ * Gratitude Gate fronts the WHOLE screen now (it used to guard only the map).
  *
  * Two ways to log, both through useFieldPins:
  *  - Tally buttons: one tap per door at your own feet (pin = device fix).
@@ -52,48 +52,39 @@ import {
  * behind the route's Turf Tools toggle (ManagerTerritoryView), not here.
  */
 
-type TallyKey = "doors_knocked" | "people_talked_to" | "not_interested";
+type TallyKey = "doors_knocked" | "people_talked_to" | "not_interested" | "renters";
 type PinType = ActivePin;
 
 const TALLY_TO_PIN: Record<TallyKey, PinType> = {
   doors_knocked: "knock",
   people_talked_to: "talked_to",
   not_interested: "not_interested",
+  renters: "renter",
 };
 
-/** The three tally buttons as data (house pattern — FUNNEL_COLS,
- *  COMPANY_TILES): the Submit New Lead button stays hand-rolled because it
- *  really is different (pulse glow, no count, opens the sheet). */
+/** The four tally keys as data (house pattern — FUNNEL_COLS, COMPANY_TILES),
+ *  in the dispatch board's Door Work order (Drs/Tlk/NI/Rnt, PR #159) so the
+ *  grid and the board read the same. Renter's count comes from
+ *  daily_logs.renters — pins feed it only once migration 20260910200000 is
+ *  applied (before that a Renter tap still pins + bumps Talked To, but this
+ *  key's own count won't tick). The Submit New Lead CTA stays hand-rolled
+ *  below the grid because it really is different (full-width, pulse glow,
+ *  no count, opens the sheet). */
 const TALLIES: Array<{
   key: TallyKey;
   label: string;
-  emoji: string;
   icon: typeof DoorOpen;
   color: string;
-  subtle?: boolean;
 }> = [
-  {
-    key: "doors_knocked",
-    label: "Log Knock",
-    emoji: "🚪",
-    icon: DoorOpen,
-    color: "var(--neon-blue)",
-  },
+  { key: "doors_knocked", label: "Log Knock", icon: DoorOpen, color: "var(--neon-blue)" },
   {
     key: "people_talked_to",
     label: "Talked To",
-    emoji: "🗣️",
     icon: MessagesSquare,
     color: "var(--neon-orange)",
   },
-  {
-    key: "not_interested",
-    label: "Not Interested",
-    emoji: "🛑",
-    icon: Ban,
-    color: "oklch(0.55 0.02 270)",
-    subtle: true,
-  },
+  { key: "not_interested", label: "Not Interested", icon: Ban, color: "oklch(0.65 0.03 270)" },
+  { key: "renters", label: "Renter", icon: KeyRound, color: "#c77dff" },
 ];
 
 // The six knock results (owner directive 2026-08-15). Appt is map-only:
@@ -480,40 +471,38 @@ export function ActiveRun({
 
           {/* ---- Tally slot ---- */}
           <div className="md:col-span-2 space-y-3 md:space-y-6">
-            <div data-tour="field-tallies" className="grid grid-cols-2 gap-3">
-              {TALLIES.map((t) => (
-                <TallyButton
-                  key={t.key}
-                  label={t.label}
-                  emoji={t.emoji}
-                  icon={t.icon}
-                  value={today?.[t.key] ?? 0}
-                  onClick={() => bump(t.key)}
-                  loading={pending === TALLY_TO_PIN[t.key]}
-                  color={t.color}
-                  subtle={t.subtle}
-                />
-              ))}
-              <div className="pulse-glow-wrapper" data-tour="field-lead">
+            <div className="space-y-2.5 md:space-y-3">
+              <div data-tour="field-tallies" className="grid grid-cols-2 gap-2.5 md:gap-3">
+                {TALLIES.map((t) => (
+                  <TallyButton
+                    key={t.key}
+                    label={t.label}
+                    icon={t.icon}
+                    value={today?.[t.key] ?? 0}
+                    onClick={() => bump(t.key)}
+                    loading={pending === TALLY_TO_PIN[t.key]}
+                    color={t.color}
+                  />
+                ))}
+              </div>
+              <div className="pulse-glow-wrapper w-full" data-tour="field-lead">
                 <button
                   type="button"
                   onClick={openLead}
                   disabled={pending === "lead"}
-                  className="arcade-btn-3d w-full h-full min-h-[4.5rem] md:min-h-[8rem] flex items-center md:flex-col justify-center gap-2 p-3"
+                  className="arcade-btn-3d w-full min-h-[3.75rem] md:min-h-[4.75rem] flex items-center justify-center gap-2.5 px-4"
                   style={{
                     ["--btn-color" as string]: "var(--victory)",
                     ["--btn-fg" as string]: "#06110a",
                   }}
                 >
                   {pending === "lead" ? (
-                    <Loader2 className="w-7 h-7 animate-spin" />
+                    <Loader2 className="w-6 h-6 animate-spin" />
                   ) : (
-                    <Zap className="w-7 h-7" />
+                    <Zap className="w-6 h-6" />
                   )}
-                  <span className="font-display text-[11px] uppercase tracking-widest text-center leading-tight">
-                    ⚡ Submit
-                    <br />
-                    New Lead
+                  <span className="font-display text-xs md:text-sm uppercase tracking-widest">
+                    Submit New Lead
                   </span>
                 </button>
               </div>
@@ -603,50 +592,42 @@ function HowItWorksList() {
 
 function TallyButton({
   label,
-  emoji,
   icon: Icon,
   value,
   onClick,
   loading,
   color,
-  subtle,
 }: {
   label: string;
-  emoji: string;
   icon: typeof DoorOpen;
   value: number;
   onClick: () => void;
   loading: boolean;
   color: string;
-  subtle?: boolean;
 }) {
   return (
-    // Compact on phones (the map owns the vertical space now), tall on md+.
+    // Scoreboard key: icon chip top-left, glowing count top-right, label on
+    // its own full-width line below (long labels never fight the count for
+    // room). Compact on phones — the map owns the vertical space — tall on md+.
     <button
       type="button"
       onClick={onClick}
       disabled={loading}
-      className="arcade-btn-3d min-h-[4.5rem] md:min-h-[8rem] flex items-center justify-between md:flex-col md:justify-center gap-2 px-3 py-2 md:p-4"
-      style={{
-        ["--btn-color" as string]: color,
-        ["--btn-fg" as string]: subtle ? "#f4f4f8" : "#0b0b12",
-      }}
+      className="arcade-key min-h-[4.5rem] md:min-h-[7rem] flex flex-col justify-between gap-1.5 p-2.5 md:p-3.5 text-left"
+      style={{ ["--btn-color" as string]: color }}
     >
-      <div className="flex items-center md:flex-col gap-1.5 min-w-0">
-        <div className="text-2xl md:text-3xl leading-none shrink-0">{emoji}</div>
-        <div className="font-display text-[10px] md:text-[11px] uppercase tracking-widest text-left md:text-center leading-tight">
-          {label}
-        </div>
-      </div>
-      <div className="flex items-center gap-1.5 shrink-0">
+      <div className="w-full flex items-center justify-between gap-2">
+        <span className="arcade-key-icon shrink-0">
+          <Icon className="w-4 h-4 md:w-[18px] md:h-[18px]" />
+        </span>
         {loading ? (
-          <Loader2 className="w-5 h-5 animate-spin" />
+          <Loader2 className="w-5 h-5 md:w-6 md:h-6 animate-spin" style={{ color }} />
         ) : (
-          <>
-            <Icon className="w-4 h-4 md:w-5 md:h-5" />
-            <span className="font-display text-2xl md:text-3xl tabular-nums">{value}</span>
-          </>
+          <span className="arcade-key-count text-2xl md:text-3xl">{value}</span>
         )}
+      </div>
+      <div className="w-full font-display text-[9px] md:text-[10px] uppercase tracking-widest leading-tight text-foreground/85">
+        {label}
       </div>
     </button>
   );

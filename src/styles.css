@@ -39,7 +39,8 @@
   --color-surface: var(--surface);
   --color-surface-elevated: var(--surface-elevated);
 
-  --shadow-arcade: 0 0 0 1px var(--neon), 0 0 24px -4px color-mix(in oklab, var(--neon) 60%, transparent);
+  --shadow-arcade:
+    0 0 0 1px var(--neon), 0 0 24px -4px color-mix(in oklab, var(--neon) 60%, transparent);
   --shadow-glow: 0 0 32px -8px color-mix(in oklab, var(--neon) 70%, transparent);
 
   /* Faction palettes (design system 2026-08-14). Turf Invaders fights in
@@ -52,10 +53,18 @@
   --color-kombat-black: var(--kombat-black);
 
   /* Outer glows for interactive/highlighted chrome: shadow-neon-pink etc. */
-  --shadow-neon-pink: 0 0 0 1px color-mix(in oklab, var(--turf-pink) 45%, transparent), 0 0 24px -4px color-mix(in oklab, var(--turf-pink) 70%, transparent);
-  --shadow-neon-cyan: 0 0 0 1px color-mix(in oklab, var(--turf-cyan) 45%, transparent), 0 0 24px -4px color-mix(in oklab, var(--turf-cyan) 70%, transparent);
-  --shadow-neon-red: 0 0 0 1px color-mix(in oklab, var(--kombat-red) 50%, transparent), 0 0 26px -4px color-mix(in oklab, var(--kombat-red) 75%, transparent);
-  --shadow-neon-gold: 0 0 0 1px color-mix(in oklab, var(--kombat-gold) 50%, transparent), 0 0 24px -4px color-mix(in oklab, var(--kombat-gold) 70%, transparent);
+  --shadow-neon-pink:
+    0 0 0 1px color-mix(in oklab, var(--turf-pink) 45%, transparent),
+    0 0 24px -4px color-mix(in oklab, var(--turf-pink) 70%, transparent);
+  --shadow-neon-cyan:
+    0 0 0 1px color-mix(in oklab, var(--turf-cyan) 45%, transparent),
+    0 0 24px -4px color-mix(in oklab, var(--turf-cyan) 70%, transparent);
+  --shadow-neon-red:
+    0 0 0 1px color-mix(in oklab, var(--kombat-red) 50%, transparent),
+    0 0 26px -4px color-mix(in oklab, var(--kombat-red) 75%, transparent);
+  --shadow-neon-gold:
+    0 0 0 1px color-mix(in oklab, var(--kombat-gold) 50%, transparent),
+    0 0 24px -4px color-mix(in oklab, var(--kombat-gold) 70%, transparent);
 }
 
 :root {
@@ -64,16 +73,16 @@
   /* Dark arcade base */
   --background: oklch(0.16 0.02 270);
   --foreground: oklch(0.96 0.01 250);
-  --surface: oklch(0.20 0.03 270);
+  --surface: oklch(0.2 0.03 270);
   --surface-elevated: oklch(0.24 0.035 270);
 
-  --card: oklch(0.20 0.03 270);
+  --card: oklch(0.2 0.03 270);
   --card-foreground: oklch(0.96 0.01 250);
   --popover: oklch(0.22 0.03 270);
   --popover-foreground: oklch(0.96 0.01 250);
 
   /* Turf Invaders wordmark palette: Neon Orange, Arcade Blue, Vivid Green, Hot Pink */
-  --primary: oklch(0.75 0.19 55);           /* neon orange */
+  --primary: oklch(0.75 0.19 55); /* neon orange */
   --primary-foreground: oklch(0.14 0.03 270);
 
   --secondary: oklch(0.28 0.04 270);
@@ -82,7 +91,7 @@
   --muted: oklch(0.26 0.03 270);
   --muted-foreground: oklch(0.68 0.03 260);
 
-  --accent: oklch(0.68 0.20 245);           /* arcade blue */
+  --accent: oklch(0.68 0.2 245); /* arcade blue */
   --accent-foreground: oklch(0.98 0.01 250);
 
   --destructive: oklch(0.65 0.24 25);
@@ -92,35 +101,49 @@
   --input: oklch(0.28 0.04 270);
   --ring: oklch(0.75 0.19 55);
 
-  --neon: oklch(0.72 0.27 340);             /* hot pink */
+  --neon: oklch(0.72 0.27 340); /* hot pink */
   --neon-foreground: oklch(0.14 0.03 270);
-  --neon-magenta: oklch(0.72 0.27 340);     /* alias for legacy usage */
+  --neon-magenta: oklch(0.72 0.27 340); /* alias for legacy usage */
   --neon-orange: oklch(0.75 0.19 55);
-  --neon-blue: oklch(0.68 0.20 245);
-  --victory: oklch(0.80 0.22 145);          /* vivid green */
-  --warning: oklch(0.82 0.17 90);           /* neon yellow */
+  --neon-blue: oklch(0.68 0.2 245);
+  --victory: oklch(0.8 0.22 145); /* vivid green */
+  --warning: oklch(0.82 0.17 90); /* neon yellow */
 
   /* Faction source-of-truth. Turf reuses the wordmark pink/blue so the
    * whole app stays one palette; Kombat gets its own blood/gold/black. */
   --turf-pink: var(--neon-magenta);
   --turf-cyan: var(--neon-blue);
-  --kombat-red: oklch(0.54 0.22 27);        /* dried-blood red */
-  --kombat-gold: oklch(0.80 0.15 85);       /* trophy gold */
-  --kombat-black: oklch(0.13 0.015 20);     /* deep warm black */
+  --kombat-red: oklch(0.54 0.22 27); /* dried-blood red */
+  --kombat-gold: oklch(0.8 0.15 85); /* trophy gold */
+  --kombat-black: oklch(0.13 0.015 20); /* deep warm black */
 }
 
-.dark { color-scheme: dark; }
+.dark {
+  color-scheme: dark;
+}
 
 @layer base {
-  * { border-color: var(--color-border); }
-  html { color-scheme: dark; }
+  * {
+    border-color: var(--color-border);
+  }
+  html {
+    color-scheme: dark;
+  }
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-sans);
     background-image:
-      radial-gradient(ellipse at top, color-mix(in oklab, var(--neon) 8%, transparent), transparent 60%),
-      radial-gradient(ellipse at bottom right, color-mix(in oklab, var(--accent) 6%, transparent), transparent 60%);
+      radial-gradient(
+        ellipse at top,
+        color-mix(in oklab, var(--neon) 8%, transparent),
+        transparent 60%
+      ),
+      radial-gradient(
+        ellipse at bottom right,
+        color-mix(in oklab, var(--accent) 6%, transparent),
+        transparent 60%
+      );
     background-attachment: fixed;
     /* Page-level backstop: stray wide children must never rock the whole
      * page sideways (covers /auth and error pages that skip AppShell).
@@ -131,7 +154,13 @@
      * see more data" bugs happen), scrollbar-hide on nav/chip strips only. */
     overflow-x: clip;
   }
-  h1, h2, h3, .font-display { font-family: var(--font-display); letter-spacing: 0.02em; }
+  h1,
+  h2,
+  h3,
+  .font-display {
+    font-family: var(--font-display);
+    letter-spacing: 0.02em;
+  }
 }
 
 @utility arcade-card {
@@ -163,13 +192,16 @@
 }
 
 @keyframes suspend-pulse {
-  0%, 100% {
-    box-shadow: 0 0 0 1px var(--destructive),
-                0 0 18px -2px color-mix(in oklab, var(--destructive) 70%, transparent);
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px var(--destructive),
+      0 0 18px -2px color-mix(in oklab, var(--destructive) 70%, transparent);
   }
   50% {
-    box-shadow: 0 0 0 1px var(--destructive),
-                0 0 36px 2px color-mix(in oklab, var(--destructive) 90%, transparent);
+    box-shadow:
+      0 0 0 1px var(--destructive),
+      0 0 36px 2px color-mix(in oklab, var(--destructive) 90%, transparent);
   }
 }
 @utility suspended-glow {
@@ -178,8 +210,17 @@
   color: var(--destructive);
 }
 @keyframes neon-mega-pulse {
-  0%, 100% { text-shadow: 0 0 18px color-mix(in oklab, var(--victory) 60%, transparent), 0 0 40px color-mix(in oklab, var(--victory) 30%, transparent); }
-  50%      { text-shadow: 0 0 28px color-mix(in oklab, var(--victory) 90%, transparent), 0 0 70px color-mix(in oklab, var(--victory) 55%, transparent); }
+  0%,
+  100% {
+    text-shadow:
+      0 0 18px color-mix(in oklab, var(--victory) 60%, transparent),
+      0 0 40px color-mix(in oklab, var(--victory) 30%, transparent);
+  }
+  50% {
+    text-shadow:
+      0 0 28px color-mix(in oklab, var(--victory) 90%, transparent),
+      0 0 70px color-mix(in oklab, var(--victory) 55%, transparent);
+  }
 }
 @utility text-mega-victory {
   color: var(--victory);
@@ -203,10 +244,15 @@
     0 10px 22px -6px color-mix(in oklab, var(--btn-color, var(--primary)) 55%, transparent),
     inset 0 1px 0 color-mix(in oklab, white 45%, transparent),
     inset 0 -6px 12px -6px color-mix(in oklab, black 45%, transparent);
-  transition: transform 90ms ease, box-shadow 90ms ease, filter 120ms ease;
+  transition:
+    transform 90ms ease,
+    box-shadow 90ms ease,
+    filter 120ms ease;
   will-change: transform;
 }
-.arcade-btn-3d:hover { filter: brightness(1.06); }
+.arcade-btn-3d:hover {
+  filter: brightness(1.06);
+}
 .arcade-btn-3d:active,
 .arcade-btn-3d[data-pressed="true"] {
   transform: translateY(4px);
@@ -216,7 +262,76 @@
     inset 0 1px 0 color-mix(in oklab, white 25%, transparent),
     inset 0 -3px 8px -4px color-mix(in oklab, black 55%, transparent);
 }
-.arcade-btn-3d:disabled { opacity: 0.7; cursor: not-allowed; }
+.arcade-btn-3d:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+/* Neon arcade key — dark faceplate with a colored rim-light, icon chip, and
+ * glowing score readout (Active Run tally keys, 2026-09-10 polish). The color
+ * lives in the rim/icon/count instead of a filled slab, so the keys sit in
+ * the same dark-arcade idiom as the rest of the shell. Same --btn-color API
+ * as arcade-btn-3d (which the TimeClock punch buttons and the Submit New
+ * Lead CTA keep — a filled key stays the "big yes" affordance). */
+@utility arcade-key {
+  position: relative;
+  overflow: hidden;
+  border-radius: 1rem;
+  border: 1.5px solid color-mix(in oklab, var(--btn-color, var(--neon)) 50%, var(--border));
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--btn-color, var(--neon)) 14%, var(--surface-elevated)) 0%,
+    color-mix(in oklab, var(--btn-color, var(--neon)) 6%, var(--surface)) 55%,
+    color-mix(in oklab, var(--btn-color, var(--neon)) 3%, var(--surface)) 100%
+  );
+  color: var(--foreground);
+  box-shadow:
+    0 5px 0 0 color-mix(in oklab, var(--btn-color, var(--neon)) 22%, oklch(0.13 0.02 270)),
+    0 12px 26px -10px color-mix(in oklab, var(--btn-color, var(--neon)) 50%, transparent),
+    inset 0 1px 0 color-mix(in oklab, white 14%, transparent),
+    inset 0 0 30px -14px color-mix(in oklab, var(--btn-color, var(--neon)) 55%, transparent);
+  transition:
+    transform 90ms ease,
+    box-shadow 90ms ease,
+    filter 120ms ease;
+  will-change: transform;
+}
+.arcade-key:hover {
+  filter: brightness(1.1);
+}
+.arcade-key:active {
+  transform: translateY(3px);
+  box-shadow:
+    0 2px 0 0 color-mix(in oklab, var(--btn-color, var(--neon)) 22%, oklch(0.13 0.02 270)),
+    0 5px 14px -8px color-mix(in oklab, var(--btn-color, var(--neon)) 50%, transparent),
+    inset 0 1px 0 color-mix(in oklab, white 8%, transparent),
+    inset 0 0 30px -12px color-mix(in oklab, var(--btn-color, var(--neon)) 65%, transparent);
+}
+.arcade-key:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+/* Sub-parts: colored icon chip + glowing tabular readout. */
+@utility arcade-key-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.625rem;
+  color: var(--btn-color, var(--neon));
+  background: color-mix(in oklab, var(--btn-color, var(--neon)) 16%, transparent);
+  border: 1px solid color-mix(in oklab, var(--btn-color, var(--neon)) 40%, transparent);
+  box-shadow: 0 0 16px -6px color-mix(in oklab, var(--btn-color, var(--neon)) 70%, transparent);
+}
+@utility arcade-key-count {
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  color: var(--btn-color, var(--neon));
+  text-shadow: 0 0 14px color-mix(in oklab, var(--btn-color, var(--neon)) 60%, transparent);
+}
 
 @utility timer-display {
   font-family: "Orbitron", "JetBrains Mono", ui-monospace, monospace;
@@ -232,7 +347,8 @@
 
 /* Focal-point pulse for the "Submit New Lead" button — subtle breathing halo */
 @keyframes pulse-glow {
-  0%, 100% {
+  0%,
+  100% {
     transform: scale(1);
     box-shadow:
       0 0 0 0 color-mix(in oklab, var(--victory) 0%, transparent),
@@ -255,7 +371,8 @@
 
 /* Free Agents panel — pulsing neon-orange border to demand attention */
 @keyframes free-agents-pulse {
-  0%, 100% {
+  0%,
+  100% {
     box-shadow:
       0 0 0 1px color-mix(in oklab, var(--neon-orange) 60%, transparent),
       0 0 12px 0 color-mix(in oklab, var(--neon-orange) 20%, transparent);
@@ -278,7 +395,10 @@
   border: 1.5px solid color-mix(in oklab, var(--neon-blue) 70%, transparent);
   border-radius: var(--radius-lg);
   box-shadow: 0 4px 20px -6px color-mix(in oklab, var(--neon-blue) 30%, transparent);
-  transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    transform 150ms ease;
 }
 /* Glowing green points badge */
 @utility points-badge-glow {
@@ -291,17 +411,21 @@
   text-shadow: 0 0 8px color-mix(in oklab, var(--victory) 60%, transparent);
 }
 
-
-
 /* Static doughnut marker — no animation to avoid motion fatigue */
 @utility frozen-doughnut {
   display: inline-block;
-  filter: grayscale(1) brightness(0.7) drop-shadow(0 0 6px rgba(255,255,255,0.15));
+  filter: grayscale(1) brightness(0.7) drop-shadow(0 0 6px rgba(255, 255, 255, 0.15));
 }
 
 @keyframes confetti-fall {
-  0% { transform: translate3d(0,-20px,0) rotate(0deg); opacity: 1; }
-  100% { transform: translate3d(var(--dx,20px), 320px, 0) rotate(720deg); opacity: 0; }
+  0% {
+    transform: translate3d(0, -20px, 0) rotate(0deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translate3d(var(--dx, 20px), 320px, 0) rotate(720deg);
+    opacity: 0;
+  }
 }
 .confetti-piece {
   position: absolute;
@@ -316,23 +440,47 @@
 /* NeonMap marker animations — one shared copy; the divIcon HTML used to
    inline these per marker (a day of leads = dozens of duplicate <style> tags). */
 @keyframes nm-star-pulse {
-  0%, 100% { transform: scale(1); opacity: 0.25; }
-  50% { transform: scale(1.35); opacity: 0.55; }
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.25;
+  }
+  50% {
+    transform: scale(1.35);
+    opacity: 0.55;
+  }
 }
 @keyframes nm-flag {
   /* #8a8f99 = REMOTE_DROP_COLOR / UNASSIGNED_COLOR */
-  0%, 100% { box-shadow: 0 0 10px #8a8f99, 0 0 0 2px #ff2d5588; }
-  50% { box-shadow: 0 0 18px #8a8f99, 0 0 0 4px #ff2d55cc; }
+  0%,
+  100% {
+    box-shadow:
+      0 0 10px #8a8f99,
+      0 0 0 2px #ff2d5588;
+  }
+  50% {
+    box-shadow:
+      0 0 18px #8a8f99,
+      0 0 0 4px #ff2d55cc;
+  }
 }
 @keyframes nm-pulse {
-  0% { transform: scale(0.6); opacity: 0.6; }
-  100% { transform: scale(2.6); opacity: 0; }
+  0% {
+    transform: scale(0.6);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
 }
 
 @utility scrollbar-hide {
   scrollbar-width: none;
   -ms-overflow-style: none;
-  &::-webkit-scrollbar { display: none; }
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 /* iOS safe-area insets (live once viewport-fit=cover is set in __root).
@@ -361,7 +509,7 @@
   border: 2px solid var(--neon);
   border-radius: 14px;
   box-shadow:
-    0 0 0 200vmax color-mix(in oklab, oklch(0.10 0.02 270) 82%, transparent),
+    0 0 0 200vmax color-mix(in oklab, oklch(0.1 0.02 270) 82%, transparent),
     0 0 22px 2px color-mix(in oklab, var(--neon) 65%, transparent),
     inset 0 0 18px -6px color-mix(in oklab, var(--neon) 55%, transparent);
   transition:
@@ -406,16 +554,37 @@
   animation: ti-cursor-ring 1.8s ease-out infinite;
 }
 @keyframes ti-cursor-tap {
-  0%, 100% { transform: scale(1); }
-  10% { transform: scale(0.78); }
-  22% { transform: scale(1.05); }
-  30% { transform: scale(1); }
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  10% {
+    transform: scale(0.78);
+  }
+  22% {
+    transform: scale(1.05);
+  }
+  30% {
+    transform: scale(1);
+  }
 }
 @keyframes ti-cursor-ring {
-  0%, 9% { transform: scale(0.2); opacity: 0; }
-  14% { opacity: 0.85; }
-  55% { transform: scale(2.1); opacity: 0; }
-  100% { transform: scale(2.1); opacity: 0; }
+  0%,
+  9% {
+    transform: scale(0.2);
+    opacity: 0;
+  }
+  14% {
+    opacity: 0.85;
+  }
+  55% {
+    transform: scale(2.1);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(2.1);
+    opacity: 0;
+  }
 }
 .ti-tour-card {
   transition: opacity 0.3s ease;
@@ -453,8 +622,12 @@
   background: var(--surface);
   border: 1px solid color-mix(in oklab, var(--neon) 40%, var(--border));
 }
-.turf-popup .leaflet-popup-content { margin: 10px 12px; }
-.turf-popup a.leaflet-popup-close-button { color: var(--muted-foreground); }
+.turf-popup .leaflet-popup-content {
+  margin: 10px 12px;
+}
+.turf-popup a.leaflet-popup-close-button {
+  color: var(--muted-foreground);
+}
 .turf-popup .nm-pop-title {
   font-family: var(--font-display);
   font-size: 11px;
@@ -463,7 +636,10 @@
   color: var(--neon);
   margin-bottom: 4px;
 }
-.turf-popup .nm-pop-now { font-size: 13px; margin-bottom: 8px; }
+.turf-popup .nm-pop-now {
+  font-size: 13px;
+  margin-bottom: 8px;
+}
 .turf-popup .nm-pop-head {
   font-family: var(--font-display);
   font-size: 9px;
@@ -479,8 +655,14 @@
   font-size: 12px;
   padding: 1px 0;
 }
-.turf-popup .nm-pop-when { color: var(--muted-foreground); white-space: nowrap; }
-.turf-popup .nm-pop-empty { font-size: 12px; color: var(--muted-foreground); }
+.turf-popup .nm-pop-when {
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.turf-popup .nm-pop-empty {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
 .turf-popup .nm-pop-btn {
   margin-top: 10px;
   width: 100%;
@@ -495,4 +677,6 @@
   letter-spacing: 0.1em;
   cursor: pointer;
 }
-.turf-popup .nm-pop-btn:hover { background: color-mix(in oklab, var(--neon) 28%, transparent); }
+.turf-popup .nm-pop-btn:hover {
+  background: color-mix(in oklab, var(--neon) 28%, transparent);
+}
