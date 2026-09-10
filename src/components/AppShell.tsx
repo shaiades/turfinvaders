@@ -6,6 +6,7 @@ import { useSwipeNav } from "@/hooks/useSwipeNav";
 import { CanvasserHUD } from "@/components/CanvasserHUD";
 import { CanvasserTutorial, startCanvasserTutorial } from "@/components/tutorial/CanvasserTutorial";
 import { WelcomeAnimation } from "@/components/WelcomeAnimation";
+import { CloseKombatIntro, isCloseKombatIntroForced } from "@/components/CloseKombatIntro";
 import { CLOSE_KOMBAT_ROLES, canUseViewAs, privilegeRole } from "@/lib/roles";
 import {
   LogOut,
@@ -369,8 +370,17 @@ export function AppShell({ children }: { children: ReactNode }) {
         </nav>
       )}
 
-      {/* First-sign-in arcade intro — every role, once per account. */}
-      {user && <WelcomeAnimation userId={user.id} onActiveChange={setIntroActive} />}
+      {/* First-sign-in arcade intro — every role, once per account. Sales
+          reps' whole app is Close Kombat, so they open on the door-kick
+          cutscene instead of the van arrival (owner ask 2026-09-10);
+          `?ck_anim=1` previews the kick from any account, `?welcome_anim=1`
+          still previews the van from non-rep accounts. */}
+      {user &&
+        (role === "sales_rep" || isCloseKombatIntroForced() ? (
+          <CloseKombatIntro userId={user.id} onActiveChange={setIntroActive} />
+        ) : (
+          <WelcomeAnimation userId={user.id} onActiveChange={setIntroActive} />
+        ))}
 
       {/* Per-page discovery tips: each screen's mini-tour auto-pops the first
           time this account opens it; the header "?" replays the current

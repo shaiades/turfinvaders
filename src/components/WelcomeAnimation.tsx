@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { clamp01, easeInOut, easeOutBack, limb, popText, rr } from "./intro-fx";
 
 /**
  * First-sign-in intro (owner ask 2026-09-10; restyled 2026-09-10 from 8-bit
@@ -16,8 +17,10 @@ import { supabase } from "@/integrations/supabase/client";
  * add `&welcome_hold=<ms>` to freeze the scene at that timestamp.
  * `prefers-reduced-motion` marks the flag and never plays (unless forced).
  *
- * Everything is drawn in-component on a 640×360 virtual canvas rendered at
- * device resolution — no image assets, no new dependencies.
+ * Everything is drawn on a 640×360 virtual canvas rendered at device
+ * resolution — no image assets, no new dependencies (shape/pop-text/beeper
+ * primitives shared with CloseKombatIntro via intro-fx). Sales reps get that
+ * door-kick cutscene INSTEAD of this one — AppShell swaps by role.
  */
 
 const DURATION = 5000;
@@ -59,29 +62,6 @@ const T_DOOR_OPEN = 2750;
 const T_OWNER = 3050;
 const T_CHEER = 3300;
 const T_FADE_OUT = 4700;
-
-const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
-const easeInOut = (p: number) => (p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2);
-const easeOutBack = (p: number) => {
-  const c = 1.70158;
-  return 1 + (c + 1) * Math.pow(p - 1, 3) + c * Math.pow(p - 1, 2);
-};
-
-function rr(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  r: number | number[],
-) {
-  ctx.beginPath();
-  if (typeof ctx.roundRect === "function") {
-    ctx.roundRect(x, y, w, h, r);
-  } else {
-    ctx.rect(x, y, w, h);
-  }
-}
 
 const STARS = Array.from({ length: 26 }, (_, i) => ({
   x: (i * 53 + 21) % VW,
@@ -337,24 +317,6 @@ function createIntroAudio() {
 
 /* ── Characters (articulated capsule figures) ──────────────────────────── */
 
-function limb(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  ang: number,
-  len: number,
-  w: number,
-  color: string,
-) {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(ang);
-  ctx.fillStyle = color;
-  rr(ctx, -w / 2, 0, w, len, w / 2);
-  ctx.fill();
-  ctx.restore();
-}
-
 type Pose = "stand" | "run" | "knock" | "cheer";
 
 /** The rep, feet anchored at (x, y), facing right. ~64 virtual px tall. */
@@ -482,40 +444,6 @@ function drawOwner(ctx: CanvasRenderingContext2D, x: number, y: number, alpha: n
   ctx.arc(-3, -51, 1.2, 0, Math.PI * 2);
   ctx.arc(3, -51, 1.2, 0, Math.PI * 2);
   ctx.fill();
-  ctx.restore();
-}
-
-/* ── Pop text (THPS-style score callouts) ──────────────────────────────── */
-
-function popText(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  x: number,
-  y: number,
-  born: number,
-  t: number,
-  size: number,
-  fill: string | CanvasGradient,
-  glow: string,
-) {
-  const age = t - born;
-  if (age < 0) return;
-  const scale = easeOutBack(clamp01(age / 220));
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(-0.07);
-  ctx.scale(scale, scale);
-  ctx.font = `900 italic ${size}px "Arial Black", "Helvetica Neue", sans-serif`;
-  ctx.textAlign = "center";
-  ctx.lineJoin = "round";
-  ctx.shadowColor = glow;
-  ctx.shadowBlur = 16;
-  ctx.strokeStyle = "rgba(5,7,15,0.9)";
-  ctx.lineWidth = 7;
-  ctx.strokeText(text, 0, 0);
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = fill;
-  ctx.fillText(text, 0, 0);
   ctx.restore();
 }
 
