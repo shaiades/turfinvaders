@@ -72,28 +72,20 @@ import { RenameCanvasserDialog, type NameGroupRef } from "@/components/RenameCan
 import { MergeCanvasserDialog } from "@/components/MergeCanvasserDialog";
 import { useMoveAgents, useArchiveAgents } from "@/hooks/useRosterActions";
 import { ExecutiveSection } from "@/components/ExecutiveDashboard";
+import {
+  useDispatchRoster,
+  useDispatchVans,
+  type RosterProfile,
+  type Van,
+} from "@/hooks/useFleetRoster";
+import { MovePlayersSheet } from "@/components/MovePlayersSheet";
 
-/** One profile row as the board consumes it (dispatch membership). */
-export type RosterProfile = {
-  id: string;
-  display_name: string | null;
-  office_location: string | null;
-  team_id: string | null;
-  team_office: string | null;
-  is_active: boolean | null;
-  is_placeholder: boolean | null;
-  suspension_tracked: boolean;
-  created_at: string;
-};
+// Roster/vans queries + their types live in useFleetRoster so the Move
+// Players sheet shares the exact key+queryFn; re-export the types so the
+// dialogs' existing imports keep working.
+export type { RosterProfile, Van } from "@/hooks/useFleetRoster";
 
 type BoardProfile = RosterProfile & { role: "canvasser" | "captain"; former: boolean };
-
-export type Van = {
-  id: string;
-  name: string;
-  color: string | null;
-  office_location: string | null;
-};
 
 // The dispatch funnel counts ONLY actioned Lead Status results (owner,
 // 2026-07-28): Confirmed, Future, and Blowout — where Blowout absorbs the
@@ -181,6 +173,7 @@ function FleetDispatchInner({
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
   const [manageOpen, setManageOpen] = useState(false);
   const [glossaryOpen, setGlossaryOpen] = useState(false);
+  const [movePlayersOpen, setMovePlayersOpen] = useState(false);
   const { office: officeTab, matches } = useOfficeFilter();
 
   // Roll to the new calendar day at midnight PT.
@@ -287,53 +280,9 @@ function FleetDispatchInner({
   // --- Queries (one key family; realtime prefix-invalidates all of it) ---
 
   // Roster serves BOTH the board and Manage Fleet from one fetch so the two
-  // can never disagree after a mutation.
-  const rosterQuery = useQuery({
-    queryKey: ["fleet_dispatch", "roster"],
-    queryFn: async () => {
-      const [profsR, rolesR] = await Promise.all([
-        supabase
-          .from("profiles")
-          .select(
-            "id, display_name, office_location, team_id, is_active, is_placeholder, suspension_tracked, created_at, teams:team_id(office_location)",
-          )
-          .order("display_name"),
-        supabase.from("user_roles").select("user_id, role"),
-      ]);
-      if (profsR.error) throw profsR.error;
-      if (rolesR.error) throw rolesR.error;
-      const rolesByUser = new Map<string, string[]>();
-      for (const r of rolesR.data ?? []) {
-        const arr = rolesByUser.get(r.user_id) ?? [];
-        arr.push(r.role);
-        rolesByUser.set(r.user_id, arr);
-      }
-      const profiles: RosterProfile[] = (
-        (profsR.data ?? []) as Array<{
-          id: string;
-          display_name: string | null;
-          office_location: string | null;
-          team_id: string | null;
-          is_active: boolean | null;
-          is_placeholder: boolean | null;
-          suspension_tracked: boolean;
-          created_at: string;
-          teams: { office_location: string | null } | null;
-        }>
-      ).map((p) => ({
-        id: p.id,
-        display_name: p.display_name,
-        office_location: p.office_location,
-        team_id: p.team_id,
-        is_active: p.is_active,
-        is_placeholder: p.is_placeholder,
-        suspension_tracked: p.suspension_tracked,
-        created_at: p.created_at,
-        team_office: p.teams?.office_location ?? null,
-      }));
-      return { profiles, rolesByUser };
-    },
-  });
+  // can never disagree after a mutation (queryFn lives in useFleetRoster,
+  // shared with the Move Players sheet).
+  const rosterQuery = useDispatchRoster();
   const allProfiles = rosterQuery.data?.profiles ?? [];
   const rolesByUser = rosterQuery.data?.rolesByUser ?? new Map<string, string[]>();
 
@@ -361,17 +310,7 @@ function FleetDispatchInner({
     return out;
   }, [allProfiles, rolesByUser]);
 
-  const { data: vans = [] } = useQuery({
-    queryKey: ["fleet_dispatch", "vans"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("teams")
-        .select("id, name, color, office_location")
-        .order("name");
-      if (error) throw error;
-      return (data ?? []) as Van[];
-    },
-  });
+  const { data: vans = [] } = useDispatchVans();
 
   // The Confirmation van (Cynthia's) confirms for BOTH offices, so it renders
   // on every office tab showing that office's slice of its members' production
@@ -900,13 +839,36 @@ function FleetDispatchInner({
             <Info className="w-4 h-4" />
           </button>
         </div>
-        {!readOnly && (
+        {/* Move Players rides canEditRows (role-gated like the row menus),
+            so captains get it on the leaderboard and their Command embed;
+            the webhook/office controls stay page-gated behind !readOnly. */}
+        {(canEditRows || !readOnly) && (
           <div className="flex items-center gap-2">
-            <WebhookLogsButton />
-            <OfficeFilterToggle />
+            {canEditRows && (
+              <Button
+                size="sm"
+                variant="outline"
+                data-tour="move-players"
+                onClick={() => setMovePlayersOpen(true)}
+                className="gap-1.5 font-display uppercase tracking-widest text-[10px] border-[color:var(--neon-blue)]/60 text-[color:var(--neon-blue)] hover:border-[color:var(--neon-blue)] hover:text-[color:var(--neon-blue)]"
+              >
+                <ArrowRightLeft className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Move Players</span>
+                <span className="sm:hidden">Move</span>
+              </Button>
+            )}
+            {!readOnly && (
+              <>
+                <WebhookLogsButton />
+                <OfficeFilterToggle />
+              </>
+            )}
           </div>
         )}
         <GlossarySheet open={glossaryOpen} onOpenChange={setGlossaryOpen} />
+        {canEditRows && (
+          <MovePlayersSheet open={movePlayersOpen} onOpenChange={setMovePlayersOpen} />
+        )}
       </div>
 
       {/* Range tabs: Day / Week / Month, plus each range's own controls */}
@@ -1140,6 +1102,7 @@ function FleetDispatchInner({
               rolesByUser={rolesByUser}
               pointsByUser={pointsByUser}
               volumeByUser={volumeByUser}
+              onOpenMovePlayers={() => setMovePlayersOpen(true)}
             />
           )}
         </div>
@@ -1211,10 +1174,20 @@ const RESULT_COLS: Array<{
   key: keyof DispatchResults;
   color: keyof typeof metricColorClass;
 }> = [
-  { short: "Lds", full: "Total Leads run on blocks, credited to each card's block day", key: "lds", color: "neon" },
+  {
+    short: "Lds",
+    full: "Total Leads run on blocks, credited to each card's block day",
+    key: "lds",
+    color: "neon",
+  },
   { short: "Sit", full: "Sits (demos, sales split out)", key: "sit", color: "victory" },
   { short: "RS", full: "Resets", key: "rs", color: "accent" },
-  { short: "BO", full: "Blowout at the door — no demo (confirmation BOs live in the funnel half)", key: "bo", color: "destructive" },
+  {
+    short: "BO",
+    full: "Blowout at the door — no demo (confirmation BOs live in the funnel half)",
+    key: "bo",
+    color: "destructive",
+  },
   { short: "CTC", full: "CTC — couldn't contact", key: "ctc", color: "muted-foreground" },
   { short: "NC", full: "Non-Core product", key: "nc", color: "warning" },
   { short: "OL", full: "One Legs / Outside Leads", key: "ol", color: "warning" },
