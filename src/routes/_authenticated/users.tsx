@@ -18,6 +18,9 @@ import {
 } from "@/lib/role-policy";
 import { useSetUserRole } from "@/hooks/useSetUserRole";
 import { useAuth } from "@/hooks/useAuth";
+import { InviteDialog } from "@/components/InviteDialog";
+import { isLeadSourceName } from "@/lib/lead-sources";
+import { Send } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/users")({
   head: () => ({ meta: [{ title: "Manage Users — Turf Invaders" }] }),
@@ -109,6 +112,11 @@ function UsersPage() {
   });
 
   const createFn = useServerFn(createCanvasser);
+  const [inviteTarget, setInviteTarget] = useState<{
+    id: string;
+    name: string;
+    role: AppRole;
+  } | null>(null);
   const [form, setForm] = useState({
     email: "",
     password: "",
@@ -168,6 +176,12 @@ function UsersPage() {
                 <th className="px-4 py-2">Role</th>
                 <th className="px-4 py-2">Team</th>
                 <th className="px-4 py-2" title="Counted on the Live Dispatch suspension (donut) list">Suspension</th>
+                <th
+                  className="px-4 py-2"
+                  title="One-time sign-in link for their existing account — you copy it and text/email it yourself"
+                >
+                  Invite
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -265,6 +279,36 @@ function UsersPage() {
                             : "off"}
                         </span>
                       </label>
+                    </td>
+                    <td className="px-4 py-3">
+                      {(() => {
+                        const isPlaceholder = (p as { is_placeholder?: boolean }).is_placeholder;
+                        const isChannel = isLeadSourceName(p.display_name);
+                        const disabledWhy = isChannel
+                          ? "Lead-source channel — not a person"
+                          : isPlaceholder
+                            ? "No login account — create them with Add New Player first"
+                            : !canModify
+                              ? "Only Owners can invite Admin accounts"
+                              : undefined;
+                        return (
+                          <button
+                            type="button"
+                            disabled={!!disabledWhy}
+                            title={disabledWhy ?? "Generate a sign-in link to text or email them"}
+                            onClick={() =>
+                              setInviteTarget({
+                                id: p.id,
+                                name: p.display_name ?? "player",
+                                role: currentRole,
+                              })
+                            }
+                            className="inline-flex items-center gap-1.5 rounded border border-neon/50 text-neon hover:bg-neon/10 px-2.5 py-1.5 text-[11px] font-display uppercase tracking-wider disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                          >
+                            <Send className="w-3.5 h-3.5" /> Invite
+                          </button>
+                        );
+                      })()}
                     </td>
                   </tr>
                 );
@@ -371,6 +415,14 @@ function UsersPage() {
       {/* Bulk deletion tools — owner-only (server-side deleteProfile is
           owner-gated anyway; don't render controls that can only error). */}
       {isOwner && <DatabaseCleanup />}
+
+      <InviteDialog
+        open={!!inviteTarget}
+        onOpenChange={(o) => {
+          if (!o) setInviteTarget(null);
+        }}
+        target={inviteTarget}
+      />
     </div>
   );
 }
