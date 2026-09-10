@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthWelcomeRouteImport } from './routes/auth_.welcome'
 import { Route as AuthCallbackRouteImport } from './routes/auth_.callback'
 import { Route as AuthenticatedUsersRouteImport } from './routes/_authenticated/users'
 import { Route as AuthenticatedPlaybookRouteImport } from './routes/_authenticated/playbook'
@@ -43,6 +44,11 @@ const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthWelcomeRoute = AuthWelcomeRouteImport.update({
+  id: '/auth_/welcome',
+  path: '/auth/welcome',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthCallbackRoute = AuthCallbackRouteImport.update({
@@ -159,6 +165,7 @@ export interface FileRoutesByFullPath {
   '/playbook': typeof AuthenticatedPlaybookRoute
   '/users': typeof AuthenticatedUsersRoute
   '/auth/callback': typeof AuthCallbackRoute
+  '/auth/welcome': typeof AuthWelcomeRoute
   '/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRouteWithChildren
   '/teams/$teamId': typeof AuthenticatedTeamsTeamIdRoute
   '/api/internal/rotate-boards': typeof ApiInternalRotateBoardsRoute
@@ -181,6 +188,7 @@ export interface FileRoutesByTo {
   '/playbook': typeof AuthenticatedPlaybookRoute
   '/users': typeof AuthenticatedUsersRoute
   '/auth/callback': typeof AuthCallbackRoute
+  '/auth/welcome': typeof AuthWelcomeRoute
   '/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRouteWithChildren
   '/teams/$teamId': typeof AuthenticatedTeamsTeamIdRoute
   '/api/internal/rotate-boards': typeof ApiInternalRotateBoardsRoute
@@ -205,6 +213,7 @@ export interface FileRoutesById {
   '/_authenticated/playbook': typeof AuthenticatedPlaybookRoute
   '/_authenticated/users': typeof AuthenticatedUsersRoute
   '/auth_/callback': typeof AuthCallbackRoute
+  '/auth_/welcome': typeof AuthWelcomeRoute
   '/_authenticated/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRouteWithChildren
   '/_authenticated/teams/$teamId': typeof AuthenticatedTeamsTeamIdRoute
   '/api/internal/rotate-boards': typeof ApiInternalRotateBoardsRoute
@@ -229,6 +238,7 @@ export interface FileRouteTypes {
     | '/playbook'
     | '/users'
     | '/auth/callback'
+    | '/auth/welcome'
     | '/canvassers/$canvasserId'
     | '/teams/$teamId'
     | '/api/internal/rotate-boards'
@@ -251,6 +261,7 @@ export interface FileRouteTypes {
     | '/playbook'
     | '/users'
     | '/auth/callback'
+    | '/auth/welcome'
     | '/canvassers/$canvasserId'
     | '/teams/$teamId'
     | '/api/internal/rotate-boards'
@@ -274,6 +285,7 @@ export interface FileRouteTypes {
     | '/_authenticated/playbook'
     | '/_authenticated/users'
     | '/auth_/callback'
+    | '/auth_/welcome'
     | '/_authenticated/canvassers/$canvasserId'
     | '/_authenticated/teams/$teamId'
     | '/api/internal/rotate-boards'
@@ -286,6 +298,7 @@ export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
   AuthCallbackRoute: typeof AuthCallbackRoute
+  AuthWelcomeRoute: typeof AuthWelcomeRoute
   ApiInternalRotateBoardsRoute: typeof ApiInternalRotateBoardsRoute
 }
 
@@ -310,6 +323,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth_/welcome': {
+      id: '/auth_/welcome'
+      path: '/auth/welcome'
+      fullPath: '/auth/welcome'
+      preLoaderRoute: typeof AuthWelcomeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/auth_/callback': {
@@ -501,6 +521,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
   AuthCallbackRoute: AuthCallbackRoute,
+  AuthWelcomeRoute: AuthWelcomeRoute,
   ApiInternalRotateBoardsRoute: ApiInternalRotateBoardsRoute,
 }
 export const routeTree = rootRouteImport
