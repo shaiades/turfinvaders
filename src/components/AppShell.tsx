@@ -5,7 +5,7 @@ import { useAuth, setDevRoleOverride, type AppRole } from "@/hooks/useAuth";
 import { useSwipeNav } from "@/hooks/useSwipeNav";
 import { CanvasserHUD } from "@/components/CanvasserHUD";
 import { CanvasserTutorial, startCanvasserTutorial } from "@/components/tutorial/CanvasserTutorial";
-import { CLOSE_KOMBAT_ROLES, canUseViewAs } from "@/lib/roles";
+import { CLOSE_KOMBAT_ROLES, canUseViewAs, privilegeRole } from "@/lib/roles";
 import {
   LogOut,
   LayoutDashboard,
@@ -60,7 +60,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { user, role, realRole, displayName } = useAuth();
   const router = useRouter();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const isOverridden = role !== realRole && realRole !== null;
+  // Compare against the COLLAPSED real role: a confirmer's `role` is always
+  // "canvasser" (privilegeRole in useAuth) and must not read as a View As
+  // override.
+  const isOverridden = role !== privilegeRole(realRole) && realRole !== null;
 
   // Canvasser guard: block manual navigation to leadership routes.
   useEffect(() => {

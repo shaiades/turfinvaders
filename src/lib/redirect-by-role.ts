@@ -1,5 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
-import { isManagerRole } from "@/lib/roles";
+import { isManagerRole, privilegeRole } from "@/lib/roles";
 
 export type RoleDestination = {
   to: "/field" | "/dashboard" | "/close-kombat";
@@ -13,7 +13,9 @@ export type RoleDestination = {
  */
 export async function destinationByRole(userId: string): Promise<RoleDestination> {
   const { data } = await supabase.from("user_roles").select("role").eq("user_id", userId);
-  const roles = (data ?? []).map((r) => r.role as string);
+  // Collapse to privilege tiers so a confirmer-only account routes exactly
+  // like a canvasser-only one (→ /field).
+  const roles = (data ?? []).map((r) => privilegeRole(r.role as string) as string);
   const isManager = roles.some(isManagerRole);
   if (roles.includes("sales_rep") && !isManager && !roles.includes("canvasser")) {
     return { to: "/close-kombat" };

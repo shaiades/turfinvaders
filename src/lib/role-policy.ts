@@ -5,12 +5,33 @@
 
 /** All app roles, in priority order (highest first). sales_rep (closers,
  *  added 2026-07-29 for Close Kombat) sits above canvasser: a rep sees only
- *  their stats section, never the canvassing suite. */
-export const APP_ROLES = ["owner", "office_staff", "captain", "sales_rep", "canvasser"] as const;
+ *  their stats section, never the canvassing suite. confirmer (office
+ *  confirmation staff, added 2026-09-09 for Cynthia) sits just above
+ *  canvasser so the title wins the label when both are held — but it is a
+ *  TITLE, not a tier: privilegeRole() collapses it to canvasser everywhere
+ *  permissions or experience are decided. */
+export const APP_ROLES = [
+  "owner",
+  "office_staff",
+  "captain",
+  "sales_rep",
+  "confirmer",
+  "canvasser",
+] as const;
 export type AppRole = (typeof APP_ROLES)[number];
 
 export function isAppRole(v: unknown): v is AppRole {
   return (APP_ROLES as readonly unknown[]).includes(v);
+}
+
+/** The privilege tier a role behaves as. Confirmers get the exact canvasser
+ *  experience and permissions (owner directive 2026-09-09) — only roster
+ *  labels show the real role. Collapse through this before comparing a role
+ *  to "canvasser"; never hand a raw role to a `=== "canvasser"` check. */
+export function privilegeRole(role: AppRole | null): AppRole | null;
+export function privilegeRole(role: AppRole | string | null | undefined): string | null | undefined;
+export function privilegeRole(role: unknown) {
+  return role === "confirmer" ? "canvasser" : role;
 }
 
 /** Manager tier: owner, captain, and office_staff (the "admin" role) all get full managerial access. */
@@ -113,6 +134,7 @@ export const ROLE_LABEL: Record<AppRole, string> = {
   office_staff: "Manager",
   captain: "Captain",
   sales_rep: "Sales Rep",
+  confirmer: "Confirmer",
   canvasser: "Canvasser",
 };
 
@@ -121,5 +143,6 @@ export const ROLE_TONE: Record<AppRole, string> = {
   office_staff: "text-accent border-accent/40",
   captain: "text-neon border-neon/40",
   sales_rep: "text-warning border-warning/40",
+  confirmer: "text-turf-cyan border-turf-cyan/40",
   canvasser: "text-muted-foreground border-border",
 };
