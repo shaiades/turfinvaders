@@ -4,15 +4,30 @@ import { toast } from "sonner";
 
 type VanLite = { id: string; name: string; office_location?: string | null };
 
-const ROSTER_KEYS = [["fleet_dispatch"], ["weekly_results"], ["payroll-ledger"], ["manage_users"]];
+export const ROSTER_KEYS = [
+  ["fleet_dispatch"],
+  ["weekly_results"],
+  ["payroll-ledger"],
+  ["manage_users"],
+];
 
-/** Move one person (possibly several duplicate profiles grouped under one
- *  board row) to a van or to Free Agents (null). Assigning to a van cascades
- *  the van's office onto the person, matching FleetDispatchManage. */
+/** Move people to a van or to Free Agents (null). `ids` is the flat profile-id
+ *  list (a person's same-name duplicates ride together); `count` is how many
+ *  PEOPLE that represents — pass it >1 for a bulk move so the toast counts
+ *  humans, not profile rows. Assigning to a van cascades the van's office
+ *  onto each person. */
 export function useMoveAgents(vans: VanLite[]) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ ids, vanId }: { ids: string[]; vanId: string | null; name?: string }) => {
+    mutationFn: async ({
+      ids,
+      vanId,
+    }: {
+      ids: string[];
+      vanId: string | null;
+      name?: string;
+      count?: number;
+    }) => {
       const patch: { team_id: string | null; office_location?: string } = { team_id: vanId };
       if (vanId) {
         const van = vans.find((v) => v.id === vanId);
@@ -27,10 +42,23 @@ export function useMoveAgents(vans: VanLite[]) {
         .select("id");
       if (error) throw error;
       if (!data?.length) throw new Error("Move failed — you don't have permission for this agent");
+      return { skipped: ids.length - data.length };
     },
-    onSuccess: (_d, vars) => {
+    onSuccess: (res, vars) => {
       const van = vars.vanId ? vans.find((v) => v.id === vars.vanId) : null;
-      toast.success(`${vars.name ?? "Agent"} moved to ${van ? van.name : "Free Agents"}`);
+      const dest = van ? van.name : "Free Agents";
+      toast.success(
+        (vars.count ?? 1) > 1
+          ? `${vars.count} players → ${dest}`
+          : `${vars.name ?? "Agent"} moved to ${dest}`,
+      );
+      // Partial landing (RLS filtered some rows, e.g. a privileged duplicate):
+      // the move succeeded for the rest — warn, don't error.
+      if (res.skipped > 0) {
+        toast.warning(
+          `${res.skipped} ${res.skipped === 1 ? "profile" : "profiles"} couldn't be moved — you may not have permission for them`,
+        );
+      }
       for (const key of ROSTER_KEYS) qc.invalidateQueries({ queryKey: key });
     },
     onError: (e: Error) => toast.error(e.message),

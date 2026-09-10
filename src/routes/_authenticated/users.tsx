@@ -19,8 +19,11 @@ import {
 import { useSetUserRole } from "@/hooks/useSetUserRole";
 import { useAuth } from "@/hooks/useAuth";
 import { InviteDialog } from "@/components/InviteDialog";
+import { MovePlayersSheet } from "@/components/MovePlayersSheet";
+import { useMoveAgents } from "@/hooks/useRosterActions";
+import { Button } from "@/components/ui/button";
 import { isLeadSourceName } from "@/lib/lead-sources";
-import { Send } from "lucide-react";
+import { ArrowRightLeft, Send } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/users")({
   head: () => ({ meta: [{ title: "Manage Users — Turf Invaders" }] }),
@@ -50,7 +53,8 @@ function UsersPage() {
           )
           .order("created_at", { ascending: false }),
         supabase.from("user_roles").select("user_id, role"),
-        supabase.from("teams").select("id, name").order("name"),
+        // color + office_location feed useMoveAgents' office cascade.
+        supabase.from("teams").select("id, name, color, office_location").order("name"),
       ]);
       if (profilesRes.error) throw profilesRes.error;
       if (rolesRes.error) throw rolesRes.error;
@@ -93,23 +97,13 @@ function UsersPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const setTeam = useMutation({
-    mutationFn: async ({ userId, teamId }: { userId: string; teamId: string | null }) => {
-      const { data: rows, error } = await supabase
-        .from("profiles")
-        .update({ team_id: teamId })
-        .eq("id", userId)
-        .select("id");
-      if (error) throw error;
-      if (!rows?.length) throw new Error("Update failed — you don't have permission for this user");
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["manage_users"] });
-      qc.invalidateQueries({ queryKey: ["fleet_dispatch"] });
-      toast.success("Team updated");
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
+  // Canonical move hook: cascades the van's office onto the profile and
+  // invalidates every roster surface (the old local mutation did neither).
+  // This table lists duplicate profiles as separate rows on purpose, so the
+  // select moves just the one account (ids: [p.id]); Move Players is the
+  // group-level bulk tool.
+  const moveAgents = useMoveAgents(data?.teams ?? []);
+  const [movePlayersOpen, setMovePlayersOpen] = useState(false);
 
   const createFn = useServerFn(createCanvasser);
   const [inviteTarget, setInviteTarget] = useState<{
@@ -142,14 +136,23 @@ function UsersPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["manage_users"] });
       toast.success(`Added ${form.display_name}`);
-      setForm({ email: "", password: "", display_name: "", role: "canvasser", office_location: "", team_id: "" });
+      setForm({
+        email: "",
+        password: "",
+        display_name: "",
+        role: "canvasser",
+        office_location: "",
+        team_id: "",
+      });
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
   if (isLoading || !data) return <div className="text-sm text-muted-foreground">Loading…</div>;
 
-  const ownerCount = Array.from(data.rolesByUser.values()).filter((r) => r.includes("owner")).length;
+  const ownerCount = Array.from(data.rolesByUser.values()).filter((r) =>
+    r.includes("owner"),
+  ).length;
 
   return (
     <div className="space-y-8">
@@ -161,11 +164,24 @@ function UsersPage() {
         <p className="text-sm text-muted-foreground mt-2">
           Newest accounts first. Multiple Owners are allowed — all Owners have equal, full access.
           Role changes are owner-only; Admins manage teams and suspension tracking, and can add new
-          players as Canvasser or Sales Rep.
+          players as Canvasser or Sales Rep. Use Move Players to search the roster and move people
+          between vans in bulk; the Team column moves one account at a time.
         </p>
       </div>
 
-      <ArcadePanel title={`Players (${data.profiles.length})`}>
+      <ArcadePanel
+        title={`Players (${data.profiles.length})`}
+        action={
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setMovePlayersOpen(true)}
+            className="gap-1.5 font-display uppercase tracking-widest text-[10px] border-[color:var(--neon-blue)]/60 text-[color:var(--neon-blue)] hover:border-[color:var(--neon-blue)] hover:text-[color:var(--neon-blue)]"
+          >
+            <ArrowRightLeft className="w-3.5 h-3.5" /> Move Players
+          </Button>
+        }
+      >
         <div className="overflow-x-auto -mx-4 sm:mx-0">
           <table className="w-full text-sm">
             <thead>
@@ -175,7 +191,12 @@ function UsersPage() {
                 <th className="px-4 py-2">LVL</th>
                 <th className="px-4 py-2">Role</th>
                 <th className="px-4 py-2">Team</th>
-                <th className="px-4 py-2" title="Counted on the Live Dispatch suspension (donut) list">Suspension</th>
+                <th
+                  className="px-4 py-2"
+                  title="Counted on the Live Dispatch suspension (donut) list"
+                >
+                  Suspension
+                </th>
                 <th
                   className="px-4 py-2"
                   title="One-time sign-in link for their existing account — you copy it and text/email it yourself"
@@ -246,9 +267,13 @@ function UsersPage() {
                     <td className="px-4 py-3">
                       <select
                         value={p.team_id ?? ""}
-                        disabled={setTeam.isPending || !canModify}
+                        disabled={moveAgents.isPending || !canModify}
                         onChange={(e) =>
-                          setTeam.mutate({ userId: p.id, teamId: e.target.value || null })
+                          moveAgents.mutate({
+                            ids: [p.id],
+                            vanId: e.target.value || null,
+                            name: p.display_name ?? "Player",
+                          })
                         }
                         className="bg-input border border-border rounded-md px-2 py-2 text-base md:text-sm disabled:opacity-50"
                       >
@@ -327,7 +352,9 @@ function UsersPage() {
           }}
         >
           <label className="flex flex-col gap-1 text-xs">
-            <span className="font-display uppercase tracking-widest text-muted-foreground">Display Name</span>
+            <span className="font-display uppercase tracking-widest text-muted-foreground">
+              Display Name
+            </span>
             <input
               required
               value={form.display_name}
@@ -336,7 +363,9 @@ function UsersPage() {
             />
           </label>
           <label className="flex flex-col gap-1 text-xs">
-            <span className="font-display uppercase tracking-widest text-muted-foreground">Email</span>
+            <span className="font-display uppercase tracking-widest text-muted-foreground">
+              Email
+            </span>
             <input
               required
               type="email"
@@ -346,7 +375,9 @@ function UsersPage() {
             />
           </label>
           <label className="flex flex-col gap-1 text-xs">
-            <span className="font-display uppercase tracking-widest text-muted-foreground">Temp Password</span>
+            <span className="font-display uppercase tracking-widest text-muted-foreground">
+              Temp Password
+            </span>
             <input
               required
               type="text"
@@ -358,7 +389,9 @@ function UsersPage() {
             />
           </label>
           <label className="flex flex-col gap-1 text-xs">
-            <span className="font-display uppercase tracking-widest text-muted-foreground">Role</span>
+            <span className="font-display uppercase tracking-widest text-muted-foreground">
+              Role
+            </span>
             <select
               value={form.role}
               onChange={(e) => setForm({ ...form, role: e.target.value as AppRole })}
@@ -372,20 +405,28 @@ function UsersPage() {
             </select>
           </label>
           <label className="flex flex-col gap-1 text-xs">
-            <span className="font-display uppercase tracking-widest text-muted-foreground">Office</span>
+            <span className="font-display uppercase tracking-widest text-muted-foreground">
+              Office
+            </span>
             <select
               value={form.office_location}
-              onChange={(e) => setForm({ ...form, office_location: e.target.value as typeof form.office_location })}
+              onChange={(e) =>
+                setForm({ ...form, office_location: e.target.value as typeof form.office_location })
+              }
               className="bg-input border border-border rounded-md px-2 py-2 text-base md:text-sm"
             >
               <option value="">— none —</option>
               {OFFICE_LOCATIONS.map((o) => (
-                <option key={o} value={o}>{o}</option>
+                <option key={o} value={o}>
+                  {o}
+                </option>
               ))}
             </select>
           </label>
           <label className="flex flex-col gap-1 text-xs">
-            <span className="font-display uppercase tracking-widest text-muted-foreground">Team / Van</span>
+            <span className="font-display uppercase tracking-widest text-muted-foreground">
+              Team / Van
+            </span>
             <select
               value={form.team_id}
               onChange={(e) => setForm({ ...form, team_id: e.target.value })}
@@ -393,7 +434,9 @@ function UsersPage() {
             >
               <option value="">— unassigned —</option>
               {data.teams.map((t) => (
-                <option key={t.id} value={t.id}>{t.name}</option>
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
               ))}
             </select>
           </label>
@@ -408,7 +451,8 @@ function UsersPage() {
           </div>
         </form>
         <p className="text-xs text-muted-foreground mt-3">
-          The player can sign in immediately with the email + temp password. Ask them to change it after first login.
+          The player can sign in immediately with the email + temp password. Ask them to change it
+          after first login.
         </p>
       </ArcadePanel>
 
@@ -423,6 +467,8 @@ function UsersPage() {
         }}
         target={inviteTarget}
       />
+
+      <MovePlayersSheet open={movePlayersOpen} onOpenChange={setMovePlayersOpen} />
     </div>
   );
 }
