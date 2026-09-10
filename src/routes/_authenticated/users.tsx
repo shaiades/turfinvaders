@@ -199,7 +199,7 @@ function UsersPage() {
                 </th>
                 <th
                   className="px-4 py-2"
-                  title="One-time sign-in link for their existing account — you copy it and text/email it yourself"
+                  title="One-time sign-in link you text/email yourself — rows with no login yet get one created on the spot"
                 >
                   Invite
                 </th>
@@ -311,16 +311,19 @@ function UsersPage() {
                         const isChannel = isLeadSourceName(p.display_name);
                         const disabledWhy = isChannel
                           ? "Lead-source channel — not a person"
-                          : isPlaceholder
-                            ? "No login account — create them with Add New Player first"
-                            : !canModify
-                              ? "Only Owners can invite Admin accounts"
-                              : undefined;
+                          : !canModify
+                            ? "Only Owners can invite Admin accounts"
+                            : undefined;
                         return (
                           <button
                             type="button"
                             disabled={!!disabledWhy}
-                            title={disabledWhy ?? "Generate a sign-in link to text or email them"}
+                            title={
+                              disabledWhy ??
+                              (isPlaceholder
+                                ? "No login yet — Invite creates one and hands you the link, history attached"
+                                : "Generate a sign-in link to text or email them")
+                            }
                             onClick={() =>
                               setInviteTarget({
                                 id: p.id,
