@@ -1173,9 +1173,10 @@ type FunnelRow = {
 };
 
 /** The door-work group — raw daily_logs field counters, in front of the two
- *  lead halves. Sources are honest per column: Drs/Tlk come from map pins
- *  AND the Mission Log form; NI is pin-only; Rnt is Mission-Log-only (a
- *  Renter PIN counts under Tlk). Remote-drop pins never count anywhere. */
+ *  lead halves. Sources are honest per column: Drs/Tlk/Rnt come from map
+ *  pins AND the Mission Log form (Rnt joined via 20260910200000 — a Renter
+ *  pin bumps BOTH Rnt and Tlk); NI is pin-only. Remote-drop pins never
+ *  count anywhere. */
 const DOOR_COLS: Array<{
   short: string;
   full: string;
@@ -1202,7 +1203,7 @@ const DOOR_COLS: Array<{
   },
   {
     short: "Rnt",
-    full: "Renters — Mission Log entries only (a Renter pin counts under Tlk)",
+    full: "Renters — Renter pins (tally key or map), plus Mission Log entries (each also counts under Tlk)",
     key: "rnt",
     color: "warning",
   },
