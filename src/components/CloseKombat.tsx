@@ -48,8 +48,8 @@ import { ChevronLeft, ChevronRight, Crown, RefreshCw, Swords } from "lucide-reac
 /**
  * Close Kombat — sales-rep standings straight from the Monday.com Block
  * boards, in Monday's own column language (Iss / BO / OL / RS / PM / Sale).
- * Day / Week / Month ranges are all LA-calendar (card_date is the physical
- * appointment date — no 7 PM report lock here). Standings are ranked by sale
+ * Day / Week / Month / Year ranges are all LA-calendar (card_date is the
+ * physical appointment date — no 7 PM report lock here). Standings are ranked by sale
  * volume in every range (owner, 2026-07-30). Shared cards: each rep gets
  * full RESULT credit but the sale VOLUME splits evenly (owner, 2026-07-29);
  * Office Appointments are not leads and aren't tracked here (owner,
@@ -64,7 +64,7 @@ export function CloseKombat() {
   );
 }
 
-type RangeTab = "day" | "week" | "month";
+type RangeTab = "day" | "week" | "month" | "year";
 type DayPreset = "today" | "yesterday";
 
 type ResolvedRange = {
@@ -167,7 +167,7 @@ function CloseKombatInner() {
   const { matches } = useOfficeFilter();
   const isAdmin = isAdminRole(realRole);
 
-  // --- Range engine: Day / Week (Mon–Sun) / Month, all LA-calendar ---
+  // --- Range engine: Day / Week (Mon–Sun) / Month / Year, all LA-calendar ---
   const [tab, setTab] = useState<RangeTab>("day");
   const [dayPreset, setDayPreset] = useState<DayPreset>("today");
   // Mon–SUN (not the Mon–Sat pay week): Block boards carry Sunday groups and
@@ -181,6 +181,13 @@ function CloseKombatInner() {
     dateFromISO(monthStart),
   );
   const todayISO = laTodayISO();
+  // Year = the LA calendar year, Jan 1 → Dec 31 — the "who's really the best
+  // rep" view (owner, 2026-09-10). Same window semantics as every other tab:
+  // volume is the year's own, and a cross-year save still pays out on its
+  // original sale's date, so a Dec sale saved in Jan stays in Dec's year.
+  const currentYear = Number(todayISO.slice(0, 4));
+  const [year, setYear] = useState<number>(currentYear);
+  const isCurrentYear = year === currentYear;
 
   const range: ResolvedRange = useMemo(() => {
     if (tab === "day") {
@@ -200,6 +207,15 @@ function CloseKombatInner() {
         label: formatWeekRange(week.weekStart, week.weekEnd),
         sub: `${week.weekStartISO} → ${week.weekEndISO}`,
         isLive: week.isCurrentWeek,
+      };
+    }
+    if (tab === "year") {
+      return {
+        start: `${year}-01-01`,
+        end: `${year}-12-31`,
+        label: String(year),
+        sub: `${year}-01-01 → ${year}-12-31`,
+        isLive: isCurrentYear,
       };
     }
     const monthEnd = addDaysISO(nextMonthStartISO(monthStart), -1);
@@ -222,6 +238,8 @@ function CloseKombatInner() {
     monthStart,
     monthLabel,
     isCurrentMonth,
+    year,
+    isCurrentYear,
   ]);
 
   // --- Data: block_cards snapshots in range, office-filtered client-side.
@@ -231,10 +249,7 @@ function CloseKombatInner() {
   // One walk spans BOTH windows (stats range + volume window), padded by
   // SAVE_LINK_PAD_DAYS of pure link context on each side; the aggregate
   // takes the full set and counts only its own window.
-  const fetchStart = addDaysISO(
-    range.start,
-    -SAVE_LINK_PAD_DAYS,
-  );
+  const fetchStart = addDaysISO(range.start, -SAVE_LINK_PAD_DAYS);
   const fetchEnd = addDaysISO(range.end, SAVE_LINK_PAD_DAYS);
   // Exactly the BlockCard fields — select("*") also dragged created_at /
   // updated_at across the wire for thousands of rows, for nothing.
@@ -391,13 +406,14 @@ function CloseKombatInner() {
         </div>
       </div>
 
-      {/* Range tabs: Day / Week / Month, plus each range's own controls */}
+      {/* Range tabs: Day / Week / Month / Year, plus each range's own controls */}
       <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide">
         {(
           [
             { id: "day", label: "Day" },
             { id: "week", label: "Week" },
             { id: "month", label: "Month" },
+            { id: "year", label: "Year" },
           ] as Array<{ id: RangeTab; label: string }>
         ).map((p) => (
           <ArcadePill
@@ -477,6 +493,33 @@ function CloseKombatInner() {
           </>
         )}
 
+        {tab === "year" && (
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setYear((y) => y - 1)}
+              title="Previous year"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+            <RangeChip>{range.label}</RangeChip>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setYear((y) => y + 1)}
+              title="Next year"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+            {!isCurrentYear && (
+              <Button size="sm" variant="ghost" onClick={() => setYear(currentYear)}>
+                Jump to current year
+              </Button>
+            )}
+          </>
+        )}
+
         <span className="ml-2 text-[10px] text-muted-foreground font-mono whitespace-nowrap">
           {range.sub}
         </span>
@@ -487,8 +530,17 @@ function CloseKombatInner() {
           don't count anywhere), so No Show + No Demo + Reset + PM + Sold
           always equals Appts. Cancels sit inside PM and Reloads sit outside
           Appts entirely, so neither belongs in that sum. Result order follows
-          the board's own funnel (owner, 2026-07-30). */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-3">
+          the board's own funnel (owner, 2026-07-30). While a new range's
+          fetch is in flight the previous range's real numbers stay up
+          (placeholderData) but dimmed — the Year fetch pages ~15 months of
+          cards and can take seconds, and full-brightness stale numbers under
+          a new label read as the new range's truth. */}
+      <div
+        className={cn(
+          "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-3 transition-opacity",
+          cardsQuery.isPlaceholderData && "opacity-50",
+        )}
+      >
         {COMPANY_TILES.map((d) => (
           <KombatTile
             key={d.label}
@@ -536,7 +588,11 @@ function CloseKombatInner() {
         faction="kombat"
         title={`Kombat Standings · ${range.label}`}
         action={
-          range.isLive ? (
+          cardsQuery.isPlaceholderData ? (
+            <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground animate-pulse">
+              Counting…
+            </span>
+          ) : range.isLive ? (
             <span className="text-[10px] font-display uppercase tracking-widest text-victory">
               Live
             </span>
@@ -557,7 +613,7 @@ function CloseKombatInner() {
             )}
           </div>
         ) : (
-          <>
+          <div className={cn("transition-opacity", cardsQuery.isPlaceholderData && "opacity-50")}>
             {/* Desktop table (Monday's column language) */}
             <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-sm">
@@ -740,7 +796,9 @@ function CloseKombatInner() {
                     <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
                       {fmtRatio(totals.leadsToSale)}
                     </td>
-                    <td className="py-2.5 pl-2 text-right tabular-nums">{fmtMoney(totals.revenue)}</td>
+                    <td className="py-2.5 pl-2 text-right tabular-nums">
+                      {fmtMoney(totals.revenue)}
+                    </td>
                   </tr>
                 </tfoot>
               </table>
@@ -786,7 +844,7 @@ function CloseKombatInner() {
                 <StatLine s={totals} />
               </MobileCard>
             </MobileCardList>
-          </>
+          </div>
         )}
       </ArcadePanel>
 
