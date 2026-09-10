@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth, setDevRoleOverride, type AppRole } from "@/hooks/useAuth";
 import { useSwipeNav } from "@/hooks/useSwipeNav";
 import { CanvasserHUD } from "@/components/CanvasserHUD";
+import { AppMenu } from "@/components/AppMenu";
 import { CanvasserTutorial, startCanvasserTutorial } from "@/components/tutorial/CanvasserTutorial";
 import { WelcomeAnimation } from "@/components/WelcomeAnimation";
 import { CloseKombatIntro, isCloseKombatIntroForced } from "@/components/CloseKombatIntro";
@@ -23,6 +24,7 @@ import {
   Swords,
   GraduationCap,
   CircleHelp,
+  Menu,
 } from "lucide-react";
 const turfInvadersWordmark = { url: "/turf-invaders-wordmark.png" };
 
@@ -142,20 +144,27 @@ export function AppShell({ children }: { children: ReactNode }) {
       ];
     }
     // Leadership: owner + office_staff (Admin tier — captains returned above).
+    // Slimmed to the daily-driver five (2026-09-11 owner ask: stop crowding
+    // the bar) — the old duplicate "Fleet Dispatch" entry (identical
+    // destination to Command) is gone, and Learn/Wrap moved into the
+    // hamburger AppMenu with Manage Players and Invite. Five items also
+    // means the mobile bottom bar (capped at 5) finally shows everything.
     // Close Kombat only for roles its route guard admits.
     return [
       { to: "/dashboard", search: { tab: "dispatch" }, label: "Command", icon: LayoutDashboard },
       { to: "/my-territory", label: "Territory", icon: MapPin },
-      { to: "/dashboard", search: { tab: "dispatch" }, label: "Fleet Dispatch", icon: Truck },
       { to: "/dashboard", search: { tab: "payroll" }, label: "Payroll", icon: DollarSign },
       { to: "/confirmation-desk", label: "Desk", icon: PhoneCall },
       ...(role && CLOSE_KOMBAT_ROLES.includes(role)
         ? [{ to: "/close-kombat", label: "Close Kombat", icon: Swords } as NavItem]
         : []),
-      { to: "/learn", label: "Learn", icon: GraduationCap },
-      { to: "/daily-wrap", label: "Wrap", icon: Sparkles },
     ];
   })();
+
+  // The hamburger menu is the management tier's overflow: Invite a Player
+  // (Owners/Admins/Captains), plus the office pages for Owners/Admins.
+  const hasMenu = role === "owner" || role === "office_staff" || role === "captain";
+  const [menuOpen, setMenuOpen] = useState(false);
 
   // Mobile bottom bar caps at 5 for everyone except captains, who carry a 6th
   // (Mission joined their canvasser toolkit 2026-09-09) — all six are field
@@ -224,7 +233,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       <header className="border-b border-border bg-background/95 backdrop-blur sticky top-0 z-20 pt-safe">
         {/* Mobile header: centered logo only. Side slots are 44px twins so
             the wordmark stays optically centered. Canvassers get the tutorial
-            replay in the left slot; everyone else keeps the spacer. */}
+            replay in the left slot, the management tier gets the hamburger,
+            everyone else keeps the spacer. */}
         <div className="md:hidden flex items-center justify-between px-4 py-2">
           {user && role === "canvasser" ? (
             <button
@@ -234,6 +244,14 @@ export function AppShell({ children }: { children: ReactNode }) {
               aria-label="Replay the app tutorial"
             >
               <CircleHelp className="w-5 h-5" />
+            </button>
+          ) : user && hasMenu ? (
+            <button
+              onClick={() => setMenuOpen(true)}
+              className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
+              aria-label="Open menu"
+            >
+              <Menu className="w-5 h-5" />
             </button>
           ) : (
             <div className="w-11" />
@@ -310,6 +328,15 @@ export function AppShell({ children }: { children: ReactNode }) {
                     <CircleHelp className="w-5 h-5" />
                   </button>
                 )}
+                {hasMenu && (
+                  <button
+                    onClick={() => setMenuOpen(true)}
+                    className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
+                    aria-label="Open menu"
+                  >
+                    <Menu className="w-5 h-5" />
+                  </button>
+                )}
                 <div className="text-right">
                   <div className="text-xs text-muted-foreground uppercase tracking-wider">
                     {role}
@@ -369,6 +396,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           </ul>
         </nav>
       )}
+
+      {/* Management hamburger drawer + the Invite a Player flow behind it. */}
+      {user && hasMenu && <AppMenu open={menuOpen} onOpenChange={setMenuOpen} />}
 
       {/* First-sign-in arcade intro — every role, once per account. Sales
           reps' whole app is Close Kombat, so they open on the door-kick

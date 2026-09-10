@@ -19,9 +19,11 @@ const SYNTHETIC_EMAIL_RE = /@knockout\.local$/i;
 
 type AdminCtx = { supabase: SupabaseClient; userId: string };
 
-/** Invite is an Admin-tier action (the Manage Players page's tier), and only
- *  Owners may act on privileged (Owner/Admin) targets — an invite link IS
- *  credentials for the target account. */
+/** Inviting is a manager action — Owners, Admins, and Captains (2026-09-11
+ *  owner ask: captains send invites too). An invite link IS credentials for
+ *  the target account, so the tiers ladder: only Owners act on privileged
+ *  (Owner/Admin) targets, and Captains only on canvasser-tier targets — the
+ *  same tier they may create (createCanvasser rule). */
 async function assertInviteAllowed(context: AdminCtx, targetUserId: string) {
   const { data: callerRows, error: callerErr } = await context.supabase
     .from("user_roles")
@@ -30,8 +32,9 @@ async function assertInviteAllowed(context: AdminCtx, targetUserId: string) {
   if (callerErr) throw new Error(callerErr.message);
   const callerRoles = (callerRows ?? []).map((r: { role: string }) => r.role);
   const callerIsOwner = callerRoles.includes("owner");
-  if (!callerIsOwner && !callerRoles.includes("office_staff")) {
-    throw new Error("Only Owners and Admins can invite players.");
+  const callerIsAdmin = callerRoles.includes("office_staff");
+  if (!callerIsOwner && !callerIsAdmin && !callerRoles.includes("captain")) {
+    throw new Error("Only Owners, Admins, and Captains can invite players.");
   }
 
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -54,6 +57,15 @@ async function assertInviteAllowed(context: AdminCtx, targetUserId: string) {
   const targetPrivileged = targetRoles.includes("owner") || targetRoles.includes("office_staff");
   if (targetPrivileged && !callerIsOwner) {
     throw new Error("Only Owners can invite Owner or Admin accounts.");
+  }
+  if (
+    !callerIsOwner &&
+    !callerIsAdmin &&
+    targetRoles.some((r) => !LIMITED_CREATABLE_ROLES.includes(r as AppRole))
+  ) {
+    throw new Error(
+      "Captains can invite Canvassers and Sales Reps — ask an Owner or Admin for this player.",
+    );
   }
   return { supabaseAdmin, profile, callerIsOwner, targetRoles };
 }
