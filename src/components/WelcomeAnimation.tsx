@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { clamp01, easeInOut, easeOutBack, limb, makeBeeper, popText, rr } from "./intro-fx";
+import { clamp01, easeInOut, easeOutBack, limb, popText, rr } from "./intro-fx";
 
 /**
  * First-sign-in intro (owner ask 2026-09-10; restyled 2026-09-10 from 8-bit
@@ -108,6 +108,211 @@ function spawnConfetti(list: Confetto[], cx: number, cy: number, n: number) {
       h: 6 + Math.random() * 5,
     });
   }
+}
+
+/* ── Soundtrack (fully synthesized — no audio files) ───────────────────
+ *
+ * Browsers only allow audio after a user gesture. The common first-open
+ * follows the sign-in click in the same SPA session, so `tryStart` usually
+ * succeeds and the score plays on its own; on a cold open it stays silent
+ * and the scene's 🔇 button unlocks it mid-scene (the whole timeline is
+ * scheduled from wherever playback currently is). Everything is wrapped in
+ * try/catch: audio is a garnish and must never break the intro. */
+
+function createIntroAudio() {
+  let ctx: AudioContext | null = null;
+  let master: GainNode | null = null;
+  let noiseBuf: AudioBuffer | null = null;
+  let scheduled = false;
+
+  const ensure = () => {
+    if (ctx) return;
+    ctx = new AudioContext();
+    master = ctx.createGain();
+    master.gain.value = 0.55;
+    master.connect(ctx.destination);
+    noiseBuf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.6), ctx.sampleRate);
+    const d = noiseBuf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  };
+
+  /** One enveloped oscillator note. Times in seconds relative to now. */
+  const tone = (
+    at: number,
+    dur: number,
+    freq: number,
+    opts: {
+      type?: OscillatorType;
+      gain?: number;
+      slideTo?: number;
+      lowpass?: number;
+      attack?: number;
+    } = {},
+  ) => {
+    if (!ctx || !master || at + dur < 0) return;
+    const t0 = ctx.currentTime + Math.max(0, at);
+    const osc = ctx.createOscillator();
+    osc.type = opts.type ?? "sine";
+    osc.frequency.setValueAtTime(freq, t0);
+    if (opts.slideTo) osc.frequency.exponentialRampToValueAtTime(opts.slideTo, t0 + dur);
+    const g = ctx.createGain();
+    const peak = opts.gain ?? 0.08;
+    const a = Math.min(opts.attack ?? 0.008, dur / 2);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.linearRampToValueAtTime(peak, t0 + a);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    let head: AudioNode = osc;
+    if (opts.lowpass) {
+      const f = ctx.createBiquadFilter();
+      f.type = "lowpass";
+      f.frequency.value = opts.lowpass;
+      head.connect(f);
+      head = f;
+    }
+    head.connect(g).connect(master);
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.05);
+  };
+
+  /** One enveloped noise hit through a filter. */
+  const noise = (
+    at: number,
+    dur: number,
+    opts: { gain?: number; kind?: BiquadFilterType; freq?: number; q?: number } = {},
+  ) => {
+    if (!ctx || !master || !noiseBuf || at + dur < 0) return;
+    const t0 = ctx.currentTime + Math.max(0, at);
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuf;
+    src.loop = true;
+    const f = ctx.createBiquadFilter();
+    f.type = opts.kind ?? "bandpass";
+    f.frequency.value = opts.freq ?? 1500;
+    f.Q.value = opts.q ?? 0.8;
+    const g = ctx.createGain();
+    const peak = opts.gain ?? 0.04;
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.linearRampToValueAtTime(peak, t0 + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    src.connect(f).connect(g).connect(master);
+    src.start(t0);
+    src.stop(t0 + dur + 0.05);
+  };
+
+  /** Schedule the whole score from `elapsedMs` into the intro. Events in
+   *  the past are skipped; the pads clip to what remains. */
+  const scheduleFrom = (elapsedMs: number) => {
+    if (!ctx || !master || scheduled) return;
+    scheduled = true;
+    const rel = (ms: number) => (ms - elapsedMs) / 1000;
+    const pad = (fromMs: number, toMs: number, freqs: number[], gain: number) => {
+      const end = rel(toMs);
+      if (end <= 0) return;
+      const start = Math.max(0, rel(fromMs));
+      for (const fq of freqs) {
+        tone(start, end - start, fq, { type: "sawtooth", gain, lowpass: 460, attack: 0.35 });
+      }
+    };
+    // Ambient bed: moody Am pad, lifting to C major for the payoff
+    pad(0, T_CHEER, [110, 110.8, 164.81], 0.028);
+    pad(T_CHEER, DURATION, [130.81, 131.6, 196], 0.038);
+    // Bass pulses
+    for (let ms = 200; ms < T_CHEER; ms += 500) {
+      tone(rel(ms), 0.22, 55, { gain: 0.12 });
+    }
+    for (let ms = T_CHEER; ms < T_FADE_OUT; ms += 500) {
+      tone(rel(ms), 0.24, 65.41, { gain: 0.14 });
+    }
+    // Hi-hat ticks
+    for (let ms = 500; ms < 4500; ms += 250) {
+      noise(rel(ms), 0.03, { kind: "highpass", freq: 6500, gain: 0.014 });
+    }
+    // Out of the van: a short swoosh
+    noise(rel(90), 0.32, { kind: "bandpass", freq: 900, q: 0.6, gain: 0.05 });
+    // Footsteps on the turf, matched to the run cycle
+    for (let i = 0, ms = 400; ms < T_RUN_END - 60; i++, ms += 150) {
+      noise(rel(ms), 0.06, { kind: "lowpass", freq: 320, gain: i % 2 ? 0.045 : 0.06 });
+    }
+    // Knocks: thump (pitch-dropping sine) + knuckle click — one, then two
+    for (const ms of [T_KNOCK_1, T_KNOCK_2, T_KNOCK_2 + 130]) {
+      tone(rel(ms), 0.1, 130, { slideTo: 55, gain: 0.34 });
+      noise(rel(ms), 0.02, { kind: "highpass", freq: 2200, gain: 0.08 });
+    }
+    // Door: a little creak, then a warm two-note chime as the light spills
+    tone(rel(T_DOOR_OPEN), 0.28, 170, {
+      type: "sawtooth",
+      slideTo: 330,
+      lowpass: 850,
+      gain: 0.04,
+    });
+    tone(rel(T_DOOR_OPEN + 190), 0.3, 659.25, { type: "triangle", gain: 0.05 });
+    tone(rel(T_DOOR_OPEN + 260), 0.4, 880, { type: "triangle", gain: 0.05 });
+    // Celebration: fanfare + confetti bursts + a sparkle run
+    const FANFARE = [
+      [0, 523.25],
+      [110, 659.25],
+      [220, 783.99],
+      [330, 1046.5],
+    ] as const;
+    for (const [off, fq] of FANFARE) {
+      const dur = off === 330 ? 0.55 : 0.22;
+      tone(rel(T_CHEER + off), dur, fq, { type: "triangle", gain: 0.15 });
+      tone(rel(T_CHEER + off), dur, fq / 2, { type: "sawtooth", gain: 0.05, lowpass: 2400 });
+    }
+    tone(rel(T_CHEER), 0.5, 130.81, { gain: 0.12 });
+    noise(rel(T_CHEER), 0.4, { kind: "bandpass", freq: 3000, q: 1, gain: 0.06 });
+    noise(rel(T_CHEER + 500), 0.35, { kind: "bandpass", freq: 3400, q: 1, gain: 0.045 });
+    for (let i = 0; i < 6; i++) {
+      tone(rel(T_CHEER + 160 + i * 60), 0.07, 1568 * Math.pow(2, i / 6), { gain: 0.045 });
+    }
+    // Ride the visual fade out
+    const fadeAt = ctx.currentTime + Math.max(0, rel(T_FADE_OUT));
+    master.gain.setValueAtTime(master.gain.value, fadeAt);
+    master.gain.linearRampToValueAtTime(0.0001, fadeAt + 0.3);
+  };
+
+  return {
+    /** Create/resume the context; true when the browser lets audio run. */
+    async tryStart(): Promise<boolean> {
+      try {
+        ensure();
+        if (ctx!.state === "suspended") await ctx!.resume().catch(() => {});
+        return ctx!.state === "running";
+      } catch {
+        return false;
+      }
+    },
+    scheduleFrom(elapsedMs: number) {
+      try {
+        scheduleFrom(elapsedMs);
+      } catch {
+        /* garnish */
+      }
+    },
+    setMuted(muted: boolean) {
+      try {
+        if (!ctx || !master) return;
+        master.gain.cancelScheduledValues(ctx.currentTime);
+        master.gain.linearRampToValueAtTime(muted ? 0.0001 : 0.55, ctx.currentTime + 0.08);
+      } catch {
+        /* garnish */
+      }
+    },
+    stop() {
+      try {
+        if (!ctx || !master) return;
+        master.gain.cancelScheduledValues(ctx.currentTime);
+        master.gain.linearRampToValueAtTime(0.0001, ctx.currentTime + 0.06);
+        const c = ctx;
+        window.setTimeout(() => c.close().catch(() => {}), 120);
+        ctx = null;
+        master = null;
+        scheduled = false;
+      } catch {
+        /* garnish */
+      }
+    },
+  };
 }
 
 /* ── Characters (articulated capsule figures) ──────────────────────────── */
@@ -674,9 +879,11 @@ export function WelcomeAnimation({
   });
   const [visible, setVisible] = useState(false); // drives the CSS fade
   const [showWelcome, setShowWelcome] = useState(false);
+  const [soundOn, setSoundOn] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const confettiRef = useRef<Confetto[]>([]);
-  const beepRef = useRef<ReturnType<typeof makeBeeper> | null>(null);
+  const audioRef = useRef<ReturnType<typeof createIntroAudio> | null>(null);
+  const startRef = useRef(0);
   const doneRef = useRef(false);
 
   useEffect(() => {
@@ -744,13 +951,25 @@ export function WelcomeAnimation({
     canvas.height = Math.round(cssW * (VH / VW) * dpr);
     const scale = canvas.width / VW;
 
-    beepRef.current = makeBeeper();
     setVisible(true);
 
     const start = performance.now();
+    startRef.current = start;
+    // Audio: usually allowed right away (the sign-in click was this SPA
+    // session's gesture); on a cold open it stays locked until the 🔇
+    // button is tapped.
+    if (hold == null) {
+      const audio = createIntroAudio();
+      audioRef.current = audio;
+      audio.tryStart().then((ok) => {
+        if (ok && audioRef.current === audio && !doneRef.current) {
+          audio.scheduleFrom(performance.now() - start);
+          setSoundOn(true);
+        }
+      });
+    }
+
     let raf = 0;
-    let knock1Done = false;
-    let knock2Done = false;
     let cheerDone = false;
     let confetti2Done = false;
     const confetti = confettiRef.current;
@@ -759,22 +978,9 @@ export function WelcomeAnimation({
     const step = (now: number) => {
       const t = hold ?? now - start;
       if (hold == null) {
-        if (t >= T_KNOCK_1 && !knock1Done) {
-          knock1Done = true;
-          beepRef.current?.(85, 80, 0, "triangle");
-        }
-        if (t >= T_KNOCK_2 && !knock2Done) {
-          knock2Done = true;
-          beepRef.current?.(85, 80, 0, "triangle");
-          beepRef.current?.(85, 80, 130, "triangle");
-        }
         if (t >= T_CHEER && !cheerDone) {
           cheerDone = true;
           spawnConfetti(confetti, RUN_TO - 60, 190, 70);
-          beepRef.current?.(523, 90, 0);
-          beepRef.current?.(659, 90, 90);
-          beepRef.current?.(784, 110, 180);
-          beepRef.current?.(1046, 170, 270);
           setShowWelcome(true);
         }
         if (t >= T_CHEER + 500 && !confetti2Done) {
@@ -808,6 +1014,8 @@ export function WelcomeAnimation({
     return () => {
       cancelAnimationFrame(raf);
       if (failsafe) window.clearTimeout(failsafe);
+      audioRef.current?.stop();
+      audioRef.current = null;
     };
   }, [phase, hold, markSeen, finish]);
 
@@ -818,6 +1026,23 @@ export function WelcomeAnimation({
     window.addEventListener("keydown", skip);
     return () => window.removeEventListener("keydown", skip);
   }, [phase, hold, finish]);
+
+  // 🔇/🔊 — unlocking mid-scene schedules the score from the current beat.
+  const toggleSound = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (soundOn) {
+      audio.setMuted(true);
+      setSoundOn(false);
+      return;
+    }
+    audio.tryStart().then((ok) => {
+      if (!ok || doneRef.current) return;
+      audio.scheduleFrom(performance.now() - startRef.current);
+      audio.setMuted(false);
+      setSoundOn(true);
+    });
+  }, [soundOn]);
 
   if (phase !== "playing") return null;
 
@@ -857,6 +1082,21 @@ export function WelcomeAnimation({
               "radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,0.45) 100%)",
           }}
         />
+        {hold == null && (
+          <button
+            type="button"
+            aria-label={soundOn ? "Mute sound" : "Turn sound on"}
+            aria-pressed={soundOn}
+            // A tap here must never read as "skip".
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              toggleSound();
+            }}
+            className="absolute top-2 right-2 h-11 w-11 inline-flex items-center justify-center rounded-full border border-white/25 bg-black/45 text-lg backdrop-blur-sm hover:border-white/50"
+          >
+            <span aria-hidden>{soundOn ? "🔊" : "🔇"}</span>
+          </button>
+        )}
       </div>
       <div
         className="font-display uppercase tracking-widest text-xs sm:text-sm mt-4 text-victory"
