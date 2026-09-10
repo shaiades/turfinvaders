@@ -35,6 +35,7 @@ import {
   UserPlus,
   Lock,
   Merge,
+  ArrowRightLeft,
 } from "lucide-react";
 import { deleteProfile, deleteVan } from "@/lib/fleet.functions";
 import { AddAgentDialog } from "@/components/AddAgentDialog";
@@ -42,6 +43,7 @@ import { RenameCanvasserDialog, type NameGroupRef } from "@/components/RenameCan
 import { MergeCanvasserDialog } from "@/components/MergeCanvasserDialog";
 import { isLeadSourceName } from "@/lib/lead-sources";
 import { useAuth } from "@/hooks/useAuth";
+import { useMoveAgents } from "@/hooks/useRosterActions";
 import { isManagerRole } from "@/lib/roles";
 import { canManageTarget } from "@/lib/role-policy";
 import { normalizeName } from "@/lib/utils";
@@ -76,12 +78,14 @@ export function FleetDispatchManage({
   rolesByUser,
   pointsByUser,
   volumeByUser,
+  onOpenMovePlayers,
 }: {
   vans: Van[];
   profiles: RosterProfile[];
   rolesByUser: Map<string, string[]>;
   pointsByUser: Map<string, number>;
   volumeByUser: Map<string, number>;
+  onOpenMovePlayers?: () => void;
 }) {
   const qc = useQueryClient();
   const { realRole } = useAuth();
@@ -133,33 +137,20 @@ export function FleetDispatchManage({
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const assignCanvasser = useMutation({
-    mutationFn: async ({ canvasserId, vanId }: { canvasserId: string; vanId: string | null }) => {
-      const patch: { team_id: string | null; office_location?: string } = { team_id: vanId };
-      if (vanId) {
-        const van = vans.find((v) => v.id === vanId);
-        if (van?.office_location) patch.office_location = van.office_location;
-      }
-      // .select() so an RLS-blocked update (0 rows) errors instead of
-      // silently toasting success.
-      const { data, error } = await supabase
-        .from("profiles")
-        .update(patch)
-        .eq("id", canvasserId)
-        .select("id");
-      if (error) throw error;
-      if (!data?.length) throw new Error("Move failed — you don't have permission for this agent");
-    },
-    onSuccess: (_d, vars) => {
-      const van = vars.vanId ? vans.find((v) => v.id === vars.vanId) : null;
-      toast.success(van ? `Moved to ${van.name}` : "Moved to Free Agents");
-      qc.invalidateQueries({ queryKey: ["fleet_dispatch"] });
-      qc.invalidateQueries({ queryKey: ["weekly_results"] });
-      qc.invalidateQueries({ queryKey: ["payroll-ledger"] });
-      qc.invalidateQueries({ queryKey: ["manage_users"] });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
+  const moveAgents = useMoveAgents(vans);
+
+  // Move the WHOLE name group (every non-archived same-name duplicate), like
+  // the board's row menu — moving only the clicked profile used to strand a
+  // duplicate on the old van.
+  const moveGroup = (profile: RosterProfile, vanId: string | null) => {
+    const key = normalizeName(profile.display_name) || `id:${profile.id}`;
+    const ids = allProfiles
+      .filter(
+        (p) => p.is_active !== false && (normalizeName(p.display_name) || `id:${p.id}`) === key,
+      )
+      .map((p) => p.id);
+    moveAgents.mutate({ ids, vanId, name: profile.display_name ?? "Agent" });
+  };
 
   const archiveAgent = useMutation({
     mutationFn: async ({ id }: { id: string; name: string }) => {
@@ -527,7 +518,9 @@ export function FleetDispatchManage({
                         <div>
                           <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground mb-1">
                             Roster ({roster.length}){" "}
-                            <span className="opacity-60">· use Move to reassign</span>
+                            <span className="opacity-60">
+                              · tap a row's Move menu, or Move Players for several at once
+                            </span>
                           </div>
                           <div className="space-y-1.5 min-h-[40px]">
                             {roster.map((r) => {
@@ -558,12 +551,7 @@ export function FleetDispatchManage({
                                   isCaptain={rIsCaptain}
                                   vans={canModify ? vanOptions : undefined}
                                   currentVanId={v.id}
-                                  onMove={
-                                    canModify
-                                      ? (vanId) =>
-                                          assignCanvasser.mutate({ canvasserId: r.id, vanId })
-                                      : undefined
-                                  }
+                                  onMove={canModify ? (vanId) => moveGroup(r, vanId) : undefined}
                                   onArchive={
                                     canArchive
                                       ? () => {
@@ -619,7 +607,7 @@ export function FleetDispatchManage({
 
                             {roster.length === 0 && (
                               <div className="text-xs text-muted-foreground italic px-2 py-3 border border-dashed border-border rounded">
-                                No agents yet — use “+ Add” or a row's Move menu.
+                                No agents yet — use “+ Add”, a row's Move menu, or Move Players.
                               </div>
                             )}
                           </div>
@@ -655,21 +643,37 @@ export function FleetDispatchManage({
               </span>
             </div>
             {canManage && (
-              <Button
-                size="sm"
-                onClick={() => {
-                  setAddAgentVanId(null);
-                  setAddAgentOpen(true);
-                }}
-                className="gap-1 font-display uppercase tracking-widest text-[10px] bg-background border text-foreground hover:bg-[color:var(--neon-blue)]/10"
-                style={{
-                  borderColor: "var(--neon-blue)",
-                  color: "var(--neon-blue)",
-                  boxShadow: "0 0 12px -4px color-mix(in oklab, var(--neon-blue) 70%, transparent)",
-                }}
-              >
-                <UserPlus className="w-3.5 h-3.5" /> + Add Agent
-              </Button>
+              <div className="flex items-center gap-2">
+                {onOpenMovePlayers && (
+                  <Button
+                    size="sm"
+                    onClick={onOpenMovePlayers}
+                    className="gap-1 font-display uppercase tracking-widest text-[10px] bg-background border text-foreground hover:bg-[color:var(--neon-blue)]/10"
+                    style={{
+                      borderColor: "var(--neon-blue)",
+                      color: "var(--neon-blue)",
+                    }}
+                  >
+                    <ArrowRightLeft className="w-3.5 h-3.5" /> Move Players
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setAddAgentVanId(null);
+                    setAddAgentOpen(true);
+                  }}
+                  className="gap-1 font-display uppercase tracking-widest text-[10px] bg-background border text-foreground hover:bg-[color:var(--neon-blue)]/10"
+                  style={{
+                    borderColor: "var(--neon-blue)",
+                    color: "var(--neon-blue)",
+                    boxShadow:
+                      "0 0 12px -4px color-mix(in oklab, var(--neon-blue) 70%, transparent)",
+                  }}
+                >
+                  <UserPlus className="w-3.5 h-3.5" /> + Add Agent
+                </Button>
+              </div>
             )}
           </div>
           <div className="min-h-[120px] rounded-lg border border-dashed p-2 space-y-1.5 border-border">
@@ -691,11 +695,7 @@ export function FleetDispatchManage({
                     volume={volumeByUser.get(p.id) ?? 0}
                     vans={canModify ? vanOptions : undefined}
                     currentVanId={p.team_id}
-                    onMove={
-                      canModify
-                        ? (vanId) => assignCanvasser.mutate({ canvasserId: p.id, vanId })
-                        : undefined
-                    }
+                    onMove={canModify ? (vanId) => moveGroup(p, vanId) : undefined}
                     onArchive={
                       canArchive
                         ? () => {
@@ -749,7 +749,7 @@ export function FleetDispatchManage({
           </div>
           <p className="text-[10px] text-muted-foreground">
             {canManage
-              ? "Use a row's Move menu to place an agent on a roster. Auto-created from Monday.com webhooks."
+              ? "Tap Move on a row — or Move Players to search and place several at once. New Monday.com agents land here automatically and follow their card's Van column."
               : "Free Agents auto-populate from Monday.com webhooks."}
           </p>
         </div>
@@ -811,7 +811,9 @@ export function FleetDispatchManage({
                       size="sm"
                       variant="outline"
                       disabled={reactivateAgent.isPending || !canReactivate}
-                      title={canReactivate ? undefined : "Only Owners can reactivate Admin accounts"}
+                      title={
+                        canReactivate ? undefined : "Only Owners can reactivate Admin accounts"
+                      }
                       onClick={() => reactivateAgent.mutate(p.id)}
                       className="h-7 text-[11px] font-display uppercase tracking-wider"
                     >
