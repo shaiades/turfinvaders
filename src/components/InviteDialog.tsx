@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import {
   Dialog,
@@ -12,16 +12,18 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { Copy, Mail, Send, TriangleAlert } from "lucide-react";
+import { Copy, Mail, Send, Sparkles, TriangleAlert } from "lucide-react";
 import { getInviteTarget, createInviteLink } from "@/lib/invites.functions";
+import { NAME_KEYS } from "@/hooks/useRosterActions";
 import { ROLE_LABEL, type AppRole } from "@/lib/role-policy";
 
-/** Invite an existing player to the app: generates a one-time sign-in link
- *  for their EXISTING account (history intact — never a second profile) that
- *  lands them on /auth/welcome to set a password. Nothing is sent
- *  automatically — the manager copies the link and texts/emails it, so the
- *  office controls exactly who gets in and with which role (set on the same
- *  Manage Players row before or after inviting). */
+/** Invite a player to the app: generates a one-time sign-in link that lands
+ *  them on /auth/welcome to set a password. Auth-backed rows keep their
+ *  existing account (history intact — never a second profile); placeholder
+ *  rows get a login created on the spot with all their history absorbed into
+ *  it. Nothing is sent automatically — the manager copies the link and
+ *  texts/emails it, so the office controls exactly who gets in and with
+ *  which role (set on the same Manage Players row before or after inviting). */
 export function InviteDialog({
   open,
   onOpenChange,
@@ -31,10 +33,15 @@ export function InviteDialog({
   onOpenChange: (o: boolean) => void;
   target: { id: string; name: string; role: AppRole } | null;
 }) {
+  const qc = useQueryClient();
   const getTarget = useServerFn(getInviteTarget);
   const createLink = useServerFn(createInviteLink);
   const [email, setEmail] = useState("");
   const [link, setLink] = useState<string | null>(null);
+  // Inviting a placeholder mints a NEW profile id (the login's) and deletes
+  // the row the dialog opened on — "Generate a fresh link" must target the
+  // id the server handed back, never the dead placeholder id.
+  const [mintedId, setMintedId] = useState<string | null>(null);
 
   const { data: info, isLoading } = useQuery({
     enabled: open && !!target,
@@ -47,6 +54,7 @@ export function InviteDialog({
     if (open) {
       setLink(null);
       setEmail("");
+      setMintedId(null);
     }
   }, [open, target?.id]);
   useEffect(() => {
@@ -57,13 +65,21 @@ export function InviteDialog({
     mutationFn: async () =>
       createLink({
         data: {
-          user_id: target!.id,
+          user_id: mintedId ?? target!.id,
           email: email.trim() ? email.trim().toLowerCase() : undefined,
         },
       }),
     onSuccess: (res) => {
       setLink(res.link);
-      toast.success("Invite link ready — copy it and send it");
+      if (res.user_id !== (mintedId ?? target?.id)) {
+        // Placeholder path ran: their login now exists and the roster row
+        // swapped ids — refresh everything that keys on profile ids.
+        setMintedId(res.user_id);
+        for (const key of NAME_KEYS) qc.invalidateQueries({ queryKey: key });
+        toast.success("Login created with all history attached — copy the link and send it");
+      } else {
+        toast.success("Invite link ready — copy it and send it");
+      }
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -79,6 +95,10 @@ export function InviteDialog({
   }
 
   const needsRealEmail = !!info?.synthetic_email;
+  // Placeholder rows are invitable too — the server creates the login and
+  // merges the placeholder into it. mintedId means that already happened.
+  const willCreateLogin = !!info && !info.has_auth && info.is_placeholder && !mintedId;
+  const emailRequired = needsRealEmail || willCreateLogin;
   const mailto = link
     ? `mailto:${encodeURIComponent(email.trim())}?subject=${encodeURIComponent(
         "Your Turf Invaders invite",
@@ -95,8 +115,8 @@ export function InviteDialog({
             Invite {target?.name ?? "player"}
           </DialogTitle>
           <DialogDescription>
-            Creates a one-time sign-in link for their existing account — same player, all history
-            attached. They open it, set a password, and land in the app as{" "}
+            Creates a one-time sign-in link — same player, all history attached. They open it, set a
+            password, and land in the app as{" "}
             <span className="text-foreground font-medium">
               {target ? ROLE_LABEL[target.role] : ""}
             </span>{" "}
@@ -106,16 +126,25 @@ export function InviteDialog({
 
         {isLoading || !info ? (
           <div className="text-sm text-muted-foreground py-4">Checking their account…</div>
-        ) : !info.has_auth ? (
+        ) : !info.has_auth && !info.is_placeholder && !mintedId ? (
           <div className="flex items-start gap-2 rounded border border-yellow-500/50 bg-yellow-500/10 px-3 py-2 text-xs text-yellow-500">
             <TriangleAlert className="w-4 h-4 shrink-0 mt-0.5" />
             <span>
-              This is a placeholder row with no login account behind it. Create them with Add Player
-              instead — then invite from their new row.
+              This row has no login account behind it. Create them with Add Player instead — then
+              invite from their new row.
             </span>
           </div>
         ) : (
           <div className="space-y-3 py-1">
+            {willCreateLogin && (
+              <div className="flex items-start gap-2 rounded border border-[color:var(--neon-blue)]/50 bg-[color:var(--neon-blue)]/10 px-3 py-2 text-xs text-[color:var(--neon-blue)]">
+                <Sparkles className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>
+                  No login yet — enter their email and this creates their account with every stat,
+                  log, and pin they already have attached, then hands you the link.
+                </span>
+              </div>
+            )}
             {needsRealEmail && (
               <div className="flex items-start gap-2 rounded border border-yellow-500/50 bg-yellow-500/10 px-3 py-2 text-xs text-yellow-500">
                 <TriangleAlert className="w-4 h-4 shrink-0 mt-0.5" />
@@ -127,11 +156,11 @@ export function InviteDialog({
             )}
             <label className="flex flex-col gap-1 text-xs">
               <span className="font-display uppercase tracking-widest text-muted-foreground">
-                Email on file
+                {willCreateLogin ? "Their email" : "Email on file"}
               </span>
               <Input
                 type="email"
-                placeholder={needsRealEmail ? "their.real@email.com" : (info.email ?? "")}
+                placeholder={emailRequired ? "their.real@email.com" : (info.email ?? "")}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
               />
@@ -170,17 +199,21 @@ export function InviteDialog({
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Close
           </Button>
-          {info?.has_auth && (
+          {!!info && (info.has_auth || info.is_placeholder || !!mintedId) && (
             <Button
               onClick={() => generate.mutate()}
-              disabled={generate.isPending || (needsRealEmail && !email.trim())}
+              disabled={generate.isPending || (emailRequired && !email.trim())}
             >
               <Send className="w-4 h-4 mr-1" />
               {generate.isPending
-                ? "Generating…"
+                ? willCreateLogin
+                  ? "Creating their login…"
+                  : "Generating…"
                 : link
                   ? "Generate a fresh link"
-                  : "Generate invite link"}
+                  : willCreateLogin
+                    ? "Create login & invite link"
+                    : "Generate invite link"}
             </Button>
           )}
         </DialogFooter>

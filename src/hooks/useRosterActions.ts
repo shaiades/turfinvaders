@@ -67,8 +67,9 @@ export function useMoveAgents(vans: VanLite[]) {
 
 /** Rename/merge touch display_name and re-attribute history, so beyond the
  *  roster keys every query family that caches names or per-person aggregates
- *  has to refetch. */
-const NAME_KEYS = [
+ *  has to refetch. Exported for InviteDialog: inviting a placeholder runs a
+ *  merge under the hood (profile id changes), so it invalidates the same set. */
+export const NAME_KEYS = [
   ...ROSTER_KEYS,
   ["all_canvassers_simple"],
   ["live_daily_action"],
