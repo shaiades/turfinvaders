@@ -213,6 +213,32 @@ export type SyncSummary = {
   };
 };
 
+/** EVERY board on the account (id + name), newest first, paged past
+ *  Monday's per-call cap. boards(limit: N) alone returns only the newest N
+ *  account-wide, and with the office minting ~a dozen boards a month the
+ *  June 2026 Block boards slid out of a single limit-50 page by mid-August —
+ *  "Full history" quietly stopped reaching them, so a June card edit (the
+ *  Murray 6/10 sale, fixed 8/7 Christianson upsell) could never land until
+ *  the listing paged. Cheap: id+name only, ~5 pages on the 2026 account. */
+async function listAllBoards(token: string): Promise<Array<{ id: string; name: string }>> {
+  const out: Array<{ id: string; name: string }> = [];
+  const PAGE = 100;
+  for (let page = 1; ; page++) {
+    const data = await monday(
+      token,
+      "query ($page: Int!) { boards(limit: 100, page: $page, order_by: created_at) { id name } }",
+      { page },
+    );
+    const batch = ((data.boards as Array<{ id: string; name: string }>) ?? []).map((b) => ({
+      id: String(b.id),
+      name: b.name,
+    }));
+    out.push(...batch);
+    if (batch.length < PAGE) break;
+  }
+  return out;
+}
+
 export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSummary> {
   const { data: settings } = await supabaseAdmin
     .from("system_settings")
@@ -227,6 +253,11 @@ export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSumm
   const activeIds = new Set([sdId, ocId].filter(Boolean));
   const templateId = String(settings?.monday_template_board_id ?? "");
 
+  // One paged account listing per run, shared by the Block-board discovery
+  // (scope "all") and the report pass — ~5 pages each would double for free.
+  let allBoardsCache: Array<{ id: string; name: string }> | null = null;
+  const allBoards = async () => (allBoardsCache ??= await listAllBoards(token));
+
   // Target boards: explicit ids > all historical Block boards > active pair.
   let targets: Array<{ id: string; name: string }>;
   if (input.boardIds?.length) {
@@ -237,6 +268,14 @@ export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSumm
       id: String(b.id),
       name: b.name,
     }));
+  } else if (input.scope === "all") {
+    // Full history = EVERY SD/OC Block board, so the listing must page:
+    // a single newest-N page shrinks the covered window by two boards a
+    // month (see listAllBoards) and pre-window boards have no webhooks, so
+    // cards there could drift from Monday forever with no path back.
+    targets = (await allBoards()).filter(
+      (b) => /^(SD|OC)\s+Block/i.test(b.name) && b.id !== templateId,
+    );
   } else {
     const data = await monday(
       token,
@@ -251,18 +290,16 @@ export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSumm
     // Saturday's sales through Monday — the sync must cover the same window
     // or a rep added Monday morning to last week's card only lands on a full
     // backfill. Matched by PARSED week (names are hand-typed), same as
-    // rotate-boards.
+    // rotate-boards. The newest-50 page always contains this week + last
+    // week, so the quick path keeps the single cheap call.
     const prevWeekISO = addDaysISO(laWeekStartISO(), -7);
-    targets =
-      input.scope === "all"
-        ? boards.filter((b) => /^(SD|OC)\s+Block/i.test(b.name) && b.id !== templateId)
-        : boards.filter(
-            (b) =>
-              activeIds.has(b.id) ||
-              (/^(SD|OC)\s+Block/i.test(b.name) &&
-                b.id !== templateId &&
-                parseBoardWeekStart(b.name) === prevWeekISO),
-          );
+    targets = boards.filter(
+      (b) =>
+        activeIds.has(b.id) ||
+        (/^(SD|OC)\s+Block/i.test(b.name) &&
+          b.id !== templateId &&
+          parseBoardWeekStart(b.name) === prevWeekISO),
+    );
   }
 
   const results: BoardSyncResult[] = [];
@@ -426,16 +463,23 @@ export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSumm
     errors: [],
   };
   try {
-    const data = await monday(
-      token,
-      "query { boards(limit: 100, order_by: created_at) { id name } }",
-    );
-    let reportBoards = ((data.boards as Array<{ id: string; name: string }>) ?? [])
-      .map((b) => ({ id: String(b.id), name: b.name }))
+    // Paged like the Block-board discovery (a single limit-100 page was one
+    // month from dropping the June 2026 reports the same way the Block
+    // listing dropped June's boards).
+    let reportBoards = (await allBoards())
       // Monday auto-creates a "Subitems of <board>" shadow board per report
       // board — same name suffix, no WCC/Sales Rep columns, reload-titled
-      // rows that can fuzzy-bind to real cards. Never walk them.
-      .filter((b) => /\bsales report\b/i.test(b.name) && !/^subitems of/i.test(b.name.trim()));
+      // rows that can fuzzy-bind to real cards. Never walk them. The SD/OC
+      // prefix gates paging to the two-office era (May 2026 onward): older
+      // un-prefixed reports ("April 2026 Sales Report", the 2023-25 books)
+      // cover months with no Block cards at all, so their rows could only
+      // ever waste the time budget or mis-bind.
+      .filter(
+        (b) =>
+          /^(SD|OC)\s/i.test(b.name.trim()) &&
+          /\bsales report\b/i.test(b.name) &&
+          !/^subitems of/i.test(b.name.trim()),
+      );
     if (input.scope !== "all") {
       // Quick syncs only touch the current + previous month's reports.
       const labels = recentMonthLabels().map((l) => l.toLowerCase());
@@ -570,7 +614,11 @@ export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSumm
               r.rows > 0 &&
               !r.reps_column_missing,
           )
-          .map((r) => ({ office: r.office as string, start: r.month_start as string, end: r.month_end as string }));
+          .map((r) => ({
+            office: r.office as string,
+            start: r.month_start as string,
+            end: r.month_end as string,
+          }));
         const coveredDay = (office: string, day: string) =>
           healSpans.some((s) => s.office === office && day >= s.start && day < s.end);
         const orphanIds: string[] = [];
@@ -736,7 +784,9 @@ async function fetchCandidateCards(): Promise<{
     if (!repsAvailable) {
       const { data, error } = await supabaseAdmin
         .from("block_cards")
-        .select("monday_item_id, lead_name, office_location, card_date, sale, sale_price, wcc, phone")
+        .select(
+          "monday_item_id, lead_name, office_location, card_date, sale, sale_price, wcc, phone",
+        )
         .order("monday_item_id")
         .range(from, from + 999);
       if (error) throw new Error(error.message);
@@ -981,9 +1031,7 @@ async function collectReportBoard(
       : null;
   // Mid-month fallback for rows without a parseable Date Sold.
   const m = board.name.match(new RegExp(`(${MONTH_NAMES.join("|")})\\s+(\\d{4})`, "i"));
-  const monthIdx = m
-    ? MONTH_NAMES.findIndex((n) => n.toLowerCase() === m[1].toLowerCase()) + 1
-    : 0;
+  const monthIdx = m ? MONTH_NAMES.findIndex((n) => n.toLowerCase() === m[1].toLowerCase()) + 1 : 0;
   const monthMidISO = m ? `${m[2]}-${String(monthIdx).padStart(2, "0")}-15` : null;
   // Month span [start, end) for the report_reps heal — only months that
   // walked successfully may clear stale stamps. Derived from the mid-month
