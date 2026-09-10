@@ -5,6 +5,8 @@ import { addTeamMember } from "@/lib/users.functions";
 import { DEFAULT_OFFICE, OFFICE_LOCATIONS, type OfficeLocation } from "@/lib/offices";
 import { creatableRolesFor, ROLE_LABEL, type AppRole } from "@/lib/roles";
 import { useAuth } from "@/hooks/useAuth";
+import { useDispatchVans } from "@/hooks/useFleetRoster";
+import { ROSTER_KEYS } from "@/hooks/useRosterActions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,10 +22,9 @@ import {
 import { toast } from "sonner";
 import { UserPlus } from "lucide-react";
 
-
-
-
-export function AddTeamMemberDialog({ variant = "default" }: { variant?: "default" | "neon" } = {}) {
+export function AddTeamMemberDialog({
+  variant = "default",
+}: { variant?: "default" | "neon" } = {}) {
   const qc = useQueryClient();
   const { realRole } = useAuth();
   const addFn = useServerFn(addTeamMember);
@@ -31,9 +32,16 @@ export function AddTeamMemberDialog({ variant = "default" }: { variant?: "defaul
   const [fullName, setFullName] = useState("");
   const [office, setOffice] = useState<OfficeLocation>(DEFAULT_OFFICE);
   const [role, setRole] = useState<AppRole>("canvasser");
+  // Default Free Agents (null) — the van is optional at creation time.
+  const [teamId, setTeamId] = useState<string | null>(null);
+  const { data: vans = [] } = useDispatchVans({ enabled: open });
   // Owners may create any role; captains/Admins only the canvasser tier —
   // mirrors the addTeamMember server rule.
   const creatable = creatableRolesFor(realRole);
+
+  const destinationName = teamId
+    ? (vans.find((v) => v.id === teamId)?.name ?? "van")
+    : "Free Agents";
 
   const create = useMutation({
     mutationFn: async () =>
@@ -43,25 +51,21 @@ export function AddTeamMemberDialog({ variant = "default" }: { variant?: "defaul
           office_location: office,
           // Clamp so stale state can never submit a role outside the list.
           role: creatable.includes(role) ? role : "canvasser",
+          team_id: teamId,
         },
       }),
     onSuccess: () => {
-      toast.success(`${fullName} added to roster`, {
+      toast.success(`${fullName} added to ${destinationName}`, {
         style: { background: "hsl(142 76% 36%)", color: "white" },
       });
-      // Refresh every dropdown/roster that reads from profiles/user_roles.
-      qc.invalidateQueries({ queryKey: ["manage_users"] });
-      qc.invalidateQueries({ queryKey: ["dispatch_roster"] });
-      qc.invalidateQueries({ queryKey: ["profiles"] });
-      qc.invalidateQueries({ queryKey: ["fleet"] });
-      qc.invalidateQueries({ queryKey: ["turfs"] });
-      qc.invalidateQueries({ queryKey: ["leaderboard"] });
-      qc.invalidateQueries({ queryKey: ["canvassers"] });
-      // Broad safety net for any query keyed on profile lists.
-      qc.invalidateQueries();
+      // Every roster surface (board, Manage Fleet, /users, payroll/weekly)
+      // plus the canvasser dropdowns.
+      for (const key of ROSTER_KEYS) qc.invalidateQueries({ queryKey: key });
+      qc.invalidateQueries({ queryKey: ["all_canvassers_simple"] });
       setFullName("");
       setOffice(DEFAULT_OFFICE);
       setRole("canvasser");
+      setTeamId(null);
       setOpen(false);
     },
     onError: (e: Error) => toast.error(e.message),
@@ -71,9 +75,7 @@ export function AddTeamMemberDialog({ variant = "default" }: { variant?: "defaul
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         {variant === "neon" ? (
-          <Button
-            className="gap-2 font-display uppercase tracking-widest text-xs bg-neon text-background hover:bg-neon/90 shadow-[0_0_24px_-4px_color-mix(in_oklab,var(--neon)_70%,transparent)]"
-          >
+          <Button className="gap-2 font-display uppercase tracking-widest text-xs bg-neon text-background hover:bg-neon/90 shadow-[0_0_24px_-4px_color-mix(in_oklab,var(--neon)_70%,transparent)]">
             <UserPlus className="h-4 w-4" />
             <span className="sm:hidden">+ Add</span>
             <span className="hidden sm:inline">+ Add New Team Member</span>
@@ -90,7 +92,8 @@ export function AddTeamMemberDialog({ variant = "default" }: { variant?: "defaul
             Add Team Member
           </DialogTitle>
           <DialogDescription>
-            Insert a roster entry directly. No login required — they'll appear in dropdowns instantly.
+            Insert a roster entry directly. No login required — they'll appear in dropdowns
+            instantly.
           </DialogDescription>
         </DialogHeader>
 
@@ -125,7 +128,34 @@ export function AddTeamMemberDialog({ variant = "default" }: { variant?: "defaul
               className="w-full bg-input border border-border rounded-md px-3 py-2 text-sm"
             >
               {OFFICE_LOCATIONS.map((o) => (
-                <option key={o} value={o}>{o}</option>
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="tm-van">Van</Label>
+            <select
+              id="tm-van"
+              value={teamId ?? ""}
+              onChange={(e) => {
+                const next = e.target.value || null;
+                setTeamId(next);
+                // Picking a van syncs the office to that van's office.
+                if (next) {
+                  const van = vans.find((v) => v.id === next);
+                  if (van?.office_location) setOffice(van.office_location as OfficeLocation);
+                }
+              }}
+              className="w-full bg-input border border-border rounded-md px-3 py-2 text-sm"
+            >
+              <option value="">Free Agents (assign later)</option>
+              {vans.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.name}
+                </option>
               ))}
             </select>
           </div>
