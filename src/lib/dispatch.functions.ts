@@ -27,6 +27,12 @@ export type DispatchResults = {
   nc: number;
   ol: number;
   sal: number;
+  /** Door-work counters (the board's "Door Work" group) — raw daily_logs
+   *  field activity (map pins + Mission Log), unlike the lead results above. */
+  drs: number;
+  tlk: number;
+  ni: number;
+  rnt: number;
 };
 
 export const getDispatchProduction = createServerFn({ method: "POST" })
@@ -51,7 +57,7 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
       supabaseAdmin
         .from("daily_logs")
         .select(
-          "canvasser_id, demos_sits, sales, no_demo, future_leads, ctc, non_core, one_legs, unmarked, office_location, log_date, team_id",
+          "canvasser_id, demos_sits, sales, no_demo, future_leads, ctc, non_core, one_legs, unmarked, doors_knocked, people_talked_to, not_interested, renters, office_location, log_date, team_id",
         )
         .gte("log_date", data.log_start)
         .lte("log_date", data.log_end),
@@ -92,6 +98,10 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
       nc: 0,
       ol: 0,
       sal: 0,
+      drs: 0,
+      tlk: 0,
+      ni: 0,
+      rnt: 0,
     });
     for (const l of logsR.data ?? []) {
       if (!l.canvasser_id) continue;
@@ -127,6 +137,10 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
         t.ctc += l.ctc ?? 0;
         t.nc += l.non_core ?? 0;
         t.ol += l.one_legs ?? 0;
+        t.drs += l.doors_knocked ?? 0;
+        t.tlk += l.people_talked_to ?? 0;
+        t.ni += l.not_interested ?? 0;
+        t.rnt += l.renters ?? 0;
       }
     }
 
