@@ -4,7 +4,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { LIMITED_CREATABLE_ROLES } from "@/lib/role-policy";
 import { z } from "zod";
 
-const ROLES = ["owner", "office_staff", "captain", "sales_rep", "canvasser"] as const;
+const ROLES = ["owner", "office_staff", "captain", "sales_rep", "confirmer", "canvasser"] as const;
 
 const createCanvasserSchema = z.object({
   email: z.string().trim().email().max(255),
@@ -82,7 +82,7 @@ export const createCanvasser = createServerFn({ method: "POST" })
 const addTeamMemberSchema = z.object({
   full_name: z.string().trim().min(1).max(100),
   office_location: z.enum(OFFICE_LOCATIONS),
-  role: z.enum(["owner", "office_staff", "captain", "sales_rep", "canvasser"]),
+  role: z.enum(ROLES),
   team_id: z.string().uuid().nullable().optional(),
 });
 
@@ -162,7 +162,8 @@ export const listRoster = createServerFn({ method: "GET" })
       office_staff: 1,
       captain: 2,
       sales_rep: 3,
-      canvasser: 4,
+      confirmer: 4,
+      canvasser: 5,
     };
     const roleByUser = new Map<string, string>();
     for (const r of roleRows ?? []) {

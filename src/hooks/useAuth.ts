@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { User } from "@supabase/supabase-js";
-import { canUseViewAs, isAppRole, primaryRole, type AppRole } from "@/lib/roles";
+import { canUseViewAs, isAppRole, primaryRole, privilegeRole, type AppRole } from "@/lib/roles";
 
 export type { AppRole };
 
@@ -49,7 +49,10 @@ export function useAuth(): AuthState {
         setState({
           loading: false,
           user,
-          role: override ?? realRole,
+          // `role` drives experience (nav, guards, HUD) and is collapsed to
+          // its privilege tier: confirmers live the canvasser app.
+          // `realRole` stays raw for labels and the owner-only tier checks.
+          role: privilegeRole(override ?? realRole),
           realRole,
           teamId: profile?.team_id ?? null,
           displayName: profile?.display_name ?? user.email ?? null,
@@ -66,7 +69,7 @@ export function useAuth(): AuthState {
     function onOverride() {
       setState((s) => ({
         ...s,
-        role: (canUseViewAs(s.realRole) ? readDevRole() : null) ?? s.realRole,
+        role: privilegeRole((canUseViewAs(s.realRole) ? readDevRole() : null) ?? s.realRole),
       }));
     }
     window.addEventListener("dev-role-changed", onOverride);

@@ -21,6 +21,13 @@ export * from "./role-policy";
  *  must never use this guard — it is the failure-redirect target, and
  *  guarding it would loop. */
 export function requireRoleBeforeLoad(allowed: readonly AppRole[]) {
+  // Confirmers hold canvasser-tier privileges (privilegeRole): any guard
+  // that admits canvassers admits confirmers too, without each route
+  // having to know the title exists.
+  const expanded: readonly AppRole[] =
+    allowed.includes("canvasser") && !allowed.includes("confirmer")
+      ? [...allowed, "confirmer"]
+      : allowed;
   return async () => {
     const { data, error } = await supabase.auth.getSession();
     if (!error && !data.session) throw redirect({ to: "/auth" });
@@ -36,7 +43,7 @@ export function requireRoleBeforeLoad(allowed: readonly AppRole[]) {
         .from("user_roles")
         .select("role")
         .eq("user_id", userId)
-        .in("role", [...allowed]),
+        .in("role", [...expanded]),
       supabase.from("profiles").select("id").eq("id", userId).maybeSingle(),
     ]);
     if (

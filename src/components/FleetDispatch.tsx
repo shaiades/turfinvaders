@@ -348,9 +348,11 @@ function FleetDispatchInner({
     const out: BoardProfile[] = [];
     for (const p of allProfiles) {
       const roles = rolesByUser.get(p.id) ?? [];
+      // Confirmers ride the board as canvasser-tier rows (Cynthia lives on
+      // the Confirmation van) — the title only changes roster labels.
       const role = roles.includes("captain")
         ? "captain"
-        : roles.includes("canvasser")
+        : roles.includes("canvasser") || roles.includes("confirmer")
           ? "canvasser"
           : null;
       if (!role) continue;
