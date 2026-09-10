@@ -1,10 +1,11 @@
 import { Link, useRouter, useRouterState } from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth, setDevRoleOverride, type AppRole } from "@/hooks/useAuth";
 import { useSwipeNav } from "@/hooks/useSwipeNav";
 import { CanvasserHUD } from "@/components/CanvasserHUD";
 import { CanvasserTutorial, startCanvasserTutorial } from "@/components/tutorial/CanvasserTutorial";
+import { WelcomeAnimation } from "@/components/WelcomeAnimation";
 import { CLOSE_KOMBAT_ROLES, canUseViewAs, privilegeRole } from "@/lib/roles";
 import {
   LogOut,
@@ -60,6 +61,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { user, role, realRole, displayName } = useAuth();
   const router = useRouter();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  // First-sign-in arcade intro: while it's checking/playing, hold the page
+  // tour back so the two first-open moments can't stack.
+  const [introActive, setIntroActive] = useState(false);
   // Compare against the COLLAPSED real role: a confirmer's `role` is always
   // "canvasser" (privilegeRole in useAuth) and must not read as a View As
   // override.
@@ -365,10 +369,14 @@ export function AppShell({ children }: { children: ReactNode }) {
         </nav>
       )}
 
+      {/* First-sign-in arcade intro — every role, once per account. */}
+      {user && <WelcomeAnimation userId={user.id} onActiveChange={setIntroActive} />}
+
       {/* Per-page discovery tips: each screen's mini-tour auto-pops the first
           time this account opens it; the header "?" replays the current
-          screen's tips. Canvassers only. */}
-      {user && role === "canvasser" && <CanvasserTutorial userId={user.id} />}
+          screen's tips. Canvassers only — and deferred until the intro
+          animation has finished. */}
+      {user && role === "canvasser" && !introActive && <CanvasserTutorial userId={user.id} />}
     </div>
   );
 }
