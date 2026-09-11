@@ -5,7 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { ArcadeCard, ArcadePanel } from "@/components/arcade";
 import { GlossarySheet } from "@/components/GlossarySheet";
 import { AlertTriangle, Info, Trophy } from "lucide-react";
-import { addDaysISO, laTodayISO, reportDates } from "@/lib/dates";
+import { addDaysISO, reportDates } from "@/lib/dates";
 import { getClockPresence } from "@/lib/dispatch.functions";
 import { isRecentlyActive, lastActiveMap, SUSPENSION_RECENCY_DAYS } from "@/lib/suspension";
 
@@ -19,6 +19,8 @@ type Row = {
   name: string;
   todayLeads: number;
   ydayLeads: number;
+  /** Leads on the day BEFORE yday — the second judged day of the zero lists. */
+  yday2Leads: number;
   weekPoints: number;
   recent: boolean;
   tracked: boolean;
@@ -29,8 +31,21 @@ type Row = {
 };
 
 /** One doughnut card for both zero lists — the freezer (2+ zeros, red) and
- *  the fresh doughnuts (1 zero, neutral) rendered the same markup twice. */
-function DoughnutCard({ r, frozen }: { r: Row; frozen?: boolean }) {
+ *  the fresh doughnuts (1 zero, neutral) rendered the same markup twice.
+ *  Labels name the two judged days: the lists only ever score FINISHED
+ *  report days (owner, 2026-09-11: today can't count until the day is over),
+ *  so pre-lock they read yesterday/day-before and post-lock today/yesterday. */
+function DoughnutCard({
+  r,
+  frozen,
+  lastLabel,
+  prevLabel,
+}: {
+  r: Row;
+  frozen?: boolean;
+  lastLabel: string;
+  prevLabel: string;
+}) {
   return (
     <li
       className={
@@ -51,7 +66,7 @@ function DoughnutCard({ r, frozen }: { r: Row; frozen?: boolean }) {
             frozen ? "text-[var(--destructive)]" : "text-muted-foreground"
           }`}
         >
-          0 today · {frozen ? "0" : r.ydayLeads} yesterday
+          0 {lastLabel} · {frozen ? "0" : r.yday2Leads} {prevLabel}
         </div>
       </div>
     </li>
@@ -126,15 +141,19 @@ function DailyWrap() {
   const { today, yday, wkStart, locked } = reportDates();
   const [glossaryOpen, setGlossaryOpen] = useState(false);
 
-  // Clock-in gate (owner, 2026-09-11): nobody lands on a zero list for a day
-  // they never punched in. Gate days are the REAL PT calendar day — after the
-  // 7 PM roll `today` is tomorrow's report date, but punches live on the day
-  // people actually worked — and `yday` (= the real day itself once locked).
-  // Presence rides the server fn because canvassers only read their own
-  // time_entries. Until it loads (or if it fails — local dev has no service
-  // key) the zero lists stay EMPTY: missing data must never flag a person.
-  const realToday = laTodayISO();
-  const clockDates = useMemo(() => [...new Set([realToday, yday])], [realToday, yday]);
+  // Zero lists judge only FINISHED report days (owner, 2026-09-11: today
+  // must not count toward suspension until the day is over). The two judged
+  // days are `yday` and the day before it — pre-lock that's yesterday and
+  // the day prior; after the 7 PM roll `yday` IS the just-finished day, so
+  // today joins the lists exactly at the lock. Clock-in gate (owner,
+  // 2026-09-11): nobody lands on a zero list for a day they never punched
+  // in; both judged days are real PT calendar days, so presence is checked
+  // on them directly. Presence rides the server fn because canvassers only
+  // read their own time_entries. Until it loads (or if it fails — local dev
+  // has no service key) the zero lists stay EMPTY: missing data must never
+  // flag a person.
+  const yday2 = addDaysISO(yday, -1);
+  const clockDates = useMemo(() => [...new Set([yday, yday2])], [yday, yday2]);
   const clockQ = useQuery({
     queryKey: ["daily_wrap", "clock", clockDates],
     queryFn: async () => getClockPresence({ data: { dates: clockDates } }),
@@ -166,24 +185,26 @@ function DailyWrap() {
       const profiles = profilesR.data ?? [];
       const metrics = metricsR.data ?? [];
 
-      const byUser = new Map<string, { today: number; yday: number; pts: number }>();
+      const byUser = new Map<string, { today: number; yday: number; yday2: number; pts: number }>();
       for (const m of metrics) {
-        const rec = byUser.get(m.canvasser_id) ?? { today: 0, yday: 0, pts: 0 };
+        const rec = byUser.get(m.canvasser_id) ?? { today: 0, yday: 0, yday2: 0, pts: 0 };
         const leads = (m.leads_confirmed ?? 0) + (m.leads_submitted ?? 0);
         if (m.metric_date === today) rec.today += leads;
         if (m.metric_date === yday) rec.yday += leads;
+        if (m.metric_date === yday2) rec.yday2 += leads;
         // Points stay week-scoped even though the fetch may reach further back.
         if (m.metric_date >= wkStart) rec.pts += (m.pitch_missed ?? 0) * 1 + (m.sales ?? 0) * 2;
         byUser.set(m.canvasser_id, rec);
       }
       const lastMap = lastActiveMap(metrics);
       return profiles.map((p) => {
-        const r = byUser.get(p.id) ?? { today: 0, yday: 0, pts: 0 };
+        const r = byUser.get(p.id) ?? { today: 0, yday: 0, yday2: 0, pts: 0 };
         return {
           id: p.id,
           name: p.display_name ?? "Unknown",
           todayLeads: r.today,
           ydayLeads: r.yday,
+          yday2Leads: r.yday2,
           weekPoints: r.pts,
           recent: isRecentlyActive(today, [p.id], lastMap, (p.created_at ?? "").slice(0, 10)),
           tracked: p.suspension_tracked !== false,
@@ -206,31 +227,32 @@ function DailyWrap() {
     // Fleet Dispatch banner; `active` drops archived/removed reps the moment
     // the archive lands; `graced` is the 1-week rookie grace (see Row.graced).
     // All four gate only the zero lists — awards a rep earned before removal
-    // stay on the wrap. Clock-in gates likewise touch only the zero lists:
-    // a doughnut needs a punch on the real working day, the freezer a punch
-    // on both of its days (after the 7 PM roll those collapse to one real
-    // day — the vacuously-zero next report date can't be punched yet).
+    // stay on the wrap. Both lists judge ONLY the two finished report days
+    // (yday, yday2) — an in-progress day never counts (owner, 2026-09-11);
+    // it joins at the 7 PM lock, when yday becomes the just-finished day.
+    // Clock-in gates likewise touch only the zero lists: a zero day counts
+    // only when it was actually punched.
     const clockedOn = (id: string, day: string) => clockedSets.get(day)?.has(id) ?? false;
     const suspension = rows.filter(
       (r) =>
-        r.todayLeads === 0 &&
         r.ydayLeads === 0 &&
+        r.yday2Leads === 0 &&
         r.recent &&
         r.tracked &&
         r.active &&
         !r.graced &&
         clockReady &&
-        clockedOn(r.id, realToday) &&
-        clockedOn(r.id, yday),
+        clockedOn(r.id, yday) &&
+        clockedOn(r.id, yday2),
     );
     const doughnuts = rows.filter(
       (r) =>
-        r.todayLeads === 0 &&
-        r.ydayLeads > 0 &&
+        r.ydayLeads === 0 &&
+        r.yday2Leads > 0 &&
         r.active &&
         !r.graced &&
         clockReady &&
-        clockedOn(r.id, realToday),
+        clockedOn(r.id, yday),
     );
     const winners = rows
       .filter((r) => r.todayLeads >= 1)
@@ -238,9 +260,13 @@ function DailyWrap() {
     const club3 = rows.filter((r) => r.weekPoints >= 3 && r.weekPoints < 7).sort((a, b) => b.weekPoints - a.weekPoints);
     const bosses7 = rows.filter((r) => r.weekPoints >= 7).sort((a, b) => b.weekPoints - a.weekPoints);
     return { suspension, doughnuts, winners, club3, bosses7 };
-  }, [rows, clockReady, clockedSets, realToday, yday]);
+  }, [rows, clockReady, clockedSets, yday, yday2]);
 
   if (isLoading) return <div className="text-sm text-muted-foreground">Loading daily wrap…</div>;
+
+  // Pre-lock the judged days are yesterday/day-before; the lock rolls them.
+  const lastLabel = locked ? "today" : "yesterday";
+  const prevLabel = locked ? "yesterday" : "day before";
 
   return (
     <div className="space-y-6">
@@ -300,14 +326,19 @@ function DailyWrap() {
         ) : (
           <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {suspension.map((r) => (
-              <DoughnutCard key={r.id} r={r} frozen />
+              <DoughnutCard key={r.id} r={r} frozen lastLabel={lastLabel} prevLabel={prevLabel} />
             ))}
           </ul>
+        )}
+        {!locked && (
+          <p className="mt-3 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            Finished days only — today can't earn a zero until the 7 PM lock.
+          </p>
         )}
       </section>
 
       {/* Doughnut List */}
-      <ArcadePanel title="Doughnuts Today · 1 Zero">
+      <ArcadePanel title={locked ? "Doughnuts Today · 1 Zero" : "Doughnuts · Yesterday · 1 Zero"}>
         {doughnuts.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             No fresh doughnuts. Everyone got on the board.
@@ -315,7 +346,7 @@ function DailyWrap() {
         ) : (
           <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {doughnuts.map((r) => (
-              <DoughnutCard key={r.id} r={r} />
+              <DoughnutCard key={r.id} r={r} lastLabel={lastLabel} prevLabel={prevLabel} />
             ))}
           </ul>
         )}
