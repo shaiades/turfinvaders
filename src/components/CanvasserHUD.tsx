@@ -95,7 +95,7 @@ export function CanvasserHUD({ userId }: { userId: string }) {
           ⚠ Off the clock
         </span>
       ) : (
-        <RankPill rank={rank} />
+        <RankPill rank={rank} tappable />
       )}
       <div className="flex items-center gap-3 tabular-nums">
         <span className="text-muted-foreground">

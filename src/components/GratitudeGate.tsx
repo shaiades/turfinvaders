@@ -3,6 +3,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Heart, Lock } from "lucide-react";
 import { laTodayISO } from "@/lib/dates";
+import { supabase } from "@/integrations/supabase/client";
 
 
 function storageKey(userId: string) {
@@ -36,6 +37,14 @@ export function GratitudeGate({
     try {
       window.localStorage.setItem(storageKey(userId), JSON.stringify({ text: v, at: new Date().toISOString() }));
     } catch { /* ignore */ }
+    // Best-effort share to the Daily Wrap's gratitude wall (owner call
+    // 2026-09-11). Fire-and-forget: the gate NEVER waits on the network,
+    // and a dead connection at 7 AM must not block the day. Untyped table
+    // access until the generated types catch up (ObjectionDojo's pattern).
+    void (supabase as unknown as { from: (t: string) => ReturnType<typeof supabase.from> })
+      .from("gratitude_entries")
+      .insert({ user_id: userId, entry_date: laTodayISO(), text: v.slice(0, 280) })
+      .then(() => {});
     setUnlocked(true);
     // The canvasser tutorial defers its field-screen pop until the gate
     // opens (teaching buttons the gate hides would point at nothing).

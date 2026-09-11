@@ -206,7 +206,7 @@ function SCCERankBanner({ userId }: { userId: string }) {
       )}
       <ArcadeCard className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3 min-w-0">
-          <RankPill rank={rank} size="md" />
+          <RankPill rank={rank} size="md" tappable />
           <div className="min-w-0">
             <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
               SCCE Rank

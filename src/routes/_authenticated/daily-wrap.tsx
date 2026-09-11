@@ -5,9 +5,18 @@ import { supabase } from "@/integrations/supabase/client";
 import { ArcadeCard, ArcadePanel } from "@/components/arcade";
 import { GlossarySheet } from "@/components/GlossarySheet";
 import { AlertTriangle, Info, Trophy } from "lucide-react";
-import { addDaysISO, reportDates } from "@/lib/dates";
+import { addDaysISO, laTodayISO, reportDates } from "@/lib/dates";
+import { formatCurrency } from "@/lib/utils";
 import { getClockPresence } from "@/lib/dispatch.functions";
 import { isRecentlyActive, lastActiveMap, SUSPENSION_RECENCY_DAYS } from "@/lib/suspension";
+import { useAuth } from "@/hooks/useAuth";
+import { sumLogCounters, useTodayLogs } from "@/hooks/useDailyLogs";
+import { usePiggyBank } from "@/hooks/usePiggyBank";
+
+/** Untyped table access (ObjectionDojo's pattern) until generated types
+ *  catch up with gratitude_entries / objection_attempts reads here. */
+const rawTable = (name: string) =>
+  (supabase as unknown as { from: (t: string) => ReturnType<typeof supabase.from> }).from(name);
 
 export const Route = createFileRoute("/_authenticated/daily-wrap")({
   head: () => ({ meta: [{ title: "Daily Wrap-Up — Turf Invaders" }] }),
@@ -87,7 +96,9 @@ const AWARD_TIERS: Array<{
 }> = [
   {
     key: "bosses",
-    title: "7+ Point Bosses",
+    // The clubs ARE the pay tiers (audit P2-5) — naming the raise turns the
+    // award into money instead of trivia.
+    title: "7+ Point Bosses · the $35/hr tier",
     titleClass: "text-[var(--neon-blue,#00f0ff)]",
     empty: "No bosses yet this week.",
     emoji: "👑",
@@ -102,7 +113,7 @@ const AWARD_TIERS: Array<{
   },
   {
     key: "club",
-    title: "3+ Point Club",
+    title: "3+ Point Club · the $30/hr tier",
     titleClass: "text-muted-foreground",
     empty: "No one in the club yet.",
     emoji: "⭐",
@@ -140,6 +151,15 @@ function AwardSection({ tier, rows }: { tier: (typeof AWARD_TIERS)[number]; rows
 function DailyWrap() {
   const { today, yday, wkStart, locked } = reportDates();
   const [glossaryOpen, setGlossaryOpen] = useState(false);
+
+  // YOUR DAY (audit P2-3): the wrap used to be entirely team-wide — the one
+  // person guaranteed to read it never appeared. All self data rides caches
+  // other pages already warm.
+  const { user } = useAuth();
+  const selfId = user?.id;
+  const myLogs = useTodayLogs(selfId);
+  const my = sumLogCounters(myLogs.data);
+  const piggy = usePiggyBank(selfId);
 
   // Zero lists judge only FINISHED report days (owner, 2026-09-11: today
   // must not count toward suspension until the day is over). The two judged
@@ -306,6 +326,37 @@ function DailyWrap() {
         </p>
       </div>
 
+      {/* YOUR DAY — celebration starts with the person reading (P2-3). */}
+      {selfId && (
+        <YourDayCard
+          doors={my.doors_knocked}
+          talked={my.people_talked_to}
+          leads={rows.find((r) => r.id === selfId)?.todayLeads ?? my.leads_called_in}
+          weekPoints={rows.find((r) => r.id === selfId)?.weekPoints ?? 0}
+          projected={piggy.dollars}
+        />
+      )}
+
+      {/* Winners BEFORE the zero lists — celebration first, then the heat. */}
+      <WinnersPanel winners={winners} selfId={selfId} />
+
+      {/* Weekly Point Bosses */}
+      <ArcadePanel
+        title="Weekly Point Bosses"
+        action={
+          <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            <Trophy className="inline w-3 h-3 mr-1" />
+            Week of {wkStart}
+          </span>
+        }
+      >
+        <div className="space-y-6">
+          <AwardSection tier={AWARD_TIERS[0]} rows={bosses7} />
+          <AwardSection tier={AWARD_TIERS[1]} rows={club3} />
+          <DojoApprovedLine wkStart={wkStart} />
+        </div>
+      </ArcadePanel>
+
       {/* Suspension Zone */}
       <section
         className="relative overflow-hidden rounded-lg border-2 p-5"
@@ -352,31 +403,147 @@ function DailyWrap() {
         )}
       </ArcadePanel>
 
-      {/* Winners with confetti */}
-      <WinnersPanel winners={winners} />
-
-      {/* Weekly Point Bosses */}
-      <ArcadePanel
-        title="Weekly Point Bosses"
-        action={
-          <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-            <Trophy className="inline w-3 h-3 mr-1" />
-            Week of {wkStart}
-          </span>
-        }
-      >
-        <div className="space-y-6">
-          <AwardSection tier={AWARD_TIERS[0]} rows={bosses7} />
-          <AwardSection tier={AWARD_TIERS[1]} rows={club3} />
-        </div>
-      </ArcadePanel>
+      {/* The closer: the morning's gratitude, back at day's end. */}
+      <GratitudeWall />
 
       <GlossarySheet open={glossaryOpen} onOpenChange={setGlossaryOpen} />
     </div>
   );
 }
 
-function WinnersPanel({ winners }: { winners: Row[] }) {
+/** The reader's own day, in the day's own currencies: doors, leads, week
+ *  points, projected dollars. Every value rides caches other pages warm. */
+function YourDayCard({
+  doors,
+  talked,
+  leads,
+  weekPoints,
+  projected,
+}: {
+  doors: number;
+  talked: number;
+  leads: number;
+  weekPoints: number;
+  projected: number | null;
+}) {
+  const stats: Array<{ label: string; value: string; cls: string }> = [
+    { label: "Doors", value: doors.toLocaleString(), cls: "text-neon" },
+    { label: "Talked", value: talked.toLocaleString(), cls: "text-accent" },
+    { label: "Leads", value: leads.toLocaleString(), cls: "text-victory" },
+    { label: "Wk Pts", value: weekPoints.toLocaleString(), cls: "text-victory" },
+  ];
+  if (projected !== null) {
+    stats.push({
+      label: "Projected",
+      value: formatCurrency(Math.round(projected)),
+      cls: "text-victory",
+    });
+  }
+  return (
+    <ArcadeCard className="p-4">
+      <div className="text-[10px] font-display uppercase tracking-widest text-neon mb-3">
+        Your Day
+      </div>
+      <div className="grid grid-cols-4 sm:grid-cols-5 gap-2">
+        {stats.map((s) => (
+          <div key={s.label} className="rounded-md border border-border/60 bg-black/30 px-2 py-2 text-center">
+            <div className={`font-display text-xl leading-none tabular-nums ${s.cls}`}>
+              {s.value}
+            </div>
+            <div className="mt-1 text-[9px] font-display uppercase tracking-widest text-muted-foreground">
+              {s.label}
+            </div>
+          </div>
+        ))}
+      </div>
+    </ArcadeCard>
+  );
+}
+
+/** This week's approved Objection Dojo clips — training tied to the loop. */
+function DojoApprovedLine({ wkStart }: { wkStart: string }) {
+  const { data } = useQuery({
+    queryKey: ["daily_wrap", "dojo", wkStart],
+    queryFn: async () => {
+      const { data: attempts, error } = await rawTable("objection_attempts")
+        .select("canvasser_id, created_at")
+        .eq("status", "approved")
+        .gte("created_at", `${wkStart}T00:00:00Z`);
+      if (error) throw error;
+      const rows = (attempts ?? []) as Array<{ canvasser_id: string }>;
+      const ids = [...new Set(rows.map((a) => a.canvasser_id))];
+      if (ids.length === 0) return [];
+      const { data: profs } = await supabase
+        .from("profiles")
+        .select("id, display_name")
+        .in("id", ids);
+      return (profs ?? []).map((p) => p.display_name ?? "Unknown");
+    },
+  });
+  if (!data || data.length === 0) return null;
+  return (
+    <div>
+      <h3 className="font-display text-xs uppercase tracking-widest mb-2 text-muted-foreground">
+        🥋 Dojo Approved This Week
+      </h3>
+      <ul className="flex flex-wrap gap-2">
+        {data.map((name) => (
+          <li
+            key={name}
+            className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1 font-display text-[10px] uppercase tracking-widest text-muted-foreground"
+          >
+            {name}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** The morning check-ins, first names only — the ritual gets its audience. */
+function GratitudeWall() {
+  const day = laTodayISO();
+  const { data } = useQuery({
+    queryKey: ["daily_wrap", "gratitude", day],
+    queryFn: async () => {
+      const { data: entries, error } = await rawTable("gratitude_entries")
+        .select("user_id, text")
+        .eq("entry_date", day)
+        .order("created_at", { ascending: true })
+        .limit(40);
+      if (error) throw error;
+      const rows = (entries ?? []) as Array<{ user_id: string; text: string }>;
+      if (rows.length === 0) return [];
+      const ids = [...new Set(rows.map((r) => r.user_id))];
+      const { data: profs } = await supabase
+        .from("profiles")
+        .select("id, display_name")
+        .in("id", ids);
+      const names = new Map((profs ?? []).map((p) => [p.id, p.display_name ?? ""]));
+      return rows.map((r) => ({
+        first: (names.get(r.user_id) ?? "").split(" ")[0] || "Someone",
+        text: r.text,
+      }));
+    },
+  });
+  if (!data || data.length === 0) return null;
+  return (
+    <ArcadePanel title="Today's Gratitude 💚">
+      <ul className="space-y-2">
+        {data.map((g, i) => (
+          <li key={i} className="text-sm text-muted-foreground">
+            <span className="font-display text-[10px] uppercase tracking-widest text-victory">
+              {g.first}
+            </span>{" "}
+            — “{g.text}”
+          </li>
+        ))}
+      </ul>
+    </ArcadePanel>
+  );
+}
+
+function WinnersPanel({ winners, selfId }: { winners: Row[]; selfId?: string }) {
   const hostRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!hostRef.current || winners.length === 0) return;
@@ -425,7 +592,12 @@ function WinnersPanel({ winners }: { winners: Row[] }) {
           ) : (
             <ol className="divide-y divide-border">
               {winners.map((r, i) => (
-                <li key={r.id} className="flex items-center justify-between py-2.5">
+                <li
+                  key={r.id}
+                  className={`flex items-center justify-between py-2.5 ${
+                    r.id === selfId ? "bg-neon/10 -mx-2 px-2 rounded" : ""
+                  }`}
+                >
                   <div className="flex items-center gap-3 min-w-0">
                     <span
                       className={`font-display text-sm w-8 ${
