@@ -18,6 +18,7 @@ import {
   type AssignmentHistoryEntry,
 } from "@/components/AreaDetailsSheet";
 import { AssignZipSheet, type AssignableCaptain } from "@/components/AssignZipSheet";
+import { ZipCaptainAssigner } from "@/components/ZipCaptainAssigner";
 import { useZipTints, useZipAssignmentActions } from "@/hooks/useZipAssignments";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -658,6 +659,17 @@ function ManagerTerritoryView({ onBackToCanvassing }: { onBackToCanvassing?: () 
             </div>
           )}
         </div>
+
+        {/* Captain-first batch assignment: "Assigning to captain" + "ZIP codes
+            you want assigned to that captain" (owner's sections, 2026-09-11). */}
+        {isAdmin && (
+          <ZipCaptainAssigner
+            captains={captains}
+            assignments={zipZones.data ?? []}
+            saving={zipActions.assignMany.isPending}
+            onAssign={(zips, captain_id) => zipActions.assignMany.mutateAsync({ zips, captain_id })}
+          />
+        )}
 
         {/* ZIP zones: which captain owns which ZIP. Admins manage (tap a chip
             to fly there, ✕ to unassign); captains read their zones here and
