@@ -10,7 +10,7 @@ import { useZipTints } from "@/hooks/useZipAssignments";
 import { dailyLogKeys, sumLogCounters, useTodayLogs } from "@/hooks/useDailyLogs";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { GratitudeGate, hasPassedGratitudeGate } from "@/components/GratitudeGate";
-import { NeonMap, type Territory, type LatLng, type FieldPin } from "@/components/NeonMap";
+import { NeonMap, type Territory, type LatLng } from "@/components/NeonMap";
 import { PinActionSheet } from "@/components/PinActionSheet";
 import { HouseResultSheet } from "@/components/HouseResultSheet";
 import { FieldStandingsSheet } from "@/components/FieldStandingsSheet";
@@ -43,9 +43,10 @@ import {
  *
  * Three ways to log, all through useFieldPins:
  *  - House bubbles: tap the house on the map → one-tap result sheet.
- *  - Result keys: one tap logs that result at your own feet (pin = device fix).
  *  - Armed chips + map tap: result pins on houses without a bubble (rural,
  *    new builds) — >18 m away still flags a stat-dead Remote Drop.
+ *  The screen is map-first (owner 2026-09-11): no key grid — the map gets
+ *  the room, Submit New Lead keeps its own big key below.
  *
  * variant="captain" (their Territory tab): all turfs with assignee labels,
  * no turf framing, no reassignment toast — captains drop and correct their
@@ -102,10 +103,6 @@ const KNOCK_RESULTS: Array<{
     icon: <ThumbsDown className="w-4 h-4" />,
   },
 ];
-
-/** The at-your-feet result keys: everything but Lead (the Submit New Lead CTA
- *  owns the lead flow — pin + Monday form). */
-const FEET_RESULTS = KNOCK_RESULTS.filter((r) => r.type !== "lead");
 
 type TurfRow = {
   id: string;
@@ -265,47 +262,6 @@ export function ActiveRun({
     ? ((pins.pinsQuery.data ?? []).find((p) => p.id === editingPinId) ?? null)
     : null;
 
-  /** One tap = the knock AND its result, at your own feet. The optimistic
-   *  row goes into the PIN cache (the keys count pins now), and the reworked
-   *  bump trigger cascades doors/talked server-side — nothing here decides
-   *  what counts. */
-  async function logResult(pin_type: PinType) {
-    if (!user?.id) return;
-    // Block BEFORE the optimistic row (mirror of guardedMapDrop): without
-    // this, a no-GPS tap counted up, waited out the 8 s fix timeout, then
-    // silently rewound — a rookie's first knock looked like a glitch.
-    if (!me) {
-      toast.error("No GPS fix yet — enable Location and try again.");
-      return;
-    }
-    setPending(pin_type);
-    await qc.cancelQueries({ queryKey: pins.pinsKey });
-    qc.setQueryData<FieldPin[]>(pins.pinsKey, (prev) => [
-      ...(prev ?? []),
-      {
-        id: `optimistic-${crypto.randomUUID()}`,
-        pin_type,
-        lat: me.lat,
-        lng: me.lng,
-        is_remote_drop: false,
-        pending: true,
-      },
-    ]);
-    try {
-      const res = await pins.dropAtDevice(pin_type);
-      if (res.ok) {
-        // bump_daily_log_from_pin has committed — let the Log form / Stats /
-        // HUD / today-line refresh too.
-        qc.invalidateQueries({ queryKey: dailyLogKeys.all(user.id) });
-      }
-    } finally {
-      // Refetch server truth on both outcomes — reconciles the optimistic
-      // row, or removes it after an error.
-      qc.invalidateQueries({ queryKey: ["my_pins_today", user.id] });
-      setPending(null);
-    }
-  }
-
   async function openLead() {
     if (!me) {
       toast.error("No GPS fix yet — enable Location and try again.");
@@ -390,158 +346,143 @@ export function ActiveRun({
           </div>
         )}
 
-        <div className="md:grid md:grid-cols-5 md:gap-6 space-y-3 md:space-y-0">
-          {/* ---- Map slot (the tour anchor covers every state, so the ring
-               lands on the "no turf yet" panel too) ---- */}
-          <div className="md:col-span-3" data-tour="field-map">
-            {mapGate === "loading" && (
-              <ArcadePanel title="My Turf">
-                <div className="text-sm text-muted-foreground">Loading your turf…</div>
-              </ArcadePanel>
-            )}
-            {mapGate === "error" && (
-              <ArcadePanel title="My Turf">
-                <div className="space-y-3">
-                  <div className="text-sm text-muted-foreground">
-                    Couldn't load your turf. Check your signal and try again.
-                  </div>
-                  <Button variant="outline" onClick={() => turfsQuery.refetch()}>
-                    Retry
-                  </Button>
-                </div>
-              </ArcadePanel>
-            )}
-            {mapGate === "empty" && (
-              <ArcadePanel title="My Turf">
+        {/* ---- Map slot — the screen IS the map (owner 2026-09-11: "way
+             bigger", result-key grid removed: tapping a house circle offers
+             the same results, armed chips cover bubble-less spots). The tour
+             anchor covers every state so the ring lands on the "no turf yet"
+             panel too. ---- */}
+        <div data-tour="field-map">
+          {mapGate === "loading" && (
+            <ArcadePanel title="My Turf">
+              <div className="text-sm text-muted-foreground">Loading your turf…</div>
+            </ArcadePanel>
+          )}
+          {mapGate === "error" && (
+            <ArcadePanel title="My Turf">
+              <div className="space-y-3">
                 <div className="text-sm text-muted-foreground">
-                  No turf assigned yet — your manager assigns it before the shift. The tally buttons
-                  below still work; your map fills in the moment your turf lands.
+                  Couldn't load your turf. Check your signal and try again.
                 </div>
-              </ArcadePanel>
-            )}
-            {mapGate === "ready" && (
-              <div className="relative">
-                <NeonMap
-                  territories={territories}
-                  pins={pins.pinsQuery.data ?? []}
-                  houses={[]}
-                  me={me}
-                  height="clamp(260px, 42dvh, 460px)"
-                  follow
-                  fitPolygons={!isCaptain ? lockPolygons : undefined}
-                  houseBubbles
-                  zipTints={isCaptain ? zipZones.tints : undefined}
-                  onHouseTap={(h) => setHouseTarget(h)}
-                  mode={{
-                    kind: "pin",
-                    onDrop: (ll: LatLng) => pins.guardedMapDrop(ll, active),
-                    armed: armedResult
-                      ? { label: armedResult.label, color: armedResult.color }
-                      : undefined,
-                  }}
-                  onPinClick={(id) => setEditingPinId(id)}
-                />
+                <Button variant="outline" onClick={() => turfsQuery.refetch()}>
+                  Retry
+                </Button>
+              </div>
+            </ArcadePanel>
+          )}
+          {mapGate === "empty" && (
+            <ArcadePanel title="My Turf">
+              <div className="text-sm text-muted-foreground">
+                No turf assigned yet — your manager assigns it before the shift. ⚡ Submit New Lead
+                still works; your map fills in the moment your turf lands.
+              </div>
+            </ArcadePanel>
+          )}
+          {mapGate === "ready" && (
+            <div className="relative">
+              <NeonMap
+                territories={territories}
+                pins={pins.pinsQuery.data ?? []}
+                houses={[]}
+                me={me}
+                height="clamp(420px, 64dvh, 900px)"
+                follow
+                fitPolygons={!isCaptain ? lockPolygons : undefined}
+                houseBubbles
+                zipTints={isCaptain ? zipZones.tints : undefined}
+                onHouseTap={(h) => setHouseTarget(h)}
+                mode={{
+                  kind: "pin",
+                  onDrop: (ll: LatLng) => pins.guardedMapDrop(ll, active),
+                  armed: armedResult
+                    ? { label: armedResult.label, color: armedResult.color }
+                    : undefined,
+                }}
+                onPinClick={(id) => setEditingPinId(id)}
+              />
 
-                {/* Standings — the video app's leaderboard, one tap from the map */}
-                <button
-                  type="button"
-                  data-tour="field-standings"
-                  aria-label="Open standings"
-                  onClick={() => setStandingsOpen(true)}
-                  className="absolute bottom-16 left-3 z-[1000] flex h-11 w-11 items-center justify-center rounded-full border border-neon/60 bg-surface/90 backdrop-blur text-neon"
-                >
-                  <Trophy className="h-5 w-5" />
-                </button>
+              {/* Standings — the video app's leaderboard, one tap from the map */}
+              <button
+                type="button"
+                data-tour="field-standings"
+                aria-label="Open standings"
+                onClick={() => setStandingsOpen(true)}
+                className="absolute bottom-16 left-3 z-[1000] flex h-11 w-11 items-center justify-center rounded-full border border-neon/60 bg-surface/90 backdrop-blur text-neon"
+              >
+                <Trophy className="h-5 w-5" />
+              </button>
 
-                {/* Armed-result switcher pinned to the map — the ONE picker
+              {/* Armed-result switcher pinned to the map — the ONE picker
                     (the old page's duplicate grid is gone with the merge) */}
-                <div
-                  data-tour="field-chips"
-                  className="absolute bottom-3 left-1/2 -translate-x-1/2 z-[1000] flex items-center gap-1.5 rounded-full border border-border bg-surface/90 backdrop-blur px-2 py-1.5"
-                >
-                  {KNOCK_RESULTS.map((r) => {
-                    const isArmed = active === r.type;
-                    return (
-                      <button
-                        key={r.type}
-                        type="button"
-                        aria-label={`${r.label} — arm this result`}
-                        onClick={() => setActive(r.type)}
-                        className="relative flex h-11 w-11 items-center justify-center rounded-full"
-                        style={{
-                          color: r.color,
-                          background: isArmed
-                            ? `color-mix(in oklab, ${r.color} 22%, var(--surface))`
-                            : "transparent",
-                          boxShadow: isArmed
-                            ? `0 0 0 2px ${r.color}, 0 0 14px -2px ${r.color}`
-                            : "none",
-                        }}
+              <div
+                data-tour="field-chips"
+                className="absolute bottom-3 left-1/2 -translate-x-1/2 z-[1000] flex items-center gap-1.5 rounded-full border border-border bg-surface/90 backdrop-blur px-2 py-1.5"
+              >
+                {KNOCK_RESULTS.map((r) => {
+                  const isArmed = active === r.type;
+                  return (
+                    <button
+                      key={r.type}
+                      type="button"
+                      aria-label={`${r.label} — arm this result`}
+                      onClick={() => setActive(r.type)}
+                      className="relative flex h-11 w-11 items-center justify-center rounded-full"
+                      style={{
+                        color: r.color,
+                        background: isArmed
+                          ? `color-mix(in oklab, ${r.color} 22%, var(--surface))`
+                          : "transparent",
+                        boxShadow: isArmed
+                          ? `0 0 0 2px ${r.color}, 0 0 14px -2px ${r.color}`
+                          : "none",
+                      }}
+                    >
+                      {r.icon}
+                      <span
+                        className="absolute -top-1 -right-1 min-w-4 rounded-full bg-surface px-1 text-center font-display text-[9px] leading-4"
+                        style={{ color: r.color }}
                       >
-                        {r.icon}
-                        <span
-                          className="absolute -top-1 -right-1 min-w-4 rounded-full bg-surface px-1 text-center font-display text-[9px] leading-4"
-                          style={{ color: r.color }}
-                        >
-                          {pins.counts[r.type] ?? 0}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
+                        {pins.counts[r.type] ?? 0}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
+            </div>
+          )}
+        </div>
+
+        {/* Submit New Lead keeps its own key (owner call 2026-09-10) — the
+            other results live on the house circles and the map bar now. */}
+        <div className="pulse-glow-wrapper w-full" data-tour="field-lead">
+          <button
+            type="button"
+            onClick={openLead}
+            disabled={pending === "lead"}
+            className="arcade-btn-3d w-full min-h-[3.75rem] md:min-h-[4.25rem] flex items-center justify-center gap-2.5 px-4"
+            style={{
+              ["--btn-color" as string]: "var(--victory)",
+              ["--btn-fg" as string]: "#06110a",
+            }}
+          >
+            {pending === "lead" ? (
+              <Loader2 className="w-6 h-6 animate-spin" />
+            ) : (
+              <Zap className="w-6 h-6" />
             )}
-          </div>
+            <span className="font-display text-xs md:text-sm uppercase tracking-widest">
+              Submit New Lead
+            </span>
+          </button>
+        </div>
 
-          {/* ---- Result keys: one tap = the knock AND its result ---- */}
-          <div className="md:col-span-2 space-y-3 md:space-y-6">
-            <div className="space-y-2.5 md:space-y-3">
-              <div data-tour="field-tallies" className="grid grid-cols-2 gap-2.5 md:gap-3">
-                {FEET_RESULTS.map((r) => (
-                  <ResultKey
-                    key={r.type}
-                    label={r.fullLabel}
-                    icon={r.icon}
-                    value={pins.counts[r.type] ?? 0}
-                    onClick={() => logResult(r.type)}
-                    loading={pending === r.type}
-                    color={r.color}
-                  />
-                ))}
-              </div>
-              {/* Cascaded truth, so nobody misses the old Knock/Talked keys:
-                  every result above already counted these. */}
-              <div className="text-center font-display text-[9px] uppercase tracking-widest text-muted-foreground">
-                Today · {today?.doors_knocked ?? 0} doors · {today?.people_talked_to ?? 0} talked
-              </div>
-              <div className="pulse-glow-wrapper w-full" data-tour="field-lead">
-                <button
-                  type="button"
-                  onClick={openLead}
-                  disabled={pending === "lead"}
-                  className="arcade-btn-3d w-full min-h-[3.75rem] md:min-h-[4.75rem] flex items-center justify-center gap-2.5 px-4"
-                  style={{
-                    ["--btn-color" as string]: "var(--victory)",
-                    ["--btn-fg" as string]: "#06110a",
-                  }}
-                >
-                  {pending === "lead" ? (
-                    <Loader2 className="w-6 h-6 animate-spin" />
-                  ) : (
-                    <Zap className="w-6 h-6" />
-                  )}
-                  <span className="font-display text-xs md:text-sm uppercase tracking-widest">
-                    Submit New Lead
-                  </span>
-                </button>
-              </div>
-            </div>
+        {/* Cascaded truth — every result already counted these. */}
+        <div className="text-center font-display text-[9px] uppercase tracking-widest text-muted-foreground">
+          Today · {today?.doors_knocked ?? 0} doors · {today?.people_talked_to ?? 0} talked
+        </div>
 
-            {/* Desktop keeps the help visible; phones get it behind the ⓘ */}
-            <div className="hidden md:block">
-              <HowItWorks />
-            </div>
-          </div>
+        {/* Desktop keeps the help visible; phones get it behind the ⓘ */}
+        <div className="hidden md:block">
+          <HowItWorks />
         </div>
       </div>
 
@@ -621,7 +562,7 @@ function HowItWorksList() {
         separate knock button.
       </li>
       <li>• Tap a house bubble on the map, then tap what happened at that door.</li>
-      <li>• The big keys log the same results at the door you're standing at.</li>
+      <li>• No bubble on the house? Arm a result on the map bar, then tap that spot.</li>
       <li>• Your turf appears as a colored, named boundary; ZIP borders toggle bottom-right.</li>
       <li>
         • <span className="text-[#39ff14]">Lead</span> ·{" "}
@@ -644,47 +585,6 @@ function HowItWorksList() {
       </li>
       <li>• The trophy button shows live standings: SALE · DK · PTT · CL%.</li>
     </ul>
-  );
-}
-
-function ResultKey({
-  label,
-  icon,
-  value,
-  onClick,
-  loading,
-  color,
-}: {
-  label: string;
-  icon: React.ReactNode;
-  value: number;
-  onClick: () => void;
-  loading: boolean;
-  color: string;
-}) {
-  return (
-    // Scoreboard key: icon chip top-left, glowing count top-right (today's
-    // taps of THIS result), label on its own full-width line below. Compact
-    // on phones — the map owns the vertical space — tall on md+.
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={loading}
-      className="arcade-key min-h-[4.5rem] md:min-h-[6rem] flex flex-col justify-between gap-1.5 p-2.5 md:p-3.5 text-left"
-      style={{ ["--btn-color" as string]: color }}
-    >
-      <div className="w-full flex items-center justify-between gap-2">
-        <span className="arcade-key-icon shrink-0">{icon}</span>
-        {loading ? (
-          <Loader2 className="w-5 h-5 md:w-6 md:h-6 animate-spin" style={{ color }} />
-        ) : (
-          <span className="arcade-key-count text-2xl md:text-3xl">{value}</span>
-        )}
-      </div>
-      <div className="w-full font-display text-[9px] md:text-[10px] uppercase tracking-widest leading-tight text-foreground/85">
-        {label}
-      </div>
-    </button>
   );
 }
 

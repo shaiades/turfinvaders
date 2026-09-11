@@ -70,15 +70,6 @@ export const PAGE_TOURS: Record<TourPageId, TutorialStep[]> = {
       body: "No bubble on a house? Pick a result — Lead, Not Home, Go Back, Renter, NI — then tap that spot on the map. Tonight's go-backs start here.",
     },
     {
-      id: "field-tallies",
-      target: "field-tallies",
-      optional: true, // hidden behind the gate on a pre-check-in "?" replay
-      padding: 6,
-      cursorAt: { x: 0.26, y: 0.28 }, // tap the Not Home key, not the gap
-      title: "Tap the result — that's the knock",
-      body: "The door you're standing at: tap what happened — Not Home, Go Back, Renter, or Not Interested. Every result counts the door automatically; there's no separate knock button. Got a yes or set an appointment? That's ⚡ Submit New Lead. Keep Location on.",
-    },
-    {
       id: "field-lead",
       target: "field-lead",
       optional: true, // hidden behind the gate on a pre-check-in "?" replay

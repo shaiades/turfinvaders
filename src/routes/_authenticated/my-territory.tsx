@@ -616,7 +616,7 @@ function ManagerTerritoryView({ onBackToCanvassing }: { onBackToCanvassing?: () 
             pins={[]}
             houses={[]}
             me={me}
-            height={560}
+            height="clamp(480px, 70dvh, 1100px)"
             flyTo={flyTo}
             pendingPolygon={pendingPolygon}
             mode={mapMode}
