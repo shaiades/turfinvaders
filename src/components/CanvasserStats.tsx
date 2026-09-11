@@ -65,7 +65,7 @@ export function CanvasserStats({
         knocks={piggy.knocks}
         source={piggy.source}
       />
-      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid sm:grid-cols-3 gap-4">
         <GrindCounter
           label="Doors Knocked"
           counterLabel="DOORS · TODAY"
@@ -80,19 +80,14 @@ export function CanvasserStats({
           icon={<PhoneCall className="w-4 h-4" />}
           accent="var(--neon)"
         />
+        {/* Next-day + future confirms merged (audit P1-6): both mean "a
+            confirmed appointment is booked" — one tile, one number. */}
         <GrindCounter
-          label="Confirmed Next Day Leads"
-          counterLabel="NEXT DAYS · TODAY"
-          value={today.next_days}
+          label="Confirmed & Booked"
+          counterLabel="BOOKED · TODAY"
+          value={today.next_days + today.future_leads}
           icon={<CalendarClock className="w-4 h-4" />}
           accent="var(--victory)"
-        />
-        <GrindCounter
-          label="Confirmed Future Leads"
-          counterLabel="FUTURE LEADS · TODAY"
-          value={today.future_leads}
-          icon={<CalendarDays className="w-4 h-4" />}
-          accent="var(--accent)"
         />
       </div>
 
