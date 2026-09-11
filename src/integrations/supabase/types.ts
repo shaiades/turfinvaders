@@ -1195,6 +1195,45 @@ export type Database = {
         }
         Relationships: []
       }
+      zip_assignments: {
+        Row: {
+          assigned_at: string
+          assigned_by: string | null
+          captain_id: string
+          created_at: string
+          zip: string
+        }
+        Insert: {
+          assigned_at?: string
+          assigned_by?: string | null
+          captain_id: string
+          created_at?: string
+          zip: string
+        }
+        Update: {
+          assigned_at?: string
+          assigned_by?: string | null
+          captain_id?: string
+          created_at?: string
+          zip?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "zip_assignments_assigned_by_fkey"
+            columns: ["assigned_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "zip_assignments_captain_id_fkey"
+            columns: ["captain_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never

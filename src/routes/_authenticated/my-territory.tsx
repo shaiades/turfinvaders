@@ -17,10 +17,12 @@ import {
   type LastWorked,
   type AssignmentHistoryEntry,
 } from "@/components/AreaDetailsSheet";
+import { AssignZipSheet, type AssignableCaptain } from "@/components/AssignZipSheet";
+import { useZipTints, useZipAssignmentActions } from "@/hooks/useZipAssignments";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { Crosshair, Pencil, MapPin, Trash2, Zap } from "lucide-react";
+import { Crosshair, Pencil, MapPin, MapPinned, Trash2, X, Zap } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/my-territory")({
   head: () => ({ meta: [{ title: "My Territory — Turf Invaders" }] }),
@@ -118,15 +120,19 @@ function ManagerTerritoryView({ onBackToCanvassing }: { onBackToCanvassing?: () 
   const [listDeleteId, setListDeleteId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [searchBusy, setSearchBusy] = useState(false);
+  // ZIP command: admins tap ZIPs on the map to hand them to captains
+  // (owner ask 2026-09-11); captains see the zones read-only and chunk
+  // their ZIPs into turfs with the drawing flow below.
+  const isAdmin = role === "owner" || role === "office_staff";
+  const [assignZips, setAssignZips] = useState(false);
+  const [zipTarget, setZipTarget] = useState<string | null>(null);
   const [flyTo, setFlyTo] = useState<{
     bounds: [[number, number], [number, number]];
     key: number;
   } | null>(null);
 
-  async function jumpToPlace(e: React.FormEvent) {
-    e.preventDefault();
-    const q = query.trim();
-    if (q.length < 3 || searchBusy) return;
+  async function flyToQuery(q: string) {
+    if (searchBusy) return;
     setSearchBusy(true);
     try {
       const hit = await lookupPlace(q);
@@ -146,6 +152,13 @@ function ManagerTerritoryView({ onBackToCanvassing }: { onBackToCanvassing?: () 
     } finally {
       setSearchBusy(false);
     }
+  }
+
+  async function jumpToPlace(e: React.FormEvent) {
+    e.preventDefault();
+    const q = query.trim();
+    if (q.length < 3) return;
+    await flyToQuery(q);
   }
 
   // Managers see every turf (canvasser self-scoping lives in ActiveRun now)
@@ -169,10 +182,31 @@ function ManagerTerritoryView({ onBackToCanvassing }: { onBackToCanvassing?: () 
   // Managers see reassignments live (requires turfs in the realtime publication)
   useRealtimeInvalidate({
     channel: "my-territory-turfs",
-    tables: ["turfs"],
-    invalidateKeys: [["turfs"], ["turf_history"]],
+    tables: ["turfs", "zip_assignments"],
+    invalidateKeys: [["turfs"], ["turf_history"], ["zip_assignments"]],
     enabled: !!user?.id,
   });
+
+  // ZIP zones: tint map for the ZCTA layer + the assignment actions.
+  const zipZones = useZipTints();
+  const zipActions = useZipAssignmentActions();
+  const zipByCaptain = useMemo(() => {
+    const groups = new Map<string, { name: string; zips: string[] }>();
+    for (const r of zipZones.data ?? []) {
+      const g = groups.get(r.captain_id) ?? {
+        name: r.captain?.display_name ?? "Captain",
+        zips: [],
+      };
+      g.zips.push(r.zip);
+      groups.set(r.captain_id, g);
+    }
+    return [...groups.entries()]
+      .map(([id, g]) => ({ id, ...g }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [zipZones.data]);
+  const zipTargetRow = zipTarget
+    ? ((zipZones.data ?? []).find((r) => r.zip === zipTarget) ?? null)
+    : null;
 
   // Assignable users — canvassers, captains, and owners can all be assigned a turf
   const canvassersQuery = useQuery({
@@ -411,6 +445,20 @@ function ManagerTerritoryView({ onBackToCanvassing }: { onBackToCanvassing?: () 
       }
     : { kind: "view" as const };
 
+  // Captain picker for the ZIP sheet — captains only, from the same roster
+  // fetch the turf-assign sheet uses.
+  const captains: AssignableCaptain[] = useMemo(
+    () =>
+      (canvassersQuery.data ?? [])
+        .filter((u) => u.role === "captain")
+        .map((u) => ({
+          id: u.id,
+          display_name: u.display_name,
+          office_location: u.office_location,
+        })),
+    [canvassersQuery.data],
+  );
+
   const editing = editingTurfId
     ? ((turfsQuery.data ?? []).find((t) => t.id === editingTurfId) ?? null)
     : null;
@@ -488,7 +536,13 @@ function ManagerTerritoryView({ onBackToCanvassing }: { onBackToCanvassing?: () 
             Turf Tools
           </div>
           {!drawing ? (
-            <Button onClick={() => setDrawing(true)} className="gap-2">
+            <Button
+              onClick={() => {
+                setAssignZips(false);
+                setDrawing(true);
+              }}
+              className="gap-2"
+            >
               <Pencil className="w-3.5 h-3.5" /> Draw New Area
             </Button>
           ) : (
@@ -502,8 +556,26 @@ function ManagerTerritoryView({ onBackToCanvassing }: { onBackToCanvassing?: () 
               Cancel Drawing
             </Button>
           )}
+          {isAdmin && (
+            <Button
+              variant={assignZips ? "default" : "outline"}
+              onClick={() => {
+                setDrawing(false);
+                setPendingPolygon(null);
+                setAssignZips((v) => !v);
+              }}
+              className="gap-2"
+            >
+              <MapPinned className="w-3.5 h-3.5" />
+              {assignZips ? "Done Assigning" : "Assign ZIPs"}
+            </Button>
+          )}
           <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
-            {drawing ? "Drag on the map to draw an area" : `${territories.length} area(s) drawn`}
+            {drawing
+              ? "Drag on the map to draw an area"
+              : assignZips
+                ? "Tap a ZIP on the map to hand it to a captain"
+                : `${territories.length} area(s) drawn`}
           </span>
           {/* Jump the map to a ZIP or a street/place — dispatch mornings
               shouldn't start with a cross-county pan hunt. Street names are
@@ -547,8 +619,10 @@ function ManagerTerritoryView({ onBackToCanvassing }: { onBackToCanvassing?: () 
             flyTo={flyTo}
             pendingPolygon={pendingPolygon}
             mode={mapMode}
+            zipTints={zipZones.tints}
+            onZipTap={assignZips ? (zip) => setZipTarget(zip) : undefined}
             onTerritoryClick={
-              !drawing
+              !drawing && !assignZips
                 ? (id) => {
                     setEditingTurfId(id);
                     setIsModalOpen(true);
@@ -557,8 +631,9 @@ function ManagerTerritoryView({ onBackToCanvassing }: { onBackToCanvassing?: () 
             }
             // Tapping a turf opens an on-map card (current assignee + recent
             // history + an edit button) rather than jumping straight to the
-            // sheet. Disabled mid-draw so a stray tap doesn't fight drawing.
-            territoryPopups={!drawing}
+            // sheet. Disabled mid-draw (a stray tap would fight drawing) and
+            // in assign mode (the tap belongs to the ZIP underneath).
+            territoryPopups={!drawing && !assignZips}
           />
 
           {/* Floating fallback: always visible when a polygon is pending */}
@@ -583,6 +658,73 @@ function ManagerTerritoryView({ onBackToCanvassing }: { onBackToCanvassing?: () 
             </div>
           )}
         </div>
+
+        {/* ZIP zones: which captain owns which ZIP. Admins manage (tap a chip
+            to fly there, ✕ to unassign); captains read their zones here and
+            chunk them into turfs with Draw New Area. */}
+        <ArcadePanel title="ZIP Zones">
+          {zipByCaptain.length === 0 ? (
+            <div className="text-sm text-muted-foreground">
+              {isAdmin
+                ? "No ZIPs assigned yet. Tap “Assign ZIPs”, then tap a ZIP boundary on the map to hand it to a captain."
+                : "No ZIPs assigned yet — an admin hands ZIPs to captains here."}
+            </div>
+          ) : (
+            <ul className="space-y-2">
+              {zipByCaptain.map((g) => {
+                const color = assigneeColor(g.id);
+                const mine = g.id === user?.id;
+                return (
+                  <li
+                    key={g.id}
+                    className="flex flex-wrap items-center gap-2 rounded border border-border bg-surface/60 p-3"
+                  >
+                    <span className="flex items-center gap-2 min-w-0">
+                      <span
+                        className="inline-block h-3 w-3 shrink-0 rounded-full"
+                        style={{ background: color, boxShadow: `0 0 8px ${color}` }}
+                      />
+                      <span className="font-display text-sm truncate">
+                        {g.name}
+                        {mine ? " · you" : ""}
+                      </span>
+                    </span>
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      {g.zips.map((z) => (
+                        <span
+                          key={z}
+                          className="inline-flex items-center overflow-hidden rounded-full border text-xs"
+                          style={{ borderColor: color }}
+                        >
+                          <button
+                            type="button"
+                            title={`Fly to ${z}`}
+                            onClick={() => void flyToQuery(z)}
+                            className="px-2.5 py-1 font-mono tabular-nums hover:bg-surface-elevated"
+                            style={{ color }}
+                          >
+                            {z}
+                          </button>
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              aria-label={`Unassign ZIP ${z}`}
+                              disabled={zipActions.unassign.isPending}
+                              onClick={() => zipActions.unassign.mutate(z)}
+                              className="px-1.5 py-1 text-muted-foreground hover:text-destructive"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          )}
+                        </span>
+                      ))}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </ArcadePanel>
 
         {/* Manager turf list */}
         <ArcadePanel title="Assigned Areas">
@@ -670,6 +812,29 @@ function ManagerTerritoryView({ onBackToCanvassing }: { onBackToCanvassing?: () 
         }}
         onDelete={() => {
           if (editingTurf) deleteTurf.mutate(editingTurf.id);
+        }}
+      />
+
+      {/* ZIP → captain assignment (admin, from Assign-ZIPs map taps) */}
+      <AssignZipSheet
+        open={!!zipTarget}
+        onOpenChange={(v) => {
+          if (!v) setZipTarget(null);
+        }}
+        zip={zipTarget}
+        currentCaptainId={zipTargetRow?.captain_id ?? null}
+        currentCaptainName={zipTargetRow?.captain?.display_name ?? null}
+        captains={captains}
+        saving={zipActions.assign.isPending || zipActions.unassign.isPending}
+        onAssign={(captainId) => {
+          if (!zipTarget) return;
+          zipActions.assign.mutate({ zip: zipTarget, captain_id: captainId });
+          setZipTarget(null);
+        }}
+        onUnassign={() => {
+          if (!zipTarget) return;
+          zipActions.unassign.mutate(zipTarget);
+          setZipTarget(null);
         }}
       />
 

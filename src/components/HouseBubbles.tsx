@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Marker, useMap } from "react-leaflet";
 import L from "leaflet";
+import { viewBounds } from "@/lib/map-bounds";
 import { PIN_COLORS, type PinType } from "@/lib/pin-results";
 import type { FieldPin } from "@/components/NeonMap";
 
@@ -180,12 +181,12 @@ export function HouseBubblesLayer({
     if (!enabled) return;
     const refresh = () => {
       const zoom = map.getZoom();
-      setView({ bounds: map.getBounds(), zoom });
+      setView({ bounds: viewBounds(map), zoom });
       if (zoom < HOUSE_MIN_ZOOM) return;
       if (Date.now() - lastFailAt < FAIL_COOLDOWN_MS) return;
       if (debounceRef.current != null) window.clearTimeout(debounceRef.current);
       debounceRef.current = window.setTimeout(async () => {
-        const want = map.getBounds().pad(0.4);
+        const want = viewBounds(map).pad(0.4);
         if (coveredBounds.some((b) => b.contains(want))) return;
         abortRef.current?.abort();
         const ac = new AbortController();

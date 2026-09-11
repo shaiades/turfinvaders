@@ -41,6 +41,7 @@
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "leaflet": "^1.9.4",
+    "leaflet-rotate": "^0.2.8",
     "lucide-react": "^0.575.0",
     "papaparse": "^5.5.4",
     "react": "^19.2.0",
