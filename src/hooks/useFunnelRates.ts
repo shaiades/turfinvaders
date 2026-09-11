@@ -40,15 +40,24 @@ export function useFunnelRates(userId: string): {
   const metricsQ = useSixtyDaySelfMetrics(userId);
 
   const personal = useMemo(() => {
+    // Pair-matched like the company baseline: era confirms count only on
+    // days this rep actually logged doors — an office-fed confirm on a day
+    // off must not inflate their own lead-per-door.
     const split: SplitFunnelInputs = { ...EMPTY_SPLIT };
+    const doorDays = new Set<string>();
     for (const r of logsQ.data ?? []) {
       split.sits += r.demos_sits ?? 0;
       split.sales += r.sales ?? 0;
-      if (r.log_date >= DOORS_TRACKED_SINCE) split.eraDoors += r.doors_knocked ?? 0;
+      if (r.log_date >= DOORS_TRACKED_SINCE && (r.doors_knocked ?? 0) > 0) {
+        split.eraDoors += r.doors_knocked ?? 0;
+        doorDays.add(r.log_date);
+      }
     }
     for (const m of metricsQ.data ?? []) {
       split.confirmed += m.leads_confirmed ?? 0;
-      if (m.metric_date >= DOORS_TRACKED_SINCE) split.eraConfirmed += m.leads_confirmed ?? 0;
+      if (m.metric_date >= DOORS_TRACKED_SINCE && doorDays.has(m.metric_date)) {
+        split.eraConfirmed += m.leads_confirmed ?? 0;
+      }
     }
     return split;
   }, [logsQ.data, metricsQ.data]);

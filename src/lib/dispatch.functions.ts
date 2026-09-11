@@ -309,20 +309,26 @@ export const getFunnelBaseline = createServerFn({ method: "POST" })
     // office pipeline — daily_logs.confirmed_leads has never been written);
     // the door pair is pin-era only. See SplitFunnelInputs in lib/funnel.
     const [logRows, metricRows, saleRows] = await Promise.all([
-      pageAll<{ log_date: string; doors_knocked: number | null; demos_sits: number | null; sales: number | null }>(
+      pageAll<{
+        canvasser_id: string;
+        log_date: string;
+        doors_knocked: number | null;
+        demos_sits: number | null;
+        sales: number | null;
+      }>((from, to) =>
+        supabaseAdmin
+          .from("daily_logs")
+          .select("canvasser_id, log_date, doors_knocked, demos_sits, sales")
+          .gte("log_date", since)
+          .range(from, to),
+      ),
+      pageAll<{ canvasser_id: string; metric_date: string; leads_confirmed: number | null }>(
         (from, to) =>
           supabaseAdmin
-            .from("daily_logs")
-            .select("log_date, doors_knocked, demos_sits, sales")
-            .gte("log_date", since)
+            .from("daily_metrics")
+            .select("canvasser_id, metric_date, leads_confirmed")
+            .gte("metric_date", since)
             .range(from, to),
-      ),
-      pageAll<{ metric_date: string; leads_confirmed: number | null }>((from, to) =>
-        supabaseAdmin
-          .from("daily_metrics")
-          .select("metric_date, leads_confirmed")
-          .gte("metric_date", since)
-          .range(from, to),
       ),
       pageAll<{ sale_amount: number | null }>((from, to) =>
         supabaseAdmin
@@ -335,15 +341,29 @@ export const getFunnelBaseline = createServerFn({ method: "POST" })
       ),
     ]);
 
+    // The era pair is PAIR-MATCHED: confirms count only on (rep, day)
+    // combinations that actually logged doors. Pin adoption is partial, so
+    // dividing everyone's confirms by only the pin-users' doors would
+    // inflate lead-per-door ~10x — matched pairs keep both sides of the
+    // fraction describing the same people on the same days.
     const split: SplitFunnelInputs = { ...EMPTY_SPLIT };
+    const doorDays = new Set<string>();
     for (const r of logRows) {
       split.sits += r.demos_sits ?? 0;
       split.sales += r.sales ?? 0;
-      if (r.log_date >= DOORS_TRACKED_SINCE) split.eraDoors += r.doors_knocked ?? 0;
+      if (r.log_date >= DOORS_TRACKED_SINCE && (r.doors_knocked ?? 0) > 0) {
+        split.eraDoors += r.doors_knocked ?? 0;
+        doorDays.add(`${r.canvasser_id}:${r.log_date}`);
+      }
     }
     for (const m of metricRows) {
       split.confirmed += m.leads_confirmed ?? 0;
-      if (m.metric_date >= DOORS_TRACKED_SINCE) split.eraConfirmed += m.leads_confirmed ?? 0;
+      if (
+        m.metric_date >= DOORS_TRACKED_SINCE &&
+        doorDays.has(`${m.canvasser_id}:${m.metric_date}`)
+      ) {
+        split.eraConfirmed += m.leads_confirmed ?? 0;
+      }
     }
 
     const revenue = saleRows.reduce((a, r) => a + Number(r.sale_amount ?? 0), 0);
