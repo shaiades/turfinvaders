@@ -9,6 +9,7 @@ import { addDaysISO, laTodayISO, reportDates } from "@/lib/dates";
 import { formatCurrency } from "@/lib/utils";
 import { getClockPresence } from "@/lib/dispatch.functions";
 import { isRecentlyActive, lastActiveMap, SUSPENSION_RECENCY_DAYS } from "@/lib/suspension";
+import { isLeadSourceName } from "@/lib/lead-sources";
 import { useAuth } from "@/hooks/useAuth";
 import { sumLogCounters, useTodayLogs } from "@/hooks/useDailyLogs";
 import { usePiggyBank } from "@/hooks/usePiggyBank";
@@ -217,7 +218,11 @@ function DailyWrap() {
         byUser.set(m.canvasser_id, rec);
       }
       const lastMap = lastActiveMap(metrics);
-      return profiles.map((p) => {
+      // Pseudo lead-source channels (Job Walk, Upsell, …) live in profiles
+      // but are the office's credit, never canvassers (owner rule, PR
+      // #133/#172) — they must not appear as winners, bosses, or doughnuts.
+      const people = profiles.filter((p) => !isLeadSourceName(p.display_name));
+      return people.map((p) => {
         const r = byUser.get(p.id) ?? { today: 0, yday: 0, yday2: 0, pts: 0 };
         return {
           id: p.id,
