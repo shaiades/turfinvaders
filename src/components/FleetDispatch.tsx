@@ -1456,13 +1456,26 @@ function DispatchRow({
       <span className="text-sm truncate flex items-center gap-1.5 min-w-0">
         <span aria-hidden>{r.sub > 0 ? "🔥" : "🍩"}</span>
         {profileId ? (
-          <Link
-            to="/canvassers/$canvasserId"
-            params={{ canvasserId: profileId }}
-            className="truncate hover:text-neon hover:underline"
-          >
-            {name}
-          </Link>
+          <>
+            <Link
+              to="/canvassers/$canvasserId"
+              params={{ canvasserId: profileId }}
+              className="truncate hover:text-neon hover:underline"
+            >
+              {name}
+            </Link>
+            {/* Straight to their live run (owner ask 2026-09-11: leadership —
+                captains included — watches other people's active runs). */}
+            <Link
+              to="/canvassers/$canvasserId/field"
+              params={{ canvasserId: profileId }}
+              title={`Watch ${name}'s run live`}
+              aria-label={`Watch ${name}'s run live`}
+              className="shrink-0 text-muted-foreground hover:text-neon"
+            >
+              <Eye className="h-3.5 w-3.5" />
+            </Link>
+          </>
         ) : (
           <span className="truncate">{name}</span>
         )}

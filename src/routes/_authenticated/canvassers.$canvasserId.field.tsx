@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { ArcadePanel, StatCard, ArcadeCard } from "@/components/arcade";
 import { NeonMap, PIN_COLORS, PIN_LABELS, type FieldPin, type Territory, type LatLng } from "@/components/NeonMap";
 import { Home, MessageSquare, Sparkles, DollarSign, AlertTriangle, ArrowLeft, ThumbsDown, KeyRound, Undo2, CalendarCheck } from "lucide-react";
@@ -44,8 +45,23 @@ function FieldActivityPage() {
   const { canvasserId } = Route.useParams();
   const { role, user } = useAuth();
   const [day, setDay] = useState(laDateISO(new Date()));
+  const isToday = day === laDateISO(new Date());
 
   const allowed = isManagerRole(role) || user?.id === canvasserId;
+
+  // Watching TODAY is live (owner ask 2026-09-11: leadership sees other
+  // people's active runs): realtime pushes each pin/sale as it lands
+  // (field_pins and leads are both published), with a slow poll as the
+  // belt-and-suspenders for flaky field websockets.
+  useRealtimeInvalidate({
+    channel: `spectate-run-${canvasserId}`,
+    tables: ["field_pins", "leads"],
+    invalidateKeys: [
+      ["field_pins_day", canvasserId],
+      ["field_sales_day", canvasserId],
+    ],
+    enabled: allowed && isToday,
+  });
 
   const profileQuery = useQuery({
     enabled: allowed,
@@ -55,6 +71,7 @@ function FieldActivityPage() {
 
   const pinsQuery = useQuery({
     enabled: allowed,
+    refetchInterval: isToday ? 20_000 : false,
     queryKey: ["field_pins_day", canvasserId, day],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -69,6 +86,7 @@ function FieldActivityPage() {
 
   const salesQuery = useQuery({
     enabled: allowed,
+    refetchInterval: isToday ? 20_000 : false,
     queryKey: ["field_sales_day", canvasserId, day],
     queryFn: async () => {
       const start = laMidnightUtcISO(day);
@@ -174,8 +192,17 @@ function FieldActivityPage() {
           <h1 className="mt-2 font-display text-2xl text-neon">
             FIELD ACTIVITY · {(profileQuery.data?.display_name ?? "PLAYER").toUpperCase()}
           </h1>
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground mt-1">
-            Spectator mode · live pin trail & money per knock
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground mt-1 flex items-center gap-1.5">
+            {isToday && (
+              <span
+                aria-hidden
+                className="inline-block h-2 w-2 rounded-full bg-victory animate-pulse"
+                style={{ boxShadow: "0 0 8px var(--victory)" }}
+              />
+            )}
+            {isToday
+              ? "Watching live · pins land as they knock"
+              : "Spectator mode · pin trail & money per knock"}
           </div>
         </div>
         <input
@@ -195,11 +222,12 @@ function FieldActivityPage() {
         <StatCard label="$ / Knock" value={fmt(stats.vpd)} accent="victory" sublabel="Live value per door" />
       </div>
 
-      <ArcadePanel title="Live Map · Today's Pin Trail">
+      <ArcadePanel title={isToday ? "Live Map · Run In Progress" : "Map · Pin Trail"}>
         <NeonMap
           territories={territories}
           pins={pins.map((p) => ({ ...p, is_remote_drop: p.is_remote_drop ?? false }))}
-          height={520}
+          height="clamp(420px, 62dvh, 900px)"
+          houseBubbles
           mode={{ kind: "view" }}
         />
       </ArcadePanel>
