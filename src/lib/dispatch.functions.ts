@@ -217,6 +217,62 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
   });
 
 /**
+ * Clock-in presence for a set of LA work days — which user_ids hold a
+ * non-voided time_entries row on each log_date (log_date is the Pacific day
+ * of the punch-in; the payroll triggers maintain it). Powers the owner's
+ * 2026-09-11 rule: the daily dispatch roster and every donut/suspension
+ * list count only people who clocked in for the day.
+ *
+ * Runs on the service client because plain canvassers can only SELECT their
+ * own time_entries while the leaderboard and Daily Wrap are all-viewer
+ * surfaces. Ships presence ONLY — never punch times, hours, or pay.
+ */
+export const getClockPresence = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => {
+    const obj = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+    const day = /^\d{4}-\d{2}-\d{2}$/;
+    const raw = Array.isArray(obj.dates) ? obj.dates : [];
+    if (raw.length === 0 || raw.length > 31) throw new Error("Invalid dates");
+    const dates = [
+      ...new Set(
+        raw.map((d) => {
+          if (typeof d !== "string" || !day.test(d)) throw new Error("Invalid dates");
+          return d;
+        }),
+      ),
+    ];
+    return { dates };
+  })
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const byDate: Record<string, string[]> = {};
+    const seen = new Set<string>();
+    // Paged: lunch splits mean several entries per person per day, and the
+    // suspension window's 15 days × roster can pass PostgREST's 1,000-row
+    // cap — a truncated fetch would silently hide clocked-in reps.
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data: rows, error } = await supabaseAdmin
+        .from("time_entries")
+        .select("user_id, log_date")
+        .in("log_date", data.dates)
+        .is("voided_at", null)
+        .order("id", { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (error) throw error;
+      for (const r of rows ?? []) {
+        const key = `${r.log_date}|${r.user_id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        (byDate[r.log_date] ??= []).push(r.user_id);
+      }
+      if ((rows ?? []).length < PAGE) break;
+    }
+    return { byDate };
+  });
+
+/**
  * Company-wide funnel baseline for the canvasser page's shared rate engine
  * (owner decision, 2026-07-29: new reps see honest company averages, not
  * hardcoded starter rates and not their own RLS-scoped rows mislabeled as
