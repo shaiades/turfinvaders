@@ -5,7 +5,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { ArcadeCard, ArcadePanel } from "@/components/arcade";
 import { GlossarySheet } from "@/components/GlossarySheet";
 import { AlertTriangle, Info, Trophy } from "lucide-react";
-import { addDaysISO, reportDates } from "@/lib/dates";
+import { addDaysISO, laTodayISO, reportDates } from "@/lib/dates";
+import { getClockPresence } from "@/lib/dispatch.functions";
 import { isRecentlyActive, lastActiveMap, SUSPENSION_RECENCY_DAYS } from "@/lib/suspension";
 
 export const Route = createFileRoute("/_authenticated/daily-wrap")({
@@ -125,6 +126,26 @@ function DailyWrap() {
   const { today, yday, wkStart, locked } = reportDates();
   const [glossaryOpen, setGlossaryOpen] = useState(false);
 
+  // Clock-in gate (owner, 2026-09-11): nobody lands on a zero list for a day
+  // they never punched in. Gate days are the REAL PT calendar day — after the
+  // 7 PM roll `today` is tomorrow's report date, but punches live on the day
+  // people actually worked — and `yday` (= the real day itself once locked).
+  // Presence rides the server fn because canvassers only read their own
+  // time_entries. Until it loads (or if it fails — local dev has no service
+  // key) the zero lists stay EMPTY: missing data must never flag a person.
+  const realToday = laTodayISO();
+  const clockDates = useMemo(() => [...new Set([realToday, yday])], [realToday, yday]);
+  const clockQ = useQuery({
+    queryKey: ["daily_wrap", "clock", clockDates],
+    queryFn: async () => getClockPresence({ data: { dates: clockDates } }),
+  });
+  const clockReady = clockQ.isSuccess;
+  const clockedSets = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    for (const [d, ids] of Object.entries(clockQ.data?.byDate ?? {})) m.set(d, new Set(ids));
+    return m;
+  }, [clockQ.data]);
+
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ["daily_wrap", today],
     queryFn: async (): Promise<Row[]> => {
@@ -185,13 +206,31 @@ function DailyWrap() {
     // Fleet Dispatch banner; `active` drops archived/removed reps the moment
     // the archive lands; `graced` is the 1-week rookie grace (see Row.graced).
     // All four gate only the zero lists — awards a rep earned before removal
-    // stay on the wrap.
+    // stay on the wrap. Clock-in gates likewise touch only the zero lists:
+    // a doughnut needs a punch on the real working day, the freezer a punch
+    // on both of its days (after the 7 PM roll those collapse to one real
+    // day — the vacuously-zero next report date can't be punched yet).
+    const clockedOn = (id: string, day: string) => clockedSets.get(day)?.has(id) ?? false;
     const suspension = rows.filter(
       (r) =>
-        r.todayLeads === 0 && r.ydayLeads === 0 && r.recent && r.tracked && r.active && !r.graced,
+        r.todayLeads === 0 &&
+        r.ydayLeads === 0 &&
+        r.recent &&
+        r.tracked &&
+        r.active &&
+        !r.graced &&
+        clockReady &&
+        clockedOn(r.id, realToday) &&
+        clockedOn(r.id, yday),
     );
     const doughnuts = rows.filter(
-      (r) => r.todayLeads === 0 && r.ydayLeads > 0 && r.active && !r.graced,
+      (r) =>
+        r.todayLeads === 0 &&
+        r.ydayLeads > 0 &&
+        r.active &&
+        !r.graced &&
+        clockReady &&
+        clockedOn(r.id, realToday),
     );
     const winners = rows
       .filter((r) => r.todayLeads >= 1)
@@ -199,7 +238,7 @@ function DailyWrap() {
     const club3 = rows.filter((r) => r.weekPoints >= 3 && r.weekPoints < 7).sort((a, b) => b.weekPoints - a.weekPoints);
     const bosses7 = rows.filter((r) => r.weekPoints >= 7).sort((a, b) => b.weekPoints - a.weekPoints);
     return { suspension, doughnuts, winners, club3, bosses7 };
-  }, [rows]);
+  }, [rows, clockReady, clockedSets, realToday, yday]);
 
   if (isLoading) return <div className="text-sm text-muted-foreground">Loading daily wrap…</div>;
 

@@ -55,8 +55,8 @@ const SECTIONS: Array<{ heading: string; terms: Array<[string, string]> }> = [
   {
     heading: "Culture",
     terms: [
-      ["Doughnut 🍩", "A zero-lead day"],
-      ["Freezer 🚨", "Two zero days in a row — the suspension watch list"],
+      ["Doughnut 🍩", "A zero-lead day you were clocked in for — days off never count"],
+      ["Freezer 🚨", "Two clocked-in zero days in a row — the suspension watch list"],
       ["Remote Drop", "A pin dropped ~20+ yards from where you stand — flagged, never counts"],
       ["SCCE", "The company — your rank ladder. Watch “Who is SCCE” in Learn."],
     ],
