@@ -77,7 +77,7 @@ function CanvasserProfile() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("profiles")
-        .select("display_name, team_id, level")
+        .select("display_name, team_id")
         .eq("id", canvasserId)
         .maybeSingle();
       if (error) throw error;
@@ -197,7 +197,6 @@ function CanvasserProfile() {
   if (!isRealUser) throw notFound();
 
   const team = teamQuery.data;
-  const level = profileQuery.data?.level ?? 0;
   const stats = statsQuery.data;
   const revenue = revenueQuery.data ?? 0;
 
@@ -239,7 +238,6 @@ function CanvasserProfile() {
             {(profileQuery.data?.display_name ?? "PLAYER").toUpperCase()}
           </h1>
           {team && <TeamBadge name={team.name} color={team.color ?? "#10b981"} />}
-          {level > 0 && <span className="text-[10px] font-display text-victory">LVL {level}</span>}
           {(isManagerRole(role) || isSelf) && (
             <Link
               to="/canvassers/$canvasserId/field"

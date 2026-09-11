@@ -49,7 +49,7 @@ function UsersPage() {
         supabase
           .from("profiles")
           .select(
-            "id, display_name, team_id, level, xp, suspension_tracked, created_at, is_placeholder",
+            "id, display_name, team_id, suspension_tracked, created_at, is_placeholder",
           )
           .order("created_at", { ascending: false }),
         supabase.from("user_roles").select("user_id, role"),
@@ -188,7 +188,6 @@ function UsersPage() {
               <tr className="text-left text-[10px] font-display uppercase tracking-widest text-muted-foreground">
                 <th className="px-4 py-2">Name</th>
                 <th className="px-4 py-2">Joined</th>
-                <th className="px-4 py-2">LVL</th>
                 <th className="px-4 py-2">Role</th>
                 <th className="px-4 py-2">Team</th>
                 <th
@@ -237,7 +236,6 @@ function UsersPage() {
                           })
                         : "—"}
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground">{p.level ?? 1}</td>
                     <td className="px-4 py-3">
                       {isOwner ? (
                         <select

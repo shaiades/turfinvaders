@@ -8,7 +8,7 @@ import { getMondayFormUrl } from "@/lib/monday-form";
 import { useGeoWatch, useFieldPins, type ActivePin } from "@/hooks/useFieldPins";
 import { usePiggyBank } from "@/hooks/usePiggyBank";
 import { useZipTints } from "@/hooks/useZipAssignments";
-import { dailyLogKeys, sumLogCounters, useTodayLogs } from "@/hooks/useDailyLogs";
+import { dailyLogKeys } from "@/hooks/useDailyLogs";
 import { PiggyBankHUD } from "@/components/PiggyBankHUD";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { GratitudeGate, hasPassedGratitudeGate } from "@/components/GratitudeGate";
@@ -18,14 +18,12 @@ import { HouseResultSheet } from "@/components/HouseResultSheet";
 import { FieldStandingsSheet } from "@/components/FieldStandingsSheet";
 import type { OsmHouse } from "@/components/HouseBubbles";
 import { ArcadePanel } from "@/components/arcade";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import {
   Home,
   Sparkles,
   Crosshair,
-  Info,
   Pencil,
   ThumbsDown,
   KeyRound,
@@ -65,42 +63,36 @@ type PinType = ActivePin;
 const KNOCK_RESULTS: Array<{
   type: ActivePin;
   label: string;
-  fullLabel: string;
   color: string;
   icon: React.ReactNode;
 }> = [
   {
     type: "lead",
     label: "Lead",
-    fullLabel: "Lead",
     color: "#39ff14",
     icon: <Sparkles className="w-4 h-4" />,
   },
   {
     type: "not_home",
     label: "NH",
-    fullLabel: "Not Home",
     color: "#ff2d55",
     icon: <Home className="w-4 h-4" />,
   },
   {
     type: "go_back",
     label: "GB",
-    fullLabel: "Go Back",
     color: "#00e5ff",
     icon: <Undo2 className="w-4 h-4" />,
   },
   {
     type: "renter",
     label: "Renter",
-    fullLabel: "Renter",
     color: "#c77dff",
     icon: <KeyRound className="w-4 h-4" />,
   },
   {
     type: "not_interested",
     label: "NI",
-    fullLabel: "Not Interested",
     color: "#ff6b00",
     icon: <ThumbsDown className="w-4 h-4" />,
   },
@@ -153,15 +145,9 @@ export function ActiveRun({
   const [active, setActive] = useState<ActivePin>("not_home");
   const [editingPinId, setEditingPinId] = useState<string | null>(null);
   const [leadOpen, setLeadOpen] = useState(false);
-  const [helpOpen, setHelpOpen] = useState(false);
   const [pending, setPending] = useState<PinType | null>(null);
   const [houseTarget, setHouseTarget] = useState<OsmHouse | null>(null);
   const [standingsOpen, setStandingsOpen] = useState(false);
-
-  // Whole-day totals across office rows, from the shared today-logs cache —
-  // the same rows the Log form, Stats page, and HUD read.
-  const { data: todayRows } = useTodayLogs(user?.id);
-  const today = sumLogCounters(todayRows);
 
   // Piggy bank: projected dollars per knock. ?piggy_demo=1 fakes knocks
   // locally and never touches real state; parsed after mount because this
@@ -337,16 +323,6 @@ export function ActiveRun({
                 <Pencil className="w-3.5 h-3.5" /> Turf Tools
               </button>
             )}
-            {/* Info, not CircleHelp — the header's "?" replays the tour, and
-                two identical glyphs with different behaviors confused the
-                audit's rookie pass. */}
-            <button
-              onClick={() => setHelpOpen(true)}
-              aria-label="How Active Run works"
-              className="md:hidden min-w-11 min-h-11 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-surface-elevated"
-            >
-              <Info className="w-5 h-5" />
-            </button>
           </div>
         </div>
 
@@ -509,15 +485,10 @@ export function ActiveRun({
           </button>
         </div>
 
-        {/* Cascaded truth — every result already counted these. */}
-        <div className="text-center font-display text-[9px] uppercase tracking-widest text-muted-foreground">
-          Today · {today?.doors_knocked ?? 0} doors · {today?.people_talked_to ?? 0} talked
-        </div>
-
-        {/* Desktop keeps the help visible; phones get it behind the ⓘ */}
-        <div className="hidden md:block">
-          <HowItWorks />
-        </div>
+        {/* The old "Today · N doors · N talked" footer and the How-it-works
+            panel are gone (audit 2026-09-11): the piggy pill + chip badges
+            already count the day, and the "?" tour replay owns onboarding —
+            third copies earn nothing on a phone. */}
       </div>
 
       {leadOpen && <LeadSheet onClose={() => setLeadOpen(false)} />}
@@ -563,62 +534,7 @@ export function ActiveRun({
         }}
       />
 
-      {/* How-it-works bottom sheet (phones) */}
-      <Sheet open={helpOpen} onOpenChange={setHelpOpen}>
-        <SheetContent>
-          <SheetHeader>
-            <SheetTitle className="font-display text-sm uppercase tracking-widest text-neon">
-              How Active Run works
-            </SheetTitle>
-          </SheetHeader>
-          <div className="pt-2 pb-4">
-            <HowItWorksList />
-          </div>
-        </SheetContent>
-      </Sheet>
     </GratitudeGate>
-  );
-}
-
-function HowItWorks() {
-  return (
-    <ArcadePanel title="How it works">
-      <HowItWorksList />
-    </ArcadePanel>
-  );
-}
-
-function HowItWorksList() {
-  return (
-    <ul className="text-sm text-muted-foreground space-y-1.5">
-      <li>
-        • One tap = the result AND the knock. Every result counts a door automatically — there is no
-        separate knock button.
-      </li>
-      <li>• Tap a house bubble on the map, then tap what happened at that door.</li>
-      <li>• No bubble on the house? Arm a result on the map bar, then tap that spot.</li>
-      <li>• Your turf appears as a colored, named boundary; ZIP borders toggle bottom-right.</li>
-      <li>
-        • <span className="text-[#39ff14]">Lead</span> ·{" "}
-        <span className="text-[#ff2d55]">NH = Not Home</span> ·{" "}
-        <span className="text-[#00e5ff]">GB = Go Back</span> ·{" "}
-        <span className="text-[#c77dff]">Renter</span> ·{" "}
-        <span className="text-[#ff6b00]">NI = Not Interested</span>.
-      </li>
-      <li>
-        • Set an appointment? That IS a lead — smash ⚡ Submit New Lead (it counts the knock too).
-        Appointment and sale counts come from Monday.
-      </li>
-      <li>
-        • Pins dropped more than about 20 yards from where you stand are flagged as Remote Drops and
-        don't count.
-      </li>
-      <li>
-        • Mis-tap? Tap the house (or the pin) to switch the result or delete it — your stats adjust
-        automatically (today only).
-      </li>
-      <li>• The trophy button shows live standings: SALE · DK · PTT · CL%.</li>
-    </ul>
   );
 }
 

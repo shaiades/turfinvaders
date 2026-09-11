@@ -392,7 +392,7 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
       const [profilesRes, logsRes, salesRes] = await Promise.all([
         supabase
           .from("profiles")
-          .select("id, display_name, level, is_active")
+          .select("id, display_name, is_active")
           .eq("team_id", teamId!),
         supabase
           .from("daily_logs")
@@ -419,7 +419,6 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
         byId.set(p.id, {
           id: p.id,
           name: p.display_name ?? "Player",
-          level: p.level ?? 1,
           doorsKnocked: 0,
           salesClosed: 0,
           revenueGenerated: 0,
@@ -440,15 +439,14 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
       if (missingIds.size > 0) {
         const formerRes = await supabase
           .from("profiles")
-          .select("id, display_name, level")
+          .select("id, display_name")
           .in("id", [...missingIds]);
         if (formerRes.error) throw formerRes.error;
         for (const p of formerRes.data ?? []) {
           byId.set(p.id, {
             id: p.id,
             name: p.display_name ?? "Player",
-            level: p.level ?? 1,
-            doorsKnocked: 0,
+              doorsKnocked: 0,
             salesClosed: 0,
             revenueGenerated: 0,
             former: true,
@@ -766,7 +764,6 @@ function Mini({ label, value }: { label: string; value: string }) {
 type RosterRow = {
   id: string;
   name: string;
-  level: number;
   doorsKnocked: number;
   salesClosed: number;
   revenueGenerated: number;
@@ -806,8 +803,7 @@ function RosterTable({ members }: { members: RosterRow[] }) {
                   </span>
                 }
               />
-              <MobileStatGrid cols={3}>
-                <MobileStat label="Lvl" value={m.level} className="text-victory font-display" />
+              <MobileStatGrid cols={2}>
                 <MobileStat label="Doors" value={m.doorsKnocked} lit="text-foreground" />
                 <MobileStat label="Sales" value={m.salesClosed} lit="text-victory" />
               </MobileStatGrid>
@@ -821,7 +817,6 @@ function RosterTable({ members }: { members: RosterRow[] }) {
             <tr className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border">
               <th className="text-left py-2">Rank</th>
               <th className="text-left py-2">Player</th>
-              <th className="text-right py-2">Lvl</th>
               <th className="text-right py-2">Doors</th>
               <th className="text-right py-2">Sales</th>
               <th className="text-right py-2">Revenue</th>
@@ -851,7 +846,6 @@ function RosterTable({ members }: { members: RosterRow[] }) {
                       {suspended && !m.former && <SuspendedBadge />}
                     </div>
                   </td>
-                  <td className="py-2.5 text-right text-victory font-display text-xs">{m.level}</td>
                   <td
                     className={`py-2.5 text-right ${metricText(m.doorsKnocked, "text-foreground")}`}
                   >
