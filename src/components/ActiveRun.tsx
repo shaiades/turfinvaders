@@ -28,7 +28,6 @@ import {
   ThumbsDown,
   KeyRound,
   Undo2,
-  CalendarCheck,
   Trophy,
   Zap,
   X,
@@ -56,9 +55,10 @@ import {
 
 type PinType = ActivePin;
 
-// The six knock results (owner directive 2026-08-15; one-tap-counts since
-// 2026-09-10). Appt pins mark the house and count the door — appointment
-// COUNTS still come from Monday.com, never from pins.
+// The knock results (owner directive 2026-08-15; one-tap-counts since
+// 2026-09-10; Appt REMOVED 2026-09-11 — "appt set and submit new lead are
+// the same technically": setting an appointment IS submitting a lead, so
+// the Lead flow owns it. Legacy appt pins keep rendering via pin-results.
 const KNOCK_RESULTS: Array<{
   type: ActivePin;
   label: string;
@@ -100,13 +100,6 @@ const KNOCK_RESULTS: Array<{
     fullLabel: "Not Interested",
     color: "#ff6b00",
     icon: <ThumbsDown className="w-4 h-4" />,
-  },
-  {
-    type: "appt",
-    label: "Appt",
-    fullLabel: "Appt Set",
-    color: "#ffd60a",
-    icon: <CalendarCheck className="w-4 h-4" />,
   },
 ];
 
@@ -513,7 +506,6 @@ export function ActiveRun({
                     onClick={() => logResult(r.type)}
                     loading={pending === r.type}
                     color={r.color}
-                    wide={r.type === "appt"}
                   />
                 ))}
               </div>
@@ -636,12 +628,11 @@ function HowItWorksList() {
         <span className="text-[#ff2d55]">NH = Not Home</span> ·{" "}
         <span className="text-[#00e5ff]">GB = Go Back</span> ·{" "}
         <span className="text-[#c77dff]">Renter</span> ·{" "}
-        <span className="text-[#ff6b00]">NI = Not Interested</span> ·{" "}
-        <span className="text-[#ffd60a]">Appt</span>.
+        <span className="text-[#ff6b00]">NI = Not Interested</span>.
       </li>
       <li>
-        • Submitting a Lead counts as a knock too. Appt pins mark the house — appointment and sale
-        counts still come from Monday.
+        • Set an appointment? That IS a lead — smash ⚡ Submit New Lead (it counts the knock too).
+        Appointment and sale counts come from Monday.
       </li>
       <li>
         • Pins dropped more than about 20 yards from where you stand are flagged as Remote Drops and
@@ -663,7 +654,6 @@ function ResultKey({
   onClick,
   loading,
   color,
-  wide = false,
 }: {
   label: string;
   icon: React.ReactNode;
@@ -671,8 +661,6 @@ function ResultKey({
   onClick: () => void;
   loading: boolean;
   color: string;
-  /** Span both columns (the odd fifth key). */
-  wide?: boolean;
 }) {
   return (
     // Scoreboard key: icon chip top-left, glowing count top-right (today's
@@ -682,7 +670,7 @@ function ResultKey({
       type="button"
       onClick={onClick}
       disabled={loading}
-      className={`arcade-key min-h-[4.5rem] md:min-h-[6rem] flex flex-col justify-between gap-1.5 p-2.5 md:p-3.5 text-left ${wide ? "col-span-2" : ""}`}
+      className="arcade-key min-h-[4.5rem] md:min-h-[6rem] flex flex-col justify-between gap-1.5 p-2.5 md:p-3.5 text-left"
       style={{ ["--btn-color" as string]: color }}
     >
       <div className="w-full flex items-center justify-between gap-2">
