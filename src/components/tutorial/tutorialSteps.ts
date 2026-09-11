@@ -67,7 +67,7 @@ export const PAGE_TOURS: Record<TourPageId, TutorialStep[]> = {
       optional: true, // hides behind the gate / before turf is assigned
       padding: 6,
       title: "Pin any house",
-      body: "No bubble on a house? Pick a result — Lead, Not Home, Go Back, Renter, NI, Appt — then tap that spot on the map. Tonight's go-backs start here.",
+      body: "No bubble on a house? Pick a result — Lead, Not Home, Go Back, Renter, NI — then tap that spot on the map. Tonight's go-backs start here.",
     },
     {
       id: "field-tallies",
@@ -76,7 +76,7 @@ export const PAGE_TOURS: Record<TourPageId, TutorialStep[]> = {
       padding: 6,
       cursorAt: { x: 0.26, y: 0.28 }, // tap the Not Home key, not the gap
       title: "Tap the result — that's the knock",
-      body: "The door you're standing at: tap what happened — Not Home, Go Back, Renter, Not Interested, or Appt. Every result counts the door automatically; there's no separate knock button. Keep Location on.",
+      body: "The door you're standing at: tap what happened — Not Home, Go Back, Renter, or Not Interested. Every result counts the door automatically; there's no separate knock button. Got a yes or set an appointment? That's ⚡ Submit New Lead. Keep Location on.",
     },
     {
       id: "field-lead",

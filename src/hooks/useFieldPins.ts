@@ -28,7 +28,6 @@ export const RESULT_TOASTS: Partial<Record<ActivePin, string>> = {
   go_back: "🔵 Go back — hit it again later",
   renter: "🟣 Renter logged",
   not_interested: "🟠 Not interested",
-  appt: "🟡 Appt marked — counts come from Monday",
 };
 
 function haversineMeters(a: LatLng, b: LatLng) {
