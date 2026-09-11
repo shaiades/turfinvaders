@@ -3,7 +3,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { COMMISSION_BASE, weeklyPoints } from "@/lib/pay";
 import { addDaysISO, laMidnightUtcISO, laTodayISO } from "@/lib/dates";
 import { DEFAULT_OFFICE } from "@/lib/offices";
-import { EMPTY_AGGREGATE, type FunnelAggregate } from "@/lib/funnel";
+import { DOORS_TRACKED_SINCE, EMPTY_SPLIT, type SplitFunnelInputs } from "@/lib/funnel";
 
 /**
  * Aggregated per-canvasser production for the Fleet Dispatch board.
@@ -287,35 +287,67 @@ export const getFunnelBaseline = createServerFn({ method: "POST" })
   .handler(async () => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const since = addDaysISO(laTodayISO(), -60);
+    const PAGE = 1000;
 
-    const [logsR, salesR] = await Promise.all([
-      supabaseAdmin
-        .from("daily_logs")
-        .select("doors_knocked, confirmed_leads, demos_sits, sales")
-        .gte("log_date", since),
-      supabaseAdmin
-        .from("leads")
-        .select("sale_amount")
-        .eq("status", "confirmed")
-        .eq("is_sale", true)
-        .gte("created_at", laMidnightUtcISO(since)),
+    // Page every read — the unpaged select silently truncates at 1000 rows,
+    // and the 60-day company window is already past 700 daily_logs rows
+    // (the same failure class that dropped June's boards, PR #161).
+    async function pageAll<T>(
+      build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
+    ): Promise<T[]> {
+      const out: T[] = [];
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await build(from, from + PAGE - 1);
+        if (error) throw error;
+        out.push(...(data ?? []));
+        if ((data ?? []).length < PAGE) break;
+      }
+      return out;
+    }
+
+    // Sits + sales live in daily_logs; confirms live in daily_metrics (the
+    // office pipeline — daily_logs.confirmed_leads has never been written);
+    // the door pair is pin-era only. See SplitFunnelInputs in lib/funnel.
+    const [logRows, metricRows, saleRows] = await Promise.all([
+      pageAll<{ log_date: string; doors_knocked: number | null; demos_sits: number | null; sales: number | null }>(
+        (from, to) =>
+          supabaseAdmin
+            .from("daily_logs")
+            .select("log_date, doors_knocked, demos_sits, sales")
+            .gte("log_date", since)
+            .range(from, to),
+      ),
+      pageAll<{ metric_date: string; leads_confirmed: number | null }>((from, to) =>
+        supabaseAdmin
+          .from("daily_metrics")
+          .select("metric_date, leads_confirmed")
+          .gte("metric_date", since)
+          .range(from, to),
+      ),
+      pageAll<{ sale_amount: number | null }>((from, to) =>
+        supabaseAdmin
+          .from("leads")
+          .select("sale_amount")
+          .eq("status", "confirmed")
+          .eq("is_sale", true)
+          .gte("created_at", laMidnightUtcISO(since))
+          .range(from, to),
+      ),
     ]);
-    if (logsR.error) throw logsR.error;
-    if (salesR.error) throw salesR.error;
 
-    const aggregate: FunnelAggregate = (logsR.data ?? []).reduce(
-      (a, r) => ({
-        doors: a.doors + (r.doors_knocked ?? 0),
-        confirmed: a.confirmed + (r.confirmed_leads ?? 0),
-        sits: a.sits + (r.demos_sits ?? 0),
-        sales: a.sales + (r.sales ?? 0),
-      }),
-      { ...EMPTY_AGGREGATE },
-    );
+    const split: SplitFunnelInputs = { ...EMPTY_SPLIT };
+    for (const r of logRows) {
+      split.sits += r.demos_sits ?? 0;
+      split.sales += r.sales ?? 0;
+      if (r.log_date >= DOORS_TRACKED_SINCE) split.eraDoors += r.doors_knocked ?? 0;
+    }
+    for (const m of metricRows) {
+      split.confirmed += m.leads_confirmed ?? 0;
+      if (m.metric_date >= DOORS_TRACKED_SINCE) split.eraConfirmed += m.leads_confirmed ?? 0;
+    }
 
-    const saleRows = salesR.data ?? [];
     const revenue = saleRows.reduce((a, r) => a + Number(r.sale_amount ?? 0), 0);
     const avgSale = saleRows.length > 0 ? revenue / saleRows.length : 0;
 
-    return { aggregate, companyAvgCommission: avgSale * COMMISSION_BASE };
+    return { split, companyAvgCommission: avgSale * COMMISSION_BASE };
   });

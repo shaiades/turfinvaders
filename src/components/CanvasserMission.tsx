@@ -8,7 +8,7 @@ import { getMonthlyPaychecks } from "@/lib/fleet.functions";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { useCanvasserProfile } from "@/hooks/useCanvasserProfile";
 import { useCanvasserStats } from "@/hooks/useCanvasserStats";
-import { ArcadeCard, TeamBadge } from "@/components/arcade";
+import { ArcadeCard, NeonBar, TeamBadge } from "@/components/arcade";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { RankPill, RANK_PERKS } from "@/components/RankPill";
 import { PushAlertsCard } from "@/components/PushAlertsCard";
@@ -107,20 +107,9 @@ export function CanvasserMission({
 
   return (
     <div className="space-y-6">
-      <div>
-        <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-          Player
-        </div>
-        <h1 className="font-display text-2xl text-foreground mt-1">
-          {(displayName ?? "You").toUpperCase()}
-        </h1>
-        {myTeam.id && (
-          <div className="mt-2 flex items-center gap-2">
-            <TeamBadge name={myTeam.name} color={myTeam.color} />
-          </div>
-        )}
-      </div>
-
+      {/* The old PLAYER name block is gone (audit 2026-09-11): the page a
+          grinder opens to check money spent its best space telling them
+          their own name. Van identity rides the TakeHome header instead. */}
       <div data-tour="mission-clock">
         <TimeClock userId={userId} />
       </div>
@@ -128,8 +117,11 @@ export function CanvasserMission({
         <TakeHomeWidget
           userId={userId}
           weeklyPay={stats.weeklyPay}
+          weeklyGoal={stats.weeklyGoal}
           hourlyRate={stats.hourlyRate}
           weekPoints={stats.weekPoints}
+          teamName={myTeam.id ? myTeam.name : null}
+          teamColor={myTeam.color}
         />
       </div>
       <SCCERankBanner userId={userId} />
@@ -247,18 +239,20 @@ function SCCERankBanner({ userId }: { userId: string }) {
 function TakeHomeWidget({
   userId,
   weeklyPay,
+  weeklyGoal,
   hourlyRate,
   weekPoints,
+  teamName,
+  teamColor,
 }: {
   userId: string;
   weeklyPay: number;
+  weeklyGoal: number;
   hourlyRate: number;
   weekPoints: number;
+  teamName: string | null;
+  teamColor: string;
 }) {
-  // Shares SCCERankBanner's query — one profile fetch feeds the whole page.
-  const { data } = useCanvasserProfile(userId);
-  const rank = data?.current_rank ?? "Jr. Silver";
-
   // Authoritative MTD volume bonus from the pay engine (calc_monthly_paycheck)
   // — the same source the owner's payroll screen pays from. Hidden on error
   // rather than showing a possibly-wrong dollar figure. The key is shared
@@ -275,48 +269,66 @@ function TakeHomeWidget({
     },
   });
 
+  // The gap to the weekly goal, welded to the money headline (audit
+  // 2026-09-11): the number a grinder manages is dollars REMAINING, and it
+  // was previously two taps away inside the Plan tab.
+  const toGo = Math.max(0, weeklyGoal - weeklyPay);
+  const pct = weeklyGoal > 0 ? Math.min(1, weeklyPay / weeklyGoal) : 0;
+
   return (
     <div className="rounded-xl border border-victory/40 bg-[color-mix(in_oklab,var(--victory)_8%,var(--surface))] p-5 sm:p-6">
-      <div className="flex flex-wrap items-center justify-between gap-6">
-        <div>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
           <div className="text-[10px] font-display uppercase tracking-widest text-victory/80">
             Weekly Pay · All Sources
           </div>
           <div className="mt-2 font-display text-4xl sm:text-5xl text-victory leading-none">
             {formatCurrency(weeklyPay)}
           </div>
-          <div className="mt-2 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-            ${hourlyRate}/hr · {weekPoints} pts this week
-          </div>
-          {monthly && (
-            <div className="mt-1 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-              Volume bonus earned this month ·{" "}
-              <span className={Number(monthly.volume_bonus) > 0 ? "text-victory" : ""}>
-                {formatCurrency(Number(monthly.volume_bonus))}
-              </span>
-              {" (paid next month) · "}
-              {formatCurrency(
-                VOLUME_BONUS_STEP - (Number(monthly.sale_price_total) % VOLUME_BONUS_STEP),
-              )}{" "}
-              to next $1,500
-            </div>
-          )}
-          {monthly && (
-            <div className="mt-1 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-              Month take-home so far ·{" "}
-              <span className="text-victory">{formatCurrency(Number(monthly.total_pay))}</span>
-            </div>
-          )}
         </div>
-        <div className="text-right">
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-            Current Rank
+        {teamName && (
+          <div className="shrink-0">
+            <TeamBadge name={teamName} color={teamColor} />
           </div>
-          <div className="mt-2 flex justify-end">
-            <RankPill rank={rank} />
-          </div>
-        </div>
+        )}
       </div>
+      {weeklyGoal > 0 && (
+        <div className="mt-4">
+          <NeonBar pct={pct * 100} accent="var(--victory)" />
+          <div className="mt-1.5 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            {toGo > 0 ? (
+              <>
+                <span className="text-victory">{formatCurrency(weeklyGoal)}</span> weekly goal ·{" "}
+                <span className="text-[var(--warning)]">{formatCurrency(toGo)}</span> to go
+              </>
+            ) : (
+              <span className="text-victory">Weekly goal hit — everything now is gravy 🏆</span>
+            )}
+          </div>
+        </div>
+      )}
+      <div className="mt-3 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+        ${hourlyRate}/hr · {weekPoints} pts this week
+      </div>
+      {monthly && Number(monthly.sale_price_total) > 0 && (
+        <div className="mt-1 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+          Volume bonus earned this month ·{" "}
+          <span className={Number(monthly.volume_bonus) > 0 ? "text-victory" : ""}>
+            {formatCurrency(Number(monthly.volume_bonus))}
+          </span>
+          {" (paid next month) · "}
+          {formatCurrency(
+            VOLUME_BONUS_STEP - (Number(monthly.sale_price_total) % VOLUME_BONUS_STEP),
+          )}{" "}
+          to next $1,500
+        </div>
+      )}
+      {monthly && (
+        <div className="mt-1 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+          Month take-home so far ·{" "}
+          <span className="text-victory">{formatCurrency(Number(monthly.total_pay))}</span>
+        </div>
+      )}
     </div>
   );
 }

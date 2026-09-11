@@ -4,9 +4,11 @@
  *  honest: no usable rates or no commission figure means NO dollars, never
  *  an invented $0/knock. */
 import {
+  deriveSplitRates,
   expectedValuePerDoor,
   resolveAvgCommission,
   deriveRates,
+  ratesUsable,
   type ConversionRates,
 } from "../src/lib/funnel";
 
@@ -52,6 +54,27 @@ expectEq(
   null,
 );
 expectEq("zero commission → null", expectedValuePerDoor(baseline, 0), null);
+
+// ── deriveSplitRates: each rate divides quantities from its own window ──
+// Era pair (pin-tracked doors) drives lead/door; the 60d pipeline drives
+// sit and close. Mirrors the 2026-09-11 prod truth: confirms live in
+// daily_metrics, doors only exist since the knock trigger.
+const split = deriveSplitRates({
+  eraDoors: 99,
+  eraConfirmed: 12,
+  confirmed: 582,
+  sits: 400,
+  sales: 121,
+});
+expectEq("split lead/door uses the era pair", split.leadDoorRate, 12 / 99);
+expectEq("split sit rate uses the 60d pipeline", split.sitRate, 400 / 582);
+expectEq("split close rate uses the 60d pipeline", split.closeRate, 121 / 400);
+expectEq("split rates are usable", ratesUsable(split), true);
+expectEq(
+  "zero era doors kills only lead/door (rates unusable, never Infinity)",
+  ratesUsable(deriveSplitRates({ eraDoors: 0, eraConfirmed: 5, confirmed: 582, sits: 400, sales: 121 })),
+  false,
+);
 
 // ── the latch's arithmetic (mirrors usePiggyBank) ────────────────────────
 // A rate shift between knocks is absorbed by the next knock: 10 knocks

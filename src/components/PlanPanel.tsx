@@ -9,13 +9,12 @@ import {
   useSaveGoals,
   type GoalsPatch,
 } from "@/hooks/useCanvasserProfile";
-import { ArcadePanel } from "@/components/arcade";
+import { ArcadePanel, NeonBar } from "@/components/arcade";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import {
   Calendar,
-  DollarSign,
   DoorOpen,
   PhoneCall,
   Sparkles,
@@ -131,7 +130,7 @@ export function PlanPanel({ userId }: { userId: string }) {
         <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
           {math.ready
             ? funnelRates.source === "personal"
-              ? `Personal rates · ${funnelRates.sampleDoors.toLocaleString()} doors / 60d`
+              ? `Personal rates · ${funnelRates.sampleDoors.toLocaleString()} tracked doors`
               : "Company avg · 60d baseline"
             : "Awaiting conversion data"}
         </span>
@@ -153,11 +152,16 @@ export function PlanPanel({ userId }: { userId: string }) {
         )}
 
         {/* ===== Equation ===== */}
+        {/* Honest math (audit 2026-09-11): knocks × value/knock equals the
+            GAP — goal minus earned minus booked future base — not the goal.
+            The old layout said "= goal" and any rep who multiplied it out
+            caught the lie. The goal lives in the gap tile's sub. */}
         {math.ready && !math.goalMet && (
           <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr_auto_1fr] items-center gap-3 md:gap-4">
             <EquationTile
               label={horizon === "week" ? "Knocks · This Week" : "Knocks · This Month"}
               value={fmtInt(math.requiredKnocks)}
+              sub={`${(math.leadDoorRate * 100).toFixed(1)}% of knocks become leads`}
               accent="var(--neon)"
               icon={<DoorOpen className="w-3.5 h-3.5" />}
             />
@@ -170,8 +174,9 @@ export function PlanPanel({ userId }: { userId: string }) {
             />
             <Operator>=</Operator>
             <EquationTile
-              label={horizon === "week" ? "Weekly Income Goal" : "Monthly Income Goal"}
-              value={formatCurrency(goal)}
+              label={horizon === "week" ? "Gap · This Week" : "Gap · This Month"}
+              value={formatCurrency(math.gap)}
+              sub={`of ${formatCurrency(goal)} goal · earned + booked base already counted`}
               accent="var(--victory)"
               icon={<Target className="w-3.5 h-3.5" />}
               mega
@@ -184,7 +189,7 @@ export function PlanPanel({ userId }: { userId: string }) {
           weeklyGoal={stats.weeklyGoal}
           monthlyGoal={stats.monthlyGoal}
           avgCommission={stats.avgCommission}
-          saving={saveGoals.isPending}
+          saving={saveGoals.isPending || stats.profile.isLoading}
           onSave={onSave}
         />
 
@@ -207,14 +212,9 @@ export function PlanPanel({ userId }: { userId: string }) {
             <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
               <Zap className="w-3 h-3 text-neon" /> Conversion Funnel · what it takes
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <FunnelTile
-                label="Knocks"
-                value={fmtInt(math.requiredKnocks)}
-                sub={`${(math.leadDoorRate * 100).toFixed(1)}% → lead`}
-                accent="#39ff14"
-                icon={<DoorOpen className="w-4 h-4" />}
-              />
+            {/* Knocks tile lives in the equation row now — its rate sub
+                moved up there too (P1-3: one number, one home). */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <FunnelTile
                 label="Leads"
                 value={fmtInt(math.requiredLeads)}
@@ -242,7 +242,6 @@ export function PlanPanel({ userId }: { userId: string }) {
                 Earned so far · {formatCurrency(math.earned)} of {formatCurrency(goal)}
               </span>
               <span>Projected future base · {formatCurrency(math.futureBase)}</span>
-              <span>Gap to close · {formatCurrency(math.gap)}</span>
             </div>
           </div>
         )}
@@ -252,8 +251,7 @@ export function PlanPanel({ userId }: { userId: string }) {
           <DailyAction
             doorsPerDay={math.doorsPerDay}
             talksPerDay={math.talksPerDay}
-            valuePerKnock={math.valuePerKnock}
-            requiredKnocks={math.requiredKnocks}
+            todayDoors={stats.today.doors_knocked}
             daysLeft={math.daysLeft}
             goal={goal}
             horizon={horizon}
@@ -512,27 +510,29 @@ function FunnelTile({
   );
 }
 
-/** The per-day marching orders — absorbs the old Daily Mission widget:
- *  mission sentence + doors/talks/per-knock-value stat trio. */
+/** The per-day marching orders — ONE sentence and a live progress line.
+ *  The old stat trio and "N knocks to close the gap" footer were second and
+ *  third copies of numbers already on this tab (P1-3); the sentence stays
+ *  because it's the page compressed into an order, and it now closes its
+ *  own loop with today's real knock count. */
 function DailyAction({
   doorsPerDay,
   talksPerDay,
-  valuePerKnock,
-  requiredKnocks,
+  todayDoors,
   daysLeft,
   goal,
   horizon,
 }: {
   doorsPerDay: number;
   talksPerDay: number;
-  valuePerKnock: number;
-  requiredKnocks: number;
+  todayDoors: number;
   daysLeft: number;
   goal: number;
   horizon: Horizon;
 }) {
   const doors = Math.ceil(doorsPerDay);
   const talks = Math.ceil(talksPerDay);
+  const pct = doors > 0 ? Math.min(1, todayDoors / doors) : 0;
   return (
     <div
       className="relative overflow-hidden rounded-lg border border-[color-mix(in_oklab,var(--accent)_50%,var(--border))] bg-[color-mix(in_oklab,var(--accent)_8%,var(--surface))] p-5"
@@ -565,67 +565,16 @@ function DailyAction({
         .
       </div>
 
-      <div className="mt-5 grid sm:grid-cols-3 gap-4">
-        <MissionStat
-          icon={<DoorOpen className="w-4 h-4" />}
-          label="Doors / Day"
-          value={doors.toLocaleString()}
-          accent="var(--neon)"
-        />
-        <MissionStat
-          icon={<Users className="w-4 h-4" />}
-          label="Talk To / Day"
-          value={talks.toLocaleString()}
-          accent="var(--accent)"
-        />
-        <MissionStat
-          icon={<DollarSign className="w-4 h-4" />}
-          label="Per-Knock Value"
-          value={formatCurrency(valuePerKnock)}
-          accent="var(--victory)"
-        />
-      </div>
-
-      <div className="mt-4 text-[10px] font-display uppercase tracking-widest text-muted-foreground border-t border-border/60 pt-3">
-        {fmtInt(requiredKnocks)} knocks to close the gap
-      </div>
-    </div>
-  );
-}
-
-function MissionStat({
-  icon,
-  label,
-  value,
-  accent,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  accent: string;
-}) {
-  return (
-    <div
-      className="rounded-md border p-4"
-      style={{
-        borderColor: `color-mix(in oklab, ${accent} 40%, var(--border))`,
-        background: `color-mix(in oklab, ${accent} 6%, var(--surface))`,
-      }}
-    >
-      <div
-        className="flex items-center gap-1.5 text-[10px] font-display uppercase tracking-widest"
-        style={{ color: accent }}
-      >
-        {icon} {label}
-      </div>
-      <div
-        className="mt-2 font-display text-3xl leading-none"
-        style={{
-          color: accent,
-          textShadow: `0 0 16px color-mix(in oklab, ${accent} 60%, transparent)`,
-        }}
-      >
-        {value}
+      <div className="mt-4">
+        <NeonBar pct={pct * 100} accent="var(--neon)" />
+        <div className="mt-1.5 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+          Today ·{" "}
+          <span className={todayDoors >= doors ? "text-victory" : "text-neon"}>
+            {todayDoors.toLocaleString()}
+          </span>{" "}
+          of {doors.toLocaleString()} doors
+          {todayDoors >= doors && doors > 0 && " — mission complete, keep stacking"}
+        </div>
       </div>
     </div>
   );

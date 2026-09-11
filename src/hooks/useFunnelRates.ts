@@ -1,51 +1,57 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  EMPTY_AGGREGATE,
-  deriveRates,
+  DOORS_TRACKED_SINCE,
+  EMPTY_SPLIT,
+  deriveSplitRates,
   personalRatesQualify,
   ratesUsable,
   type ConversionRates,
-  type FunnelAggregate,
+  type SplitFunnelInputs,
 } from "@/lib/funnel";
 import { getFunnelBaseline } from "@/lib/dispatch.functions";
 import { useSixtyDayLogs } from "@/hooks/useDailyLogs";
+import { useSixtyDaySelfMetrics } from "@/hooks/useSelfMetrics";
 
 /**
- * The ONE source of conversion rates for the canvasser Mission page — both
- * horizons of the Plan tab's back-solve (PlanPanel) run on these rates so
- * they can never disagree. Personal 60-day history wins
- * when it has enough volume AND every rate is derivable from it; otherwise
- * the company-wide baseline (server fn — real averages, not RLS-scoped
- * self-data). `rates: null` means neither source can support the math —
- * consumers render their explanatory empty state, never invented constants.
+ * The ONE source of conversion rates for the canvasser page — both horizons
+ * of the Plan tab's back-solve AND the piggy bank's value-per-door run on
+ * these rates so they can never disagree. Personal history wins when it has
+ * enough volume; otherwise the company-wide baseline (server fn — real
+ * averages, not RLS-scoped self-data). `rates: null` means neither source
+ * can support the math — consumers render their explanatory empty state,
+ * never invented constants.
  *
- * Personal history rides the shared useSixtyDayLogs cache — the same rows
- * the Stats aggregates read, so rate derivation costs zero extra fetches.
+ * Stage sourcing (2026-09-11 audit): confirms come from daily_metrics — the
+ * office pipeline; daily_logs.confirmed_leads has NEVER been written, which
+ * is why rates were null for everyone since launch. Sits/sales stay on
+ * daily_logs, and the lead-per-door pair uses the pin era only
+ * (DOORS_TRACKED_SINCE) — doors barely exist before the knock trigger.
  */
 export function useFunnelRates(userId: string): {
   rates: ConversionRates | null;
   source: "personal" | "company";
-  personalAggregate: FunnelAggregate;
+  /** Pin-era doors backing the personal rates (the qualify denominator). */
   sampleDoors: number;
   companyAvgCommission: number;
   isLoading: boolean;
 } {
   const logsQ = useSixtyDayLogs(userId);
+  const metricsQ = useSixtyDaySelfMetrics(userId);
 
-  const personal = useMemo(
-    () =>
-      (logsQ.data ?? []).reduce<FunnelAggregate>(
-        (a, r) => ({
-          doors: a.doors + (r.doors_knocked ?? 0),
-          confirmed: a.confirmed + (r.confirmed_leads ?? 0),
-          sits: a.sits + (r.demos_sits ?? 0),
-          sales: a.sales + (r.sales ?? 0),
-        }),
-        { ...EMPTY_AGGREGATE },
-      ),
-    [logsQ.data],
-  );
+  const personal = useMemo(() => {
+    const split: SplitFunnelInputs = { ...EMPTY_SPLIT };
+    for (const r of logsQ.data ?? []) {
+      split.sits += r.demos_sits ?? 0;
+      split.sales += r.sales ?? 0;
+      if (r.log_date >= DOORS_TRACKED_SINCE) split.eraDoors += r.doors_knocked ?? 0;
+    }
+    for (const m of metricsQ.data ?? []) {
+      split.confirmed += m.leads_confirmed ?? 0;
+      if (m.metric_date >= DOORS_TRACKED_SINCE) split.eraConfirmed += m.leads_confirmed ?? 0;
+    }
+    return split;
+  }, [logsQ.data, metricsQ.data]);
 
   const baselineQ = useQuery({
     queryKey: ["funnel", "baseline"],
@@ -55,20 +61,25 @@ export function useFunnelRates(userId: string): {
     queryFn: async () => getFunnelBaseline(),
   });
 
-  const company = baselineQ.data?.aggregate ?? EMPTY_AGGREGATE;
+  const company = baselineQ.data?.split ?? EMPTY_SPLIT;
 
-  const personalRates = deriveRates(personal);
-  const companyRates = deriveRates(company);
+  const personalRates = deriveSplitRates(personal);
+  const companyRates = deriveSplitRates(company);
   // Personal must both qualify on volume AND yield usable rates — 200 doors
   // with zero sales must fall back to the baseline, not to "unavailable".
-  const usePersonal = personalRatesQualify(personal) && ratesUsable(personalRates);
+  const usePersonal =
+    personalRatesQualify({
+      doors: personal.eraDoors,
+      confirmed: personal.confirmed,
+      sits: personal.sits,
+      sales: personal.sales,
+    }) && ratesUsable(personalRates);
 
   return {
     rates: usePersonal ? personalRates : ratesUsable(companyRates) ? companyRates : null,
     source: usePersonal ? "personal" : "company",
-    personalAggregate: personal,
-    sampleDoors: personal.doors,
+    sampleDoors: personal.eraDoors,
     companyAvgCommission: baselineQ.data?.companyAvgCommission ?? 0,
-    isLoading: logsQ.isLoading || baselineQ.isLoading,
+    isLoading: logsQ.isLoading || metricsQ.isLoading || baselineQ.isLoading,
   };
 }

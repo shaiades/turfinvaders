@@ -365,7 +365,7 @@ function ConversionFunnelPanel({
   const allZero = stages.every((s) => s.value === 0);
   const rateNote =
     stats.funnelRates.source === "personal"
-      ? `Personal rates · ${stats.funnelRates.sampleDoors.toLocaleString()} doors / 60d`
+      ? `Personal rates · ${stats.funnelRates.sampleDoors.toLocaleString()} tracked doors`
       : "Company baseline rates (knock more doors to earn your own)";
 
   return (

@@ -104,7 +104,11 @@ export function PushAlertsCard({
           )}
         </div>
       </div>
-      {description && <div className="mt-1 text-xs text-muted-foreground">{description}</div>}
+      {/* Once the browser has blocked notifications the pitch is moot — the
+          status line already says how to fix it; don't re-sell every visit. */}
+      {description && status !== "blocked" && (
+        <div className="mt-1 text-xs text-muted-foreground">{description}</div>
+      )}
     </div>
   );
 }
