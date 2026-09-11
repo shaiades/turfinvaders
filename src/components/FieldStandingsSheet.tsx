@@ -13,7 +13,11 @@ import { useAuth } from "@/hooks/useAuth";
 import { useDateRange } from "@/hooks/useDateRange";
 import { useDispatchRoster, useDispatchVans } from "@/hooks/useFleetRoster";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
-import { getDispatchProduction, type DispatchResults } from "@/lib/dispatch.functions";
+import {
+  getClockPresence,
+  getDispatchProduction,
+  type DispatchResults,
+} from "@/lib/dispatch.functions";
 import { RangeTabs } from "@/components/RangeTabs";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
@@ -96,6 +100,29 @@ export function FieldStandingsSheet({
     enabled: open,
   });
 
+  // Clock-in gate (owner, 2026-09-11 — extended here for parity with the
+  // Fleet Dispatch Day tab): the DAY roster is who punched in that day. An
+  // active rep with no log row and no punch sits out; Week/Month keep the
+  // full roster, and former/placeholder rows keep their stricter
+  // production-only gate below. Fails OPEN (everyone shows) until presence
+  // loads — local dev has no service key, and a blip must never hide people.
+  const clockQ = useQuery({
+    enabled: open && range.tab === "day",
+    queryKey: ["field_standings", "clock", range.startISO],
+    refetchInterval: range.isLive ? 60_000 : false,
+    queryFn: async () => getClockPresence({ data: { dates: [range.startISO] } }),
+  });
+  const clockData = clockQ.data;
+  const clockLoaded = clockQ.isSuccess;
+  /** Non-null only when the day gate is armed: the set of punched-in ids. */
+  const dayClock = useMemo(
+    () =>
+      range.tab === "day" && clockLoaded
+        ? new Set(clockData?.byDate?.[range.startISO] ?? [])
+        : null,
+    [range.tab, range.startISO, clockLoaded, clockData],
+  );
+
   const myTeamId = useMemo(() => {
     if (!user?.id) return null;
     return roster.data?.profiles.find((p) => p.id === user.id)?.team_id ?? null;
@@ -115,9 +142,11 @@ export function FieldStandingsSheet({
       const r = results[p.id];
       const former = p.is_active !== true;
       // Former members and invite placeholders appear only with in-range
-      // production; the active roster always shows (zeros included — the
-      // board is honest about a slow day).
+      // production; the active roster shows zeros — except on the Day tab,
+      // where showing requires a punch that day (or a log row): the owner's
+      // 2026-09-11 clock-in rule, matching Fleet Dispatch.
       if ((former || p.is_placeholder) && !r) continue;
+      if (dayClock && !r && !dayClock.has(p.id)) continue;
       const row: MemberRow = {
         id: p.id,
         name: p.display_name ?? "Player",
@@ -176,7 +205,7 @@ export function FieldStandingsSheet({
       { sale: 0, dk: 0, ptt: 0 },
     );
     return { groups, totals };
-  }, [roster.data, vansQ.data, production.data]);
+  }, [roster.data, vansQ.data, production.data, dayClock]);
 
   const isOpenGroup = (g: VanGroup) => expanded[g.id] ?? g.id === (myTeamId ?? "__own__");
   const loading = roster.isPending || production.isPending;
@@ -224,7 +253,9 @@ export function FieldStandingsSheet({
             </div>
           ) : groups.length === 0 ? (
             <div className="py-6 text-center text-sm text-muted-foreground">
-              No production in this range yet.
+              {dayClock
+                ? "No one clocked in yet — players join the board when they punch in."
+                : "No production in this range yet."}
             </div>
           ) : (
             <>
