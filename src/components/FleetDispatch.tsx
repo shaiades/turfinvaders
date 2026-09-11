@@ -58,7 +58,7 @@ import { useWeekSelector } from "@/hooks/useWeekSelector";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { Link } from "@tanstack/react-router";
 import { useAuth } from "@/hooks/useAuth";
-import { canManageTarget, isManagerRole } from "@/lib/roles";
+import { canManageTarget, isAdminRole, isManagerRole } from "@/lib/roles";
 import { isRecentlyActive, lastActiveMap } from "@/lib/suspension";
 import { formatCurrency, normalizeName } from "@/lib/utils";
 import { isLeadSourceKey } from "@/lib/lead-sources";
@@ -148,7 +148,7 @@ function FleetDispatchInner({
   focusTeamId: string | null;
 }) {
   const qc = useQueryClient();
-  const { realRole } = useAuth();
+  const { realRole, role: viewRole } = useAuth();
 
   // --- Range engine: Day (report-date clock) / Week (Mon–Sun) / Month ---
   const [tab, setTab] = useState<RangeTab>("day");
@@ -293,6 +293,13 @@ function FleetDispatchInner({
   // they render only in ranges where they actually produced, bucketed by
   // their daily_logs/leads team snapshot — so removed people keep their
   // history without haunting the daily roster (owner, 2026-08-27).
+  // Office-appointment results are Admin-eyes-only (owner, 2026-09-11):
+  // captains, canvassers, and confirmers see field production, never the
+  // lead-source channel rows (Job Walk / Upsell / …) or their money. Gated
+  // on the VIEW role so an owner's View-As preview shows the hidden board.
+  // Filtering the roster here drops the rows from the pen AND the totals
+  // tiles in one place, so tiles stay ≡ Σ visible rows for every viewer.
+  const seeChannels = isAdminRole(viewRole);
   const canvassers: BoardProfile[] = useMemo(() => {
     const out: BoardProfile[] = [];
     for (const p of allProfiles) {
@@ -305,10 +312,11 @@ function FleetDispatchInner({
           ? "canvasser"
           : null;
       if (!role) continue;
+      if (!seeChannels && isLeadSourceKey(normalizeName(p.display_name))) continue;
       out.push({ ...p, role, former: p.is_active !== true });
     }
     return out;
-  }, [allProfiles, rolesByUser]);
+  }, [allProfiles, rolesByUser, seeChannels]);
 
   const { data: vans = [] } = useDispatchVans();
 
