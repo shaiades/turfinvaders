@@ -11,6 +11,7 @@ import {
 } from "@/lib/dates";
 import { useAuth } from "@/hooks/useAuth";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
+import { isLeadSourceName } from "@/lib/lead-sources";
 import { ArcadeCard, ArcadePanel } from "@/components/arcade";
 
 /**
@@ -110,6 +111,10 @@ export function CanvasserLeaderboard() {
       const lds = r?.lds ?? 0;
       if (pts === 0 && vol === 0 && lds === 0 && (r?.drs ?? 0) === 0) continue;
       const prof = profById.get(id);
+      // Pseudo lead-source channels (Job Walk, Upsell, …) are the OFFICE's
+      // credit, never canvassers (owner rule, PR #133/#172) — they race on
+      // the dispatch Lead Sources section, not on the reps' ladder.
+      if (isLeadSourceName(prof?.display_name)) continue;
       // Van-at-the-time beats live team_id (removed reps keep their history).
       const teamId = prod.snapshotTeam?.[id] ?? prof?.team_id ?? null;
       const team = teamId ? teamById.get(teamId) : null;
