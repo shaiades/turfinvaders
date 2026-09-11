@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Marker, Pane, Polygon, useMap } from "react-leaflet";
+import { Marker, Polygon, useMap } from "react-leaflet";
 import L from "leaflet";
+import { viewBounds } from "@/lib/map-bounds";
 
 /**
  * ZIP-code borders overlay (owner ask 2026-09-10: "put borders around each
@@ -105,19 +106,30 @@ function parseFeature(f: {
   return { zip, polys, bounds, labelAt: ringCentroid(biggest) };
 }
 
-// One shared divIcon per zip string (same cache rationale as NeonMap's icons:
+/** ZIP → captain tint: polygon fill/stroke color + the name on the pill. */
+export type ZipTint = { color: string; label: string };
+
+// One shared divIcon per zip+tint (same cache rationale as NeonMap's icons:
 // stable identity across GPS-tick re-renders).
 const labelIconCache = new Map<string, L.DivIcon>();
-function zipLabelIcon(zip: string): L.DivIcon {
-  let icon = labelIconCache.get(zip);
+function zipLabelIcon(zip: string, tint?: ZipTint): L.DivIcon {
+  const key = tint ? `${zip}|${tint.color}|${tint.label}` : zip;
+  let icon = labelIconCache.get(key);
   if (!icon) {
+    const safeLabel = tint?.label?.replace(/[<>&"']/g, "") ?? "";
+    const html = tint
+      ? `<div style="transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:1px;background:rgba(11,15,26,0.8);border:1px solid ${tint.color};padding:3px 7px;border-radius:6px;white-space:nowrap;box-shadow:0 0 10px color-mix(in srgb, ${tint.color} 45%, transparent);">
+           <span style="color:rgba(232,244,255,0.95);font:700 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:0.08em;">${zip}</span>
+           <span style="color:${tint.color};font:700 9px/1 ui-sans-serif,system-ui;letter-spacing:0.04em;">${safeLabel}</span>
+         </div>`
+      : `<div style="transform:translate(-50%,-50%);display:inline-block;background:rgba(11,15,26,0.72);border:1px solid rgba(232,244,255,0.45);color:rgba(232,244,255,0.92);font:700 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:0.08em;padding:2px 6px;border-radius:4px;white-space:nowrap;">${zip}</div>`;
     icon = L.divIcon({
-      html: `<div style="transform:translate(-50%,-50%);display:inline-block;background:rgba(11,15,26,0.72);border:1px solid rgba(232,244,255,0.45);color:rgba(232,244,255,0.92);font:700 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:0.08em;padding:2px 6px;border-radius:4px;white-space:nowrap;">${zip}</div>`,
+      html,
       className: "zip-border-label",
       iconSize: [0, 0],
       iconAnchor: [0, 0],
     });
-    labelIconCache.set(zip, icon);
+    labelIconCache.set(key, icon);
   }
   return icon;
 }
@@ -156,8 +168,20 @@ async function fetchZctas(bounds: L.LatLngBounds, tier: Tier, signal: AbortSigna
   if (covered.length > MAX_COVERED) covered.shift();
 }
 
-export function ZipBordersLayer({ enabled }: { enabled: boolean }) {
+export function ZipBordersLayer({
+  enabled,
+  tints,
+  onZipTap,
+}: {
+  enabled: boolean;
+  /** Assigned ZIPs: captain color + name pill (zip_assignments). */
+  tints?: Record<string, ZipTint>;
+  /** Admin assign mode: every visible ZIP becomes tappable. */
+  onZipTap?: (zip: string) => void;
+}) {
   const map = useMap();
+  const tapRef = useRef(onZipTap);
+  tapRef.current = onZipTap;
   // Bumped after every fetch/move so the visible-feature memo re-reads the
   // module cache; the cache itself is not React state on purpose (large).
   const [renderTick, setRenderTick] = useState(0);
@@ -169,12 +193,12 @@ export function ZipBordersLayer({ enabled }: { enabled: boolean }) {
     if (!enabled) return;
     const refresh = () => {
       const zoom = map.getZoom();
-      setView({ bounds: map.getBounds(), zoom });
+      setView({ bounds: viewBounds(map), zoom });
       if (zoom < ZIP_MIN_ZOOM) return;
       if (debounceRef.current != null) window.clearTimeout(debounceRef.current);
       debounceRef.current = window.setTimeout(async () => {
         const tier = tierForZoom(map.getZoom());
-        const want = map.getBounds().pad(0.3);
+        const want = viewBounds(map).pad(0.3);
         if (coveredByTier[tier].some((b) => b.contains(want))) return;
         abortRef.current?.abort();
         const ac = new AbortController();
@@ -216,40 +240,73 @@ export function ZipBordersLayer({ enabled }: { enabled: boolean }) {
   }, [enabled, view, renderTick]);
 
   if (visible.length === 0) return null;
-  const showLabels = (view?.zoom ?? 0) >= LABEL_MIN_ZOOM;
+  const zoom = view?.zoom ?? 0;
+  const tappable = !!onZipTap;
   return (
     <>
-      {/* Own panes: borders sit UNDER turf polygons (overlayPane is 400) and
-          labels under app markers (markerPane is 600) — zips are context,
-          never chrome that covers pins or assignee pills. */}
-      <Pane name="zip-borders" style={{ zIndex: 380 }}>
-        {visible.map((f) => (
-          <Polygon
-            key={f.zip}
-            positions={f.polys}
-            interactive={false}
-            pathOptions={{
-              color: "#e8f4ff",
-              weight: 1.5,
-              opacity: 0.55,
-              fill: false,
-              interactive: false,
-            }}
-          />
-        ))}
-      </Pane>
-      {showLabels && (
-        <Pane name="zip-border-labels" style={{ zIndex: 590 }}>
-          {visible.map((f) => (
-            <Marker
-              key={`${f.zip}-label`}
-              position={f.labelAt}
-              icon={zipLabelIcon(f.zip)}
-              interactive={false}
+      {/* Default panes on purpose: leaflet-rotate only rotates the built-in
+          panes (custom panes hang off the un-rotated map pane and render
+          displaced the moment the map spins — found 2026-09-11). Zips stay
+          visually beneath turfs by weight, not z: thin light strokes vs the
+          turfs' bold filled polygons; labels ride the marker pane with a
+          negative zIndexOffset so pins and assignee pills stay on top. */}
+      <>
+        {visible.map((f) => {
+          const tint = tints?.[f.zip];
+          return (
+            <Polygon
+              // Interactivity and style bake into the layer at creation —
+              // key by them so entering assign mode rebuilds the paths.
+              key={`${f.zip}|${tint ? tint.color : "plain"}|${tappable ? "tap" : "inert"}`}
+              positions={f.polys}
+              interactive={tappable}
+              eventHandlers={tappable ? { click: () => tapRef.current?.(f.zip) } : undefined}
+              pathOptions={
+                tint
+                  ? {
+                      color: tint.color,
+                      weight: 2,
+                      opacity: 0.9,
+                      // A captain's zone reads as a wash of their color.
+                      fill: true,
+                      fillColor: tint.color,
+                      fillOpacity: tappable ? 0.16 : 0.1,
+                      interactive: tappable,
+                    }
+                  : {
+                      color: "#e8f4ff",
+                      weight: 1.5,
+                      opacity: 0.55,
+                      // fill:false paths only hit-test on the stroke — assign
+                      // mode needs the interior tappable, so give unassigned
+                      // ZIPs a whisper of fill while assigning.
+                      fill: tappable,
+                      fillColor: "#e8f4ff",
+                      fillOpacity: tappable ? 0.05 : 0,
+                      interactive: tappable,
+                    }
+              }
             />
-          ))}
-        </Pane>
-      )}
+          );
+        })}
+      </>
+      <>
+        {visible.map((f) => {
+          const tint = tints?.[f.zip];
+          // Assigned ZIPs keep their captain pill at every layer zoom (the
+          // county view IS the assignment overview); plain zips label at 12+.
+          if (!tint && zoom < LABEL_MIN_ZOOM) return null;
+          return (
+            <Marker
+              key={`${f.zip}-label${tint ? `|${tint.color}|${tint.label}` : ""}`}
+              position={f.labelAt}
+              icon={zipLabelIcon(f.zip, tint)}
+              interactive={false}
+              zIndexOffset={-600}
+            />
+          );
+        })}
+      </>
     </>
   );
 }

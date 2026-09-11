@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MapContainer, TileLayer, Polygon, Polyline, Marker, Popup, useMapEvents, useMap } from "react-leaflet";
 import L from "leaflet";
-import { LocateFixed } from "lucide-react";
+import "leaflet-rotate";
+import { LocateFixed, Navigation2 } from "lucide-react";
 import { PIN_COLORS, type PinType } from "@/lib/pin-results";
-import { ZipBordersLayer, ZIP_MIN_ZOOM } from "@/components/ZipBorders";
+import { ZipBordersLayer, ZIP_MIN_ZOOM, type ZipTint } from "@/components/ZipBorders";
 import { HouseBubblesLayer, type OsmHouse } from "@/components/HouseBubbles";
 
 // Canonical copy lives in lib/pin-results (SSR-safe); re-exported here so map
@@ -242,6 +243,23 @@ function FlyTo({
     lastKey.current = target.key;
     map.flyToBounds(L.latLngBounds(target.bounds), { padding: [30, 30], maxZoom: 16 });
   }, [map, target]);
+  return null;
+}
+
+/** Report the map's bearing to the compass button (leaflet-rotate fires
+ *  'rotate' both for two-finger twists and programmatic setBearing). */
+function BearingWatcher({ onBearing }: { onBearing: (deg: number) => void }) {
+  const map = useMap();
+  const cbRef = useRef(onBearing);
+  cbRef.current = onBearing;
+  useEffect(() => {
+    const report = () => cbRef.current(map.getBearing?.() ?? 0);
+    map.on("rotate", report);
+    report();
+    return () => {
+      map.off("rotate", report);
+    };
+  }, [map]);
   return null;
 }
 
@@ -529,6 +547,8 @@ export function NeonMap({
   territoryPopups = false,
   houseBubbles = false,
   onHouseTap,
+  zipTints,
+  onZipTap,
 }: {
   territories: Territory[];
   pins?: FieldPin[];
@@ -559,6 +579,10 @@ export function NeonMap({
   houseBubbles?: boolean;
   /** Makes house bubbles tappable — the canvass screen's one-tap result sheet. */
   onHouseTap?: (house: OsmHouse) => void;
+  /** ZIP → captain tint (color + name pill) for assigned ZIP codes. */
+  zipTints?: Record<string, ZipTint>;
+  /** Admin assign mode: ZIP polygons become tappable (forces the layer on). */
+  onZipTap?: (zip: string) => void;
 }) {
   const [draft, setDraft] = useState<LatLng[]>([]);
   const mapRef = useRef<L.Map | null>(null);
@@ -593,6 +617,11 @@ export function NeonMap({
   useEffect(() => {
     if (flyTo?.key != null) setTracking(false);
   }, [flyTo?.key]);
+
+  // Map bearing (leaflet-rotate) — drives the compass needle.
+  const [bearing, setBearing] = useState(0);
+  // Assign mode must see the ZIPs it's assigning, whatever the toggle says.
+  const zipsEnabled = zipOn || !!onZipTap;
 
   const fallbackCenter = useMemo<LatLng>(() => {
     if (center) return center;
@@ -639,6 +668,14 @@ export function NeonMap({
         zoom={follow ? 17 : 13}
         zoomControl={false}
         scrollWheelZoom
+        // leaflet-rotate: two-finger twist on phones, shift-drag on desktop
+        // (owner ask 2026-09-11: "the map does not spin"). The compass button
+        // below resets north; the plugin's own control stays off.
+        rotate
+        touchRotate
+        shiftKeyRotate
+        rotateControl={false}
+        bearing={0}
         style={{ height: "100%", width: "100%", background: "#0b0f1a" }}
         ref={(instance) => { mapRef.current = instance; }}
       >
@@ -654,9 +691,10 @@ export function NeonMap({
           maxZoom={20}
         />
         <InvalidateOnMount />
+        <BearingWatcher onBearing={setBearing} />
         <FlyTo target={flyTo} />
         <ClickCapture onClick={handleClick} />
-        <ZipBordersLayer enabled={zipOn} />
+        <ZipBordersLayer enabled={zipsEnabled} tints={zipTints} onZipTap={onZipTap} />
         {houseBubbles && <HouseBubblesLayer enabled pins={pins} onHouseTap={onHouseTap} />}
         {hasFit && <FitPolygons polygons={fitPolygons!} />}
         {follow ? (
@@ -872,8 +910,35 @@ export function NeonMap({
         </div>
       )}
 
-      {/* Map controls: ZIP borders toggle + recenter, stacked bottom-right */}
+      {/* Map controls: compass + ZIP borders toggle + recenter, bottom-right */}
       <div className="absolute bottom-16 right-3 z-[1000] flex flex-col items-center gap-2">
+        {/* Compass: needle tracks the bearing (two-finger twist / shift-drag
+            spins the map); tap snaps back to north. */}
+        <button
+          type="button"
+          aria-label="Reset map rotation to north"
+          title={bearing === 0 ? "Facing north — twist with two fingers to rotate" : `Rotated ${Math.round(bearing)}° — tap to face north`}
+          onClick={() => mapRef.current?.setBearing?.(0)}
+          className="flex h-11 w-11 items-center justify-center rounded-full border bg-surface/90 backdrop-blur"
+          style={
+            bearing !== 0
+              ? { color: "#ffd60a", borderColor: "#ffd60a99", boxShadow: "0 0 10px -2px #ffd60a" }
+              : { color: "var(--muted-foreground)", borderColor: "var(--border)" }
+          }
+        >
+          <span
+            className="relative flex items-center justify-center"
+            style={{ transform: `rotate(${bearing}deg)`, transition: "transform 120ms linear" }}
+          >
+            <Navigation2 className="h-5 w-5" fill="currentColor" />
+            <span
+              className="absolute -top-1.5 font-display text-[7px] leading-none"
+              aria-hidden
+            >
+              N
+            </span>
+          </span>
+        </button>
         <button
           type="button"
           aria-label={zipOn ? "Hide ZIP code borders" : "Show ZIP code borders"}

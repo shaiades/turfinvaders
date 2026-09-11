@@ -6,6 +6,7 @@ import { requiresGratitudeGate } from "@/lib/roles";
 import { assigneeColor } from "@/lib/assignee-colors";
 import { getMondayFormUrl } from "@/lib/monday-form";
 import { useGeoWatch, useFieldPins, type ActivePin } from "@/hooks/useFieldPins";
+import { useZipTints } from "@/hooks/useZipAssignments";
 import { dailyLogKeys, sumLogCounters, useTodayLogs } from "@/hooks/useDailyLogs";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { GratitudeGate, hasPassedGratitudeGate } from "@/components/GratitudeGate";
@@ -146,6 +147,9 @@ export function ActiveRun({
   }, [user?.id]);
   const { me, geoStatus } = useGeoWatch(!loading && (!requiresGratitudeGate(role) || gatePassed));
   const pins = useFieldPins(user?.id, me);
+  // Captains see their ZIP zones tinted while canvassing — the frame they
+  // chunk turfs inside. Canvassers keep plain borders (their turf is the map).
+  const zipZones = useZipTints({ enabled: isCaptain });
 
   const [active, setActive] = useState<ActivePin>("lead");
   const [editingPinId, setEditingPinId] = useState<string | null>(null);
@@ -433,6 +437,7 @@ export function ActiveRun({
                   follow
                   fitPolygons={!isCaptain ? lockPolygons : undefined}
                   houseBubbles
+                  zipTints={isCaptain ? zipZones.tints : undefined}
                   onHouseTap={(h) => setHouseTarget(h)}
                   mode={{
                     kind: "pin",
