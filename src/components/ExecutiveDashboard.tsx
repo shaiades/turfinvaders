@@ -32,6 +32,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { upsertManualWeekly } from "@/lib/fleet.functions";
+import { getClockPresence } from "@/lib/dispatch.functions";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 import { useOfficeFilter } from "@/components/OfficeFilterContext";
@@ -73,7 +74,7 @@ function LiveDailyAction() {
   const q = useQuery({
     queryKey: ["live_daily_action", today],
     queryFn: async () => {
-      const [logsR, profilesR, vansR, rolesR] = await Promise.all([
+      const [logsR, profilesR, vansR, rolesR, clockR] = await Promise.all([
         supabase
           .from("daily_logs")
           .select(
@@ -83,6 +84,13 @@ function LiveDailyAction() {
         supabase.from("profiles").select("id, display_name, team_id, suspension_tracked"),
         supabase.from("teams").select("id, name, color"),
         supabase.from("user_roles").select("user_id, role"),
+        // Clock-in gate (owner, 2026-09-11): only people punched in today can
+        // be donuts. Guarded — if presence is unavailable (local dev has no
+        // service key) the list goes empty with a note, never a wrong flag.
+        getClockPresence({ data: { dates: [today] } }).then(
+          (r) => ({ ids: new Set(r.byDate[today] ?? []), ready: true }),
+          () => ({ ids: new Set<string>(), ready: false }),
+        ),
       ]);
       if (logsR.error) throw logsR.error;
       if (profilesR.error) throw profilesR.error;
@@ -106,8 +114,9 @@ function LiveDailyAction() {
         { called: 0, nextDay: 0, future: 0, blowout: 0 },
       );
 
-      // Donut List: every CANVASSER (or captain) on a Van who has NOT logged
-      // a Confirmed_Next_Day or Confirmed_Future ping today. Sales reps never
+      // Donut List: every CANVASSER (or captain) on a Van who CLOCKED IN
+      // today (owner, 2026-09-11 — no punch, no donut) but has NOT logged a
+      // Confirmed_Next_Day or Confirmed_Future ping. Sales reps never
       // appear — suspension is canvassers-only (owner, 2026-08-04) — and
       // suspension-exempt profiles (confirmers, lead sources) are skipped.
       const confirmedToday = new Set(
@@ -119,6 +128,7 @@ function LiveDailyAction() {
       const donut = (profilesR.data ?? [])
         .filter((p) => {
           if (!p.team_id || confirmedToday.has(p.id)) return false;
+          if (!clockR.ids.has(p.id)) return false;
           if (p.suspension_tracked === false) return false;
           const roles = rolesByUser.get(p.id) ?? [];
           if (roles.includes("sales_rep")) return false;
@@ -131,7 +141,7 @@ function LiveDailyAction() {
         }))
         .sort((a, b) => a.name.localeCompare(b.name));
 
-      return { totals, donut };
+      return { totals, donut, clockReady: clockR.ready };
     },
     refetchInterval: 15_000,
   });
@@ -177,8 +187,14 @@ function LiveDailyAction() {
         <p className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
           Donut List ({donut.length})
         </p>
-        {donut.length === 0 ? (
-          <p className="text-sm text-victory">Everyone is on the board — no donuts today.</p>
+        {q.data && !q.data.clockReady ? (
+          <p className="text-sm text-muted-foreground">
+            Clock-in data unavailable — the donut list only counts people punched in today.
+          </p>
+        ) : donut.length === 0 ? (
+          <p className="text-sm text-victory">
+            Everyone clocked in is on the board — no donuts today.
+          </p>
         ) : (
           <p className="text-sm text-foreground">{donut.map((d) => d.name).join(", ")}</p>
         )}

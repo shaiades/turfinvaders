@@ -59,11 +59,15 @@ import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { Link } from "@tanstack/react-router";
 import { useAuth } from "@/hooks/useAuth";
 import { canManageTarget, isManagerRole } from "@/lib/roles";
-import { isRecentlyActive, lastActiveMap } from "@/lib/suspension";
+import { donutEval, isRecentlyActive, lastActiveMap } from "@/lib/suspension";
 import { formatCurrency, normalizeName } from "@/lib/utils";
 import { isLeadSourceKey } from "@/lib/lead-sources";
 import { DEFAULT_OFFICE, OFFICE_LOCATIONS } from "@/lib/offices";
-import { getDispatchProduction, type DispatchResults } from "@/lib/dispatch.functions";
+import {
+  getClockPresence,
+  getDispatchProduction,
+  type DispatchResults,
+} from "@/lib/dispatch.functions";
 import { FleetDispatchManage } from "@/components/FleetDispatchManage";
 import { GlossarySheet } from "@/components/GlossarySheet";
 import { FormerBadge } from "@/components/FormerBadge";
@@ -437,6 +441,40 @@ function FleetDispatchInner({
     },
   });
 
+  // Clock-in presence (owner, 2026-09-11): the Day roster is who PUNCHED IN
+  // that day, and a day with no punch never counts toward a donut. Presence
+  // rides the getClockPresence server fn because plain canvassers (the
+  // leaderboard audience) can only read their own time_entries; the table
+  // isn't in the realtime publication, so a light poll keeps the morning
+  // board filling in as people clock in.
+  const clockDates = useMemo(
+    () => (isViewingToday ? [dayISO, ...workedDays] : [dayISO]),
+    [dayISO, isViewingToday, workedDays],
+  );
+  const clockQ = useQuery({
+    queryKey: ["fleet_dispatch", "clock", clockDates],
+    enabled: tab === "day",
+    refetchInterval: isViewingToday ? 60_000 : false,
+    queryFn: async () => getClockPresence({ data: { dates: clockDates } }),
+  });
+  const clockedByDay = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    for (const [d, ids] of Object.entries(clockQ.data?.byDate ?? {})) m.set(d, new Set(ids));
+    return m;
+  }, [clockQ.data]);
+  /** Presence gates apply only once the fetch SUCCEEDED. On error (local dev
+   *  has no service key; a deploy-window blip) the roster fails OPEN to
+   *  everyone and the donut list fails SAFE to nobody — missing data must
+   *  never hide or flag a person wrongly. */
+  const clockReady = clockQ.isSuccess;
+  const clockedOn = useCallback(
+    (ids: string[], day: string) => {
+      const s = clockedByDay.get(day);
+      return !!s && ids.some((id) => s.has(id));
+    },
+    [clockedByDay],
+  );
+
   // Realtime — one channel; prefix invalidation refreshes funnel, production,
   // suspension window, roster, and vans (fixes the old stale-banner gap).
   // profiles/teams keep one manager's van moves live on another's open board.
@@ -743,7 +781,19 @@ function FleetDispatchInner({
     // Every query window is scoped to the selected range now (the Day tab
     // included), so in-range production alone decides — a rep removed
     // Tuesday shows on Monday's day view and on no later day.
-    const gated = enriched.filter((r) => !r.g.former || hasProduction(r));
+    //
+    // Day roster = clocked-in people (owner, 2026-09-11): an active rep with
+    // no punch AND no production that day sits out that day's board. The
+    // production half keeps a missed punch from ever hiding real numbers
+    // (tiles stay ≡ the boards); Week and Month keep the full roster;
+    // clockReady keeps the gate off until presence actually loaded.
+    const gated = enriched.filter((r) => {
+      if (r.g.former) return hasProduction(r);
+      if (tab === "day" && clockReady && !clockedOn(r.g.activeIds, dayISO)) {
+        return hasProduction(r);
+      }
+      return true;
+    });
     return gated.sort((a, b) => {
       if (b.sub !== a.sub) return b.sub - a.sub;
       if (b.conf !== a.conf) return b.conf - a.conf;
@@ -759,6 +809,10 @@ function FleetDispatchInner({
     crossOfficeVanIds,
     sliceValues,
     snapshotTeamByUser,
+    tab,
+    dayISO,
+    clockReady,
+    clockedOn,
   ]);
 
   const totals = useMemo(() => {
@@ -782,13 +836,20 @@ function FleetDispatchInner({
   // Suspension rule (owner, 2026-07-28): any TWO consecutive WORKED days
   // (Mon–Sat; Sundays never count) with zero leads generated = donut. Only
   // completed days count — today-in-progress never flags anyone, so the list
-  // is stable all day and rolls at 7 PM with the report date. Excluded:
-  // profiles with suspension_tracked=false (pseudo-agents, staff), reps
-  // whose profile didn't exist for both days yet, and anyone with no credited
-  // activity in over 7 calendar days (presumed off the team; auto-archive
-  // finishes the job at 14).
+  // is stable all day and rolls at 7 PM with the report date. Since
+  // 2026-09-11 a day with NO CLOCK-IN never counts against anyone: both
+  // qualifying days must be punched days, and a day off resets the streak
+  // (donutEval in lib/suspension.ts holds the rule). Excluded: profiles with
+  // suspension_tracked=false (pseudo-agents, staff), reps whose profile
+  // didn't exist for both days yet, and anyone with no credited activity in
+  // over 7 calendar days (presumed off the team; auto-archive finishes the
+  // job at 14).
   const suspensionRows = useMemo(() => {
     if (tab !== "day" || !isViewingToday || workedDays.length < 2) return [];
+    // No presence data, no donuts — see the clockReady note above. Rows are
+    // already day-gated, so the banner also only ever names people who are
+    // clocked in (or produced) TODAY.
+    if (!clockReady) return [];
     const genOn = (ids: string[], day: string) =>
       ids.reduce((a, id) => a + (genByDay.get(id)?.get(day) ?? 0), 0);
     const [d1, d2] = workedDays;
@@ -803,24 +864,23 @@ function FleetDispatchInner({
       // Sales reps never appear on the suspension list (owner, 2026-08-04) —
       // even when a dual-role profile also puts them on the board.
       if (r.g.activeIds.some((id) => (rolesByUser.get(id) ?? []).includes("sales_rep"))) return [];
-      if (r.g.oldestCreated > d2) return [];
       if (!isRecentlyActive(today, r.g.activeIds, lastActiveBy, r.g.oldestCreated)) return [];
-      if (genOn(r.g.activeIds, d1) !== 0 || genOn(r.g.activeIds, d2) !== 0) return [];
-      // Consecutive zero worked days, newest backward, only days the profile existed.
-      let streak = 0;
-      let capped = true;
-      for (const day of workedDays) {
-        if (day < r.g.oldestCreated) {
-          capped = false;
-          break;
-        }
-        if (genOn(r.g.activeIds, day) === 0) streak++;
-        else {
-          capped = false;
-          break;
-        }
-      }
-      return [{ g: r.g, d1, d2, streak, streakLabel: `${streak}${capped ? "+" : ""}` }];
+      const verdict = donutEval({
+        workedDays,
+        oldestCreated: r.g.oldestCreated,
+        genOn: (day) => genOn(r.g.activeIds, day),
+        clockedOn: (day) => clockedOn(r.g.activeIds, day),
+      });
+      if (!verdict) return [];
+      return [
+        {
+          g: r.g,
+          d1,
+          d2,
+          streak: verdict.streak,
+          streakLabel: `${verdict.streak}${verdict.capped ? "+" : ""}`,
+        },
+      ];
     });
   }, [
     rows,
@@ -832,6 +892,8 @@ function FleetDispatchInner({
     lastActiveBy,
     today,
     rolesByUser,
+    clockReady,
+    clockedOn,
   ]);
 
   const canManage = !readOnly && isManagerRole(realRole);
@@ -844,7 +906,7 @@ function FleetDispatchInner({
 
   const footnote =
     tab === "day"
-      ? "Every number shows the selected day. Funnel columns credit the day the lead was SUBMITTED — a confirm recorded Monday for a Friday lead updates Friday, so recent days keep filling in for a few days. Lead results, Sales, and Points credit each card's BLOCK day (the weekday it ran on the Block board). Volume is sale dollars confirmed that day, midnight to midnight Pacific."
+      ? "The day's roster is who CLOCKED IN that day — no punch and no production, no row, and days you weren't clocked in never count toward the suspension list. Every number shows the selected day. Funnel columns credit the day the lead was SUBMITTED — a confirm recorded Monday for a Friday lead updates Friday, so recent days keep filling in for a few days. Lead results, Sales, and Points credit each card's BLOCK day (the weekday it ran on the Block board). Volume is sale dollars confirmed that day, midnight to midnight Pacific."
       : tab === "week"
         ? "Funnel counts credit each lead's submission day, so a just-closed week keeps filling in early the next week. Lead results credit each card's BLOCK day (the weekday it ran on the Block board), Mon–Sun of the selected week, Pacific time. Points: PM = 1 pt, Sale = 2 pts; BO/RS = 0. Volume runs Mon 12:00 AM → next Mon 12:00 AM Pacific."
         : "Every number covers the calendar month, Pacific time — funnel counts on each lead's submission day, lead results on each card's block day. Points: PM = 1 pt, Sale = 2 pts. Volume resets on the 1st, 12:00 AM Pacific.";
@@ -1962,8 +2024,8 @@ function SuspensionBanner({
         </div>
       </div>
       <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground mb-3">
-        2 consecutive worked days without a lead · Sundays excluded · completed days only · active
-        within 7 days
+        2 consecutive clocked-in days without a lead · days with no punch never count · Sundays
+        excluded · completed days only · active within 7 days
       </div>
       <div className="flex flex-wrap gap-2">
         {rows.map((r) => (
