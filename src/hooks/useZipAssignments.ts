@@ -90,5 +90,21 @@ export function useZipAssignmentActions() {
     onError: (e: Error) => toast.error(`Couldn't unassign ZIP: ${e.message}`, { duration: 8000 }),
   });
 
-  return { assign, unassign };
+  // Batch form (the "Assigning to captain" panel): one upsert round-trip for
+  // the whole list; reassigns overwrite, same-captain rows are no-ops whose
+  // provenance the stamp trigger deliberately preserves.
+  const assignMany = useMutation({
+    mutationFn: async ({ zips, captain_id }: { zips: string[]; captain_id: string }) => {
+      const rows = zips.map((zip) => ({ zip, captain_id }));
+      const { error } = await supabase.from("zip_assignments").upsert(rows, { onConflict: "zip" });
+      if (error) throw error;
+    },
+    onSuccess: (_d, vars) => {
+      toast.success(`📮 ${vars.zips.length} ZIP${vars.zips.length === 1 ? "" : "s"} assigned`);
+      qc.invalidateQueries({ queryKey: ["zip_assignments"] });
+    },
+    onError: (e: Error) => toast.error(`Couldn't assign ZIPs: ${e.message}`, { duration: 8000 }),
+  });
+
+  return { assign, unassign, assignMany };
 }
