@@ -47,6 +47,28 @@ export function ratesUsable(r: ConversionRates): boolean {
   return r.closeRate > 0 && r.sitRate > 0 && r.leadDoorRate > 0;
 }
 
+/** The ONE avg-commission fallback chain (owner, 2026-08-14): the canvasser's
+ *  own number wins, else the company 60-day average, else the $200 floor so
+ *  goal math can never divide by zero. */
+export function resolveAvgCommission(
+  profileAvg: number | null | undefined,
+  companyAvg: number,
+  floor: number,
+): number {
+  return Number(profileAvg ?? 0) || companyAvg || floor;
+}
+
+/** Expected commission dollars a single door knock is worth today — the
+ *  forward funnel walked one door at a time. Null when the rates can't
+ *  support the math; consumers show their empty state, never $0/knock. */
+export function expectedValuePerDoor(
+  rates: ConversionRates | null,
+  avgCommissionPerSale: number,
+): number | null {
+  if (!rates || !ratesUsable(rates) || avgCommissionPerSale <= 0) return null;
+  return avgCommissionPerSale * rates.closeRate * rates.sitRate * rates.leadDoorRate;
+}
+
 /**
  * The commission the funnel must still produce (owner, 2026-07-29: the goal
  * is TOTAL take-home — commission + hourly base + bonuses). Subtract what

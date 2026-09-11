@@ -6,8 +6,10 @@ import { requiresGratitudeGate } from "@/lib/roles";
 import { assigneeColor } from "@/lib/assignee-colors";
 import { getMondayFormUrl } from "@/lib/monday-form";
 import { useGeoWatch, useFieldPins, type ActivePin } from "@/hooks/useFieldPins";
+import { usePiggyBank } from "@/hooks/usePiggyBank";
 import { useZipTints } from "@/hooks/useZipAssignments";
 import { dailyLogKeys, sumLogCounters, useTodayLogs } from "@/hooks/useDailyLogs";
+import { PiggyBankHUD } from "@/components/PiggyBankHUD";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { GratitudeGate, hasPassedGratitudeGate } from "@/components/GratitudeGate";
 import { NeonMap, type Territory, type LatLng } from "@/components/NeonMap";
@@ -104,6 +106,13 @@ const KNOCK_RESULTS: Array<{
   },
 ];
 
+// The armed-chip bar drops Lead from the vocabulary (owner call 2026-09-11:
+// "just use Submit New Lead") — an armed map-tap lead pin skipped the Monday
+// form entirely, minting lead pins with no lead behind them. The house sheet
+// keeps its Lead tile because that path opens the form (it IS Submit New
+// Lead, anchored to the tapped house), and corrections keep the full list.
+const ARMED_RESULTS = KNOCK_RESULTS.filter((r) => r.type !== "lead");
+
 type TurfRow = {
   id: string;
   name: string;
@@ -141,7 +150,7 @@ export function ActiveRun({
   // chunk turfs inside. Canvassers keep plain borders (their turf is the map).
   const zipZones = useZipTints({ enabled: isCaptain });
 
-  const [active, setActive] = useState<ActivePin>("lead");
+  const [active, setActive] = useState<ActivePin>("not_home");
   const [editingPinId, setEditingPinId] = useState<string | null>(null);
   const [leadOpen, setLeadOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -153,6 +162,18 @@ export function ActiveRun({
   // the same rows the Log form, Stats page, and HUD read.
   const { data: todayRows } = useTodayLogs(user?.id);
   const today = sumLogCounters(todayRows);
+
+  // Piggy bank: projected dollars per knock. ?piggy_demo=1 fakes knocks
+  // locally and never touches real state; parsed after mount because this
+  // route SSRs and a render-time window read is a hydration mismatch.
+  const piggy = usePiggyBank(user?.id);
+  const [piggyDemo, setPiggyDemo] = useState<{ on: boolean; rateMs?: number }>({ on: false });
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("piggy_demo") === "1") {
+      setPiggyDemo({ on: true, rateMs: Number(params.get("piggy_rate")) || undefined });
+    }
+  }, []);
 
   // Turfs: captains see every turf (their vans work all of them), canvassers
   // only their assigned (enforced by RLS too).
@@ -400,6 +421,18 @@ export function ActiveRun({
                 onPinClick={(id) => setEditingPinId(id)}
               />
 
+              {/* Piggy bank — every knock is worth money, watch it stack */}
+              <div data-tour="field-bank" className="absolute top-3 left-3 z-[1000]">
+                <PiggyBankHUD
+                  dollars={piggy.dollars}
+                  perKnock={piggy.perKnock}
+                  knocks={piggy.knocks}
+                  source={piggy.source}
+                  demo={piggyDemo.on}
+                  demoRateMs={piggyDemo.rateMs}
+                />
+              </div>
+
               {/* Standings — the video app's leaderboard, one tap from the map */}
               <button
                 type="button"
@@ -417,7 +450,7 @@ export function ActiveRun({
                 data-tour="field-chips"
                 className="absolute bottom-3 left-1/2 -translate-x-1/2 z-[1000] flex items-center gap-1.5 rounded-full border border-border bg-surface/90 backdrop-blur px-2 py-1.5"
               >
-                {KNOCK_RESULTS.map((r) => {
+                {ARMED_RESULTS.map((r) => {
                   const isArmed = active === r.type;
                   return (
                     <button

@@ -62,12 +62,20 @@ export const PAGE_TOURS: Record<TourPageId, TutorialStep[]> = {
       body: "Your turf shows as a named boundary, with a bubble over every house and ZIP borders for context. Zoom to the street and tap a house bubble to log that door — one tap on the result is the whole knock.",
     },
     {
+      id: "field-bank",
+      target: "field-bank",
+      optional: true, // hides behind the gate / before the map is ready
+      padding: 6,
+      title: "Watch it stack",
+      body: "Every door you knock drops money in the bank — even a Not Home has a dollar value. Projected from your real conversion rates, and the pig refills every $100.",
+    },
+    {
       id: "field-chips",
       target: "field-chips",
       optional: true, // hides behind the gate / before turf is assigned
       padding: 6,
       title: "Pin any house",
-      body: "No bubble on a house? Pick a result — Lead, Not Home, Go Back, Renter, NI — then tap that spot on the map. Tonight's go-backs start here.",
+      body: "No bubble on a house? Pick a result — Not Home, Go Back, Renter, NI — then tap that spot on the map. Leads go through ⚡ Submit New Lead. Tonight's go-backs start here.",
     },
     {
       id: "field-lead",
