@@ -59,7 +59,7 @@ export const PAGE_TOURS: Record<TourPageId, TutorialStep[]> = {
       target: ["field-map", "gratitude-gate"],
       cursorAt: { x: 0.5, y: 0.3 },
       title: "Your turf, live",
-      body: "Your turf shows here as a named boundary on a live map, and every pin you drop lands on it. Empty right now? Your manager assigns turf before the shift — it pops in the moment it lands.",
+      body: "Your turf shows as a named boundary, with a bubble over every house and ZIP borders for context. Zoom to the street and tap a house bubble to log that door — one tap on the result is the whole knock.",
     },
     {
       id: "field-chips",
@@ -67,16 +67,16 @@ export const PAGE_TOURS: Record<TourPageId, TutorialStep[]> = {
       optional: true, // hides behind the gate / before turf is assigned
       padding: 6,
       title: "Pin any house",
-      body: "Pick a result — Lead, Not Home, Go Back, Renter, NI, Appt — then tap that house on the map. Tonight's go-backs start here.",
+      body: "No bubble on a house? Pick a result — Lead, Not Home, Go Back, Renter, NI, Appt — then tap that spot on the map. Tonight's go-backs start here.",
     },
     {
       id: "field-tallies",
       target: "field-tallies",
       optional: true, // hidden behind the gate on a pre-check-in "?" replay
       padding: 6,
-      cursorAt: { x: 0.26, y: 0.28 }, // tap the Log Knock key, not the gap
-      title: "One tap per door",
-      body: "The door you're standing at: knocked, talked to, not interested, or a renter — one tap each. Every tap drops the pin for you — keep Location on.",
+      cursorAt: { x: 0.26, y: 0.28 }, // tap the Not Home key, not the gap
+      title: "Tap the result — that's the knock",
+      body: "The door you're standing at: tap what happened — Not Home, Go Back, Renter, Not Interested, or Appt. Every result counts the door automatically; there's no separate knock button. Keep Location on.",
     },
     {
       id: "field-lead",

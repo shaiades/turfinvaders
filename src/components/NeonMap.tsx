@@ -3,6 +3,8 @@ import { MapContainer, TileLayer, Polygon, Polyline, Marker, Popup, useMapEvents
 import L from "leaflet";
 import { LocateFixed } from "lucide-react";
 import { PIN_COLORS, type PinType } from "@/lib/pin-results";
+import { ZipBordersLayer, ZIP_MIN_ZOOM } from "@/components/ZipBorders";
+import { HouseBubblesLayer, type OsmHouse } from "@/components/HouseBubbles";
 
 // Canonical copy lives in lib/pin-results (SSR-safe); re-exported here so map
 // consumers keep a single import site.
@@ -142,88 +144,92 @@ function FitBounds({ points }: { points: LatLng[] }) {
   return null;
 }
 
-function FollowMe({ me, zoom = 18, lockRadiusKm = 2, disableLock = false, paused = false }: { me: LatLng | null | undefined; zoom?: number; lockRadiusKm?: number; disableLock?: boolean; paused?: boolean }) {
+/**
+ * Follow-my-dot, free-roam edition (owner ask 2026-09-10: "more mobility" —
+ * SalesRabbit parity). The old 2 km maxBounds cage and minZoom floor are
+ * gone: the map follows the GPS dot only while `tracking` is on, and any
+ * hand-drag flips tracking off (see TrackingBreaker) so browsing the wider
+ * map is never fought by the next GPS tick. The recenter button re-arms it.
+ * Pinch/double-tap zooms deliberately do NOT break tracking — the follow pan
+ * preserves zoom, so zooming while walking keeps working.
+ */
+function FollowMe({
+  me,
+  tracking,
+  initialSnap,
+  paused = false,
+}: {
+  me: LatLng | null | undefined;
+  tracking: boolean;
+  /** Snap to street level on the first fix — off when a turf fit framed the map. */
+  initialSnap: boolean;
+  paused?: boolean;
+}) {
   const map = useMap();
   const didInitial = useRef(false);
   useEffect(() => {
     if (paused) return; // never pan the map under a drawing finger
-    if (!me) return;
+    if (!me || !tracking) return;
     if (!didInitial.current) {
-      if (!disableLock) {
-        map.setView([me.lat, me.lng], zoom, { animate: false });
-        const dLat = lockRadiusKm / 111;
-        const dLng = lockRadiusKm / (111 * Math.cos((me.lat * Math.PI) / 180));
-        const bounds = L.latLngBounds(
-          [me.lat - dLat, me.lng - dLng],
-          [me.lat + dLat, me.lng + dLng],
-        );
-        map.setMaxBounds(bounds);
-        map.setMinZoom(15);
-      }
       didInitial.current = true;
-    } else {
-      const mb = map.options.maxBounds as L.LatLngBounds | undefined;
-      if (mb && !mb.contains([me.lat, me.lng])) return;
-      map.panTo([me.lat, me.lng], { animate: true });
+      if (initialSnap) {
+        map.setView([me.lat, me.lng], Math.max(map.getZoom(), 17), { animate: false });
+        return;
+      }
     }
-  }, [map, me?.lat, me?.lng, zoom, lockRadiusKm, disableLock, paused]);
+    map.panTo([me.lat, me.lng], { animate: true });
+  }, [map, me?.lat, me?.lng, tracking, initialSnap, paused]);
   return null;
 }
 
-function LockToPolygon({ polygons, me, paddingRatio = 0.08 }: { polygons: LatLng[][]; me?: LatLng | null; paddingRatio?: number }) {
+/** Flip tracking off the moment a hand drags the map — dragstart only fires
+ *  for user drags, never for our own panTo/fitBounds, so programmatic moves
+ *  can't false-break the follow. */
+function TrackingBreaker({ onBreak }: { onBreak: () => void }) {
+  const map = useMap();
+  const cbRef = useRef(onBreak);
+  cbRef.current = onBreak;
+  useEffect(() => {
+    const breakIt = () => cbRef.current();
+    map.on("dragstart", breakIt);
+    return () => {
+      map.off("dragstart", breakIt);
+    };
+  }, [map]);
+  return null;
+}
+
+/** Frame the union of the given rings on mount and whenever the turf set
+ *  actually changes (live reassignment swaps polygons without a remount).
+ *  Framing only — pan/zoom stay free afterwards (the old maxBounds/minZoom
+ *  clamp is gone with the mobility rework). */
+function FitPolygons({
+  polygons,
+  paddingRatio = 0.08,
+}: {
+  polygons: LatLng[][];
+  paddingRatio?: number;
+}) {
   const map = useMap();
   const sigRef = useRef("");
-  // Last turf-union clamp, kept so the out-of-bounds widening below is always
-  // "turf union + current position", never cumulative drift.
-  const paddedRef = useRef<L.LatLngBounds | null>(null);
   useEffect(() => {
     const rings = polygons.filter((p) => p.length >= 3);
     if (rings.length === 0) return;
-    // Re-fit when the locked turf set actually changes (live reassignment
-    // swaps the canvasser's polygons without a remount).
     const sig = rings
       .map((ring) => ring.map((p) => `${p.lat.toFixed(6)},${p.lng.toFixed(6)}`).join(";"))
       .join("|");
     if (sigRef.current === sig) return;
     sigRef.current = sig;
-    // Clear the previous clamp first, or fitBounds gets constrained by it.
-    map.setMaxBounds(null as unknown as L.LatLngBoundsExpression);
-    map.setMinZoom(0);
-    // One bounds over every assigned turf — a canvasser with two areas can
-    // pan between both instead of being clamped inside the newest.
     const b = L.latLngBounds([]);
     rings.forEach((ring) => ring.forEach((p) => b.extend([p.lat, p.lng])));
-    const padded = b.pad(paddingRatio);
-    paddedRef.current = padded;
-    map.fitBounds(padded, { padding: [20, 20], animate: false });
-    map.setMaxBounds(padded);
-    map.setMinZoom(map.getZoom());
-    map.setMaxZoom(20);
+    // maxZoom 17: a single tiny turf must not open at rooftop zoom 20.
+    map.fitBounds(b.pad(paddingRatio), { padding: [20, 20], animate: false, maxZoom: 17 });
   }, [map, polygons, paddingRatio]);
-
-  // Standing just outside the turf: widen the clamp so the "me" dot stays
-  // reachable (and FollowMe's in-bounds pan check passes again). `polygons`
-  // is a dep so a mid-shift reassignment (which resets the clamp above)
-  // re-widens immediately for a stationary phone instead of waiting for the
-  // next GPS tick.
-  useEffect(() => {
-    const padded = paddedRef.current;
-    if (!padded || !me) return;
-    if (padded.contains([me.lat, me.lng])) {
-      map.setMaxBounds(padded);
-      return;
-    }
-    const widened = L.latLngBounds(padded.getSouthWest(), padded.getNorthEast())
-      .extend(L.latLng(me.lat, me.lng).toBounds(120));
-    map.setMaxBounds(widened);
-  }, [map, me?.lat, me?.lng, polygons]);
   return null;
 }
 
-/** Animated jump to an external target (the Turf Tools ZIP search). Clears
- *  any standing maxBounds/minZoom clamp first — FollowMe's 2 km self-cage
- *  would otherwise swallow the flight. Keyed so repeating the same search
- *  re-flies. */
+/** Animated jump to an external target (the Turf Tools ZIP search). Keyed so
+ *  repeating the same search re-flies. */
 function FlyTo({
   target,
 }: {
@@ -234,8 +240,6 @@ function FlyTo({
   useEffect(() => {
     if (!target || target.key === lastKey.current) return;
     lastKey.current = target.key;
-    map.setMaxBounds(null as unknown as L.LatLngBoundsExpression);
-    map.setMinZoom(0);
     map.flyToBounds(L.latLngBounds(target.bounds), { padding: [30, 30], maxZoom: 16 });
   }, [map, target]);
   return null;
@@ -517,12 +521,14 @@ export function NeonMap({
   center,
   height = 480,
   follow = false,
-  lockPolygons,
+  fitPolygons,
   onTerritoryClick,
   onPinClick,
   pendingPolygon,
   flyTo,
   territoryPopups = false,
+  houseBubbles = false,
+  onHouseTap,
 }: {
   territories: Territory[];
   pins?: FieldPin[];
@@ -535,8 +541,9 @@ export function NeonMap({
   /** px number (capped at 65vh) or any CSS length verbatim, e.g. "42dvh". */
   height?: number | string;
   follow?: boolean;
-  /** Clamp pan/zoom to the union of these rings (all of a canvasser's turfs). */
-  lockPolygons?: LatLng[][];
+  /** Open framing the union of these rings (all of a canvasser's turfs) and
+   *  re-frame on reassignment. Framing only — movement stays free. */
+  fitPolygons?: LatLng[][];
   onTerritoryClick?: (id: string) => void;
   /** Makes field pins tappable (own-pin corrections). Omit = inert markers. */
   onPinClick?: (id: string) => void;
@@ -548,12 +555,44 @@ export function NeonMap({
    *  recent history + an edit button) instead of firing onTerritoryClick
    *  directly. The popup's button calls onTerritoryClick to open the sheet. */
   territoryPopups?: boolean;
+  /** D2DU-style bubble over every house (OSM buildings) at street zoom. */
+  houseBubbles?: boolean;
+  /** Makes house bubbles tappable — the canvass screen's one-tap result sheet. */
+  onHouseTap?: (house: OsmHouse) => void;
 }) {
   const [draft, setDraft] = useState<LatLng[]>([]);
   const mapRef = useRef<L.Map | null>(null);
   // Set when a freehand stroke just committed — swallows the synthetic click
   // some browsers fire after pointerup so it doesn't become a stray vertex/pin.
   const justDrewRef = useRef(0);
+  // Follow-my-dot state: on while the map should chase the GPS dot, off the
+  // moment the user drags away (recenter re-arms). Starts as the follow prop.
+  const [tracking, setTracking] = useState(follow);
+  // ZIP borders on by default (owner ask 2026-09-10); preference sticks
+  // per device. try/catch: private mode must not take the map down.
+  const [zipOn, setZipOn] = useState(() => {
+    try {
+      return typeof window !== "undefined" && localStorage.getItem("ti_zip_borders") !== "0";
+    } catch {
+      return true;
+    }
+  });
+  function toggleZip() {
+    setZipOn((on) => {
+      try {
+        localStorage.setItem("ti_zip_borders", on ? "0" : "1");
+      } catch {
+        /* preference just won't stick */
+      }
+      return !on;
+    });
+  }
+
+  // A search fly-away is a deliberate departure — the next GPS tick must not
+  // yank the map back to the dot.
+  useEffect(() => {
+    if (flyTo?.key != null) setTracking(false);
+  }, [flyTo?.key]);
 
   const fallbackCenter = useMemo<LatLng>(() => {
     if (center) return center;
@@ -571,7 +610,7 @@ export function NeonMap({
     return pts;
   }, [territories, pins, me]);
 
-  const hasLock = !!lockPolygons?.some((p) => p.length >= 3);
+  const hasFit = !!fitPolygons?.some((p) => p.length >= 3);
 
   function handleClick(ll: LatLng) {
     if (Date.now() - justDrewRef.current < 400) return;
@@ -617,8 +656,22 @@ export function NeonMap({
         <InvalidateOnMount />
         <FlyTo target={flyTo} />
         <ClickCapture onClick={handleClick} />
-        {hasLock && <LockToPolygon polygons={lockPolygons!} me={me} />}
-        {follow ? <FollowMe me={me} disableLock={hasLock} paused={mode.kind === "draw"} /> : allPoints.length > 0 && !hasLock && <FitBounds points={allPoints} />}
+        <ZipBordersLayer enabled={zipOn} />
+        {houseBubbles && <HouseBubblesLayer enabled pins={pins} onHouseTap={onHouseTap} />}
+        {hasFit && <FitPolygons polygons={fitPolygons!} />}
+        {follow ? (
+          <>
+            <TrackingBreaker onBreak={() => setTracking(false)} />
+            <FollowMe
+              me={me}
+              tracking={tracking}
+              initialSnap={!hasFit}
+              paused={mode.kind === "draw"}
+            />
+          </>
+        ) : (
+          allPoints.length > 0 && !hasFit && <FitBounds points={allPoints} />
+        )}
 
         {territories.map((t) => {
           // Popup mode: click opens the on-map card (below), not the sheet —
@@ -819,21 +872,52 @@ export function NeonMap({
         </div>
       )}
 
-      {/* Recenter on my location (Leaflet clamps the jump inside maxBounds) */}
-      {me && mode.kind !== "draw" && (
+      {/* Map controls: ZIP borders toggle + recenter, stacked bottom-right */}
+      <div className="absolute bottom-16 right-3 z-[1000] flex flex-col items-center gap-2">
         <button
           type="button"
-          aria-label="Center map on my location"
-          onClick={() => {
-            const m = mapRef.current;
-            if (!m) return;
-            m.setView([me.lat, me.lng], Math.max(m.getZoom(), 17), { animate: true });
-          }}
-          className="absolute bottom-16 right-3 z-[1000] flex h-11 w-11 items-center justify-center rounded-full border border-neon/60 bg-surface/90 backdrop-blur text-neon"
+          aria-label={zipOn ? "Hide ZIP code borders" : "Show ZIP code borders"}
+          aria-pressed={zipOn}
+          title={`ZIP code borders ${zipOn ? "on" : "off"} — visible from zoom ${ZIP_MIN_ZOOM}+`}
+          onClick={toggleZip}
+          className="flex h-11 w-11 items-center justify-center rounded-full border bg-surface/90 backdrop-blur font-display text-[10px] tracking-widest"
+          style={
+            zipOn
+              ? {
+                  color: "var(--neon)",
+                  borderColor: "color-mix(in oklab, var(--neon) 60%, var(--border))",
+                  boxShadow: "0 0 10px -2px color-mix(in oklab, var(--neon) 60%, transparent)",
+                }
+              : { color: "var(--muted-foreground)", borderColor: "var(--border)" }
+          }
         >
-          <LocateFixed className="h-5 w-5" />
+          ZIP
         </button>
-      )}
+        {/* Recenter on my location — and re-arm follow-my-dot after a browse */}
+        {me && mode.kind !== "draw" && (
+          <button
+            type="button"
+            aria-label="Center map on my location"
+            onClick={() => {
+              const m = mapRef.current;
+              if (!m) return;
+              setTracking(true);
+              m.setView([me.lat, me.lng], Math.max(m.getZoom(), 17), { animate: true });
+            }}
+            className="flex h-11 w-11 items-center justify-center rounded-full border bg-surface/90 backdrop-blur"
+            style={
+              follow && tracking
+                ? { color: "#00e5ff", borderColor: "#00e5ff99", boxShadow: "0 0 10px -2px #00e5ff" }
+                : {
+                    color: "var(--neon)",
+                    borderColor: "color-mix(in oklab, var(--neon) 60%, var(--border))",
+                  }
+            }
+          >
+            <LocateFixed className="h-5 w-5" />
+          </button>
+        )}
+      </div>
     </div>
   );
 }
