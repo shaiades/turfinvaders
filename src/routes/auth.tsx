@@ -58,10 +58,24 @@ function AuthPage() {
           toast.success("Check your email to confirm your account.");
           return;
         }
-        // New accounts have no role yet (roles are Owner/Captain-granted —
-        // security decision 2026-08-12). Land them in the waiting room on
-        // /dashboard, which unlocks itself live the moment a role arrives —
-        // NOT on /field, which is a dead screen without the canvasser role.
+        // Roster self-claim (owner ask 2026-09-11): a name matching a
+        // board-minted spot with no login yet activates INSTANTLY — role
+        // granted, van + all history attached, no manager tap. The roster
+        // is the allowlist; anything else falls through to the waiting
+        // room below (claim errors — e.g. the RPC not applied yet — fall
+        // through the same way).
+        if (data.user) {
+          const { data: claim } = await supabase.rpc("claim_roster_spot");
+          if ((claim as { status?: string } | null)?.status === "claimed") {
+            toast.success("Found you on the roster — stats attached. Welcome aboard!");
+            await redirectByRole(data.user.id);
+            return;
+          }
+        }
+        // No roster match: waiting room on /dashboard, which unlocks itself
+        // live the moment a role arrives — NOT /field, which is a dead
+        // screen without the canvasser role. (Manual role grants stay
+        // Owner-only — security decision 2026-08-12.)
         toast.success("Welcome to the crew! Your manager is being pinged to activate you.");
         navigate({ to: "/dashboard", search: { tab: "dispatch" } });
       }
@@ -120,10 +134,15 @@ function AuthPage() {
                   label="Player name"
                   value={name}
                   onChange={setName}
-                  placeholder="Your name"
+                  placeholder="First + last — exactly as the office knows you"
                   autoComplete="name"
                   name="name"
+                  required
                 />
+                <p className="-mt-1 text-[10px] text-muted-foreground">
+                  Your name is your key: if it matches the roster, you're in instantly with all your
+                  stats.
+                </p>
                 <label className="block">
                   <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
                     I'm joining as
