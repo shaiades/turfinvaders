@@ -18,6 +18,8 @@ import {
   funnelStages,
 } from "@/components/ConversionPanels";
 import { LiveLeadCounter } from "@/components/LiveLeadCounter";
+import { PiggyBankHUD } from "@/components/PiggyBankHUD";
+import { usePiggyBank } from "@/hooks/usePiggyBank";
 import { QueryStateCard } from "@/components/QueryStateCard";
 import { Button } from "@/components/ui/button";
 import type { CanvasserStatsData } from "@/hooks/useCanvasserStats";
@@ -50,9 +52,19 @@ export function CanvasserStats({
   onEditGoal: () => void;
 }) {
   const { today, week, month } = stats;
+  // Same hook as Active Run's map pill — the two surfaces can never disagree
+  // (all underlying queries are already mounted here via useCanvasserStats).
+  const piggy = usePiggyBank(userId);
   return (
     <div className="space-y-6">
       <SectionLabel>Today</SectionLabel>
+      <PiggyBankHUD
+        variant="card"
+        dollars={piggy.dollars}
+        perKnock={piggy.perKnock}
+        knocks={piggy.knocks}
+        source={piggy.source}
+      />
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <GrindCounter
           label="Doors Knocked"

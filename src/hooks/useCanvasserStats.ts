@@ -14,6 +14,7 @@ import {
   payRateForPoints,
   weeklyPoints,
 } from "@/lib/pay";
+import { resolveAvgCommission } from "@/lib/funnel";
 import { useFunnelRates } from "@/hooks/useFunnelRates";
 import { useMyEarnings } from "@/hooks/useMyEarnings";
 import { useCanvasserProfile } from "@/hooks/useCanvasserProfile";
@@ -98,13 +99,13 @@ export function useCanvasserStats(userId: string) {
   const monthlyGoal = Number(profile.data?.monthly_goal ?? DEFAULT_MONTHLY_GOAL);
   const weeklyGoal = Number(profile.data?.weekly_income_goal ?? DEFAULT_WEEKLY_GOAL);
   // Income semantics (owner, 2026-07-29): required sales = goal ÷ avg
-  // commission per sale. One fallback chain everywhere (2026-08-14): the
-  // canvasser's own number wins, else the company 60d average, else $200 so
-  // the back-solve can never divide by zero.
-  const avgCommission =
-    Number(profile.data?.avg_commission ?? 0) ||
-    funnelRates.companyAvgCommission ||
-    DEFAULT_AVG_COMMISSION;
+  // commission per sale. The fallback chain lives in resolveAvgCommission so
+  // the piggy bank and the back-solve can never disagree on the figure.
+  const avgCommission = resolveAvgCommission(
+    profile.data?.avg_commission,
+    funnelRates.companyAvgCommission,
+    DEFAULT_AVG_COMMISSION,
+  );
 
   const salesQuery = useQuery({
     queryKey: ["my_confirmed_sales", "mtd", userId],

@@ -84,6 +84,26 @@ export function popText(
   ctx.restore();
 }
 
+/** The house gold coin (CloseKombatIntro's recipe), drawn centered on the
+ *  current origin — translate/rotate first. */
+export function drawCoin(ctx: CanvasRenderingContext2D, r: number) {
+  ctx.shadowColor = "#ffb02a";
+  ctx.shadowBlur = 7;
+  ctx.fillStyle = "#ffd24a";
+  ctx.strokeStyle = "#a8770a";
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(255,255,255,0.7)";
+  ctx.lineWidth = 1.1;
+  ctx.beginPath();
+  ctx.arc(0, 0, r * 0.55, -2.1, -0.7);
+  ctx.stroke();
+}
+
 /** Best-effort bleeps — silent unless the AudioContext is already allowed. */
 export function makeBeeper() {
   let ctx: AudioContext | null = null;

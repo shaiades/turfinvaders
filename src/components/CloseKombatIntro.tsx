@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { clamp01, easeInOut, easeOutBack, limb, makeBeeper, popText, rr } from "./intro-fx";
+import { clamp01, drawCoin, easeInOut, easeOutBack, limb, makeBeeper, popText, rr } from "./intro-fx";
 
 /**
  * Sales-rep first-sign-in intro (owner ask 2026-09-10): sales reps live on
@@ -182,21 +182,7 @@ function drawParticles(ctx: CanvasRenderingContext2D, list: Particle[], t: numbe
       rr(ctx, -p.size / 2, -p.size * 1.1, p.size, p.size * 2.2, 1);
       ctx.fill();
     } else if (p.kind === "coin") {
-      ctx.shadowColor = "#ffb02a";
-      ctx.shadowBlur = 7;
-      ctx.fillStyle = "#ffd24a";
-      ctx.strokeStyle = "#a8770a";
-      ctx.lineWidth = 1.4;
-      ctx.beginPath();
-      ctx.arc(0, 0, p.size, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.shadowBlur = 0;
-      ctx.stroke();
-      ctx.strokeStyle = "rgba(255,255,255,0.7)";
-      ctx.lineWidth = 1.1;
-      ctx.beginPath();
-      ctx.arc(0, 0, p.size * 0.55, -2.1, -0.7);
-      ctx.stroke();
+      drawCoin(ctx, p.size);
     } else {
       ctx.shadowColor = "#3ecf5a";
       ctx.shadowBlur = 4;

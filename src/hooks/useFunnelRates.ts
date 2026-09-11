@@ -49,6 +49,9 @@ export function useFunnelRates(userId: string): {
 
   const baselineQ = useQuery({
     queryKey: ["funnel", "baseline"],
+    // 60-day company aggregate — refetching the server fn on every window
+    // focus is pure waste on the field route, which refocuses all shift.
+    staleTime: 15 * 60_000,
     queryFn: async () => getFunnelBaseline(),
   });
 
