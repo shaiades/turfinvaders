@@ -1329,6 +1329,41 @@ serve(async (req) => {
         (changedColumnId === salePriceCol.id || changedColumnId === salePriceCol.column?.id)
       const mondayItemId = String(pulseId)
 
+      // ── One lead per copy FAMILY ── The office copies-then-moves sold
+      // cards (and an SD automation twins fresh sale cards), so one deal can
+      // arrive here under two pulseIds. The lead-COUNT credit already
+      // dedupes across the family (applyLeadCredit above); the money sync
+      // must too — the Fernandez upsell (2026-09-11) minted two $12,583
+      // Job Walk leads and Fleet Dispatch showed $25,166. Office cards
+      // write no outcome markers (the credit gate zeroes bucket), so the
+      // copy gate's marker-based family sync can never reach them: scan
+      // same-board block_cards by base name here instead. Non-office cards
+      // with no copy-gate siblings keep the old single-id behavior.
+      let familyIds = [mondayItemId, ...siblingPulseIds.filter((sid) => sid !== mondayItemId)]
+      if (siblingPulseIds.length === 0 && officeAppt && itemIsSold && boardId) {
+        const base = copyBaseName(item.name)
+        if (base) {
+          // A copy marker must sit on ONE side of the pair (this card, or
+          // the sibling): two clean-named same-customer cards are two real
+          // deals (an upsell AND a reload the same week), never a family —
+          // merging those would overwrite one deal's money with the other's.
+          const selfIsCopy = isCopyName(item.name)
+          const { data: famCards } = await supabaseAdmin
+            .from('block_cards')
+            .select('monday_item_id, lead_name')
+            .eq('board_id', boardId)
+          familyIds = [
+            mondayItemId,
+            ...(famCards ?? [])
+              .filter((c) =>
+                String(c.monday_item_id) !== mondayItemId &&
+                copyBaseName(c.lead_name ?? '') === base &&
+                (selfIsCopy || isCopyName(c.lead_name ?? '')))
+              .map((c) => String(c.monday_item_id)),
+          ]
+        }
+      }
+
       if (bucket === 'sales' || prevBucket === 'sales' || isPriceEvent || itemIsSold) {
         await supabaseAdmin.from('webhook_logs').insert({
           step: 'Sale_Price_Inspect',
@@ -1350,18 +1385,56 @@ serve(async (req) => {
         // date so the sale lands in the correct Mon–Sat pay week (the pay
         // engine casts to a UTC date).
         const pinned = `${metric_date}T20:00:00.000Z`
-        const leadCols = 'id, sale_amount, status, deny_reason'
-        const { data: existingLead } = await supabaseAdmin
+        const leadCols = 'id, monday_item_id, canvasser_id, sale_amount, status, deny_reason'
+        type LeadRow = {
+          id: string; monday_item_id: string | number | null; canvasser_id: string | null
+          sale_amount: number | null; status: string; deny_reason: string | null
+        }
+        // Family-wide lookup (one lead per copy family). Preference mirrors
+        // the copy gate's family sync: the confirmed row, else our own
+        // revert marker, else the card's own row (a human-denied lead must
+        // still reach syncExistingLead's denied-skip guard, never be
+        // shadowed by a sibling's empty slot).
+        const pickFamilyLead = (rows: LeadRow[]): LeadRow | null =>
+          rows.find((l) => l.status === 'confirmed') ??
+          rows.find((l) => l.deny_reason === REVERT_REASON) ??
+          rows.find((l) => String(l.monday_item_id) === mondayItemId) ??
+          rows[0] ?? null
+        const { data: famLeadRows } = await supabaseAdmin
           .from('leads')
           .select(leadCols)
-          .eq('monday_item_id', mondayItemId)
-          .maybeSingle()
+          .in('monday_item_id', familyIds)
+        const famLeads = (famLeadRows ?? []) as LeadRow[]
+        const existingLead = pickFamilyLead(famLeads)
+        const famConfirmed = famLeads.filter((l) => l.status === 'confirmed')
+        if (famConfirmed.length > 1) {
+          // An already-doubled family (pre-fix damage or a delivery race).
+          // Detection only — board is ground truth, history goes through
+          // supabase/corrections/, never an auto-void.
+          await supabaseAdmin.from('webhook_logs').insert({
+            step: 'Sale_Lead_Family_Duplicate',
+            data: {
+              pulseId: mondayItemId, family: familyIds, salePrice,
+              leadIds: famConfirmed.map((l) => l.id),
+              note: 'More than one confirmed lead in this copy family — audit and correct by hand',
+            },
+          })
+        }
+        if (existingLead && String(existingLead.monday_item_id) !== mondayItemId) {
+          await supabaseAdmin.from('webhook_logs').insert({
+            step: 'Sale_Lead_Family_Synced',
+            data: {
+              pulseId: mondayItemId, family: familyIds, salePrice,
+              leadId: existingLead.id, leadPulseId: String(existingLead.monday_item_id),
+              note: "Copy-family event syncing the family's one lead instead of minting a second",
+            },
+          })
+        }
 
         // Sync an existing lead to Monday's current state. created_at and
         // reviewed_at stay untouched so the pay week never shifts. A lead
         // denied by a human at the Confirmation Desk is never resurrected —
         // only our own automatic revert marker may be re-confirmed.
-        type LeadRow = { id: string; sale_amount: number | null; status: string; deny_reason: string | null }
         const syncExistingLead = async (lead: LeadRow) => {
           if (lead.status === 'denied' && lead.deny_reason !== REVERT_REASON) {
             await supabaseAdmin.from('webhook_logs').insert({
@@ -1427,9 +1500,11 @@ serve(async (req) => {
           })
         }
 
-        if (officeAppt && existingLead) {
+        if (officeAppt && existingLead && existingLead.canvasser_id !== officeCreditId) {
           // Roll-forward only: flag, do not rewrite a lead a real person
           // already holds (that is a correction file + owner decision).
+          // A family lead already on the channel is the normal copy-family
+          // sync path, not a reattribution case — no alarm for those.
           await supabaseAdmin.from('webhook_logs').insert({
             step: 'Office_Appt_Lead_Needs_Reattribution',
             data: {
@@ -1461,13 +1536,14 @@ serve(async (req) => {
           if (leadErr) {
             if ((leadErr as { code?: string }).code === '23505') {
               // Lost a concurrent-insert race: another request owns the lead
-              // now — re-read it and sync so this event's price isn't lost.
+              // now — re-read the family and sync so this event's price
+              // isn't lost.
               const { data: raced } = await supabaseAdmin
                 .from('leads')
                 .select(leadCols)
-                .eq('monday_item_id', mondayItemId)
-                .maybeSingle()
-              if (raced) await syncExistingLead(raced as LeadRow)
+                .in('monday_item_id', familyIds)
+              const racedLead = pickFamilyLead((raced ?? []) as LeadRow[])
+              if (racedLead) await syncExistingLead(racedLead)
             } else {
               await supabaseAdmin.from('webhook_logs').insert({
                 step: 'Sale_Lead_Insert_Error',
@@ -1485,17 +1561,25 @@ serve(async (req) => {
         }
       } else if (prevBucket === 'sales') {
         // Sale reverted in Monday (bucket is not 'sales' on this branch) →
-        // drop the commission but keep the audit row.
+        // drop the commission but keep the audit row. Family-wide: after
+        // the copy-family dedupe, the family's one lead may be keyed to the
+        // sibling the office kept — a revert delivered on either twin must
+        // still find it.
         const { data: voided } = await supabaseAdmin
           .from('leads')
           .update({ status: 'denied', deny_reason: REVERT_REASON })
-          .eq('monday_item_id', mondayItemId)
+          .in('monday_item_id', familyIds)
           .eq('status', 'confirmed')
           .select('id')
         if (voided && voided.length > 0) {
           await supabaseAdmin.from('webhook_logs').insert({
             step: 'Sale_Lead_Voided',
-            data: { pulseId: mondayItemId, leadId: voided[0].id },
+            data: {
+              pulseId: mondayItemId, leadId: voided[0].id,
+              ...(voided.length > 1 || familyIds.length > 1
+                ? { family: familyIds, voidedLeadIds: voided.map((v) => v.id) }
+                : {}),
+            },
           })
         }
       } else if (isPriceEvent && !itemIsSold) {
