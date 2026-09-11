@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { isAdminRole } from "@/lib/roles";
 import { destinationByRole } from "@/lib/redirect-by-role";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -129,6 +129,7 @@ function Loading() {
 function NoRole() {
   const { user } = useAuth();
   const userId = user?.id;
+  const qc = useQueryClient();
   const { data: hasRole } = useQuery({
     enabled: !!user,
     queryKey: ["waiting_room_role", user?.id],
@@ -138,6 +139,24 @@ function NoRole() {
       return (data ?? []).length > 0;
     },
   });
+
+  // One-shot roster self-claim on arrival (claim_roster_spot): covers Google
+  // signups (no claim ran on the auth page) and accounts created before the
+  // claim RPC existed. A hit grants the role server-side; poking the poll
+  // below turns the grant into the normal unlock, no special path.
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.rpc("claim_roster_spot");
+      if (!cancelled && (data as { status?: string } | null)?.status === "claimed") {
+        qc.invalidateQueries({ queryKey: ["waiting_room_role"] });
+      }
+    })().catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, qc]);
 
   useEffect(() => {
     if (!hasRole || !userId) return;
@@ -214,7 +233,9 @@ function NoRole() {
         happens {destination} — nothing to refresh, no need to sign out.
       </p>
       <p className="mt-3 text-xs text-muted-foreground">
-        Starting a shift right now? Ping your Captain to activate you on the spot.
+        Starting a shift right now? Ping your Captain to activate you on the spot. Heads up: if you
+        signed up under a different name than the office uses for you, that's usually why you're
+        waiting.
       </p>
       <div className="mt-5 inline-flex items-center gap-2 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
         <span className="w-2 h-2 rounded-full bg-neon animate-pulse" aria-hidden />

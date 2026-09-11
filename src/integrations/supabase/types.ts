@@ -1289,6 +1289,7 @@ export type Database = {
         Args: { _canvasser_id: string }
         Returns: undefined
       }
+      claim_roster_spot: { Args: never; Returns: Json }
       global_visibility_on: { Args: never; Returns: boolean }
       has_role: {
         Args: {
