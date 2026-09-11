@@ -18,6 +18,14 @@ export function laTodayISO(): string {
   return laDateISO(new Date());
 }
 
+/** "05:30" / "05:30:00" (PT wall-clock time string, e.g. a PG `time`) → "5:30 AM". */
+export function fmtWallTime(t: string): string {
+  const [h, m] = t.split(":").map(Number);
+  const ampm = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(m).padStart(2, "0")} ${ampm}`;
+}
+
 /** Local-midnight Date for a YYYY-MM-DD calendar date (for UI state/labels). */
 export function dateFromISO(iso: string): Date {
   const [y, m, d] = iso.split("-").map(Number);
