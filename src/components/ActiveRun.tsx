@@ -427,6 +427,7 @@ export function ActiveRun({
                   dollars={piggy.dollars}
                   perKnock={piggy.perKnock}
                   knocks={piggy.knocks}
+                  paceKnocks={piggy.paceKnocks}
                   source={piggy.source}
                   demo={piggyDemo.on}
                   demoRateMs={piggyDemo.rateMs}

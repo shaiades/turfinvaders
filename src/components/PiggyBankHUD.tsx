@@ -174,6 +174,7 @@ export const PiggyBankHUD = memo(function PiggyBankHUD({
   dollars,
   perKnock,
   knocks,
+  paceKnocks = null,
   source = "company",
   variant = "map",
   demo = false,
@@ -183,6 +184,8 @@ export const PiggyBankHUD = memo(function PiggyBankHUD({
   dollars: number | null;
   perKnock: number | null;
   knocks: number;
+  /** Knocks still needed this week to stay on income-goal pace. */
+  paceKnocks?: number | null;
   source?: "personal" | "company";
   variant?: Variant;
   /** Preview driver (?piggy_demo=1) — fakes knocks locally, writes nothing. */
@@ -489,6 +492,14 @@ export const PiggyBankHUD = memo(function PiggyBankHUD({
           {dl !== null && perKnockEff !== null
             ? `${kn} doors · ${formatCurrency(Math.round(dl))} projected`
             : `${kn} doors · awaiting rate data`}
+          {paceKnocks !== null && paceKnocks > 0 && (
+            <span className="block text-[var(--warning)]">
+              ≈{paceKnocks.toLocaleString()} knocks to week goal
+            </span>
+          )}
+          {paceKnocks === 0 && (
+            <span className="block text-victory">Week goal covered 🏆</span>
+          )}
         </div>
       )}
       <span className="sr-only" aria-live="polite">

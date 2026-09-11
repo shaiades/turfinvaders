@@ -25,6 +25,42 @@ export type ConversionRates = {
 
 export const EMPTY_AGGREGATE: FunnelAggregate = { doors: 0, confirmed: 0, sits: 0, sales: 0 };
 
+/** The day the result-counts-as-knock trigger went live (migration
+ *  20260910230000). doors_knocked is trustworthy only from here — the 60-day
+ *  company window holds ~99 doors total and ALL of them are from this era,
+ *  so any rate that divides by doors must use this window or it lies. */
+export const DOORS_TRACKED_SINCE = "2026-09-10";
+
+/** The funnel's stages live in different windows on purpose: confirms come
+ *  from daily_metrics (the office pipeline — daily_logs.confirmed_leads has
+ *  never been written), sits/sales from daily_logs, and the door pair only
+ *  from the pin era. Each rate divides quantities from the SAME window. */
+export type SplitFunnelInputs = {
+  /** Pin-era pair (since DOORS_TRACKED_SINCE): doors + confirms. */
+  eraDoors: number;
+  eraConfirmed: number;
+  /** Full 60-day pipeline counts. */
+  confirmed: number;
+  sits: number;
+  sales: number;
+};
+
+export const EMPTY_SPLIT: SplitFunnelInputs = {
+  eraDoors: 0,
+  eraConfirmed: 0,
+  confirmed: 0,
+  sits: 0,
+  sales: 0,
+};
+
+export function deriveSplitRates(i: SplitFunnelInputs): ConversionRates {
+  return {
+    closeRate: i.sits > 0 ? i.sales / i.sits : 0,
+    sitRate: i.confirmed > 0 ? i.sits / i.confirmed : 0,
+    leadDoorRate: i.eraDoors > 0 ? i.eraConfirmed / i.eraDoors : 0,
+  };
+}
+
 /** Personal history qualifies on volume, not tenure. */
 export const PERSONAL_MIN_DOORS = 200;
 export const PERSONAL_MIN_SITS = 5;

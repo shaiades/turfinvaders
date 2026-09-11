@@ -169,9 +169,14 @@ export function useCanvasserStats(userId: string) {
 
     const weekPoints = weeklyPoints(week.demos_sits, week.sales);
     const weekHours = clockedQuery.data ?? 0;
-    const hourlyRate = payRateForPoints(weekPoints);
+    // Rank rate-locks apply here too — the display estimate must never
+    // disagree with calc_weekly_paycheck. A reverted pay lock suspends the
+    // rank rate, so the rank is withheld from the tier math in that state.
+    const rankForRates =
+      profile.data?.pay_lock_status === "reverted" ? null : (profile.data?.current_rank ?? null);
+    const hourlyRate = payRateForPoints(weekPoints, rankForRates);
     const weekBase = weekHours * hourlyRate;
-    const weekCommission = weekRevenue * commissionRateForPoints(weekPoints);
+    const weekCommission = weekRevenue * commissionRateForPoints(weekPoints, rankForRates);
     // Month-level projection uses the base rate — the real per-week rate comes from the RPC.
     const monthCommission = monthRevenue * COMMISSION_BASE;
 
@@ -192,7 +197,7 @@ export function useCanvasserStats(userId: string) {
           ? personalAgg.people_talked_to / personalAgg.doors_knocked
           : null,
     };
-  }, [logsQuery.data, salesQuery.data, clockedQuery.data]);
+  }, [logsQuery.data, salesQuery.data, clockedQuery.data, profile.data]);
 
   // Talk-per-door: personal 60d history when it's driving the rates,
   // industry-typical ~27% otherwise (talks aren't in the company baseline).

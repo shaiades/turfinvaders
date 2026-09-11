@@ -1,9 +1,10 @@
 import { useRef } from "react";
 import { laTodayISO } from "@/lib/dates";
 import { expectedValuePerDoor, resolveAvgCommission } from "@/lib/funnel";
-import { DEFAULT_AVG_COMMISSION } from "@/hooks/useCanvasserStats";
+import { DEFAULT_AVG_COMMISSION, DEFAULT_WEEKLY_GOAL } from "@/hooks/useCanvasserStats";
 import { useCanvasserProfile } from "@/hooks/useCanvasserProfile";
 import { useFunnelRates } from "@/hooks/useFunnelRates";
+import { useMyEarnings } from "@/hooks/useMyEarnings";
 import { sumLogCounters, useTodayLogs } from "@/hooks/useDailyLogs";
 import { useMyPinsToday } from "@/hooks/useFieldPins";
 
@@ -25,6 +26,10 @@ export type PiggyBank = {
   perKnock: number | null;
   /** Latched bank total; null = doors-only mode. */
   dollars: number | null;
+  /** Knocks still needed THIS WEEK to close the income-goal gap at the
+   *  current per-knock value; null when rates or earnings are unavailable,
+   *  0 when the goal is already covered. */
+  paceKnocks: number | null;
   source: "personal" | "company";
   isLoading: boolean;
 };
@@ -74,10 +79,22 @@ export function usePiggyBank(userId: string | undefined): PiggyBank {
     };
   }
 
+  // Pace: how many knocks the rest of the week must produce at today's
+  // per-knock value to cover what the weekly goal still needs. weekEarned is
+  // pay-engine truth (shared cache with Mission — one fetch per session).
+  const earnings = useMyEarnings(userId ?? "");
+  const weeklyGoal =
+    Number(profile.data?.weekly_income_goal ?? 0) || DEFAULT_WEEKLY_GOAL;
+  const paceKnocks =
+    perKnock !== null && perKnock > 0 && !earnings.isLoading
+      ? Math.max(0, Math.ceil(Math.max(0, weeklyGoal - earnings.weekEarned) / perKnock))
+      : null;
+
   return {
     knocks,
     perKnock,
     dollars: latch.current.dollars,
+    paceKnocks,
     source: funnel.source,
     isLoading: funnel.isLoading || (pinsQuery.isLoading && todayLogs.isLoading),
   };

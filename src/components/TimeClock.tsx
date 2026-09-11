@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Clock, Play, Square, Utensils, AlertTriangle } from "lucide-react";
-import { fmtWallTime, laDateISO, laTodayISO } from "@/lib/dates";
+import { addDaysISO, fmtWallTime, laDateISO, laTodayISO } from "@/lib/dates";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { useOpenShift, useTodayShifts } from "@/hooks/useTimeClockSelf";
 
 import { ArcadePanel } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
@@ -52,21 +53,7 @@ export function TimeClock({ userId }: { userId: string }) {
     isPending: openPending,
     isError: openError,
     refetch: refetchOpen,
-  } = useQuery({
-    queryKey: ["time-clock-open", userId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("time_entries")
-        .select("id, clock_in, clock_out, log_date, billable_hours, meal_status")
-        .eq("user_id", userId)
-        .is("clock_out", null)
-        .order("clock_in", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (error) throw error;
-      return data;
-    },
-  });
+  } = useOpenShift(userId);
 
   // Meals on the open shift: drives the lunch button and the attestation skip.
   const { data: openMeals } = useQuery({
@@ -104,20 +91,7 @@ export function TimeClock({ userId }: { userId: string }) {
     },
   });
 
-  const { data: todayEntries } = useQuery({
-    queryKey: ["time-clock-today", userId, today],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("time_entries")
-        .select("id, clock_in, clock_out, billable_hours, meal_status, entry_source, voided_at")
-        .eq("user_id", userId)
-        .eq("log_date", today)
-        .is("voided_at", null)
-        .order("clock_in", { ascending: true });
-      if (error) throw error;
-      return data ?? [];
-    },
-  });
+  const { data: todayEntries } = useTodayShifts(userId);
 
   // Recent auto-closes awaiting a human: the worker should see (and dispute)
   // a fabricated end time, not discover it on payday.
@@ -130,6 +104,9 @@ export function TimeClock({ userId }: { userId: string }) {
         .eq("user_id", userId)
         .eq("needs_correction", true)
         .is("voided_at", null)
+        // A week is long enough to notice and dispute — a stale auto-close
+        // from three weeks ago pinned to the top of Mission is just noise.
+        .gte("log_date", addDaysISO(laTodayISO(), -7))
         .order("clock_in", { ascending: false })
         .limit(3);
       if (error) throw error;
