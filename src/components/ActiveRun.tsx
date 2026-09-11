@@ -4,14 +4,16 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { requiresGratitudeGate } from "@/lib/roles";
 import { assigneeColor } from "@/lib/assignee-colors";
-import { laTodayISO } from "@/lib/dates";
 import { getMondayFormUrl } from "@/lib/monday-form";
 import { useGeoWatch, useFieldPins, type ActivePin } from "@/hooks/useFieldPins";
-import { dailyLogKeys, sumLogCounters, useTodayLogs, type DailyLogRow } from "@/hooks/useDailyLogs";
+import { dailyLogKeys, sumLogCounters, useTodayLogs } from "@/hooks/useDailyLogs";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { GratitudeGate, hasPassedGratitudeGate } from "@/components/GratitudeGate";
-import { NeonMap, type Territory, type LatLng } from "@/components/NeonMap";
+import { NeonMap, type Territory, type LatLng, type FieldPin } from "@/components/NeonMap";
 import { PinActionSheet } from "@/components/PinActionSheet";
+import { HouseResultSheet } from "@/components/HouseResultSheet";
+import { FieldStandingsSheet } from "@/components/FieldStandingsSheet";
+import type { OsmHouse } from "@/components/HouseBubbles";
 import { ArcadePanel } from "@/components/arcade";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -26,9 +28,7 @@ import {
   KeyRound,
   Undo2,
   CalendarCheck,
-  DoorOpen,
-  MessagesSquare,
-  Ban,
+  Trophy,
   Zap,
   X,
   Loader2,
@@ -36,77 +36,82 @@ import {
 
 /**
  * ACTIVE RUN — the one canvass screen (owner decision 2026-09-08, merging the
- * old /field tally page and /my-territory map page). Layout is one phone
- * screen: header strip, the live turf map with the armed-result switcher
- * floating on it, then the four tally keys + the Submit New Lead CTA. The
- * Gratitude Gate fronts the WHOLE screen now (it used to guard only the map).
+ * old /field tally page and /my-territory map page). Simplified 2026-09-10
+ * (owner directive, D2DU-video parity): no more "hit Knock, then what
+ * happened" — the rep logs THE RESULT, and every result counts as a knock
+ * (the reworked bump_daily_log_from_pin cascades doors/talked server-side).
  *
- * Two ways to log, both through useFieldPins:
- *  - Tally buttons: one tap per door at your own feet (pin = device fix).
- *  - Armed chips + map tap: result pins on specific houses (NH across the
- *    street, tonight's go-backs) — >18 m away flags a stat-dead Remote Drop.
+ * Three ways to log, all through useFieldPins:
+ *  - House bubbles: tap the house on the map → one-tap result sheet.
+ *  - Result keys: one tap logs that result at your own feet (pin = device fix).
+ *  - Armed chips + map tap: result pins on houses without a bubble (rural,
+ *    new builds) — >18 m away still flags a stat-dead Remote Drop.
  *
  * variant="captain" (their Territory tab): all turfs with assignee labels,
- * no polygon lock, no reassignment toast — and, new with the merge, captains
- * drop and correct their own pins like any canvasser. Turf drawing lives
- * behind the route's Turf Tools toggle (ManagerTerritoryView), not here.
+ * no turf framing, no reassignment toast — captains drop and correct their
+ * own pins like any canvasser. Turf drawing lives behind the route's Turf
+ * Tools toggle (ManagerTerritoryView), not here.
  */
 
-type TallyKey = "doors_knocked" | "people_talked_to" | "not_interested" | "renters";
 type PinType = ActivePin;
 
-const TALLY_TO_PIN: Record<TallyKey, PinType> = {
-  doors_knocked: "knock",
-  people_talked_to: "talked_to",
-  not_interested: "not_interested",
-  renters: "renter",
-};
-
-/** The four tally keys as data (house pattern — FUNNEL_COLS, COMPANY_TILES),
- *  in the dispatch board's Door Work order (Drs/Tlk/NI/Rnt, PR #159) so the
- *  grid and the board read the same. Renter's count comes from
- *  daily_logs.renters — pins feed it only once migration 20260910200000 is
- *  applied (before that a Renter tap still pins + bumps Talked To, but this
- *  key's own count won't tick). The Submit New Lead CTA stays hand-rolled
- *  below the grid because it really is different (full-width, pulse glow,
- *  no count, opens the sheet). */
-const TALLIES: Array<{
-  key: TallyKey;
-  label: string;
-  icon: typeof DoorOpen;
-  color: string;
-}> = [
-  { key: "doors_knocked", label: "Log Knock", icon: DoorOpen, color: "var(--neon-blue)" },
-  {
-    key: "people_talked_to",
-    label: "Talked To",
-    icon: MessagesSquare,
-    color: "var(--neon-orange)",
-  },
-  { key: "not_interested", label: "Not Interested", icon: Ban, color: "oklch(0.65 0.03 270)" },
-  { key: "renters", label: "Renter", icon: KeyRound, color: "#c77dff" },
-];
-
-// The six knock results (owner directive 2026-08-15). Appt is map-only:
-// appointments and sales are counted from Monday.com, never from pins.
+// The six knock results (owner directive 2026-08-15; one-tap-counts since
+// 2026-09-10). Appt pins mark the house and count the door — appointment
+// COUNTS still come from Monday.com, never from pins.
 const KNOCK_RESULTS: Array<{
   type: ActivePin;
   label: string;
+  fullLabel: string;
   color: string;
   icon: React.ReactNode;
 }> = [
-  { type: "lead", label: "Lead", color: "#39ff14", icon: <Sparkles className="w-4 h-4" /> },
-  { type: "not_home", label: "NH", color: "#ff2d55", icon: <Home className="w-4 h-4" /> },
-  { type: "go_back", label: "GB", color: "#00e5ff", icon: <Undo2 className="w-4 h-4" /> },
-  { type: "renter", label: "Renter", color: "#c77dff", icon: <KeyRound className="w-4 h-4" /> },
+  {
+    type: "lead",
+    label: "Lead",
+    fullLabel: "Lead",
+    color: "#39ff14",
+    icon: <Sparkles className="w-4 h-4" />,
+  },
+  {
+    type: "not_home",
+    label: "NH",
+    fullLabel: "Not Home",
+    color: "#ff2d55",
+    icon: <Home className="w-4 h-4" />,
+  },
+  {
+    type: "go_back",
+    label: "GB",
+    fullLabel: "Go Back",
+    color: "#00e5ff",
+    icon: <Undo2 className="w-4 h-4" />,
+  },
+  {
+    type: "renter",
+    label: "Renter",
+    fullLabel: "Renter",
+    color: "#c77dff",
+    icon: <KeyRound className="w-4 h-4" />,
+  },
   {
     type: "not_interested",
     label: "NI",
+    fullLabel: "Not Interested",
     color: "#ff6b00",
     icon: <ThumbsDown className="w-4 h-4" />,
   },
-  { type: "appt", label: "Appt", color: "#ffd60a", icon: <CalendarCheck className="w-4 h-4" /> },
+  {
+    type: "appt",
+    label: "Appt",
+    fullLabel: "Appt Set",
+    color: "#ffd60a",
+    icon: <CalendarCheck className="w-4 h-4" />,
+  },
 ];
+
+/** The at-your-feet result keys: everything but Lead (the Submit New Lead CTA
+ *  owns the lead flow — pin + Monday form). */
+const FEET_RESULTS = KNOCK_RESULTS.filter((r) => r.type !== "lead");
 
 type TurfRow = {
   id: string;
@@ -147,7 +152,8 @@ export function ActiveRun({
   const [leadOpen, setLeadOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [pending, setPending] = useState<PinType | null>(null);
-  const log_date = laTodayISO();
+  const [houseTarget, setHouseTarget] = useState<OsmHouse | null>(null);
+  const [standingsOpen, setStandingsOpen] = useState(false);
 
   // Whole-day totals across office rows, from the shared today-logs cache —
   // the same rows the Log form, Stats page, and HUD read.
@@ -262,36 +268,43 @@ export function ActiveRun({
     ? ((pins.pinsQuery.data ?? []).find((p) => p.id === editingPinId) ?? null)
     : null;
 
-  async function bump(key: TallyKey) {
+  /** One tap = the knock AND its result, at your own feet. The optimistic
+   *  row goes into the PIN cache (the keys count pins now), and the reworked
+   *  bump trigger cascades doors/talked server-side — nothing here decides
+   *  what counts. */
+  async function logResult(pin_type: PinType) {
     if (!user?.id) return;
-    // Block BEFORE the optimistic +1 (mirror of guardedMapDrop): without
+    // Block BEFORE the optimistic row (mirror of guardedMapDrop): without
     // this, a no-GPS tap counted up, waited out the 8 s fix timeout, then
     // silently rewound — a rookie's first knock looked like a glitch.
     if (!me) {
       toast.error("No GPS fix yet — enable Location and try again.");
       return;
     }
-    const pin_type = TALLY_TO_PIN[key];
-    const todayKey = dailyLogKeys.today(user.id, log_date);
     setPending(pin_type);
+    await qc.cancelQueries({ queryKey: pins.pinsKey });
+    qc.setQueryData<FieldPin[]>(pins.pinsKey, (prev) => [
+      ...(prev ?? []),
+      {
+        id: `optimistic-${crypto.randomUUID()}`,
+        pin_type,
+        lat: me.lat,
+        lng: me.lng,
+        is_remote_drop: false,
+        pending: true,
+      },
+    ]);
     try {
-      // Optimistic +1 as an appended synthetic row via functional updater —
-      // sumLogCounters folds it into the total, and a render-captured
-      // snapshot would lose counts when two buttons are tapped in quick
-      // succession (both would base on the same stale array).
-      qc.setQueryData<DailyLogRow[]>(todayKey, (prev) => [...(prev ?? []), { log_date, [key]: 1 }]);
       const res = await pins.dropAtDevice(pin_type);
-      if (!res.ok) {
-        // Refetch server truth instead of restoring a snapshot that may
-        // predate a concurrent tap's +1.
-        qc.invalidateQueries({ queryKey: todayKey });
-      } else {
-        qc.invalidateQueries({ queryKey: ["my_pins_today", user.id] });
-        // bump_daily_log_from_pin has committed — swap the synthetic row for
-        // server truth and let the Log form / Stats / HUD refresh too.
+      if (res.ok) {
+        // bump_daily_log_from_pin has committed — let the Log form / Stats /
+        // HUD / today-line refresh too.
         qc.invalidateQueries({ queryKey: dailyLogKeys.all(user.id) });
       }
     } finally {
+      // Refetch server truth on both outcomes — reconciles the optimistic
+      // row, or removes it after an error.
+      qc.invalidateQueries({ queryKey: ["my_pins_today", user.id] });
       setPending(null);
     }
   }
@@ -418,7 +431,9 @@ export function ActiveRun({
                   me={me}
                   height="clamp(260px, 42dvh, 460px)"
                   follow
-                  lockPolygons={!isCaptain ? lockPolygons : undefined}
+                  fitPolygons={!isCaptain ? lockPolygons : undefined}
+                  houseBubbles
+                  onHouseTap={(h) => setHouseTarget(h)}
                   mode={{
                     kind: "pin",
                     onDrop: (ll: LatLng) => pins.guardedMapDrop(ll, active),
@@ -428,6 +443,17 @@ export function ActiveRun({
                   }}
                   onPinClick={(id) => setEditingPinId(id)}
                 />
+
+                {/* Standings — the video app's leaderboard, one tap from the map */}
+                <button
+                  type="button"
+                  data-tour="field-standings"
+                  aria-label="Open standings"
+                  onClick={() => setStandingsOpen(true)}
+                  className="absolute bottom-16 left-3 z-[1000] flex h-11 w-11 items-center justify-center rounded-full border border-neon/60 bg-surface/90 backdrop-blur text-neon"
+                >
+                  <Trophy className="h-5 w-5" />
+                </button>
 
                 {/* Armed-result switcher pinned to the map — the ONE picker
                     (the old page's duplicate grid is gone with the merge) */}
@@ -469,21 +495,27 @@ export function ActiveRun({
             )}
           </div>
 
-          {/* ---- Tally slot ---- */}
+          {/* ---- Result keys: one tap = the knock AND its result ---- */}
           <div className="md:col-span-2 space-y-3 md:space-y-6">
             <div className="space-y-2.5 md:space-y-3">
               <div data-tour="field-tallies" className="grid grid-cols-2 gap-2.5 md:gap-3">
-                {TALLIES.map((t) => (
-                  <TallyButton
-                    key={t.key}
-                    label={t.label}
-                    icon={t.icon}
-                    value={today?.[t.key] ?? 0}
-                    onClick={() => bump(t.key)}
-                    loading={pending === TALLY_TO_PIN[t.key]}
-                    color={t.color}
+                {FEET_RESULTS.map((r) => (
+                  <ResultKey
+                    key={r.type}
+                    label={r.fullLabel}
+                    icon={r.icon}
+                    value={pins.counts[r.type] ?? 0}
+                    onClick={() => logResult(r.type)}
+                    loading={pending === r.type}
+                    color={r.color}
+                    wide={r.type === "appt"}
                   />
                 ))}
+              </div>
+              {/* Cascaded truth, so nobody misses the old Knock/Talked keys:
+                  every result above already counted these. */}
+              <div className="text-center font-display text-[9px] uppercase tracking-widest text-muted-foreground">
+                Today · {today?.doors_knocked ?? 0} doors · {today?.people_talked_to ?? 0} talked
               </div>
               <div className="pulse-glow-wrapper w-full" data-tour="field-lead">
                 <button
@@ -517,6 +549,27 @@ export function ActiveRun({
       </div>
 
       {leadOpen && <LeadSheet onClose={() => setLeadOpen(false)} />}
+
+      {/* One-tap result on a tapped house bubble (drop or same-day switch) */}
+      <HouseResultSheet
+        open={!!houseTarget}
+        onOpenChange={(v) => {
+          if (!v) setHouseTarget(null);
+        }}
+        house={houseTarget}
+        results={KNOCK_RESULTS}
+        busy={pins.dropAtPoint.isPending || pins.updatePin.isPending}
+        onDrop={(h, pin_type) => {
+          pins.guardedMapDrop({ lat: h.lat, lng: h.lng }, pin_type);
+          // A lead IS the Monday form — the pin marks the house, the form
+          // submits the lead (one flow, owner directive 2026-09-10).
+          if (pin_type === "lead") setLeadOpen(true);
+        }}
+        onSwitch={(pinId, pin_type) => pins.updatePin.mutate({ id: pinId, pin_type })}
+      />
+
+      {/* SALE / DK / PTT / CL% standings + Stats Key */}
+      <FieldStandingsSheet open={standingsOpen} onOpenChange={setStandingsOpen} />
 
       {/* Pin corrections: tap a pin → switch result / delete (same-day only) */}
       <PinActionSheet
@@ -566,9 +619,13 @@ function HowItWorks() {
 function HowItWorksList() {
   return (
     <ul className="text-sm text-muted-foreground space-y-1.5">
-      <li>• The big buttons log the door you're standing at — one tap each.</li>
-      <li>• Your turf appears as a colored, named boundary on the map.</li>
-      <li>• For other houses: pick a result on the map bar, then tap that house.</li>
+      <li>
+        • One tap = the result AND the knock. Every result counts a door automatically — there is no
+        separate knock button.
+      </li>
+      <li>• Tap a house bubble on the map, then tap what happened at that door.</li>
+      <li>• The big keys log the same results at the door you're standing at.</li>
+      <li>• Your turf appears as a colored, named boundary; ZIP borders toggle bottom-right.</li>
       <li>
         • <span className="text-[#39ff14]">Lead</span> ·{" "}
         <span className="text-[#ff2d55]">NH = Not Home</span> ·{" "}
@@ -577,49 +634,54 @@ function HowItWorksList() {
         <span className="text-[#ff6b00]">NI = Not Interested</span> ·{" "}
         <span className="text-[#ffd60a]">Appt</span>.
       </li>
-      <li>• Appt pins mark the house only — appointments and sales are counted from Monday.</li>
+      <li>
+        • Submitting a Lead counts as a knock too. Appt pins mark the house — appointment and sale
+        counts still come from Monday.
+      </li>
       <li>
         • Pins dropped more than about 20 yards from where you stand are flagged as Remote Drops and
         don't count.
       </li>
       <li>
-        • Mis-tap? Tap the pin to switch its result or delete it — your stats adjust automatically
-        (today only).
+        • Mis-tap? Tap the house (or the pin) to switch the result or delete it — your stats adjust
+        automatically (today only).
       </li>
+      <li>• The trophy button shows live standings: SALE · DK · PTT · CL%.</li>
     </ul>
   );
 }
 
-function TallyButton({
+function ResultKey({
   label,
-  icon: Icon,
+  icon,
   value,
   onClick,
   loading,
   color,
+  wide = false,
 }: {
   label: string;
-  icon: typeof DoorOpen;
+  icon: React.ReactNode;
   value: number;
   onClick: () => void;
   loading: boolean;
   color: string;
+  /** Span both columns (the odd fifth key). */
+  wide?: boolean;
 }) {
   return (
-    // Scoreboard key: icon chip top-left, glowing count top-right, label on
-    // its own full-width line below (long labels never fight the count for
-    // room). Compact on phones — the map owns the vertical space — tall on md+.
+    // Scoreboard key: icon chip top-left, glowing count top-right (today's
+    // taps of THIS result), label on its own full-width line below. Compact
+    // on phones — the map owns the vertical space — tall on md+.
     <button
       type="button"
       onClick={onClick}
       disabled={loading}
-      className="arcade-key min-h-[4.5rem] md:min-h-[7rem] flex flex-col justify-between gap-1.5 p-2.5 md:p-3.5 text-left"
+      className={`arcade-key min-h-[4.5rem] md:min-h-[6rem] flex flex-col justify-between gap-1.5 p-2.5 md:p-3.5 text-left ${wide ? "col-span-2" : ""}`}
       style={{ ["--btn-color" as string]: color }}
     >
       <div className="w-full flex items-center justify-between gap-2">
-        <span className="arcade-key-icon shrink-0">
-          <Icon className="w-4 h-4 md:w-[18px] md:h-[18px]" />
-        </span>
+        <span className="arcade-key-icon shrink-0">{icon}</span>
         {loading ? (
           <Loader2 className="w-5 h-5 md:w-6 md:h-6 animate-spin" style={{ color }} />
         ) : (
