@@ -13,7 +13,7 @@ import type { FieldPin, LatLng } from "@/components/NeonMap";
  * Active Run + Territory). Two formerly-divergent insert paths live here on
  * purpose so they can never drift again:
  *  - dropAtPoint: a map tap — pin lands where tapped, distance to the device
- *    fix is measured, >18 m flags Remote Drop (stat-dead in the bump trigger).
+ *    fix is measured, >75 yd flags Remote Drop (stat-dead in the bump trigger).
  *  - dropAtDevice: a tally-button tap — the pin IS the device fix, so
  *    distance_m is 0 and is_remote_drop false by construction.
  * The bump_daily_log_from_pin trigger owns all counter math; nothing in this
@@ -21,6 +21,11 @@ import type { FieldPin, LatLng } from "@/components/NeonMap";
  */
 
 export type ActivePin = FieldPin["pin_type"];
+
+/** Map-tapped pins farther than this from the device flag as stat-dead
+ *  Remote Drops. 75 yards (owner call 2026-09-12 — was 18 m/~20 yd: reps
+ *  work whole cul-de-sacs from one spot and honest drops kept flagging). */
+export const REMOTE_DROP_LIMIT_M = 75 * 0.9144; // 68.58 m
 
 export const RESULT_TOASTS: Partial<Record<ActivePin, string>> = {
   lead: "🟢 Lead pin dropped",
@@ -130,7 +135,7 @@ export function useFieldPins(userId: string | undefined, me: LatLng | null) {
         throw new Error("No GPS fix — pin not saved. Wait for the blue dot and try again.");
       }
       const distance_m = haversineMeters(device, ll);
-      const is_remote_drop = distance_m > 18;
+      const is_remote_drop = distance_m > REMOTE_DROP_LIMIT_M;
       const { error } = await supabase.from("field_pins").insert({
         canvasser_id: userId!,
         pin_type,

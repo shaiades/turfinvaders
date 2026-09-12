@@ -44,7 +44,7 @@ import {
  * Three ways to log, all through useFieldPins:
  *  - House bubbles: tap the house on the map → one-tap result sheet.
  *  - Armed chips + map tap: result pins on houses without a bubble (rural,
- *    new builds) — >18 m away still flags a stat-dead Remote Drop.
+ *    new builds) — >75 yd away still flags a stat-dead Remote Drop.
  *  The screen is map-first (owner 2026-09-11): no key grid — the map gets
  *  the room, Submit New Lead keeps its own big key below.
  *
@@ -576,8 +576,8 @@ function HowItWorksList() {
         Appointment and sale counts come from Monday.
       </li>
       <li>
-        • Pins dropped more than about 20 yards from where you stand are flagged as Remote Drops and
-        don't count.
+        • Pins dropped more than 75 yards from where you stand are flagged as Remote Drops and don't
+        count.
       </li>
       <li>
         • Mis-tap? Tap the house (or the pin) to switch the result or delete it — your stats adjust
