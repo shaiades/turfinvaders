@@ -21,13 +21,13 @@ import { ArcadePanel } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import {
-  Home,
+  DoorClosed,
   Sparkles,
   Crosshair,
   Pencil,
   ThumbsDown,
   KeyRound,
-  Undo2,
+  Clock3,
   Trophy,
   Zap,
   X,
@@ -60,43 +60,63 @@ type PinType = ActivePin;
 // 2026-09-10; Appt REMOVED 2026-09-11 — "appt set and submit new lead are
 // the same technically": setting an appointment IS submitting a lead, so
 // the Lead flow owns it. Legacy appt pins keep rendering via pin-results.
+// label = the short badge/legend form; fullLabel = the words the sheets
+// spell out; chipLabel = the caption under the armed chips (owner ask
+// 2026-09-12: icon-only chips were riddles — a HOUSE icon meaning "nobody
+// home" and an undo arrow meaning "come back later" told rookies nothing).
 const KNOCK_RESULTS: Array<{
   type: ActivePin;
   label: string;
+  fullLabel: string;
+  chipLabel: string;
   color: string;
   icon: React.ReactNode;
 }> = [
   {
     type: "lead",
     label: "Lead",
+    fullLabel: "Lead",
+    chipLabel: "Lead",
     color: "#39ff14",
     icon: <Sparkles className="w-4 h-4" />,
   },
   {
     type: "not_home",
     label: "NH",
+    fullLabel: "Not Home",
+    chipLabel: "Not Home",
     color: "#ff2d55",
-    icon: <Home className="w-4 h-4" />,
+    icon: <DoorClosed className="w-4 h-4" />,
   },
   {
     type: "go_back",
     label: "GB",
+    fullLabel: "Go Back Later",
+    chipLabel: "Go Back",
     color: "#00e5ff",
-    icon: <Undo2 className="w-4 h-4" />,
+    icon: <Clock3 className="w-4 h-4" />,
   },
   {
     type: "renter",
     label: "Renter",
+    fullLabel: "Renter",
+    chipLabel: "Renter",
     color: "#c77dff",
     icon: <KeyRound className="w-4 h-4" />,
   },
   {
     type: "not_interested",
     label: "NI",
+    fullLabel: "Not Interested",
+    chipLabel: "Not Int.",
     color: "#ff6b00",
     icon: <ThumbsDown className="w-4 h-4" />,
   },
 ];
+
+// The sheets spell results out in full — abbreviations were the barrier,
+// and the tap tiles have the room.
+const SHEET_RESULTS = KNOCK_RESULTS.map((r) => ({ ...r, label: r.fullLabel }));
 
 // The armed-chip bar drops Lead from the vocabulary (owner call 2026-09-11:
 // "just use Submit New Lead") — an armed map-tap lead pin skipped the Monday
@@ -433,9 +453,9 @@ export function ActiveRun({
                     <button
                       key={r.type}
                       type="button"
-                      aria-label={`${r.label} — arm this result`}
+                      aria-label={`${r.fullLabel} — arm this result`}
                       onClick={() => setActive(r.type)}
-                      className="relative flex h-11 w-11 items-center justify-center rounded-full"
+                      className="relative flex min-h-11 w-16 flex-col items-center justify-center gap-1 rounded-xl py-1.5"
                       style={{
                         color: r.color,
                         background: isArmed
@@ -447,6 +467,9 @@ export function ActiveRun({
                       }}
                     >
                       {r.icon}
+                      <span className="font-display text-[7px] uppercase tracking-wide leading-none whitespace-nowrap">
+                        {r.chipLabel}
+                      </span>
                       <span
                         className="absolute -top-1 -right-1 min-w-4 rounded-full bg-surface px-1 text-center font-display text-[9px] leading-4"
                         style={{ color: r.color }}
@@ -500,7 +523,7 @@ export function ActiveRun({
           if (!v) setHouseTarget(null);
         }}
         house={houseTarget}
-        results={KNOCK_RESULTS}
+        results={SHEET_RESULTS}
         busy={pins.dropAtPoint.isPending || pins.updatePin.isPending}
         onDrop={(h, pin_type) => {
           pins.guardedMapDrop({ lat: h.lat, lng: h.lng }, pin_type);
@@ -521,7 +544,7 @@ export function ActiveRun({
           if (!v) setEditingPinId(null);
         }}
         pin={editingPin}
-        results={KNOCK_RESULTS}
+        results={SHEET_RESULTS}
         updating={pins.updatePin.isPending}
         deleting={pins.deletePin.isPending}
         onSelect={(pin_type) => {

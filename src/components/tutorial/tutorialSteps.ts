@@ -75,7 +75,7 @@ export const PAGE_TOURS: Record<TourPageId, TutorialStep[]> = {
       optional: true, // hides behind the gate / before turf is assigned
       padding: 6,
       title: "Pin any house",
-      body: "No bubble on a house? Pick a result — Not Home, Go Back, Renter, NI — then tap that spot on the map. Leads go through ⚡ Submit New Lead. Tonight's go-backs start here.",
+      body: "No bubble on a house? Pick a result — Not Home, Go Back, Renter, Not Interested — then tap that spot on the map. Leads go through ⚡ Submit New Lead. Tonight's go-backs start here.",
     },
     {
       id: "field-lead",
