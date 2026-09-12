@@ -34,25 +34,15 @@ import {
 import { useCanvasserProfile } from "@/hooks/useCanvasserProfile";
 
 /**
- * The DESK LOG (audit 2026-09-11): only the facts the field can't count for
- * itself. The door work — doors, talked, renters, leads called in — is
- * auto-bumped per pin by bump_daily_log_from_pin and shows here as
- * read-only counters (manual inputs were a double-entry trap: typing +1
- * renter never ticked talked, pins do both). Confirmed Leads left entirely
- * — that's the office's fact, read from daily_metrics. Notes left too
- * (owner call): it promised "your Manager or Captain" an audience that no
- * surface ever rendered. Also here: both lead-submission paths and the
- * recent-leads status list.
+ * The DESK LOG: only the facts the field can't count for itself — the pin
+ * pipeline owns the door work, and since the Today-tab merge (owner,
+ * 2026-09-12) the live counters render ABOVE this panel in
+ * CanvasserMission's TodayPanel, never here: the leadership /log route
+ * mounts this panel bare. Confirmed Leads has no input (the office's fact,
+ * read from daily_metrics) and Notes is gone (owner call: it promised an
+ * audience no surface rendered). Also here: both lead-submission paths and
+ * the recent-leads status list.
  */
-
-// Pin-fed columns — displayed, never edited. Wording follows the
-// GlossarySheet / pay.ts vocabulary, never invented.
-const AUTO_VOCAB: { key: AutoKey; label: string; hint: string }[] = [
-  { key: "doors_knocked", label: "Doors", hint: "Every pin counts the knock" },
-  { key: "people_talked_to", label: "Talked", hint: "Conversations at the door" },
-  { key: "renters", label: "Renters", hint: "A renter answered — not the owner" },
-  { key: "leads_called_in", label: "Leads", hint: "Lead pins + Submit New Lead" },
-];
 
 // The desk facts — what happened AFTER the knock, typed by you.
 const VOCAB: { key: LogKey; label: string; hint?: string }[] = [
@@ -64,8 +54,6 @@ const VOCAB: { key: LogKey; label: string; hint?: string }[] = [
   { key: "no_shows", label: "No Shows", hint: "Customer wasn't there when it ran" },
   { key: "no_demo", label: "No Demo", hint: "Ran but no demo happened" },
 ];
-
-type AutoKey = "doors_knocked" | "people_talked_to" | "renters" | "leads_called_in";
 
 type LogKey =
   | "next_days"
@@ -192,9 +180,6 @@ export function DailyLogPanel({ canEditMondayUrl }: { canEditMondayUrl: boolean 
     Math.max(0, wk.sales - homeSales + form.sales),
   );
 
-  // All-office totals — the same numbers Stats and the HUD show.
-  const totals = sumLogCounters(todayLogs.data);
-
   return (
     <div className="space-y-8">
       <ArcadePanel
@@ -215,34 +200,6 @@ export function DailyLogPanel({ canEditMondayUrl }: { canEditMondayUrl: boolean 
             another office — those aren't editable here.
           </div>
         )}
-
-        {/* Door work — counted by pins, shown here read-only so this tab can
-            never disagree with Active Run / Stats / the HUD. */}
-        <div className="mb-6">
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground mb-2">
-            Door Work · <span className="text-neon">auto from your pins</span>
-          </div>
-          <div className="grid grid-cols-4 gap-2">
-            {AUTO_VOCAB.map((a) => (
-              <div
-                key={a.key}
-                className="rounded-md border border-border/60 bg-black/30 px-2 py-2.5 text-center"
-                title={a.hint}
-              >
-                <div className="font-display text-2xl leading-none text-neon tabular-nums">
-                  {totals[a.key]}
-                </div>
-                <div className="mt-1.5 text-[9px] font-display uppercase tracking-widest text-muted-foreground">
-                  {a.label}
-                </div>
-              </div>
-            ))}
-          </div>
-          <p className="mt-2 text-[10px] text-muted-foreground">
-            Counts live as pins land on Active Run. Missed pins on a dead-phone day? Tell your
-            captain.
-          </p>
-        </div>
 
         {/* The money strip — sits and sales below ARE the paycheck. */}
         <div className="mb-4 rounded-md border border-victory/40 bg-[color-mix(in_oklab,var(--victory)_7%,var(--surface))] px-3 py-2.5">
