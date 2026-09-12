@@ -63,23 +63,33 @@ const SECTIONS: Array<{ heading: string; terms: Array<[string, string]> }> = [
   },
 ];
 
+export type GlossarySections = Array<{ heading: string; terms: Array<[string, string]> }>;
+
 export function GlossarySheet({
   open,
   onOpenChange,
+  sections = SECTIONS,
+  title = "What the shorthand means",
+  accentClass = "text-neon",
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  /** Override for non-canvasser vocabularies (Close Kombat passes the
+   *  Monday column language); default = the canvasser terms above. */
+  sections?: GlossarySections;
+  title?: string;
+  accentClass?: string;
 }) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="overflow-y-auto">
         <SheetHeader>
-          <SheetTitle className="font-display text-sm uppercase tracking-widest text-neon">
-            What the shorthand means
+          <SheetTitle className={`font-display text-sm uppercase tracking-widest ${accentClass}`}>
+            {title}
           </SheetTitle>
         </SheetHeader>
         <div className="pt-2 pb-4 space-y-5">
-          {SECTIONS.map((s) => (
+          {sections.map((s) => (
             <div key={s.heading}>
               <div className="font-display text-[10px] uppercase tracking-widest text-muted-foreground mb-2">
                 {s.heading}
@@ -87,7 +97,7 @@ export function GlossarySheet({
               <dl className="space-y-1.5">
                 {s.terms.map(([term, def]) => (
                   <div key={`${s.heading}-${term}`} className="flex gap-3 text-sm">
-                    <dt className="font-display text-[11px] text-neon shrink-0 w-16 pt-0.5">
+                    <dt className={`font-display text-[11px] ${accentClass} shrink-0 w-16 pt-0.5`}>
                       {term}
                     </dt>
                     <dd className="text-foreground/85 leading-snug">{def}</dd>

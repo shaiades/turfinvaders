@@ -237,9 +237,7 @@ export function customerKey(s: string | null | undefined): string {
  *  drop blanks, dedupe — a Reps cell of "Sam, Sam" is one Sam, not a double
  *  bump with a halved split. Every rep list goes through this door. */
 export function cleanReps(xs: string[] | null | undefined): string[] {
-  return [
-    ...new Set((xs ?? []).map((r) => r.trim().replace(/\s+/g, " ")).filter(Boolean)),
-  ];
+  return [...new Set((xs ?? []).map((r) => r.trim().replace(/\s+/g, " ")).filter(Boolean))];
 }
 
 /** Who gets RESULT credit (Appts/Sold/...): always the Block card's own reps.
@@ -706,6 +704,85 @@ export function aggregateCloseKombat(
   return { reps, totals };
 }
 
+// ── Per-card resolution for display surfaces ───────────────────────────────
+// Any surface that itemizes cards (the rep's MY DEALS list) must resolve
+// each card EXACTLY the way aggregateCloseKombat counts it — same rule the
+// audit follows: a per-card view that contradicts the standings on the same
+// screen destroys trust in both. This runs the identical pre-passes (save
+// linking, cancel-revival, excluded-card gate) and reports what the
+// aggregate would do with each card, without counting anything.
+
+export type CardResolution = {
+  /** Outcome AFTER save-revival (a landed save heals a stale cancel stamp). */
+  outcome: CardOutcome;
+  /** This is a Can/Save marker card (landed or not). */
+  isSave: boolean;
+  /** A landed save, folded into its original — the deal counts THERE. */
+  consumedSave: boolean;
+  /** The aggregate counts this card somewhere (result, cancel tally, or
+   *  office tally). false = counts NOWHERE (excluded-alive, unmarked,
+   *  orphan/failed save) — display it as not counting, never as money. */
+  counted: boolean;
+  /** Office Appointment card (job visit / upsale / reload home) — its
+   *  cancel carries no sit, unlike a lead cancel. */
+  officeAppt: boolean;
+  /** A landed save revived this original from a stale Cancelled stamp. */
+  revivedBySave: boolean;
+  /** The price the aggregate pays for a sold card (save re-pricing
+   *  applied); raw sale_price otherwise. */
+  effectivePrice: number | null;
+};
+
+export function resolveCards(cards: BlockCard[]): Map<string, CardResolution> {
+  const saves = linkSaves(cards);
+  const out = new Map<string, CardResolution>();
+  for (let card of cards) {
+    const id = card.monday_item_id;
+    if (saves.consumed.has(id)) {
+      out.set(id, {
+        outcome: "unmarked",
+        isSave: true,
+        consumedSave: true,
+        counted: false,
+        officeAppt: false,
+        revivedBySave: false,
+        effectivePrice: card.sale_price,
+      });
+      continue;
+    }
+    if (isCanSave(card)) {
+      out.set(id, {
+        outcome: "unmarked",
+        isSave: true,
+        consumedSave: false,
+        counted: false,
+        officeAppt: false,
+        revivedBySave: false,
+        effectivePrice: card.sale_price,
+      });
+      continue;
+    }
+    const save = saves.effects.get(id);
+    let revived = false;
+    if (save && cardOutcome(card) === "cancelled") {
+      card = { ...card, wcc: null };
+      revived = true;
+    }
+    const excludedAlive = isExcludedCard(card) && !isCancelLabel(card.wcc) && !isFtdLabel(card.wcc);
+    const outcome = cardOutcome(card);
+    out.set(id, {
+      outcome,
+      isSave: false,
+      consumedSave: false,
+      counted: !excludedAlive && outcome !== "unmarked",
+      officeAppt: isOfficeAppt(card),
+      revivedBySave: revived,
+      effectivePrice: outcome === "sold" && save ? save.price : card.sale_price,
+    });
+  }
+  return out;
+}
+
 // ── Needs Attention ────────────────────────────────────────────────────────
 // Board-hygiene audit (owner, 2026-08-03), born from the July reconciliation
 // against the Shark Tank dashboard: every dollar of daylight between the two
@@ -821,7 +898,11 @@ export function auditBlockCards(
   const dupTwins = new Map<string, BlockCard[]>();
   for (const g of dupGroups.values()) {
     if (g.length < 2) continue;
-    for (const c of g) dupTwins.set(c.monday_item_id, g.filter((o) => o !== c));
+    for (const c of g)
+      dupTwins.set(
+        c.monday_item_id,
+        g.filter((o) => o !== c),
+      );
   }
 
   const items: AttentionItem[] = [];

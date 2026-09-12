@@ -76,7 +76,10 @@ export function CrewMap({ onBack }: { onBack: () => void }) {
   const { me } = useGeoWatch(allowed);
 
   const [rawFocusId, setFocusId] = useState<string | null>(null);
-  const [flyTo, setFlyTo] = useState<{ bounds: [[number, number], [number, number]]; key: number } | null>(null);
+  const [flyTo, setFlyTo] = useState<{
+    bounds: [[number, number], [number, number]];
+    key: number;
+  } | null>(null);
 
   // Clock presence for the legend dots — display only, fail open. Local dev
   // has no service key, so this query ALWAYS fails there; nobody is hidden.
@@ -98,12 +101,10 @@ export function CrewMap({ onBack }: { onBack: () => void }) {
     queryKey: ["turfs", "crew_map"],
     staleTime: 5 * 60_000,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("turfs")
-        .select(
-          `id, name, color, polygon_coordinates, assigned_user_id,
+      const { data, error } = await supabase.from("turfs").select(
+        `id, name, color, polygon_coordinates, assigned_user_id,
            assignee:profiles!turfs_assigned_user_id_fkey(display_name)`,
-        );
+      );
       if (error) throw error;
       return (data ?? []) as unknown as TurfRow[];
     },
@@ -116,7 +117,9 @@ export function CrewMap({ onBack }: { onBack: () => void }) {
         color: assigneeColor(t.assigned_user_id),
         polygon: (t.polygon_coordinates ?? []) as LatLng[],
         dashed: !t.assigned_user_id,
-        assignmentLabel: t.assigned_user_id ? (t.assignee?.display_name ?? "Assigned") : "Unassigned",
+        assignmentLabel: t.assigned_user_id
+          ? (t.assignee?.display_name ?? "Assigned")
+          : "Unassigned",
       })),
     [turfsQ.data],
   );
@@ -135,7 +138,10 @@ export function CrewMap({ onBack }: { onBack: () => void }) {
     return (id: string) => isLeadSourceName(nameById.get(id));
   }, [nameById]);
 
-  const allPins = useMemo(() => (pinsQ.data ?? []).filter((p) => !isPseudo(p.canvasser_id)), [pinsQ.data, isPseudo]);
+  const allPins = useMemo(
+    () => (pinsQ.data ?? []).filter((p) => !isPseudo(p.canvasser_id)),
+    [pinsQ.data, isPseudo],
+  );
 
   // Beacon payloads are client-authored by whoever holds the field-tier
   // publish grant — treat them as hints, not identity. Once the roster is
@@ -186,7 +192,8 @@ export function CrewMap({ onBack }: { onBack: () => void }) {
         });
     }
     return [...byId.values()].sort(
-      (a, b) => Number(b.live) - Number(a.live) || b.doors - a.doors || a.name.localeCompare(b.name),
+      (a, b) =>
+        Number(b.live) - Number(a.live) || b.doors - a.doors || a.name.localeCompare(b.name),
     );
   }, [allPins, liveList, nameById, clockQ.isSuccess, openNow]);
 
@@ -247,11 +254,16 @@ export function CrewMap({ onBack }: { onBack: () => void }) {
       return;
     }
     setFocusId(id);
-    const pts: LatLng[] = allPins.filter((p) => p.canvasser_id === id).map((p) => ({ lat: p.lat, lng: p.lng }));
+    const pts: LatLng[] = allPins
+      .filter((p) => p.canvasser_id === id)
+      .map((p) => ({ lat: p.lat, lng: p.lng }));
     const beacon = positions[id];
     if (beacon) pts.push({ lat: beacon.lat, lng: beacon.lng });
     if (pts.length === 0) return;
-    let s = pts[0].lat, n = pts[0].lat, w = pts[0].lng, e = pts[0].lng;
+    let s = pts[0].lat,
+      n = pts[0].lat,
+      w = pts[0].lng,
+      e = pts[0].lng;
     for (const p of pts) {
       if (p.lat < s) s = p.lat;
       if (p.lat > n) n = p.lat;
@@ -301,10 +313,14 @@ export function CrewMap({ onBack }: { onBack: () => void }) {
           >
             <ArrowLeft className="w-3.5 h-3.5" /> Back
           </button>
-          <h1 className="font-display text-sm sm:text-base text-neon uppercase tracking-widest">Crew Map</h1>
+          <h1 className="font-display text-sm sm:text-base text-neon uppercase tracking-widest">
+            Crew Map
+          </h1>
         </div>
         <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
-          <Radio className={`w-3 h-3 ${liveCount > 0 ? "text-victory animate-pulse" : "text-muted-foreground"}`} />
+          <Radio
+            className={`w-3 h-3 ${liveCount > 0 ? "text-victory animate-pulse" : "text-muted-foreground"}`}
+          />
           {liveCount > 0 ? `${liveCount} LIVE` : liveStatus === "live" ? "0 LIVE" : "PINS ONLY"}
           <span className="text-muted-foreground/60">·</span>
           {reps.length} IN THE FIELD
@@ -382,13 +398,16 @@ export function CrewMap({ onBack }: { onBack: () => void }) {
                       {self ? " · you" : ""}
                     </span>
                     <span className="font-display text-[10px] tabular-nums text-muted-foreground whitespace-nowrap">
-                      {r.doors} drs{r.leads > 0 ? ` · ${r.leads} lead${r.leads > 1 ? "s" : ""}` : ""}
+                      {r.doors} drs
+                      {r.leads > 0 ? ` · ${r.leads} lead${r.leads > 1 ? "s" : ""}` : ""}
                     </span>
                     {r.onClock != null && (
                       <span
                         title={r.onClock ? "On the clock right now" : "Not on the clock"}
                         className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                          r.onClock ? "bg-[var(--victory)] shadow-[0_0_6px_var(--victory)]" : "bg-muted-foreground/50"
+                          r.onClock
+                            ? "bg-[var(--victory)] shadow-[0_0_6px_var(--victory)]"
+                            : "bg-muted-foreground/50"
                         }`}
                       />
                     )}

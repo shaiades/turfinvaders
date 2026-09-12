@@ -147,11 +147,18 @@ export function useCrewLive(enabled: boolean) {
         !Number.isFinite(b.lng)
       )
         return;
-      pending.set(b.id, { id: b.id, name: b.name.slice(0, 80), lat: b.lat, lng: b.lng, at: Date.now() });
+      pending.set(b.id, {
+        id: b.id,
+        name: b.name.slice(0, 80),
+        lat: b.lat,
+        lng: b.lng,
+        at: Date.now(),
+      });
     });
     ch.subscribe((s) => {
       if (s === "SUBSCRIBED") setStatus("live");
-      else if (s === "CHANNEL_ERROR" || s === "TIMED_OUT" || s === "CLOSED") setStatus("unavailable");
+      else if (s === "CHANNEL_ERROR" || s === "TIMED_OUT" || s === "CLOSED")
+        setStatus("unavailable");
     });
 
     // One timer does both: flush the coalesced batch and prune stale entries.
