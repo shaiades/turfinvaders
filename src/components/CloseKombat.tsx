@@ -50,6 +50,7 @@ import {
 } from "@/lib/close-kombat";
 import { getKombatSyncInfo, syncBlockCards } from "@/lib/close-kombat.functions";
 import { GlossarySheet, type GlossarySections } from "@/components/GlossarySheet";
+import { PushAlertsCard } from "@/components/PushAlertsCard";
 import { toast } from "sonner";
 import {
   ChevronDown,
@@ -1234,6 +1235,16 @@ function CloseKombatInner() {
         title="What the columns mean"
         accentClass="text-kombat-gold"
       />
+
+      {/* Sale alerts (R-11): reps could never even SUBSCRIBE to push — the
+          alerts card only lived on pages the cage blocks. The KA-CHING push
+          fires from the block_cards trigger the moment their sale lands. */}
+      {isRep && (
+        <PushAlertsCard
+          title="Sale alerts"
+          description="Get a KA-CHING on this phone the moment one of your sales hits the board."
+        />
+      )}
     </div>
   );
 }
