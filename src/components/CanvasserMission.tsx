@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { formatCurrency } from "@/lib/utils";
 import { laMonthStartISO } from "@/lib/dates";
-import { PAY_LOCK_MIN_ROLLING_AVG, VOLUME_BONUS_STEP } from "@/lib/pay";
+import { HOURLY_TOP, PAY_LOCK_MIN_ROLLING_AVG, VOLUME_BONUS_STEP } from "@/lib/pay";
 import { getMonthlyPaychecks } from "@/lib/fleet.functions";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { useAuth } from "@/hooks/useAuth";
@@ -385,8 +385,12 @@ function TakeHomeWidget({
           </div>
         </div>
       )}
+      {/* Below the top tier the rate is the WEEKLY points ladder, whatever
+          rank (or role) you hold — a captain reading $18 on Monday morning
+          filed it as a bug (captain audit 2026-09-12, "also spotted"). */}
       <div className="mt-3 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
         ${hourlyRate}/hr · {weekPoints} pts this week
+        {hourlyRate < HOURLY_TOP && " · tier climbs with pts, resets weekly"}
       </div>
       {monthly && Number(monthly.sale_price_total) > 0 && (
         <div className="mt-1 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
