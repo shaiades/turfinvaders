@@ -238,12 +238,20 @@ function ManagerTerritoryView({ onBackToCanvassing }: { onBackToCanvassing?: () 
           },
         ]),
       );
-      // Dedupe: a user holding two roles (e.g. captain + canvasser) must not
-      // appear twice in the assign list.
+      // Dedupe with ROLE PRECEDENCE: most captains also hold the canvasser
+      // role, and first-row-wins made their listed role row-order roulette —
+      // whenever the canvasser row arrived first, the ZIP assigner's
+      // captain filter silently dropped them (owner report 2026-09-12:
+      // "can't assign areas to captains" — it looked clock-related, but no
+      // assignment surface ever gated on punches).
+      const ROLE_RANK: Record<string, number> = { captain: 3, owner: 2, canvasser: 1 };
       const byId = new Map<string, AssignableUser>();
       for (const r of roleRows ?? []) {
         const id = r.user_id as string;
-        if (byId.has(id)) continue;
+        const existing = byId.get(id);
+        if (existing && (ROLE_RANK[existing.role] ?? 0) >= (ROLE_RANK[r.role as string] ?? 0)) {
+          continue;
+        }
         const p = profById.get(id);
         byId.set(id, {
           id,
