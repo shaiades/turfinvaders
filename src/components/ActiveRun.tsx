@@ -6,6 +6,7 @@ import { requiresGratitudeGate } from "@/lib/roles";
 import { assigneeColor } from "@/lib/assignee-colors";
 import { getMondayFormUrl } from "@/lib/monday-form";
 import { useGeoWatch, useFieldPins, type ActivePin } from "@/hooks/useFieldPins";
+import { useCrewBeacon } from "@/hooks/useCrewLive";
 import { usePiggyBank } from "@/hooks/usePiggyBank";
 import { useZipTints } from "@/hooks/useZipAssignments";
 import { dailyLogKeys } from "@/hooks/useDailyLogs";
@@ -29,6 +30,7 @@ import {
   KeyRound,
   Clock3,
   Trophy,
+  Users,
   Zap,
   X,
   Loader2,
@@ -138,11 +140,13 @@ type TurfRow = {
 export function ActiveRun({
   variant,
   onOpenTurfTools,
+  onOpenCrewMap,
 }: {
   variant: "canvasser" | "captain";
   onOpenTurfTools?: () => void;
+  onOpenCrewMap?: () => void;
 }) {
-  const { user, role, loading } = useAuth();
+  const { user, role, loading, displayName } = useAuth();
   const qc = useQueryClient();
   const isCaptain = variant === "captain";
 
@@ -158,6 +162,15 @@ export function ActiveRun({
   }, [user?.id]);
   const { me, geoStatus } = useGeoWatch(!loading && (!requiresGratitudeGate(role) || gatePassed));
   const pins = useFieldPins(user?.id, me);
+  // Crew Map beacon: throttled live position on the private crew-live topic,
+  // riding the watch above (never a second GPS watch). Best-effort — a
+  // refused join (role without the publish grant) is silent by design.
+  useCrewBeacon({
+    userId: user?.id,
+    name: displayName,
+    me,
+    enabled: !loading && !!user?.id && (!requiresGratitudeGate(role) || gatePassed),
+  });
   // Captains see their ZIP zones tinted while canvassing — the frame they
   // chunk turfs inside. Canvassers keep plain borders (their turf is the map).
   const zipZones = useZipTints({ enabled: isCaptain });
@@ -335,6 +348,16 @@ export function ActiveRun({
                 "GPS…"
               )}
             </span>
+            {isCaptain && onOpenCrewMap && (
+              <button
+                onClick={onOpenCrewMap}
+                aria-label="Crew Map"
+                title="Crew Map — everyone's pins & live positions"
+                className="min-h-11 min-w-11 inline-flex items-center justify-center rounded-md border border-[color-mix(in_oklab,var(--accent)_45%,var(--border))] text-[var(--accent)] hover:bg-surface-elevated"
+              >
+                <Users className="w-4 h-4" />
+              </button>
+            )}
             {isCaptain && onOpenTurfTools && (
               <button
                 onClick={onOpenTurfTools}
