@@ -133,6 +133,17 @@ function ClickCapture({ onClick }: { onClick: (ll: LatLng) => void }) {
   return null;
 }
 
+/** Drops Leaflet's own branding link from the attribution control (owner
+ *  ask 2026-09-12). The tile provider's "© Esri" stays — Esri's basemap
+ *  terms require attribution; styles.css shrinks it to a quiet chip. */
+function AttributionPrefixOff() {
+  const map = useMap();
+  useEffect(() => {
+    map.attributionControl?.setPrefix(false);
+  }, [map]);
+  return null;
+}
+
 function FitBounds({ points }: { points: LatLng[] }) {
   const map = useMap();
   const didFit = useRef(false);
@@ -654,6 +665,7 @@ export function NeonMap({
           maxZoom={20}
         />
         <InvalidateOnMount />
+        <AttributionPrefixOff />
         <BearingWatcher onBearing={setBearing} />
         <FlyTo target={flyTo} />
         <ClickCapture onClick={handleClick} />
