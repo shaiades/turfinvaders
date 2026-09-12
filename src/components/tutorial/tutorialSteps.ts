@@ -115,8 +115,8 @@ export const PAGE_TOURS: Record<TourPageId, TutorialStep[]> = {
       route: "/dashboard",
       search: { tab: "log" },
       target: "tab-log",
-      title: "Log",
-      body: "Your official numbers for the day. Active Run fills these in as you tap — review before you head in, and add anything you missed.",
+      title: "Today",
+      body: "Your live day in one place: the bank filling, counters ticking as you tap, and the desk numbers — sits and sales — you type in yourself. That's where your points come from.",
     },
     {
       id: "tab-stats",
@@ -124,7 +124,7 @@ export const PAGE_TOURS: Record<TourPageId, TutorialStep[]> = {
       search: { tab: "stats" },
       target: "tab-stats",
       title: "Stats",
-      body: "Today, this week, this month — your funnel, points, and money. Know your numbers, grow your numbers.",
+      body: "The scoreboard — this week and this month: your funnel, points, and money. Know your numbers, grow your numbers.",
     },
   ],
   learn: [

@@ -176,7 +176,8 @@ export function useCanvasserStats(userId: string) {
       profile.data?.pay_lock_status === "reverted" ? null : (profile.data?.current_rank ?? null);
     const hourlyRate = payRateForPoints(weekPoints, rankForRates);
     const weekBase = weekHours * hourlyRate;
-    const weekCommission = weekRevenue * commissionRateForPoints(weekPoints, rankForRates);
+    const weekCommissionRate = commissionRateForPoints(weekPoints, rankForRates);
+    const weekCommission = weekRevenue * weekCommissionRate;
     // Month-level projection uses the base rate — the real per-week rate comes from the RPC.
     const monthCommission = monthRevenue * COMMISSION_BASE;
 
@@ -191,6 +192,7 @@ export function useCanvasserStats(userId: string) {
       hourlyRate,
       weekBase,
       weekCommission,
+      weekCommissionRate,
       monthCommission,
       personalTalkRatio:
         personalAgg.doors_knocked > 0
