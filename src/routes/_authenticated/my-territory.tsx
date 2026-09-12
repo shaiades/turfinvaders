@@ -8,6 +8,7 @@ import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { assigneeColor } from "@/lib/assignee-colors";
 import { ArcadePanel } from "@/components/arcade";
 import { ActiveRun } from "@/components/ActiveRun";
+import { CrewMap } from "@/components/CrewMap";
 import { NeonMap, type Territory, type LatLng } from "@/components/NeonMap";
 import {
   AreaDetailsSheet,
@@ -23,7 +24,7 @@ import { useZipTints, useZipAssignmentActions } from "@/hooks/useZipAssignments"
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { Crosshair, Pencil, MapPin, MapPinned, Trash2, X, Zap } from "lucide-react";
+import { Crosshair, Pencil, MapPin, MapPinned, Trash2, Users, X, Zap } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/my-territory")({
   head: () => ({ meta: [{ title: "My Territory — Turf Invaders" }] }),
@@ -97,20 +98,43 @@ function MyTerritoryPage() {
   if (loading) return <div className="text-sm text-muted-foreground">Loading…</div>;
   if (role === "canvasser" || !role) return <Navigate to="/field" replace />;
   if (role === "captain") return <CaptainTerritory />;
-  return <ManagerTerritoryView />;
+  return <AdminTerritory />;
 }
 
 // Captains canvass by default (owner decision 2026-09-08 — the merge also
 // UPGRADED captains from view-only to dropping/correcting their own pins),
-// with turf drawing one tap away. Plain state: drawing is a short task, and
-// a reload landing back on the canvass screen is the right default.
+// with turf drawing and the crew map each one tap away. Plain state: both
+// are short tasks, and a reload landing back on the canvass screen is the
+// right default.
 function CaptainTerritory() {
-  const [turfTools, setTurfTools] = useState(false);
-  if (turfTools) return <ManagerTerritoryView onBackToCanvassing={() => setTurfTools(false)} />;
-  return <ActiveRun variant="captain" onOpenTurfTools={() => setTurfTools(true)} />;
+  const [view, setView] = useState<"run" | "tools" | "crew">("run");
+  if (view === "tools") return <ManagerTerritoryView onBackToCanvassing={() => setView("run")} />;
+  if (view === "crew") return <CrewMap onBack={() => setView("run")} />;
+  return (
+    <ActiveRun
+      variant="captain"
+      onOpenTurfTools={() => setView("tools")}
+      onOpenCrewMap={() => setView("crew")}
+    />
+  );
 }
 
-function ManagerTerritoryView({ onBackToCanvassing }: { onBackToCanvassing?: () => void }) {
+// Admin tier gets the same crew map from the Turf Tools toolbar — the audit's
+// parity rule: a leadership feature mounted only inside ActiveRun is
+// invisible to owner/office_staff (they never render the canvass screen).
+function AdminTerritory() {
+  const [crew, setCrew] = useState(false);
+  if (crew) return <CrewMap onBack={() => setCrew(false)} />;
+  return <ManagerTerritoryView onOpenCrewMap={() => setCrew(true)} />;
+}
+
+function ManagerTerritoryView({
+  onBackToCanvassing,
+  onOpenCrewMap,
+}: {
+  onBackToCanvassing?: () => void;
+  onOpenCrewMap?: () => void;
+}) {
   const { user, role } = useAuth();
   const qc = useQueryClient();
   const { me, geoStatus } = useGeoWatch();
@@ -577,6 +601,11 @@ function ManagerTerritoryView({ onBackToCanvassing }: { onBackToCanvassing?: () 
             >
               <MapPinned className="w-3.5 h-3.5" />
               {assignZips ? "Done Assigning" : "Assign ZIPs"}
+            </Button>
+          )}
+          {onOpenCrewMap && (
+            <Button variant="outline" onClick={onOpenCrewMap} className="gap-2">
+              <Users className="w-3.5 h-3.5" /> Crew Map
             </Button>
           )}
           <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
