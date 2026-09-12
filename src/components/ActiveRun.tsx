@@ -46,7 +46,7 @@ import {
  * Three ways to log, all through useFieldPins:
  *  - House bubbles: tap the house on the map → one-tap result sheet.
  *  - Armed chips + map tap: result pins on houses without a bubble (rural,
- *    new builds) — >18 m away still flags a stat-dead Remote Drop.
+ *    new builds) — >75 yd away still flags a stat-dead Remote Drop.
  *  The screen is map-first (owner 2026-09-11): no key grid — the map gets
  *  the room, Submit New Lead keeps its own big key below.
  *
