@@ -2,7 +2,6 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { weeklyPoints } from "@/lib/pay";
 import { ArcadePanel } from "@/components/arcade";
-import { LiveFeed } from "@/components/LiveFeed";
 import { laWeekStartISO } from "@/lib/dates";
 const turfInvadersHero = { url: "/turf-invaders-hero.jpg" };
 
@@ -87,7 +86,6 @@ export function CommandCenter({ teamId, range }: Props) {
           <div className="font-display text-sm text-neon">Command Center</div>
         </div>
       </div>
-      <LiveFeed />
       <ArcadePanel
         title="Command Center"
         action={

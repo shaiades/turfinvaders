@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { FleetDispatch } from "@/components/FleetDispatch";
 import { CanvasserLeaderboard } from "@/components/CanvasserLeaderboard";
 import { useAuth } from "@/hooks/useAuth";
-import { isManagerRole } from "@/lib/role-policy";
+import { isAdminRole } from "@/lib/role-policy";
 import { Trophy } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/leaderboard")({
@@ -11,11 +11,12 @@ export const Route = createFileRoute("/_authenticated/leaderboard")({
 });
 
 function LeaderboardPage() {
-  // Two boards, one address (audit P1-4, owner: full rebuild): reps get a
-  // ranked ladder — the race, with their own row glowing — while leadership
-  // keeps the full Fleet Dispatch ops table it actually manages from.
+  // Two boards, one address: reps AND captains get the ranked ladder — the
+  // race, with their own row glowing (owner call 2026-09-12: the captain's
+  // van ops already live on Command, so this tab is their race too) — while
+  // the Admin tier keeps the full Fleet Dispatch ops table.
   const { role, loading } = useAuth();
-  const leadership = isManagerRole(role);
+  const leadership = isAdminRole(role);
   return (
     <div className="mx-auto max-w-6xl w-full px-3 py-4 space-y-4">
       <div className="flex items-center gap-2">

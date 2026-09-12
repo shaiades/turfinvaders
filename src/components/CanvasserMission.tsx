@@ -6,6 +6,7 @@ import { laMonthStartISO } from "@/lib/dates";
 import { PAY_LOCK_MIN_ROLLING_AVG, VOLUME_BONUS_STEP } from "@/lib/pay";
 import { getMonthlyPaychecks } from "@/lib/fleet.functions";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
+import { useAuth } from "@/hooks/useAuth";
 import { useCanvasserProfile } from "@/hooks/useCanvasserProfile";
 import { useCanvasserStats } from "@/hooks/useCanvasserStats";
 import { ArcadeCard, NeonBar, TeamBadge } from "@/components/arcade";
@@ -172,6 +173,7 @@ export function CanvasserMission({
  *  DailyLogPanel, so the leadership /log route keeps the bare desk panel
  *  without pulling piggy/funnel queries for non-canvassing roles. */
 function TodayPanel({ userId, stats }: { userId: string; stats: CanvasserStatsData }) {
+  const { role } = useAuth();
   // Same hook as Active Run's map pill — the two surfaces can never disagree
   // (every underlying query is already warm from the header + Stats).
   const piggy = usePiggyBank(userId);
@@ -223,8 +225,10 @@ function TodayPanel({ userId, stats }: { userId: string; stats: CanvasserStatsDa
           />
         </div>
         <p className="mt-2 text-[10px] text-muted-foreground">
-          Counts live as pins land on Active Run. Missed pins on a dead-phone day? Tell your
-          captain.
+          Counts live as pins land on Active Run.
+          {role === "captain"
+            ? " Missed pins on a dead-phone day? You're the captain — flag it to the office."
+            : " Missed pins on a dead-phone day? Tell your captain."}
         </p>
       </div>
       <DailyLogPanel canEditMondayUrl={false} />

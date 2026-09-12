@@ -403,7 +403,7 @@ export function ActiveRun({
                 me={me}
                 height="clamp(420px, 64dvh, 900px)"
                 follow
-                fitPolygons={!isCaptain ? lockPolygons : undefined}
+                fitPolygons={lockPolygons}
                 houseBubbles
                 zipTints={isCaptain ? zipZones.tints : undefined}
                 onHouseTap={(h) => setHouseTarget(h)}
