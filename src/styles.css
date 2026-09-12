@@ -680,3 +680,19 @@
 .turf-popup .nm-pop-btn:hover {
   background: color-mix(in oklab, var(--neon) 28%, transparent);
 }
+
+/* Map attribution: NeonMap drops Leaflet's branding prefix (owner ask
+   2026-09-12); the tile terms still require "© Esri", so it stays — as a
+   whisper on the arcade ground, not a white sticker. */
+.leaflet-control-attribution {
+  background: rgba(7, 10, 20, 0.55) !important;
+  color: color-mix(in oklab, var(--muted-foreground) 60%, transparent) !important;
+  font-size: 9px !important;
+  line-height: 1.2 !important;
+  padding: 2px 6px !important;
+  border-radius: 6px 0 0 0;
+}
+.leaflet-control-attribution a {
+  color: inherit !important;
+  text-decoration: none !important;
+}
