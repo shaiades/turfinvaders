@@ -31,6 +31,7 @@ export function useMyEarnings(userId: string): {
   const monthStart = laMonthStartISO();
 
   const weekQ = useQuery({
+    enabled: !!userId,
     queryKey: ["earnings", "week", userId, weekStart],
     queryFn: async () => {
       const { results } = await getWeeklyPaychecks({
@@ -43,6 +44,7 @@ export function useMyEarnings(userId: string): {
   // Deliberately the same key TakeHomeWidget has always used — one fetch,
   // one cache entry, zero chance of two different month figures on the page.
   const monthQ = useQuery({
+    enabled: !!userId,
     queryKey: ["takehome_volume_bonus", userId, monthStart],
     queryFn: async () => {
       const { results } = await getMonthlyPaychecks({
@@ -53,6 +55,7 @@ export function useMyEarnings(userId: string): {
   });
 
   const clockQ = useQuery({
+    enabled: !!userId,
     queryKey: ["earnings", "clock-days", userId, monthStart],
     queryFn: async () => {
       const { data, error } = await supabase

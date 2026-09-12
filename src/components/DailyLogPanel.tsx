@@ -10,11 +10,23 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { Plus, Save, Send } from "lucide-react";
+import { addDaysISO, laWeekStartISO } from "@/lib/dates";
+import {
+  HOURLY_MID,
+  HOURLY_TOP,
+  MONSTER_BONUS,
+  MONSTER_THRESHOLD,
+  POINTS_TIER_MID,
+  POINTS_TIER_TOP,
+  SIT_BONUS_THRESHOLD,
+  weeklyPoints,
+} from "@/lib/pay";
 import { MondayEmbed } from "@/components/MondayEmbed";
 import {
   findOfficeRow,
   sumLogCounters,
   useSaveTodayLog,
+  useSixtyDayLogs,
   useTodayLogs,
   type DailyLogRow,
   type SaveTodayLogInput,
@@ -22,40 +34,28 @@ import {
 import { useCanvasserProfile } from "@/hooks/useCanvasserProfile";
 
 /**
- * The daily-log surface: today's counts + notes, both lead-submission paths
- * (internal pending lead → Confirmation Desk, Monday.com form → Incoming
- * Leads board), and the recent-leads status list. Rendered by the canvasser
- * Mission page's Log tab AND the leadership /log page.
+ * The DESK LOG: only the facts the field can't count for itself — the pin
+ * pipeline owns the door work, and since the Today-tab merge (owner,
+ * 2026-09-12) the live counters render ABOVE this panel in
+ * CanvasserMission's TodayPanel, never here: the leadership /log route
+ * mounts this panel bare. Confirmed Leads has no input (the office's fact,
+ * read from daily_metrics) and Notes is gone (owner call: it promised an
+ * audience no surface rendered). Also here: both lead-submission paths and
+ * the recent-leads status list.
  */
 
-// hint = rookie-readable sublabel. Wording follows the FleetDispatch column
-// tooltips / GlossarySheet / pay.ts, never invented; if a term's meaning
-// changes there, change it here.
+// The desk facts — what happened AFTER the knock, typed by you.
 const VOCAB: { key: LogKey; label: string; hint?: string }[] = [
-  { key: "doors_knocked", label: "Doors Knocked" },
-  { key: "people_talked_to", label: "People Talked To" },
-  { key: "renters", label: "Renters", hint: "A renter answered — not the owner" },
-  { key: "leads_called_in", label: "Leads Called In", hint: "Leads you phoned in to the office" },
-  {
-    key: "confirmed_leads",
-    label: "Confirmed Leads",
-    hint: "Called-in leads the office confirmed",
-  },
-  { key: "next_days", label: "Next Days", hint: "Confirmed to run tomorrow" },
-  { key: "future_leads", label: "Future Leads", hint: "Confirmed for a later date" },
   { key: "demos_sits", label: "Demos / Sits", hint: "You sat the demo at the table" },
   { key: "sales", label: "Sales" },
+  { key: "next_days", label: "Next Days", hint: "Confirmed to run tomorrow" },
+  { key: "future_leads", label: "Future Leads", hint: "Confirmed for a later date" },
   { key: "one_legs", label: "One Legs", hint: "Only one decision-maker was home" },
   { key: "no_shows", label: "No Shows", hint: "Customer wasn't there when it ran" },
   { key: "no_demo", label: "No Demo", hint: "Ran but no demo happened" },
 ];
 
 type LogKey =
-  | "doors_knocked"
-  | "people_talked_to"
-  | "renters"
-  | "leads_called_in"
-  | "confirmed_leads"
   | "next_days"
   | "future_leads"
   | "demos_sits"
@@ -64,15 +64,10 @@ type LogKey =
   | "no_shows"
   | "no_demo";
 
-type LogField = LogKey | "notes";
-type LogState = Record<LogKey, number> & { notes: string };
+type LogField = LogKey;
+type LogState = Record<LogKey, number>;
 
 const EMPTY: LogState = {
-  doors_knocked: 0,
-  people_talked_to: 0,
-  renters: 0,
-  leads_called_in: 0,
-  confirmed_leads: 0,
   next_days: 0,
   future_leads: 0,
   demos_sits: 0,
@@ -80,11 +75,9 @@ const EMPTY: LogState = {
   one_legs: 0,
   no_shows: 0,
   no_demo: 0,
-  notes: "",
 };
 
-function fromRow(row: DailyLogRow | undefined, key: LogField): number | string {
-  if (key === "notes") return row?.notes ?? "";
+function fromRow(row: DailyLogRow | undefined, key: LogKey): number {
   return row?.[key] ?? 0;
 }
 
@@ -101,6 +94,7 @@ export function DailyLogPanel({ canEditMondayUrl }: { canEditMondayUrl: boolean 
   // dirty-pinned against the wrong row and later upserted over the real one.
   const officeReady = !profile.isLoading;
   const todayLogs = useTodayLogs(user?.id);
+  const sixtyQ = useSixtyDayLogs(user?.id);
   const homeRow = findOfficeRow(todayLogs.data, myOffice);
 
   const [form, setForm] = useState<LogState>(EMPTY);
@@ -119,14 +113,13 @@ export function DailyLogPanel({ canEditMondayUrl }: { canEditMondayUrl: boolean 
     setForm((f) => {
       const next = { ...f };
       for (const v of VOCAB) {
-        if (!dirtyRef.current.has(v.key)) next[v.key] = fromRow(homeRow, v.key) as number;
+        if (!dirtyRef.current.has(v.key)) next[v.key] = fromRow(homeRow, v.key);
       }
-      if (!dirtyRef.current.has("notes")) next.notes = fromRow(homeRow, "notes") as string;
       return next;
     });
   }, [homeRow]);
 
-  const setField = (key: LogField, value: number | string) => {
+  const setField = (key: LogField, value: number) => {
     setForm((f) => ({ ...f, [key]: value }));
     setDirty((d) => (d.has(key) ? d : new Set(d).add(key)));
   };
@@ -135,8 +128,7 @@ export function DailyLogPanel({ canEditMondayUrl }: { canEditMondayUrl: boolean 
   const submitSave = () => {
     const patch: SaveTodayLogInput["patch"] = {};
     for (const key of dirty) {
-      if (key === "notes") patch.notes = form.notes;
-      else patch[key] = form[key];
+      patch[key] = form[key];
     }
     save.mutate(
       { office: myOffice, teamId, patch },
@@ -151,9 +143,7 @@ export function DailyLogPanel({ canEditMondayUrl }: { canEditMondayUrl: boolean 
           setDirty((d) => {
             const next = new Set<LogField>();
             for (const key of d) {
-              const sent = key === "notes" ? patch.notes : patch[key];
-              const current = key === "notes" ? formRef.current.notes : formRef.current[key];
-              if (sent === undefined || current !== sent) next.add(key);
+              if (patch[key] === undefined || formRef.current[key] !== patch[key]) next.add(key);
             }
             return next;
           });
@@ -176,10 +166,24 @@ export function DailyLogPanel({ canEditMondayUrl }: { canEditMondayUrl: boolean 
     otherOffice.leads_called_in > 0 ? `${otherOffice.leads_called_in} leads called in` : null,
   ].filter(Boolean);
 
+  // Live points preview: the week's saved sits/sales with today's HOME-ROW
+  // values swapped for what's currently typed — the tier consequence of a
+  // sit shows the moment it's typed, before Save.
+  const wkStart = laWeekStartISO();
+  const wkEnd = addDaysISO(wkStart, 5);
+  const weekRows = (sixtyQ.data ?? []).filter((r) => r.log_date >= wkStart && r.log_date <= wkEnd);
+  const wk = sumLogCounters(weekRows);
+  const homeSits = fromRow(homeRow, "demos_sits");
+  const homeSales = fromRow(homeRow, "sales");
+  const previewPts = weeklyPoints(
+    Math.max(0, wk.demos_sits - homeSits + form.demos_sits),
+    Math.max(0, wk.sales - homeSales + form.sales),
+  );
+
   return (
     <div className="space-y-8">
       <ArcadePanel
-        title="Today's Counts"
+        title="Desk Log"
         action={
           <Button
             onClick={submitSave}
@@ -196,6 +200,28 @@ export function DailyLogPanel({ canEditMondayUrl }: { canEditMondayUrl: boolean 
             another office — those aren't editable here.
           </div>
         )}
+
+        {/* The money strip — sits and sales below ARE the paycheck. */}
+        <div className="mb-4 rounded-md border border-victory/40 bg-[color-mix(in_oklab,var(--victory)_7%,var(--surface))] px-3 py-2.5">
+          <div className="text-[10px] font-display uppercase tracking-widest">
+            <span className="text-muted-foreground">Wk Pts · </span>
+            <span className="text-victory">{previewPts}</span>
+            <span className="text-muted-foreground">
+              {" · "}
+              {previewPts >= MONSTER_THRESHOLD
+                ? `$${MONSTER_BONUS} monster secured 💰`
+                : previewPts >= POINTS_TIER_TOP
+                  ? `${MONSTER_THRESHOLD - previewPts} more = $${MONSTER_BONUS} monster`
+                  : previewPts >= POINTS_TIER_MID
+                    ? `${POINTS_TIER_TOP - previewPts} more = $${HOURLY_TOP}/hr + 2% comm`
+                    : `${POINTS_TIER_MID - previewPts} more = $${HOURLY_MID}/hr`}
+            </span>
+          </div>
+          <div className="mt-1 text-[9px] font-display uppercase tracking-widest text-muted-foreground/70">
+            PM sit = 1 pt · sale = 2 pts · sits past {SIT_BONUS_THRESHOLD} pay a bonus each
+          </div>
+        </div>
+
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
           {VOCAB.map((v) => (
             <div key={v.key}>
@@ -216,19 +242,6 @@ export function DailyLogPanel({ canEditMondayUrl }: { canEditMondayUrl: boolean 
               />
             </div>
           ))}
-        </div>
-        <div className="mt-5">
-          <Label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-            Notes
-          </Label>
-          <Textarea
-            className="mt-1.5"
-            rows={2}
-            value={form.notes}
-            disabled={!officeReady}
-            onChange={(e) => setField("notes", e.target.value)}
-            placeholder="Anything your Manager or Captain should know about today…"
-          />
         </div>
       </ArcadePanel>
 
@@ -397,10 +410,22 @@ function MyRecentLeads({ userId }: { userId?: string }) {
           {data!.map((l) => (
             <li key={l.id} className="py-3 flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <div className="font-medium truncate">{l.customer_name || "Unnamed lead"}</div>
+                <div className="font-medium truncate">
+                  {l.customer_name || "Unnamed lead"}
+                  {l.is_sale && l.sale_amount != null && (
+                    <span className="ml-2 font-display text-xs text-victory">
+                      ${Number(l.sale_amount).toLocaleString()}
+                    </span>
+                  )}
+                </div>
                 <div className="text-xs text-muted-foreground truncate">
                   {l.address || "—"} · {new Date(l.created_at).toLocaleString()}
                 </div>
+                {/* Denials used to vanish silently — the desk's reason was
+                    fetched and never shown. Seeing it is the coaching. */}
+                {l.status === "denied" && l.deny_reason && (
+                  <div className="mt-1 text-xs text-destructive">Denied: {l.deny_reason}</div>
+                )}
               </div>
               <StatusPill status={l.status as "pending" | "confirmed" | "denied"} />
             </li>

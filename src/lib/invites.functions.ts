@@ -12,6 +12,19 @@ import { z } from "zod";
 const APP_ORIGIN = "https://turfinvaders.com";
 const WELCOME_PATH = "/auth/welcome";
 
+/** The invite link is OUR page carrying the recovery token HASH — never the
+ *  raw supabase /auth/v1/verify action_link. That URL is consumed by a bare
+ *  GET, so iMessage/WhatsApp/email link-preview bots were eating invites
+ *  seconds after managers sent them ("the links expire instantly",
+ *  2026-09-11). The welcome page only spends the token when the invitee
+ *  taps Enter (verifyOtp POST), so previews are harmless and the link lives
+ *  its full OTP window (dashboard MAILER_OTP_EXP, 3600s as of 2026-09-11).
+ *  Note: generating a new link for the same account still replaces any
+ *  older unused one. */
+function buildInviteLink(hashedToken: string) {
+  return `${APP_ORIGIN}${WELCOME_PATH}?th=${encodeURIComponent(hashedToken)}`;
+}
+
 /** The CSV import (2026-06-30) minted auth users with synthetic
  *  csv-import+…@knockout.local addresses. Nobody can receive mail there, so
  *  an invite for one of these accounts must supply the person's real email. */
@@ -163,10 +176,10 @@ export const createInviteLink = createServerFn({ method: "POST" })
       options: { redirectTo: `${APP_ORIGIN}${WELCOME_PATH}` },
     });
     if (linkErr) throw new Error(linkErr.message);
-    const link = linkData?.properties?.action_link;
-    if (!link) throw new Error("Supabase returned no link — try again.");
+    const hashedToken = linkData?.properties?.hashed_token;
+    if (!hashedToken) throw new Error("Supabase returned no link — try again.");
 
-    return { link, email, user_id: data.user_id };
+    return { link: buildInviteLink(hashedToken), email, user_id: data.user_id };
   });
 
 /** The placeholder path of createInviteLink: mint the login, move the
@@ -272,7 +285,7 @@ async function inviteAsNewLogin(
     email,
     options: { redirectTo: `${APP_ORIGIN}${WELCOME_PATH}` },
   });
-  if (linkErr || !linkData?.properties?.action_link) {
+  if (linkErr || !linkData?.properties?.hashed_token) {
     // The login + merge already landed — don't roll back history. Their row
     // is now auth-backed, so a retry goes down the normal path.
     throw new Error(
@@ -280,5 +293,5 @@ async function inviteAsNewLogin(
     );
   }
 
-  return { link: linkData.properties.action_link, email, user_id: newUserId };
+  return { link: buildInviteLink(linkData.properties.hashed_token), email, user_id: newUserId };
 }

@@ -8,7 +8,7 @@ import { AppMenu } from "@/components/AppMenu";
 import { CanvasserTutorial, startCanvasserTutorial } from "@/components/tutorial/CanvasserTutorial";
 import { WelcomeAnimation } from "@/components/WelcomeAnimation";
 import { CloseKombatIntro, isCloseKombatIntroForced } from "@/components/CloseKombatIntro";
-import { CLOSE_KOMBAT_ROLES, canUseViewAs, privilegeRole } from "@/lib/roles";
+import { CLOSE_KOMBAT_ROLES, ROLE_LABEL, canUseViewAs, privilegeRole } from "@/lib/roles";
 import {
   LogOut,
   LayoutDashboard,
@@ -20,7 +20,6 @@ import {
   Target,
   PhoneCall,
   Sparkles,
-  Truck,
   Swords,
   GraduationCap,
   CircleHelp,
@@ -133,12 +132,13 @@ export function AppShell({ children }: { children: ReactNode }) {
       // keeping the item lit while inner ?tab= rewrites.
       // Short labels so all six fit the mobile bottom bar without truncating
       // (six 62px cells at 375px). "Turf" is the canonical word (go-live
-      // decision); "Dispatch" keeps the meaningful half of Fleet Dispatch.
+      // decision); /leaderboard is the ranked LADDER for captains now
+      // (owner call 2026-09-12) — van ops live on Command.
       return [
         { to: "/dashboard", label: "Command", icon: LayoutDashboard },
         { to: "/mission", label: "Mission", icon: Target },
         { to: "/my-territory", label: "Turf", icon: MapPin },
-        { to: "/leaderboard", label: "Dispatch", icon: Truck },
+        { to: "/leaderboard", label: "Leaders", icon: Trophy },
         { to: "/learn", label: "Learn", icon: GraduationCap },
         { to: "/daily-wrap", label: "Wrap", icon: Sparkles },
       ];
@@ -256,9 +256,12 @@ export function AppShell({ children }: { children: ReactNode }) {
           ) : (
             <div className="w-11" />
           )}
+          {/* Reps' home IS Close Kombat — the /dashboard link used to mount
+              the full canvasser Mission for a flash frame before the cage
+              bounced them back (rep audit R-13). */}
           <Link
-            to="/dashboard"
-            search={{ tab: "dispatch" }}
+            to={role === "sales_rep" ? "/close-kombat" : "/dashboard"}
+            search={(role === "sales_rep" ? undefined : { tab: "dispatch" }) as never}
             aria-label="Turf Invaders home"
             className="flex items-center justify-center min-h-11"
           >
@@ -303,8 +306,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             ))}
           </nav>
           <Link
-            to="/dashboard"
-            search={{ tab: "dispatch" }}
+            to={role === "sales_rep" ? "/close-kombat" : "/dashboard"}
+            search={(role === "sales_rep" ? undefined : { tab: "dispatch" }) as never}
             className="flex items-center justify-center shrink-0"
             aria-label="Turf Invaders home"
           >
@@ -318,7 +321,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="flex items-center gap-3 justify-end">
             {user && (
               <>
-                {role === "canvasser" && (
+                {(role === "canvasser" || role === "captain") && (
                   <button
                     onClick={startCanvasserTutorial}
                     data-tour="help"
@@ -338,8 +341,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                   </button>
                 )}
                 <div className="text-right">
+                  {/* Human label, never the raw enum — "SALES_REP" with the
+                      underscore was the first thing a closer read (R-13). */}
                   <div className="text-xs text-muted-foreground uppercase tracking-wider">
-                    {role}
+                    {role ? ROLE_LABEL[role] : ""}
                   </div>
                   <div className="text-sm font-medium">{displayName}</div>
                 </div>
@@ -355,16 +360,24 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </div>
         {/* Score strip rides the sticky header — a canvasser mid-street never
-            hunts for their number. Other roles render nothing here. */}
-        {user && role === "canvasser" && <CanvasserHUD userId={user.id} />}
+            hunts for their number. Captains get it too (audit 2026-09-12):
+            they punch like canvassers, and the OFF CLOCK alarm matters most
+            for the player-coach busy running a van. */}
+        {user && (role === "canvasser" || role === "captain") && <CanvasserHUD userId={user.id} />}
       </header>
-      <main className="flex-1 max-w-7xl w-full min-w-0 mx-auto px-4 sm:px-6 py-4 md:py-8 pb-28 md:pb-8">
+      <main
+        className={`flex-1 max-w-7xl w-full min-w-0 mx-auto px-4 sm:px-6 py-4 md:py-8 md:pb-8 ${
+          user && navItems.length > 1 ? "pb-28" : "pb-8"
+        }`}
+      >
         {children}
       </main>
 
-      {/* Mobile bottom tab bar — hidden entirely for role-less accounts
-          (waiting room) instead of rendering an empty strip. */}
-      {user && navItems.length > 0 && (
+      {/* Mobile bottom tab bar — hidden for role-less accounts (waiting
+          room) AND for single-destination roles: a sales rep's one-cell
+          permanently-active bar burned ~80px of phone height navigating to
+          nowhere (rep audit R-13). */}
+      {user && navItems.length > 1 && (
         <nav
           aria-label="Primary"
           className="md:hidden fixed bottom-0 inset-x-0 z-30 border-t border-border bg-background/95 backdrop-blur pb-safe px-safe"
@@ -406,7 +419,11 @@ export function AppShell({ children }: { children: ReactNode }) {
           `?ck_anim=1` previews the kick from any account, `?welcome_anim=1`
           still previews the van from non-rep accounts. */}
       {user &&
-        (role === "sales_rep" || isCloseKombatIntroForced() ? (
+        // Gate on the REAL role: an owner previewing View As → Sales Rep used
+        // to trigger a non-forced playback that burned the owner's own
+        // ti_ck_intro flag (rep audit). Previews go through ?ck_anim=1,
+        // which never writes flags.
+        (privilegeRole(realRole) === "sales_rep" || isCloseKombatIntroForced() ? (
           <CloseKombatIntro userId={user.id} onActiveChange={setIntroActive} />
         ) : (
           <WelcomeAnimation userId={user.id} onActiveChange={setIntroActive} />
@@ -416,7 +433,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           time this account opens it; the header "?" replays the current
           screen's tips. Canvassers only — and deferred until the intro
           animation has finished. */}
-      {user && role === "canvasser" && !introActive && <CanvasserTutorial userId={user.id} />}
+      {user && (role === "canvasser" || role === "captain") && !introActive && (
+        <CanvasserTutorial userId={user.id} missionRoute={role === "captain" ? "/mission" : "/dashboard"} />
+      )}
     </div>
   );
 }

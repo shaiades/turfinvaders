@@ -88,17 +88,20 @@ export function useGeoWatch(enabled = true): { me: LatLng | null; geoStatus: Geo
   return { me, geoStatus };
 }
 
-export function useFieldPins(userId: string | undefined, me: LatLng | null) {
-  const qc = useQueryClient();
+// One key per LA day: corrections are same-day by construction — after
+// midnight a still-open tab rolls to a fresh (empty) pin list instead of
+// letting yesterday's cached pins be edited. Tally-button drops invalidate
+// the ["my_pins_today", uid] prefix, which still matches this key.
+export const myPinsTodayKey = (userId: string | undefined, todayISO: string) =>
+  ["my_pins_today", userId, todayISO] as const;
 
-  // One key per LA day: corrections are same-day by construction — after
-  // midnight a still-open tab rolls to a fresh (empty) pin list instead of
-  // letting yesterday's cached pins be edited. Tally-button drops invalidate
-  // the ["my_pins_today", uid] prefix, which still matches this key.
+/** Read-only view of today's pins on the SAME cache entry the pin engine
+ *  writes its optimistic rows into — the piggy bank ticks the frame a knock
+ *  lands, with zero duplicate fetch and no second queryFn to drift. */
+export function useMyPinsToday(userId: string | undefined) {
   const todayISO = laTodayISO();
-  const pinsKey = useMemo(() => ["my_pins_today", userId, todayISO], [userId, todayISO]);
-
-  const pinsQuery = useQuery({
+  const pinsKey = useMemo(() => myPinsTodayKey(userId, todayISO), [userId, todayISO]);
+  const query = useQuery({
     enabled: !!userId,
     queryKey: pinsKey,
     queryFn: async () => {
@@ -111,6 +114,13 @@ export function useFieldPins(userId: string | undefined, me: LatLng | null) {
       return (data ?? []) as FieldPin[];
     },
   });
+  return { query, pinsKey };
+}
+
+export function useFieldPins(userId: string | undefined, me: LatLng | null) {
+  const qc = useQueryClient();
+
+  const { query: pinsQuery, pinsKey } = useMyPinsToday(userId);
 
   const counts = useMemo(() => {
     const pins = pinsQuery.data ?? [];
@@ -171,7 +181,10 @@ export function useFieldPins(userId: string | undefined, me: LatLng | null) {
           pin_type,
           lat: ll.lat,
           lng: ll.lng,
-          is_remote_drop: false,
+          // Best-effort verdict from the current fix so a doomed remote drop
+          // never counts optimistically (no coin, then a retraction) — the
+          // mutationFn's fresh fix still owns the row that gets inserted.
+          is_remote_drop: me ? haversineMeters(me, ll) > 18 : false,
           pending: true,
         },
       ]);

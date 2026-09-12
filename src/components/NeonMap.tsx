@@ -37,6 +37,19 @@ export type FieldPin = {
   created_at?: string;
   /** Optimistic row awaiting server truth — rendered dimmed, not tappable. */
   pending?: boolean;
+  /** Crew view: replaces the dot's white border with the owner's color so
+   *  the result color (fill) still reads while pins attribute to a rep.
+   *  hsl() strings welcome — alpha goes through color-mix, never hex tricks. */
+  accent?: string | null;
+};
+
+/** A live crew position (Crew Map): pulsing avatar with initials + name pill. */
+export type CrewMarker = {
+  id: string;
+  name: string;
+  color: string;
+  lat: number;
+  lng: number;
 };
 
 const REMOTE_DROP_COLOR = "#8a8f99";
@@ -58,15 +71,19 @@ function cachedIcon(key: string, make: () => L.DivIcon): L.DivIcon {
 
 // `hit` grows the tappable box past the visual dot (interactive pins need a
 // finger-sized target; an 18px dot alone is a dead zone on a phone).
-function glowingDotIcon(color: string, size = 18, hit = size) {
-  return cachedIcon(`dot|${color}|${size}|${hit}`, () => {
+// `ring` (crew view) swaps the white border for the owning rep's color —
+// possibly an hsl() string, so its halo uses color-mix, not `${color}88`.
+function glowingDotIcon(color: string, size = 18, hit = size, ring?: string) {
+  return cachedIcon(`dot|${color}|${size}|${hit}|${ring ?? ""}`, () => {
+    const border = ring ? `2.5px solid ${ring}` : "2px solid rgba(255,255,255,0.85)";
+    const halo = ring ? `,0 0 0 2px color-mix(in srgb, ${ring} 45%, transparent)` : "";
     const html = `
     <div style="width:${hit}px;height:${hit}px;display:flex;align-items:center;justify-content:center;">
       <div style="
         width:${size}px;height:${size}px;border-radius:9999px;
         background:${color};
-        border:2px solid rgba(255,255,255,0.85);
-        box-shadow:0 0 12px ${color},0 0 22px ${color}88,inset 0 0 6px rgba(255,255,255,0.6);
+        border:${border};
+        box-shadow:0 0 12px ${color},0 0 22px ${color}88,inset 0 0 6px rgba(255,255,255,0.6)${halo};
       "></div>
     </div>`;
     return L.divIcon({
@@ -74,6 +91,38 @@ function glowingDotIcon(color: string, size = 18, hit = size) {
       className: "neon-pin",
       iconSize: [hit, hit],
       iconAnchor: [hit / 2, hit / 2],
+    });
+  });
+}
+
+// Crew Map avatar: pulsing ring + initials core + name pill. Cached per
+// (name, color) — bounded by roster size. divIcon html is raw innerHTML, so
+// the display name is sanitized like every other label icon here.
+function crewAvatarIcon(name: string, color: string) {
+  return cachedIcon(`crew|${name}|${color}`, () => {
+    const safe = name.replace(/[<>&"']/g, "");
+    const inits =
+      safe
+        .trim()
+        .split(/\s+/)
+        .map((w) => w[0] ?? "")
+        .join("")
+        .slice(0, 2)
+        .toUpperCase() || "?";
+    const html = `
+    <div style="position:relative;width:120px;height:52px;display:flex;flex-direction:column;align-items:center;">
+      <div style="position:relative;width:32px;height:32px;">
+        <div style="position:absolute;inset:0;border-radius:9999px;background:${color};opacity:.35;animation:nm-pulse 1.4s ease-out infinite;"></div>
+        <div style="position:absolute;inset:4px;border-radius:9999px;background:color-mix(in srgb, ${color} 78%, #000);border:2px solid #fff;box-shadow:0 0 14px ${color};display:flex;align-items:center;justify-content:center;color:#fff;font:700 10px/1 ui-sans-serif,system-ui;text-shadow:0 0 4px #000;">${inits}</div>
+      </div>
+      <div style="margin-top:2px;max-width:118px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:1px 6px;border-radius:9999px;background:rgba(11,15,26,.85);border:1px solid color-mix(in srgb, ${color} 60%, transparent);color:#fff;font:600 9px/1.4 ui-sans-serif,system-ui;">${safe}</div>
+    </div>`;
+    return L.divIcon({
+      html,
+      className: "neon-crew-avatar",
+      iconSize: [120, 52],
+      // Anchor on the avatar dot's center, not the box center — the pill hangs below.
+      iconAnchor: [60, 16],
     });
   });
 }
@@ -130,6 +179,17 @@ function ClickCapture({ onClick }: { onClick: (ll: LatLng) => void }) {
   useMapEvents({
     click(e) { onClick({ lat: e.latlng.lat, lng: e.latlng.lng }); },
   });
+  return null;
+}
+
+/** Drops Leaflet's own branding link from the attribution control (owner
+ *  ask 2026-09-12). The tile provider's "© Esri" stays — Esri's basemap
+ *  terms require attribution; styles.css shrinks it to a quiet chip. */
+function AttributionPrefixOff() {
+  const map = useMap();
+  useEffect(() => {
+    map.attributionControl?.setPrefix(false);
+  }, [map]);
   return null;
 }
 
@@ -294,39 +354,6 @@ type Mode =
     };
 
 export type HouseMarker = { id: string; lat: number; lng: number; name: string };
-
-export type LeadStatus = "pending" | "confirmed" | "na" | "killed";
-export type LeadPin = { id: string; lat: number; lng: number; status: LeadStatus; label?: string };
-
-export const LEAD_STATUS_COLORS: Record<LeadStatus, string> = {
-  pending: "#8a8f99",
-  confirmed: "#39ff14",
-  na: "#ffd60a",
-  killed: "#ff2d55",
-};
-
-function leadPinIcon(color: string, solid: boolean, size = 20) {
-  return cachedIcon(`lead|${color}|${solid ? 1 : 0}|${size}`, () => {
-    const html = solid
-      ? `<div style="width:${size}px;height:${size}px;border-radius:9999px;background:${color};border:2px solid #fff;box-shadow:0 0 14px ${color},0 0 22px ${color}88;"></div>`
-      : `<div style="width:${size}px;height:${size}px;border-radius:9999px;background:transparent;border:3px solid ${color};box-shadow:0 0 10px ${color}aa, inset 0 0 6px ${color}55;"></div>`;
-    return L.divIcon({
-      html, className: "neon-lead-pin",
-      iconSize: [size, size], iconAnchor: [size / 2, size / 2],
-    });
-  });
-}
-
-function haversineM(a: LatLng, b: LatLng) {
-  const R = 6371000;
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLat = toRad(b.lat - a.lat);
-  const dLng = toRad(b.lng - a.lng);
-  const s1 = Math.sin(dLat / 2);
-  const s2 = Math.sin(dLng / 2);
-  const h = s1 * s1 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * s2 * s2;
-  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
-}
 
 function houseIcon(name: string) {
   const safe = name.replace(/[<>&"']/g, "");
@@ -532,8 +559,6 @@ export function NeonMap({
   territories,
   pins = [],
   houses = [],
-  leads = [],
-  proximityMeters = 30,
   me,
   mode = { kind: "view" },
   center,
@@ -549,12 +574,11 @@ export function NeonMap({
   onHouseTap,
   zipTints,
   onZipTap,
+  crew,
 }: {
   territories: Territory[];
   pins?: FieldPin[];
   houses?: HouseMarker[];
-  leads?: LeadPin[];
-  proximityMeters?: number;
   me?: LatLng | null;
   mode?: Mode;
   center?: LatLng;
@@ -583,6 +607,9 @@ export function NeonMap({
   zipTints?: Record<string, ZipTint>;
   /** Admin assign mode: ZIP polygons become tappable (forces the layer on). */
   onZipTap?: (zip: string) => void;
+  /** Crew Map: live rep positions as pulsing avatar markers (default pane —
+   *  custom panes render displaced under leaflet-rotate). */
+  crew?: CrewMarker[];
 }) {
   const [draft, setDraft] = useState<LatLng[]>([]);
   const mapRef = useRef<L.Map | null>(null);
@@ -691,6 +718,7 @@ export function NeonMap({
           maxZoom={20}
         />
         <InvalidateOnMount />
+        <AttributionPrefixOff />
         <BearingWatcher onBearing={setBearing} />
         <FlyTo target={flyTo} />
         <ClickCapture onClick={handleClick} />
@@ -846,26 +874,25 @@ export function NeonMap({
                   ? flaggedPinIcon(22, tappable ? 30 : 22)
                   : p.pin_type === "lead"
                     ? leadStarIcon()
-                    : glowingDotIcon(PIN_COLORS[p.pin_type], 18, tappable ? 30 : 18)
+                    : glowingDotIcon(PIN_COLORS[p.pin_type], 18, tappable ? 30 : 18, p.accent ?? undefined)
               }
             />
           );
         })}
 
-        {leads.map((l) => {
-          const color = LEAD_STATUS_COLORS[l.status];
-          const dist = me ? haversineM(me, { lat: l.lat, lng: l.lng }) : Infinity;
-          const solid = dist <= proximityMeters;
-          return (
-            <Marker
-              key={`${l.id}:${solid ? "s" : "h"}:${l.status}`}
-              position={[l.lat, l.lng]}
-              icon={leadPinIcon(color, solid)}
-            />
-          );
-        })}
-
         {me && <Marker position={[me.lat, me.lng]} icon={pulseDotIcon("#00e5ff")} />}
+
+        {(crew ?? []).map((c) => (
+          <Marker
+            key={`crew-${c.id}`}
+            position={[c.lat, c.lng]}
+            icon={crewAvatarIcon(c.name, c.color)}
+            // Avatars float above every pin; taps pass through — the legend
+            // chips below the map are the interaction surface.
+            zIndexOffset={1000}
+            interactive={false}
+          />
+        ))}
       </MapContainer>
 
       {/* Draw mode controls */}

@@ -89,7 +89,9 @@ const RESULT_ORDER: Array<{ type: PinType; label: string; icon: React.ReactNode;
   { type: "go_back", label: "GB", icon: <Undo2 className="w-3.5 h-3.5" />, alwaysShow: true },
   { type: "renter", label: "Renter", icon: <KeyRound className="w-3.5 h-3.5" />, alwaysShow: true },
   { type: "not_interested", label: "NI", icon: <ThumbsDown className="w-3.5 h-3.5" />, alwaysShow: true },
-  { type: "appt", label: "Appt", icon: <CalendarCheck className="w-3.5 h-3.5" />, alwaysShow: true },
+  // Appt was retired as a knock result 2026-09-11 (the Lead flow owns it) —
+  // legacy appt pins still render, but a permanent zero card earns nothing.
+  { type: "appt", label: "Appt", icon: <CalendarCheck className="w-3.5 h-3.5" />, alwaysShow: false },
   { type: "talked_to", label: "Talked", icon: <MessageSquare className="w-3.5 h-3.5" />, alwaysShow: false },
   { type: "knock", label: "Knock", icon: <DoorOpen className="w-3.5 h-3.5" />, alwaysShow: false },
 ];

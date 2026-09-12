@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Clock, Play, Square, Utensils, AlertTriangle } from "lucide-react";
-import { laDateISO, laTodayISO } from "@/lib/dates";
+import { addDaysISO, fmtWallTime, laDateISO, laTodayISO } from "@/lib/dates";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { useOpenShift, useTodayShifts } from "@/hooks/useTimeClockSelf";
 
 import { ArcadePanel } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
@@ -52,21 +53,7 @@ export function TimeClock({ userId }: { userId: string }) {
     isPending: openPending,
     isError: openError,
     refetch: refetchOpen,
-  } = useQuery({
-    queryKey: ["time-clock-open", userId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("time_entries")
-        .select("id, clock_in, clock_out, log_date, billable_hours, meal_status")
-        .eq("user_id", userId)
-        .is("clock_out", null)
-        .order("clock_in", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (error) throw error;
-      return data;
-    },
-  });
+  } = useOpenShift(userId);
 
   // Meals on the open shift: drives the lunch button and the attestation skip.
   const { data: openMeals } = useQuery({
@@ -84,20 +71,27 @@ export function TimeClock({ userId }: { userId: string }) {
   });
 
   const today = isoDateLocal(new Date());
-  const { data: todayEntries } = useQuery({
-    queryKey: ["time-clock-today", userId, today],
+
+  // Today's early/late pass, if a manager granted one: it silences the
+  // early-clock-in review flag server-side and extends the auto-close
+  // cutoff, so the worker should see it too. Errors (including the table
+  // not existing until migration 20260911120000 lands) read as "no pass".
+  const { data: todayPass } = useQuery({
+    queryKey: ["time-clock-pass", userId, today],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("time_entries")
-        .select("id, clock_in, clock_out, billable_hours, meal_status, entry_source, voided_at")
+        .from("time_clock_exceptions")
+        .select("early_from, late_until")
         .eq("user_id", userId)
-        .eq("log_date", today)
-        .is("voided_at", null)
-        .order("clock_in", { ascending: true });
-      if (error) throw error;
-      return data ?? [];
+        .eq("exception_date", today)
+        .is("revoked_at", null)
+        .maybeSingle();
+      if (error) return null;
+      return data;
     },
   });
+
+  const { data: todayEntries } = useTodayShifts(userId);
 
   // Recent auto-closes awaiting a human: the worker should see (and dispute)
   // a fabricated end time, not discover it on payday.
@@ -110,6 +104,9 @@ export function TimeClock({ userId }: { userId: string }) {
         .eq("user_id", userId)
         .eq("needs_correction", true)
         .is("voided_at", null)
+        // A week is long enough to notice and dispute — a stale auto-close
+        // from three weeks ago pinned to the top of Mission is just noise.
+        .gte("log_date", addDaysISO(laTodayISO(), -7))
         .order("clock_in", { ascending: false })
         .limit(3);
       if (error) throw error;
@@ -147,7 +144,18 @@ export function TimeClock({ userId }: { userId: string }) {
         }).format(new Date()),
       );
       const sundayNow = new Date(`${laTodayISO()}T12:00:00Z`).getUTCDay() === 0;
-      if (laHour < 7) {
+      // Mirror of the server's pass check: an early punch at/after the
+      // granted time raises no flag, so don't threaten a review either.
+      const laHM = new Intl.DateTimeFormat("en-GB", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+        timeZone: "America/Los_Angeles",
+      }).format(new Date());
+      const earlyCovered = !!todayPass?.early_from && laHM >= todayPass.early_from.slice(0, 5);
+      if (laHour < 7 && earlyCovered) {
+        toast.success("Clocked in — early start pre-approved");
+      } else if (laHour < 7) {
         toast.info("Clocked in early", {
           description: "Before 7:00 AM — your captain or manager will review and approve.",
         });
@@ -306,6 +314,14 @@ export function TimeClock({ userId }: { userId: string }) {
         <div className="timer-display text-5xl sm:text-6xl text-center">
           {!openLoaded ? "—" : isClockedIn ? fmtDuration(liveMs) : "00:00:00"}
         </div>
+
+        {todayPass && (todayPass.early_from || todayPass.late_until) && (
+          <div className="text-[10px] font-display uppercase tracking-widest text-victory border border-victory/40 rounded px-2 py-1">
+            Pass today
+            {todayPass.early_from && ` · in from ${fmtWallTime(todayPass.early_from)}`}
+            {todayPass.late_until && ` · out until ${fmtWallTime(todayPass.late_until)}`}
+          </div>
+        )}
 
         <div className="text-xs text-muted-foreground text-center">
           Today billable: <span className="text-victory">{todayHours.toFixed(2)}h</span>

@@ -95,7 +95,17 @@ function rectsDiffer(a: SpotRect | null, b: SpotRect): boolean {
 /** Wordmark palette for the first-tour finale (canvas-confetti wants hex). */
 const CONFETTI_COLORS = ["#ff4fd8", "#4fa3ff", "#54f06a", "#ffa438", "#ffe95e"];
 
-export function CanvasserTutorial({ userId }: { userId: string }) {
+export function CanvasserTutorial({
+  userId,
+  missionRoute = "/dashboard",
+}: {
+  userId: string;
+  /** Where the Mission surface lives for this role — captains mount
+   *  CanvasserMission on /mission, canvassers on /dashboard. Steps authored
+   *  against /dashboard are rerouted so the captain tour lands on the page
+   *  that actually renders the anchors (audit 2026-09-12). */
+  missionRoute?: string;
+}) {
   const router = useRouter();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
 
@@ -193,10 +203,11 @@ export function CanvasserTutorial({ userId }: { userId: string }) {
 
       if (s.route) {
         const here = router.state.location;
+        const to = s.route === "/dashboard" ? missionRoute : s.route;
         const wantTab = s.search?.tab;
         const hereTab = (here.search as { tab?: string } | undefined)?.tab;
-        if (here.pathname !== s.route || (wantTab && hereTab !== wantTab)) {
-          router.navigate({ to: s.route, search: s.search as never, replace: true });
+        if (here.pathname !== to || (wantTab && hereTab !== wantTab)) {
+          router.navigate({ to, search: s.search as never, replace: true });
         }
       }
 

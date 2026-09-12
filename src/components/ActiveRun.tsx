@@ -6,8 +6,11 @@ import { requiresGratitudeGate } from "@/lib/roles";
 import { assigneeColor } from "@/lib/assignee-colors";
 import { getMondayFormUrl } from "@/lib/monday-form";
 import { useGeoWatch, useFieldPins, type ActivePin } from "@/hooks/useFieldPins";
+import { useCrewBeacon } from "@/hooks/useCrewLive";
+import { usePiggyBank } from "@/hooks/usePiggyBank";
 import { useZipTints } from "@/hooks/useZipAssignments";
-import { dailyLogKeys, sumLogCounters, useTodayLogs } from "@/hooks/useDailyLogs";
+import { dailyLogKeys } from "@/hooks/useDailyLogs";
+import { PiggyBankHUD } from "@/components/PiggyBankHUD";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { GratitudeGate, hasPassedGratitudeGate } from "@/components/GratitudeGate";
 import { NeonMap, type Territory, type LatLng } from "@/components/NeonMap";
@@ -16,19 +19,18 @@ import { HouseResultSheet } from "@/components/HouseResultSheet";
 import { FieldStandingsSheet } from "@/components/FieldStandingsSheet";
 import type { OsmHouse } from "@/components/HouseBubbles";
 import { ArcadePanel } from "@/components/arcade";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import {
-  Home,
+  DoorClosed,
   Sparkles,
   Crosshair,
-  Info,
   Pencil,
   ThumbsDown,
   KeyRound,
-  Undo2,
+  Clock3,
   Trophy,
+  Users,
   Zap,
   X,
   Loader2,
@@ -60,10 +62,15 @@ type PinType = ActivePin;
 // 2026-09-10; Appt REMOVED 2026-09-11 — "appt set and submit new lead are
 // the same technically": setting an appointment IS submitting a lead, so
 // the Lead flow owns it. Legacy appt pins keep rendering via pin-results.
+// label = the short badge/legend form; fullLabel = the words the sheets
+// spell out; chipLabel = the caption under the armed chips (owner ask
+// 2026-09-12: icon-only chips were riddles — a HOUSE icon meaning "nobody
+// home" and an undo arrow meaning "come back later" told rookies nothing).
 const KNOCK_RESULTS: Array<{
   type: ActivePin;
   label: string;
   fullLabel: string;
+  chipLabel: string;
   color: string;
   icon: React.ReactNode;
 }> = [
@@ -71,6 +78,7 @@ const KNOCK_RESULTS: Array<{
     type: "lead",
     label: "Lead",
     fullLabel: "Lead",
+    chipLabel: "Lead",
     color: "#39ff14",
     icon: <Sparkles className="w-4 h-4" />,
   },
@@ -78,20 +86,23 @@ const KNOCK_RESULTS: Array<{
     type: "not_home",
     label: "NH",
     fullLabel: "Not Home",
+    chipLabel: "Not Home",
     color: "#ff2d55",
-    icon: <Home className="w-4 h-4" />,
+    icon: <DoorClosed className="w-4 h-4" />,
   },
   {
     type: "go_back",
     label: "GB",
-    fullLabel: "Go Back",
+    fullLabel: "Go Back Later",
+    chipLabel: "Go Back",
     color: "#00e5ff",
-    icon: <Undo2 className="w-4 h-4" />,
+    icon: <Clock3 className="w-4 h-4" />,
   },
   {
     type: "renter",
     label: "Renter",
     fullLabel: "Renter",
+    chipLabel: "Renter",
     color: "#c77dff",
     icon: <KeyRound className="w-4 h-4" />,
   },
@@ -99,10 +110,22 @@ const KNOCK_RESULTS: Array<{
     type: "not_interested",
     label: "NI",
     fullLabel: "Not Interested",
+    chipLabel: "Not Int.",
     color: "#ff6b00",
     icon: <ThumbsDown className="w-4 h-4" />,
   },
 ];
+
+// The sheets spell results out in full — abbreviations were the barrier,
+// and the tap tiles have the room.
+const SHEET_RESULTS = KNOCK_RESULTS.map((r) => ({ ...r, label: r.fullLabel }));
+
+// The armed-chip bar drops Lead from the vocabulary (owner call 2026-09-11:
+// "just use Submit New Lead") — an armed map-tap lead pin skipped the Monday
+// form entirely, minting lead pins with no lead behind them. The house sheet
+// keeps its Lead tile because that path opens the form (it IS Submit New
+// Lead, anchored to the tapped house), and corrections keep the full list.
+const ARMED_RESULTS = KNOCK_RESULTS.filter((r) => r.type !== "lead");
 
 type TurfRow = {
   id: string;
@@ -117,11 +140,13 @@ type TurfRow = {
 export function ActiveRun({
   variant,
   onOpenTurfTools,
+  onOpenCrewMap,
 }: {
   variant: "canvasser" | "captain";
   onOpenTurfTools?: () => void;
+  onOpenCrewMap?: () => void;
 }) {
-  const { user, role, loading } = useAuth();
+  const { user, role, loading, displayName } = useAuth();
   const qc = useQueryClient();
   const isCaptain = variant === "captain";
 
@@ -137,22 +162,37 @@ export function ActiveRun({
   }, [user?.id]);
   const { me, geoStatus } = useGeoWatch(!loading && (!requiresGratitudeGate(role) || gatePassed));
   const pins = useFieldPins(user?.id, me);
+  // Crew Map beacon: throttled live position on the private crew-live topic,
+  // riding the watch above (never a second GPS watch). Best-effort — a
+  // refused join (role without the publish grant) is silent by design.
+  useCrewBeacon({
+    userId: user?.id,
+    name: displayName,
+    me,
+    enabled: !loading && !!user?.id && (!requiresGratitudeGate(role) || gatePassed),
+  });
   // Captains see their ZIP zones tinted while canvassing — the frame they
   // chunk turfs inside. Canvassers keep plain borders (their turf is the map).
   const zipZones = useZipTints({ enabled: isCaptain });
 
-  const [active, setActive] = useState<ActivePin>("lead");
+  const [active, setActive] = useState<ActivePin>("not_home");
   const [editingPinId, setEditingPinId] = useState<string | null>(null);
   const [leadOpen, setLeadOpen] = useState(false);
-  const [helpOpen, setHelpOpen] = useState(false);
   const [pending, setPending] = useState<PinType | null>(null);
   const [houseTarget, setHouseTarget] = useState<OsmHouse | null>(null);
   const [standingsOpen, setStandingsOpen] = useState(false);
 
-  // Whole-day totals across office rows, from the shared today-logs cache —
-  // the same rows the Log form, Stats page, and HUD read.
-  const { data: todayRows } = useTodayLogs(user?.id);
-  const today = sumLogCounters(todayRows);
+  // Piggy bank: projected dollars per knock. ?piggy_demo=1 fakes knocks
+  // locally and never touches real state; parsed after mount because this
+  // route SSRs and a render-time window read is a hydration mismatch.
+  const piggy = usePiggyBank(user?.id);
+  const [piggyDemo, setPiggyDemo] = useState<{ on: boolean; rateMs?: number }>({ on: false });
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("piggy_demo") === "1") {
+      setPiggyDemo({ on: true, rateMs: Number(params.get("piggy_rate")) || undefined });
+    }
+  }, []);
 
   // Turfs: captains see every turf (their vans work all of them), canvassers
   // only their assigned (enforced by RLS too).
@@ -308,6 +348,16 @@ export function ActiveRun({
                 "GPS…"
               )}
             </span>
+            {isCaptain && onOpenCrewMap && (
+              <button
+                onClick={onOpenCrewMap}
+                aria-label="Crew Map"
+                title="Crew Map — everyone's pins & live positions"
+                className="min-h-11 min-w-11 inline-flex items-center justify-center rounded-md border border-[color-mix(in_oklab,var(--accent)_45%,var(--border))] text-[var(--accent)] hover:bg-surface-elevated"
+              >
+                <Users className="w-4 h-4" />
+              </button>
+            )}
             {isCaptain && onOpenTurfTools && (
               <button
                 onClick={onOpenTurfTools}
@@ -316,16 +366,6 @@ export function ActiveRun({
                 <Pencil className="w-3.5 h-3.5" /> Turf Tools
               </button>
             )}
-            {/* Info, not CircleHelp — the header's "?" replays the tour, and
-                two identical glyphs with different behaviors confused the
-                audit's rookie pass. */}
-            <button
-              onClick={() => setHelpOpen(true)}
-              aria-label="How Active Run works"
-              className="md:hidden min-w-11 min-h-11 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-surface-elevated"
-            >
-              <Info className="w-5 h-5" />
-            </button>
           </div>
         </div>
 
@@ -386,7 +426,7 @@ export function ActiveRun({
                 me={me}
                 height="clamp(420px, 64dvh, 900px)"
                 follow
-                fitPolygons={!isCaptain ? lockPolygons : undefined}
+                fitPolygons={lockPolygons}
                 houseBubbles
                 zipTints={isCaptain ? zipZones.tints : undefined}
                 onHouseTap={(h) => setHouseTarget(h)}
@@ -399,6 +439,19 @@ export function ActiveRun({
                 }}
                 onPinClick={(id) => setEditingPinId(id)}
               />
+
+              {/* Piggy bank — every knock is worth money, watch it stack */}
+              <div data-tour="field-bank" className="absolute top-3 left-3 z-[1000]">
+                <PiggyBankHUD
+                  dollars={piggy.dollars}
+                  perKnock={piggy.perKnock}
+                  knocks={piggy.knocks}
+                  paceKnocks={piggy.paceKnocks}
+                  source={piggy.source}
+                  demo={piggyDemo.on}
+                  demoRateMs={piggyDemo.rateMs}
+                />
+              </div>
 
               {/* Standings — the video app's leaderboard, one tap from the map */}
               <button
@@ -417,15 +470,15 @@ export function ActiveRun({
                 data-tour="field-chips"
                 className="absolute bottom-3 left-1/2 -translate-x-1/2 z-[1000] flex items-center gap-1.5 rounded-full border border-border bg-surface/90 backdrop-blur px-2 py-1.5"
               >
-                {KNOCK_RESULTS.map((r) => {
+                {ARMED_RESULTS.map((r) => {
                   const isArmed = active === r.type;
                   return (
                     <button
                       key={r.type}
                       type="button"
-                      aria-label={`${r.label} — arm this result`}
+                      aria-label={`${r.fullLabel} — arm this result`}
                       onClick={() => setActive(r.type)}
-                      className="relative flex h-11 w-11 items-center justify-center rounded-full"
+                      className="relative flex min-h-11 w-16 flex-col items-center justify-center gap-1 rounded-xl py-1.5"
                       style={{
                         color: r.color,
                         background: isArmed
@@ -437,6 +490,9 @@ export function ActiveRun({
                       }}
                     >
                       {r.icon}
+                      <span className="font-display text-[7px] uppercase tracking-wide leading-none whitespace-nowrap">
+                        {r.chipLabel}
+                      </span>
                       <span
                         className="absolute -top-1 -right-1 min-w-4 rounded-full bg-surface px-1 text-center font-display text-[9px] leading-4"
                         style={{ color: r.color }}
@@ -475,15 +531,10 @@ export function ActiveRun({
           </button>
         </div>
 
-        {/* Cascaded truth — every result already counted these. */}
-        <div className="text-center font-display text-[9px] uppercase tracking-widest text-muted-foreground">
-          Today · {today?.doors_knocked ?? 0} doors · {today?.people_talked_to ?? 0} talked
-        </div>
-
-        {/* Desktop keeps the help visible; phones get it behind the ⓘ */}
-        <div className="hidden md:block">
-          <HowItWorks />
-        </div>
+        {/* The old "Today · N doors · N talked" footer and the How-it-works
+            panel are gone (audit 2026-09-11): the piggy pill + chip badges
+            already count the day, and the "?" tour replay owns onboarding —
+            third copies earn nothing on a phone. */}
       </div>
 
       {leadOpen && <LeadSheet onClose={() => setLeadOpen(false)} />}
@@ -495,7 +546,7 @@ export function ActiveRun({
           if (!v) setHouseTarget(null);
         }}
         house={houseTarget}
-        results={KNOCK_RESULTS}
+        results={SHEET_RESULTS}
         busy={pins.dropAtPoint.isPending || pins.updatePin.isPending}
         onDrop={(h, pin_type) => {
           pins.guardedMapDrop({ lat: h.lat, lng: h.lng }, pin_type);
@@ -516,7 +567,7 @@ export function ActiveRun({
           if (!v) setEditingPinId(null);
         }}
         pin={editingPin}
-        results={KNOCK_RESULTS}
+        results={SHEET_RESULTS}
         updating={pins.updatePin.isPending}
         deleting={pins.deletePin.isPending}
         onSelect={(pin_type) => {
@@ -529,62 +580,7 @@ export function ActiveRun({
         }}
       />
 
-      {/* How-it-works bottom sheet (phones) */}
-      <Sheet open={helpOpen} onOpenChange={setHelpOpen}>
-        <SheetContent>
-          <SheetHeader>
-            <SheetTitle className="font-display text-sm uppercase tracking-widest text-neon">
-              How Active Run works
-            </SheetTitle>
-          </SheetHeader>
-          <div className="pt-2 pb-4">
-            <HowItWorksList />
-          </div>
-        </SheetContent>
-      </Sheet>
     </GratitudeGate>
-  );
-}
-
-function HowItWorks() {
-  return (
-    <ArcadePanel title="How it works">
-      <HowItWorksList />
-    </ArcadePanel>
-  );
-}
-
-function HowItWorksList() {
-  return (
-    <ul className="text-sm text-muted-foreground space-y-1.5">
-      <li>
-        • One tap = the result AND the knock. Every result counts a door automatically — there is no
-        separate knock button.
-      </li>
-      <li>• Tap a house bubble on the map, then tap what happened at that door.</li>
-      <li>• No bubble on the house? Arm a result on the map bar, then tap that spot.</li>
-      <li>• Your turf appears as a colored, named boundary; ZIP borders toggle bottom-right.</li>
-      <li>
-        • <span className="text-[#39ff14]">Lead</span> ·{" "}
-        <span className="text-[#ff2d55]">NH = Not Home</span> ·{" "}
-        <span className="text-[#00e5ff]">GB = Go Back</span> ·{" "}
-        <span className="text-[#c77dff]">Renter</span> ·{" "}
-        <span className="text-[#ff6b00]">NI = Not Interested</span>.
-      </li>
-      <li>
-        • Set an appointment? That IS a lead — smash ⚡ Submit New Lead (it counts the knock too).
-        Appointment and sale counts come from Monday.
-      </li>
-      <li>
-        • Pins dropped more than 75 yards from where you stand are flagged as Remote Drops and don't
-        count.
-      </li>
-      <li>
-        • Mis-tap? Tap the house (or the pin) to switch the result or delete it — your stats adjust
-        automatically (today only).
-      </li>
-      <li>• The trophy button shows live standings: SALE · DK · PTT · CL%.</li>
-    </ul>
   );
 }
 

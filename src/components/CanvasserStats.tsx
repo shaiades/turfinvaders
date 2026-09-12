@@ -2,13 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { formatCurrency } from "@/lib/utils";
 import { addDaysISO, laWeekStartISO } from "@/lib/dates";
-import {
-  HOURLY_MID,
-  HOURLY_TOP,
-  POINTS_TIER_MID,
-  POINTS_TIER_TOP,
-  commissionRateForPoints,
-} from "@/lib/pay";
+import { HOURLY_MID, HOURLY_TOP, POINTS_TIER_MID, POINTS_TIER_TOP } from "@/lib/pay";
 import { ArcadePanel, NeonBar } from "@/components/arcade";
 import { type PinType } from "@/lib/pin-results";
 import {
@@ -22,21 +16,17 @@ import { QueryStateCard } from "@/components/QueryStateCard";
 import { Button } from "@/components/ui/button";
 import type { CanvasserStatsData } from "@/hooks/useCanvasserStats";
 import {
-  CalendarClock,
-  CalendarDays,
   DollarSign,
-  DoorOpen,
   Filter,
   Gauge,
   Pencil,
-  PhoneCall,
   Target,
 } from "lucide-react";
 
 /**
- * The Mission page's Stats tab — read-only review, stacked in day order:
- * TODAY (live counters) → THIS WEEK (pace + paycheck engine) → MONTH TO
- * DATE (revenue, sales, goal progress). Goal EDITING lives on the Plan tab;
+ * The Mission page's Stats tab — the read-only SCOREBOARD (owner merge
+ * 2026-09-12: everything live-today moved to the Today tab): THIS WEEK
+ * (pace + paycheck engine) → MONTH TO DATE (revenue, sales, goal progress). Goal EDITING lives on the Plan tab;
  * the goal bar here links there. Weekly pay itself isn't repeated — the
  * Take-Home widget in the page header owns that number.
  */
@@ -49,41 +39,11 @@ export function CanvasserStats({
   userId: string;
   onEditGoal: () => void;
 }) {
-  const { today, week, month } = stats;
+  const { week, month } = stats;
+  // Today lives on the Today tab now (owner merge, 2026-09-12) — this tab is
+  // the pure scoreboard: the week you're being paid on, then the month.
   return (
     <div className="space-y-6">
-      <SectionLabel>Today</SectionLabel>
-      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <GrindCounter
-          label="Doors Knocked"
-          counterLabel="DOORS · TODAY"
-          value={today.doors_knocked}
-          icon={<DoorOpen className="w-4 h-4" />}
-          accent="#ff2d55"
-        />
-        <GrindCounter
-          label="Leads Called In"
-          counterLabel="LEADS · TODAY"
-          value={today.leads_called_in}
-          icon={<PhoneCall className="w-4 h-4" />}
-          accent="var(--neon)"
-        />
-        <GrindCounter
-          label="Confirmed Next Day Leads"
-          counterLabel="NEXT DAYS · TODAY"
-          value={today.next_days}
-          icon={<CalendarClock className="w-4 h-4" />}
-          accent="var(--victory)"
-        />
-        <GrindCounter
-          label="Confirmed Future Leads"
-          counterLabel="FUTURE LEADS · TODAY"
-          value={today.future_leads}
-          icon={<CalendarDays className="w-4 h-4" />}
-          accent="var(--accent)"
-        />
-      </div>
-
       <SectionLabel>This Week</SectionLabel>
       <ConversionFunnelPanel stats={stats} onOpenPlan={onEditGoal} />
       <DoorResultsPanel userId={userId} />
@@ -101,6 +61,7 @@ export function CanvasserStats({
         hourlyRate={stats.hourlyRate}
         base={stats.weekBase}
         commission={stats.weekCommission}
+        commissionPct={Math.round(stats.weekCommissionRate * 100)}
         revenue={stats.weekRevenue}
       />
 
@@ -145,12 +106,13 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-function GrindCounter({
+export function GrindCounter({
   label,
   counterLabel,
   value,
   icon,
   accent,
+  size = "lg",
 }: {
   label: string;
   /** The inner ticker's own metric name — LiveLeadCounter's default label is
@@ -159,10 +121,12 @@ function GrindCounter({
   value: number;
   icon: React.ReactNode;
   accent: string;
+  /** "md" fits a 2-up phone grid (Today tab); "lg" is the full-width ticker. */
+  size?: "md" | "lg";
 }) {
   return (
     <div
-      className="relative overflow-hidden rounded-lg border p-5"
+      className={`relative overflow-hidden rounded-lg border ${size === "md" ? "p-3.5" : "p-5"}`}
       style={{
         borderColor: `color-mix(in oklab, ${accent} 35%, var(--border))`,
         background: `color-mix(in oklab, ${accent} 5%, var(--surface))`,
@@ -177,7 +141,7 @@ function GrindCounter({
           {icon} {label}
         </div>
         <div className="mt-3 flex items-end gap-2">
-          <LiveLeadCounter value={value} size="lg" label={counterLabel} />
+          <LiveLeadCounter value={value} size={size} label={counterLabel} />
         </div>
         <div className="mt-2 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
           TODAY · LIVE
@@ -238,6 +202,7 @@ function PaycheckEngineWidget({
   hourlyRate,
   base,
   commission,
+  commissionPct,
   revenue,
 }: {
   /** The 60d-logs query behind `points` — the clocked-hours and sales-revenue
@@ -249,6 +214,8 @@ function PaycheckEngineWidget({
   hourlyRate: number;
   base: number;
   commission: number;
+  /** Rank-lock-aware rate from the stats hook — never recomputed here. */
+  commissionPct: number;
   revenue: number;
 }) {
   const atTop = hourlyRate >= HOURLY_TOP;
@@ -256,7 +223,6 @@ function PaycheckEngineWidget({
   const nextRate = points >= POINTS_TIER_MID ? HOURLY_TOP : HOURLY_MID;
   // Monotonic progress toward the top tier so the bar never shrinks as points grow.
   const pct = Math.min(1, points / POINTS_TIER_TOP);
-  const commissionPct = Math.round(commissionRateForPoints(points) * 100);
   const accent = atTop ? "var(--victory)" : "var(--neon)";
   const action = (
     <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
@@ -353,7 +319,7 @@ function ConversionFunnelPanel({
   const allZero = stages.every((s) => s.value === 0);
   const rateNote =
     stats.funnelRates.source === "personal"
-      ? `Personal rates · ${stats.funnelRates.sampleDoors.toLocaleString()} doors / 60d`
+      ? `Personal rates · ${stats.funnelRates.sampleDoors.toLocaleString()} tracked doors`
       : "Company baseline rates (knock more doors to earn your own)";
 
   return (

@@ -9,6 +9,9 @@ import { cn } from "@/lib/utils";
 import { Clock, ChevronLeft, ChevronRight, Save, Trash2, AlertTriangle, Utensils } from "lucide-react";
 import { useWeekSelector } from "@/hooks/useWeekSelector";
 import { TimeClockReviewQueue } from "@/components/TimeClockReviewQueue";
+import { TimeClockBackfill } from "@/components/TimeClockBackfill";
+import { TimeClockExceptions } from "@/components/TimeClockExceptions";
+import { TimeClockLiveShifts } from "@/components/TimeClockLiveShifts";
 import { PushAlertsCard } from "@/components/PushAlertsCard";
 
 // Weeks anchor to the LA Monday (midnight PT reset).
@@ -410,6 +413,16 @@ export function TimesheetEditor() {
           </span>
         </div>
       </ArcadePanel>
+
+      {/* Owner/Manager tools beyond row edits: one-tap clock-out of anyone
+          currently punched in, create whole entries for anyone (backfill),
+          and pre-approve early starts / late finishes so known exceptions
+          never flag or auto-close. */}
+      <TimeClockLiveShifts profiles={data?.profiles ?? []} />
+      <div className="grid lg:grid-cols-2 gap-4 items-start">
+        <TimeClockBackfill profiles={data?.profiles ?? []} />
+        <TimeClockExceptions profiles={data?.profiles ?? []} />
+      </div>
 
       <ArcadePanel title="Entries">
         {isLoading ? (

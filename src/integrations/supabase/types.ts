@@ -947,6 +947,45 @@ export type Database = {
         }
         Relationships: []
       }
+      time_clock_exceptions: {
+        Row: {
+          created_at: string
+          early_from: string | null
+          exception_date: string
+          granted_by: string
+          id: string
+          late_until: string | null
+          reason: string
+          revoked_at: string | null
+          revoked_by: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          early_from?: string | null
+          exception_date: string
+          granted_by: string
+          id?: string
+          late_until?: string | null
+          reason: string
+          revoked_at?: string | null
+          revoked_by?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          early_from?: string | null
+          exception_date?: string
+          granted_by?: string
+          id?: string
+          late_until?: string | null
+          reason?: string
+          revoked_at?: string | null
+          revoked_by?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       time_entries: {
         Row: {
           billable_hours: number
@@ -1328,7 +1367,18 @@ export type Database = {
         Args: { _canvasser_id: string }
         Returns: undefined
       }
+      claim_roster_spot: { Args: never; Returns: Json }
       global_visibility_on: { Args: never; Returns: boolean }
+      grant_time_clock_exception: {
+        Args: {
+          _user_id: string
+          _date: string
+          _early_from: string | null
+          _late_until: string | null
+          _reason: string
+        }
+        Returns: string
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -1355,6 +1405,10 @@ export type Database = {
       refresh_canvasser_rank: {
         Args: { _canvasser_id: string }
         Returns: string
+      }
+      revoke_time_clock_exception: {
+        Args: { _id: string }
+        Returns: undefined
       }
       set_user_role: {
         Args: {

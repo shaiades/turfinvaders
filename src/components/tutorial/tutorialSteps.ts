@@ -44,6 +44,10 @@ export type TourPageId = "field" | "mission" | "leaders" | "wrap" | "learn";
 export function pageIdForPathname(pathname: string): TourPageId | null {
   if (pathname === "/field") return "field";
   if (pathname === "/dashboard") return "mission";
+  // Captain twins (audit 2026-09-12): their Mission lives on /mission and
+  // their canvass map on /my-territory — same anchors, same tours.
+  if (pathname === "/mission") return "mission";
+  if (pathname === "/my-territory") return "field";
   if (pathname === "/learn") return "learn";
   if (pathname === "/leaderboard") return "leaders";
   if (pathname === "/daily-wrap") return "wrap";
@@ -62,12 +66,20 @@ export const PAGE_TOURS: Record<TourPageId, TutorialStep[]> = {
       body: "Your turf shows as a named boundary, with a bubble over every house and ZIP borders for context. Zoom to the street and tap a house bubble to log that door — one tap on the result is the whole knock.",
     },
     {
+      id: "field-bank",
+      target: "field-bank",
+      optional: true, // hides behind the gate / before the map is ready
+      padding: 6,
+      title: "Watch it stack",
+      body: "Every door you knock drops money in the bank — even a Not Home has a dollar value. Projected from your real conversion rates, and the pig refills every $100.",
+    },
+    {
       id: "field-chips",
       target: "field-chips",
       optional: true, // hides behind the gate / before turf is assigned
       padding: 6,
       title: "Pin any house",
-      body: "No bubble on a house? Pick a result — Lead, Not Home, Go Back, Renter, NI — then tap that spot on the map. Tonight's go-backs start here.",
+      body: "No bubble on a house? Pick a result — Not Home, Go Back, Renter, Not Interested — then tap that spot on the map. Leads go through ⚡ Submit New Lead. Tonight's go-backs start here.",
     },
     {
       id: "field-lead",
@@ -107,8 +119,8 @@ export const PAGE_TOURS: Record<TourPageId, TutorialStep[]> = {
       route: "/dashboard",
       search: { tab: "log" },
       target: "tab-log",
-      title: "Log",
-      body: "Your official numbers for the day. Active Run fills these in as you tap — review before you head in, and add anything you missed.",
+      title: "Today",
+      body: "Your live day in one place: the bank filling, counters ticking as you tap, and the desk numbers — sits and sales — you type in yourself. That's where your points come from.",
     },
     {
       id: "tab-stats",
@@ -116,7 +128,7 @@ export const PAGE_TOURS: Record<TourPageId, TutorialStep[]> = {
       search: { tab: "stats" },
       target: "tab-stats",
       title: "Stats",
-      body: "Today, this week, this month — your funnel, points, and money. Know your numbers, grow your numbers.",
+      body: "The scoreboard — this week and this month: your funnel, points, and money. Know your numbers, grow your numbers.",
     },
   ],
   learn: [
@@ -165,7 +177,7 @@ export const WELCOME_STEPS: TutorialStep[] = [
     id: "hud",
     target: "hud",
     title: "Your score strip",
-    body: "Your rank, Leads Today, and Pts Today — pinned to the top of every screen, so you always know where you stand.",
+    body: "Your rank, today's leads, and your week points with the distance to the next pay tier — pinned to the top of every screen. If you knock while off the clock, it turns into an alarm.",
   },
 ];
 

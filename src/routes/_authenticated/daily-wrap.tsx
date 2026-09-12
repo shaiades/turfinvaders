@@ -5,8 +5,19 @@ import { supabase } from "@/integrations/supabase/client";
 import { ArcadeCard, ArcadePanel } from "@/components/arcade";
 import { GlossarySheet } from "@/components/GlossarySheet";
 import { AlertTriangle, Info, Trophy } from "lucide-react";
-import { addDaysISO, reportDates } from "@/lib/dates";
+import { addDaysISO, laTodayISO, reportDates } from "@/lib/dates";
+import { formatCurrency } from "@/lib/utils";
+import { getClockPresence } from "@/lib/dispatch.functions";
 import { isRecentlyActive, lastActiveMap, SUSPENSION_RECENCY_DAYS } from "@/lib/suspension";
+import { isLeadSourceName } from "@/lib/lead-sources";
+import { useAuth } from "@/hooks/useAuth";
+import { sumLogCounters, useTodayLogs } from "@/hooks/useDailyLogs";
+import { usePiggyBank } from "@/hooks/usePiggyBank";
+
+/** Untyped table access (ObjectionDojo's pattern) until generated types
+ *  catch up with gratitude_entries / objection_attempts reads here. */
+const rawTable = (name: string) =>
+  (supabase as unknown as { from: (t: string) => ReturnType<typeof supabase.from> }).from(name);
 
 export const Route = createFileRoute("/_authenticated/daily-wrap")({
   head: () => ({ meta: [{ title: "Daily Wrap-Up — Turf Invaders" }] }),
@@ -18,6 +29,8 @@ type Row = {
   name: string;
   todayLeads: number;
   ydayLeads: number;
+  /** Leads on the day BEFORE yday — the second judged day of the zero lists. */
+  yday2Leads: number;
   weekPoints: number;
   recent: boolean;
   tracked: boolean;
@@ -28,8 +41,21 @@ type Row = {
 };
 
 /** One doughnut card for both zero lists — the freezer (2+ zeros, red) and
- *  the fresh doughnuts (1 zero, neutral) rendered the same markup twice. */
-function DoughnutCard({ r, frozen }: { r: Row; frozen?: boolean }) {
+ *  the fresh doughnuts (1 zero, neutral) rendered the same markup twice.
+ *  Labels name the two judged days: the lists only ever score FINISHED
+ *  report days (owner, 2026-09-11: today can't count until the day is over),
+ *  so pre-lock they read yesterday/day-before and post-lock today/yesterday. */
+function DoughnutCard({
+  r,
+  frozen,
+  lastLabel,
+  prevLabel,
+}: {
+  r: Row;
+  frozen?: boolean;
+  lastLabel: string;
+  prevLabel: string;
+}) {
   return (
     <li
       className={
@@ -50,7 +76,7 @@ function DoughnutCard({ r, frozen }: { r: Row; frozen?: boolean }) {
             frozen ? "text-[var(--destructive)]" : "text-muted-foreground"
           }`}
         >
-          0 today · {frozen ? "0" : r.ydayLeads} yesterday
+          0 {lastLabel} · {frozen ? "0" : r.yday2Leads} {prevLabel}
         </div>
       </div>
     </li>
@@ -71,7 +97,9 @@ const AWARD_TIERS: Array<{
 }> = [
   {
     key: "bosses",
-    title: "7+ Point Bosses",
+    // The clubs ARE the pay tiers (audit P2-5) — naming the raise turns the
+    // award into money instead of trivia.
+    title: "7+ Point Bosses · the $35/hr tier",
     titleClass: "text-[var(--neon-blue,#00f0ff)]",
     empty: "No bosses yet this week.",
     emoji: "👑",
@@ -86,7 +114,7 @@ const AWARD_TIERS: Array<{
   },
   {
     key: "club",
-    title: "3+ Point Club",
+    title: "3+ Point Club · the $30/hr tier",
     titleClass: "text-muted-foreground",
     empty: "No one in the club yet.",
     emoji: "⭐",
@@ -125,6 +153,39 @@ function DailyWrap() {
   const { today, yday, wkStart, locked } = reportDates();
   const [glossaryOpen, setGlossaryOpen] = useState(false);
 
+  // YOUR DAY (audit P2-3): the wrap used to be entirely team-wide — the one
+  // person guaranteed to read it never appeared. All self data rides caches
+  // other pages already warm.
+  const { user } = useAuth();
+  const selfId = user?.id;
+  const myLogs = useTodayLogs(selfId);
+  const my = sumLogCounters(myLogs.data);
+  const piggy = usePiggyBank(selfId);
+
+  // Zero lists judge only FINISHED report days (owner, 2026-09-11: today
+  // must not count toward suspension until the day is over). The two judged
+  // days are `yday` and the day before it — pre-lock that's yesterday and
+  // the day prior; after the 7 PM roll `yday` IS the just-finished day, so
+  // today joins the lists exactly at the lock. Clock-in gate (owner,
+  // 2026-09-11): nobody lands on a zero list for a day they never punched
+  // in; both judged days are real PT calendar days, so presence is checked
+  // on them directly. Presence rides the server fn because canvassers only
+  // read their own time_entries. Until it loads (or if it fails — local dev
+  // has no service key) the zero lists stay EMPTY: missing data must never
+  // flag a person.
+  const yday2 = addDaysISO(yday, -1);
+  const clockDates = useMemo(() => [...new Set([yday, yday2])], [yday, yday2]);
+  const clockQ = useQuery({
+    queryKey: ["daily_wrap", "clock", clockDates],
+    queryFn: async () => getClockPresence({ data: { dates: clockDates } }),
+  });
+  const clockReady = clockQ.isSuccess;
+  const clockedSets = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    for (const [d, ids] of Object.entries(clockQ.data?.byDate ?? {})) m.set(d, new Set(ids));
+    return m;
+  }, [clockQ.data]);
+
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ["daily_wrap", today],
     queryFn: async (): Promise<Row[]> => {
@@ -145,24 +206,30 @@ function DailyWrap() {
       const profiles = profilesR.data ?? [];
       const metrics = metricsR.data ?? [];
 
-      const byUser = new Map<string, { today: number; yday: number; pts: number }>();
+      const byUser = new Map<string, { today: number; yday: number; yday2: number; pts: number }>();
       for (const m of metrics) {
-        const rec = byUser.get(m.canvasser_id) ?? { today: 0, yday: 0, pts: 0 };
+        const rec = byUser.get(m.canvasser_id) ?? { today: 0, yday: 0, yday2: 0, pts: 0 };
         const leads = (m.leads_confirmed ?? 0) + (m.leads_submitted ?? 0);
         if (m.metric_date === today) rec.today += leads;
         if (m.metric_date === yday) rec.yday += leads;
+        if (m.metric_date === yday2) rec.yday2 += leads;
         // Points stay week-scoped even though the fetch may reach further back.
         if (m.metric_date >= wkStart) rec.pts += (m.pitch_missed ?? 0) * 1 + (m.sales ?? 0) * 2;
         byUser.set(m.canvasser_id, rec);
       }
       const lastMap = lastActiveMap(metrics);
-      return profiles.map((p) => {
-        const r = byUser.get(p.id) ?? { today: 0, yday: 0, pts: 0 };
+      // Pseudo lead-source channels (Job Walk, Upsell, …) live in profiles
+      // but are the office's credit, never canvassers (owner rule, PR
+      // #133/#172) — they must not appear as winners, bosses, or doughnuts.
+      const people = profiles.filter((p) => !isLeadSourceName(p.display_name));
+      return people.map((p) => {
+        const r = byUser.get(p.id) ?? { today: 0, yday: 0, yday2: 0, pts: 0 };
         return {
           id: p.id,
           name: p.display_name ?? "Unknown",
           todayLeads: r.today,
           ydayLeads: r.yday,
+          yday2Leads: r.yday2,
           weekPoints: r.pts,
           recent: isRecentlyActive(today, [p.id], lastMap, (p.created_at ?? "").slice(0, 10)),
           tracked: p.suspension_tracked !== false,
@@ -185,13 +252,32 @@ function DailyWrap() {
     // Fleet Dispatch banner; `active` drops archived/removed reps the moment
     // the archive lands; `graced` is the 1-week rookie grace (see Row.graced).
     // All four gate only the zero lists — awards a rep earned before removal
-    // stay on the wrap.
+    // stay on the wrap. Both lists judge ONLY the two finished report days
+    // (yday, yday2) — an in-progress day never counts (owner, 2026-09-11);
+    // it joins at the 7 PM lock, when yday becomes the just-finished day.
+    // Clock-in gates likewise touch only the zero lists: a zero day counts
+    // only when it was actually punched.
+    const clockedOn = (id: string, day: string) => clockedSets.get(day)?.has(id) ?? false;
     const suspension = rows.filter(
       (r) =>
-        r.todayLeads === 0 && r.ydayLeads === 0 && r.recent && r.tracked && r.active && !r.graced,
+        r.ydayLeads === 0 &&
+        r.yday2Leads === 0 &&
+        r.recent &&
+        r.tracked &&
+        r.active &&
+        !r.graced &&
+        clockReady &&
+        clockedOn(r.id, yday) &&
+        clockedOn(r.id, yday2),
     );
     const doughnuts = rows.filter(
-      (r) => r.todayLeads === 0 && r.ydayLeads > 0 && r.active && !r.graced,
+      (r) =>
+        r.ydayLeads === 0 &&
+        r.yday2Leads > 0 &&
+        r.active &&
+        !r.graced &&
+        clockReady &&
+        clockedOn(r.id, yday),
     );
     const winners = rows
       .filter((r) => r.todayLeads >= 1)
@@ -199,9 +285,13 @@ function DailyWrap() {
     const club3 = rows.filter((r) => r.weekPoints >= 3 && r.weekPoints < 7).sort((a, b) => b.weekPoints - a.weekPoints);
     const bosses7 = rows.filter((r) => r.weekPoints >= 7).sort((a, b) => b.weekPoints - a.weekPoints);
     return { suspension, doughnuts, winners, club3, bosses7 };
-  }, [rows]);
+  }, [rows, clockReady, clockedSets, yday, yday2]);
 
   if (isLoading) return <div className="text-sm text-muted-foreground">Loading daily wrap…</div>;
+
+  // Pre-lock the judged days are yesterday/day-before; the lock rolls them.
+  const lastLabel = locked ? "today" : "yesterday";
+  const prevLabel = locked ? "yesterday" : "day before";
 
   return (
     <div className="space-y-6">
@@ -241,6 +331,37 @@ function DailyWrap() {
         </p>
       </div>
 
+      {/* YOUR DAY — celebration starts with the person reading (P2-3). */}
+      {selfId && (
+        <YourDayCard
+          doors={my.doors_knocked}
+          talked={my.people_talked_to}
+          leads={rows.find((r) => r.id === selfId)?.todayLeads ?? my.leads_called_in}
+          weekPoints={rows.find((r) => r.id === selfId)?.weekPoints ?? 0}
+          projected={piggy.dollars}
+        />
+      )}
+
+      {/* Winners BEFORE the zero lists — celebration first, then the heat. */}
+      <WinnersPanel winners={winners} selfId={selfId} />
+
+      {/* Weekly Point Bosses */}
+      <ArcadePanel
+        title="Weekly Point Bosses"
+        action={
+          <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            <Trophy className="inline w-3 h-3 mr-1" />
+            Week of {wkStart}
+          </span>
+        }
+      >
+        <div className="space-y-6">
+          <AwardSection tier={AWARD_TIERS[0]} rows={bosses7} />
+          <AwardSection tier={AWARD_TIERS[1]} rows={club3} />
+          <DojoApprovedLine wkStart={wkStart} />
+        </div>
+      </ArcadePanel>
+
       {/* Suspension Zone */}
       <section
         className="relative overflow-hidden rounded-lg border-2 p-5"
@@ -261,14 +382,19 @@ function DailyWrap() {
         ) : (
           <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {suspension.map((r) => (
-              <DoughnutCard key={r.id} r={r} frozen />
+              <DoughnutCard key={r.id} r={r} frozen lastLabel={lastLabel} prevLabel={prevLabel} />
             ))}
           </ul>
+        )}
+        {!locked && (
+          <p className="mt-3 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            Finished days only — today can't earn a zero until the 7 PM lock.
+          </p>
         )}
       </section>
 
       {/* Doughnut List */}
-      <ArcadePanel title="Doughnuts Today · 1 Zero">
+      <ArcadePanel title={locked ? "Doughnuts Today · 1 Zero" : "Doughnuts · Yesterday · 1 Zero"}>
         {doughnuts.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             No fresh doughnuts. Everyone got on the board.
@@ -276,37 +402,153 @@ function DailyWrap() {
         ) : (
           <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {doughnuts.map((r) => (
-              <DoughnutCard key={r.id} r={r} />
+              <DoughnutCard key={r.id} r={r} lastLabel={lastLabel} prevLabel={prevLabel} />
             ))}
           </ul>
         )}
       </ArcadePanel>
 
-      {/* Winners with confetti */}
-      <WinnersPanel winners={winners} />
-
-      {/* Weekly Point Bosses */}
-      <ArcadePanel
-        title="Weekly Point Bosses"
-        action={
-          <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-            <Trophy className="inline w-3 h-3 mr-1" />
-            Week of {wkStart}
-          </span>
-        }
-      >
-        <div className="space-y-6">
-          <AwardSection tier={AWARD_TIERS[0]} rows={bosses7} />
-          <AwardSection tier={AWARD_TIERS[1]} rows={club3} />
-        </div>
-      </ArcadePanel>
+      {/* The closer: the morning's gratitude, back at day's end. */}
+      <GratitudeWall />
 
       <GlossarySheet open={glossaryOpen} onOpenChange={setGlossaryOpen} />
     </div>
   );
 }
 
-function WinnersPanel({ winners }: { winners: Row[] }) {
+/** The reader's own day, in the day's own currencies: doors, leads, week
+ *  points, projected dollars. Every value rides caches other pages warm. */
+function YourDayCard({
+  doors,
+  talked,
+  leads,
+  weekPoints,
+  projected,
+}: {
+  doors: number;
+  talked: number;
+  leads: number;
+  weekPoints: number;
+  projected: number | null;
+}) {
+  const stats: Array<{ label: string; value: string; cls: string }> = [
+    { label: "Doors", value: doors.toLocaleString(), cls: "text-neon" },
+    { label: "Talked", value: talked.toLocaleString(), cls: "text-accent" },
+    { label: "Leads", value: leads.toLocaleString(), cls: "text-victory" },
+    { label: "Wk Pts", value: weekPoints.toLocaleString(), cls: "text-victory" },
+  ];
+  if (projected !== null) {
+    stats.push({
+      label: "Projected",
+      value: formatCurrency(Math.round(projected)),
+      cls: "text-victory",
+    });
+  }
+  return (
+    <ArcadeCard className="p-4">
+      <div className="text-[10px] font-display uppercase tracking-widest text-neon mb-3">
+        Your Day
+      </div>
+      <div className="grid grid-cols-4 sm:grid-cols-5 gap-2">
+        {stats.map((s) => (
+          <div key={s.label} className="rounded-md border border-border/60 bg-black/30 px-2 py-2 text-center">
+            <div className={`font-display text-xl leading-none tabular-nums ${s.cls}`}>
+              {s.value}
+            </div>
+            <div className="mt-1 text-[9px] font-display uppercase tracking-widest text-muted-foreground">
+              {s.label}
+            </div>
+          </div>
+        ))}
+      </div>
+    </ArcadeCard>
+  );
+}
+
+/** This week's approved Objection Dojo clips — training tied to the loop. */
+function DojoApprovedLine({ wkStart }: { wkStart: string }) {
+  const { data } = useQuery({
+    queryKey: ["daily_wrap", "dojo", wkStart],
+    queryFn: async () => {
+      const { data: attempts, error } = await rawTable("objection_attempts")
+        .select("canvasser_id, created_at")
+        .eq("status", "approved")
+        .gte("created_at", `${wkStart}T00:00:00Z`);
+      if (error) throw error;
+      const rows = (attempts ?? []) as Array<{ canvasser_id: string }>;
+      const ids = [...new Set(rows.map((a) => a.canvasser_id))];
+      if (ids.length === 0) return [];
+      const { data: profs } = await supabase
+        .from("profiles")
+        .select("id, display_name")
+        .in("id", ids);
+      return (profs ?? []).map((p) => p.display_name ?? "Unknown");
+    },
+  });
+  if (!data || data.length === 0) return null;
+  return (
+    <div>
+      <h3 className="font-display text-xs uppercase tracking-widest mb-2 text-muted-foreground">
+        🥋 Dojo Approved This Week
+      </h3>
+      <ul className="flex flex-wrap gap-2">
+        {data.map((name) => (
+          <li
+            key={name}
+            className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1 font-display text-[10px] uppercase tracking-widest text-muted-foreground"
+          >
+            {name}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** The morning check-ins, first names only — the ritual gets its audience. */
+function GratitudeWall() {
+  const day = laTodayISO();
+  const { data } = useQuery({
+    queryKey: ["daily_wrap", "gratitude", day],
+    queryFn: async () => {
+      const { data: entries, error } = await rawTable("gratitude_entries")
+        .select("user_id, text")
+        .eq("entry_date", day)
+        .order("created_at", { ascending: true })
+        .limit(40);
+      if (error) throw error;
+      const rows = (entries ?? []) as Array<{ user_id: string; text: string }>;
+      if (rows.length === 0) return [];
+      const ids = [...new Set(rows.map((r) => r.user_id))];
+      const { data: profs } = await supabase
+        .from("profiles")
+        .select("id, display_name")
+        .in("id", ids);
+      const names = new Map((profs ?? []).map((p) => [p.id, p.display_name ?? ""]));
+      return rows.map((r) => ({
+        first: (names.get(r.user_id) ?? "").split(" ")[0] || "Someone",
+        text: r.text,
+      }));
+    },
+  });
+  if (!data || data.length === 0) return null;
+  return (
+    <ArcadePanel title="Today's Gratitude 💚">
+      <ul className="space-y-2">
+        {data.map((g, i) => (
+          <li key={i} className="text-sm text-muted-foreground">
+            <span className="font-display text-[10px] uppercase tracking-widest text-victory">
+              {g.first}
+            </span>{" "}
+            — “{g.text}”
+          </li>
+        ))}
+      </ul>
+    </ArcadePanel>
+  );
+}
+
+function WinnersPanel({ winners, selfId }: { winners: Row[]; selfId?: string }) {
   const hostRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!hostRef.current || winners.length === 0) return;
@@ -355,7 +597,12 @@ function WinnersPanel({ winners }: { winners: Row[] }) {
           ) : (
             <ol className="divide-y divide-border">
               {winners.map((r, i) => (
-                <li key={r.id} className="flex items-center justify-between py-2.5">
+                <li
+                  key={r.id}
+                  className={`flex items-center justify-between py-2.5 ${
+                    r.id === selfId ? "bg-neon/10 -mx-2 px-2 rounded" : ""
+                  }`}
+                >
                   <div className="flex items-center gap-3 min-w-0">
                     <span
                       className={`font-display text-sm w-8 ${

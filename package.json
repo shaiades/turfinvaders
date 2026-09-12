@@ -16,7 +16,8 @@
     "verify:kombat": "npx tsx scripts/verify-close-kombat.ts",
     "verify:blockday": "npx tsx scripts/verify-block-day.ts",
     "verify:suspension": "npx tsx scripts/verify-suspension.ts",
-    "verify:overtime": "npx tsx scripts/verify-overtime.ts"
+    "verify:overtime": "npx tsx scripts/verify-overtime.ts",
+    "verify:piggy": "npx tsx scripts/verify-piggy.ts"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",

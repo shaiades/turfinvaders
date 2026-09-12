@@ -25,6 +25,42 @@ export type ConversionRates = {
 
 export const EMPTY_AGGREGATE: FunnelAggregate = { doors: 0, confirmed: 0, sits: 0, sales: 0 };
 
+/** The day the result-counts-as-knock trigger went live (migration
+ *  20260910230000). doors_knocked is trustworthy only from here — the 60-day
+ *  company window holds ~99 doors total and ALL of them are from this era,
+ *  so any rate that divides by doors must use this window or it lies. */
+export const DOORS_TRACKED_SINCE = "2026-09-10";
+
+/** The funnel's stages live in different windows on purpose: confirms come
+ *  from daily_metrics (the office pipeline — daily_logs.confirmed_leads has
+ *  never been written), sits/sales from daily_logs, and the door pair only
+ *  from the pin era. Each rate divides quantities from the SAME window. */
+export type SplitFunnelInputs = {
+  /** Pin-era pair (since DOORS_TRACKED_SINCE): doors + confirms. */
+  eraDoors: number;
+  eraConfirmed: number;
+  /** Full 60-day pipeline counts. */
+  confirmed: number;
+  sits: number;
+  sales: number;
+};
+
+export const EMPTY_SPLIT: SplitFunnelInputs = {
+  eraDoors: 0,
+  eraConfirmed: 0,
+  confirmed: 0,
+  sits: 0,
+  sales: 0,
+};
+
+export function deriveSplitRates(i: SplitFunnelInputs): ConversionRates {
+  return {
+    closeRate: i.sits > 0 ? i.sales / i.sits : 0,
+    sitRate: i.confirmed > 0 ? i.sits / i.confirmed : 0,
+    leadDoorRate: i.eraDoors > 0 ? i.eraConfirmed / i.eraDoors : 0,
+  };
+}
+
 /** Personal history qualifies on volume, not tenure. */
 export const PERSONAL_MIN_DOORS = 200;
 export const PERSONAL_MIN_SITS = 5;
@@ -45,6 +81,28 @@ export function deriveRates(a: FunnelAggregate): ConversionRates {
 
 export function ratesUsable(r: ConversionRates): boolean {
   return r.closeRate > 0 && r.sitRate > 0 && r.leadDoorRate > 0;
+}
+
+/** The ONE avg-commission fallback chain (owner, 2026-08-14): the canvasser's
+ *  own number wins, else the company 60-day average, else the $200 floor so
+ *  goal math can never divide by zero. */
+export function resolveAvgCommission(
+  profileAvg: number | null | undefined,
+  companyAvg: number,
+  floor: number,
+): number {
+  return Number(profileAvg ?? 0) || companyAvg || floor;
+}
+
+/** Expected commission dollars a single door knock is worth today — the
+ *  forward funnel walked one door at a time. Null when the rates can't
+ *  support the math; consumers show their empty state, never $0/knock. */
+export function expectedValuePerDoor(
+  rates: ConversionRates | null,
+  avgCommissionPerSale: number,
+): number | null {
+  if (!rates || !ratesUsable(rates) || avgCommissionPerSale <= 0) return null;
+  return avgCommissionPerSale * rates.closeRate * rates.sitRate * rates.leadDoorRate;
 }
 
 /**

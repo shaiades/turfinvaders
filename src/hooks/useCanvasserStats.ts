@@ -14,6 +14,7 @@ import {
   payRateForPoints,
   weeklyPoints,
 } from "@/lib/pay";
+import { resolveAvgCommission } from "@/lib/funnel";
 import { useFunnelRates } from "@/hooks/useFunnelRates";
 import { useMyEarnings } from "@/hooks/useMyEarnings";
 import { useCanvasserProfile } from "@/hooks/useCanvasserProfile";
@@ -98,13 +99,13 @@ export function useCanvasserStats(userId: string) {
   const monthlyGoal = Number(profile.data?.monthly_goal ?? DEFAULT_MONTHLY_GOAL);
   const weeklyGoal = Number(profile.data?.weekly_income_goal ?? DEFAULT_WEEKLY_GOAL);
   // Income semantics (owner, 2026-07-29): required sales = goal ÷ avg
-  // commission per sale. One fallback chain everywhere (2026-08-14): the
-  // canvasser's own number wins, else the company 60d average, else $200 so
-  // the back-solve can never divide by zero.
-  const avgCommission =
-    Number(profile.data?.avg_commission ?? 0) ||
-    funnelRates.companyAvgCommission ||
-    DEFAULT_AVG_COMMISSION;
+  // commission per sale. The fallback chain lives in resolveAvgCommission so
+  // the piggy bank and the back-solve can never disagree on the figure.
+  const avgCommission = resolveAvgCommission(
+    profile.data?.avg_commission,
+    funnelRates.companyAvgCommission,
+    DEFAULT_AVG_COMMISSION,
+  );
 
   const salesQuery = useQuery({
     queryKey: ["my_confirmed_sales", "mtd", userId],
@@ -168,9 +169,15 @@ export function useCanvasserStats(userId: string) {
 
     const weekPoints = weeklyPoints(week.demos_sits, week.sales);
     const weekHours = clockedQuery.data ?? 0;
-    const hourlyRate = payRateForPoints(weekPoints);
+    // Rank rate-locks apply here too — the display estimate must never
+    // disagree with calc_weekly_paycheck. A reverted pay lock suspends the
+    // rank rate, so the rank is withheld from the tier math in that state.
+    const rankForRates =
+      profile.data?.pay_lock_status === "reverted" ? null : (profile.data?.current_rank ?? null);
+    const hourlyRate = payRateForPoints(weekPoints, rankForRates);
     const weekBase = weekHours * hourlyRate;
-    const weekCommission = weekRevenue * commissionRateForPoints(weekPoints);
+    const weekCommissionRate = commissionRateForPoints(weekPoints, rankForRates);
+    const weekCommission = weekRevenue * weekCommissionRate;
     // Month-level projection uses the base rate — the real per-week rate comes from the RPC.
     const monthCommission = monthRevenue * COMMISSION_BASE;
 
@@ -185,13 +192,14 @@ export function useCanvasserStats(userId: string) {
       hourlyRate,
       weekBase,
       weekCommission,
+      weekCommissionRate,
       monthCommission,
       personalTalkRatio:
         personalAgg.doors_knocked > 0
           ? personalAgg.people_talked_to / personalAgg.doors_knocked
           : null,
     };
-  }, [logsQuery.data, salesQuery.data, clockedQuery.data]);
+  }, [logsQuery.data, salesQuery.data, clockedQuery.data, profile.data]);
 
   // Talk-per-door: personal 60d history when it's driving the rates,
   // industry-typical ~27% otherwise (talks aren't in the company baseline).

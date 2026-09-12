@@ -3,7 +3,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { COMMISSION_BASE, weeklyPoints } from "@/lib/pay";
 import { addDaysISO, laMidnightUtcISO, laTodayISO } from "@/lib/dates";
 import { DEFAULT_OFFICE } from "@/lib/offices";
-import { EMPTY_AGGREGATE, type FunnelAggregate } from "@/lib/funnel";
+import { DOORS_TRACKED_SINCE, EMPTY_SPLIT, type SplitFunnelInputs } from "@/lib/funnel";
 
 /**
  * Aggregated per-canvasser production for the Fleet Dispatch board.
@@ -217,6 +217,72 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
   });
 
 /**
+ * Clock-in presence for a set of LA work days — which user_ids hold a
+ * non-voided time_entries row on each log_date (log_date is the Pacific day
+ * of the punch-in; the payroll triggers maintain it). Powers the owner's
+ * 2026-09-11 rule: the daily dispatch roster and every donut/suspension
+ * list count only people who clocked in for the day.
+ *
+ * Runs on the service client because plain canvassers can only SELECT their
+ * own time_entries while the leaderboard and Daily Wrap are all-viewer
+ * surfaces. Ships presence ONLY — never punch times, hours, or pay.
+ */
+export const getClockPresence = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => {
+    const obj = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+    const day = /^\d{4}-\d{2}-\d{2}$/;
+    const raw = Array.isArray(obj.dates) ? obj.dates : [];
+    if (raw.length === 0 || raw.length > 31) throw new Error("Invalid dates");
+    const dates = [
+      ...new Set(
+        raw.map((d) => {
+          if (typeof d !== "string" || !day.test(d)) throw new Error("Invalid dates");
+          return d;
+        }),
+      ),
+    ];
+    return { dates };
+  })
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const byDate: Record<string, string[]> = {};
+    const seen = new Set<string>();
+    // Paged: lunch splits mean several entries per person per day, and the
+    // suspension window's 15 days × roster can pass PostgREST's 1,000-row
+    // cap — a truncated fetch would silently hide clocked-in reps.
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data: rows, error } = await supabaseAdmin
+        .from("time_entries")
+        .select("user_id, log_date")
+        .in("log_date", data.dates)
+        .is("voided_at", null)
+        .order("id", { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (error) throw error;
+      for (const r of rows ?? []) {
+        const key = `${r.log_date}|${r.user_id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        (byDate[r.log_date] ??= []).push(r.user_id);
+      }
+      if ((rows ?? []).length < PAGE) break;
+    }
+    // Who is ON the clock right now — open (un-clocked-out) shifts. Small
+    // set (≤ headcount), one page is plenty; used for the per-row live dot.
+    const { data: openRows, error: openErr } = await supabaseAdmin
+      .from("time_entries")
+      .select("user_id")
+      .is("clock_out", null)
+      .is("voided_at", null)
+      .limit(1000);
+    if (openErr) throw openErr;
+    const openNow = [...new Set((openRows ?? []).map((r) => r.user_id as string))];
+    return { byDate, openNow };
+  });
+
+/**
  * Company-wide funnel baseline for the canvasser page's shared rate engine
  * (owner decision, 2026-07-29: new reps see honest company averages, not
  * hardcoded starter rates and not their own RLS-scoped rows mislabeled as
@@ -231,35 +297,87 @@ export const getFunnelBaseline = createServerFn({ method: "POST" })
   .handler(async () => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const since = addDaysISO(laTodayISO(), -60);
+    const PAGE = 1000;
 
-    const [logsR, salesR] = await Promise.all([
-      supabaseAdmin
-        .from("daily_logs")
-        .select("doors_knocked, confirmed_leads, demos_sits, sales")
-        .gte("log_date", since),
-      supabaseAdmin
-        .from("leads")
-        .select("sale_amount")
-        .eq("status", "confirmed")
-        .eq("is_sale", true)
-        .gte("created_at", laMidnightUtcISO(since)),
+    // Page every read — the unpaged select silently truncates at 1000 rows,
+    // and the 60-day company window is already past 700 daily_logs rows
+    // (the same failure class that dropped June's boards, PR #161).
+    async function pageAll<T>(
+      build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
+    ): Promise<T[]> {
+      const out: T[] = [];
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await build(from, from + PAGE - 1);
+        if (error) throw error;
+        out.push(...(data ?? []));
+        if ((data ?? []).length < PAGE) break;
+      }
+      return out;
+    }
+
+    // Sits + sales live in daily_logs; confirms live in daily_metrics (the
+    // office pipeline — daily_logs.confirmed_leads has never been written);
+    // the door pair is pin-era only. See SplitFunnelInputs in lib/funnel.
+    const [logRows, metricRows, saleRows] = await Promise.all([
+      pageAll<{
+        canvasser_id: string;
+        log_date: string;
+        doors_knocked: number | null;
+        demos_sits: number | null;
+        sales: number | null;
+      }>((from, to) =>
+        supabaseAdmin
+          .from("daily_logs")
+          .select("canvasser_id, log_date, doors_knocked, demos_sits, sales")
+          .gte("log_date", since)
+          .range(from, to),
+      ),
+      pageAll<{ canvasser_id: string; metric_date: string; leads_confirmed: number | null }>(
+        (from, to) =>
+          supabaseAdmin
+            .from("daily_metrics")
+            .select("canvasser_id, metric_date, leads_confirmed")
+            .gte("metric_date", since)
+            .range(from, to),
+      ),
+      pageAll<{ sale_amount: number | null }>((from, to) =>
+        supabaseAdmin
+          .from("leads")
+          .select("sale_amount")
+          .eq("status", "confirmed")
+          .eq("is_sale", true)
+          .gte("created_at", laMidnightUtcISO(since))
+          .range(from, to),
+      ),
     ]);
-    if (logsR.error) throw logsR.error;
-    if (salesR.error) throw salesR.error;
 
-    const aggregate: FunnelAggregate = (logsR.data ?? []).reduce(
-      (a, r) => ({
-        doors: a.doors + (r.doors_knocked ?? 0),
-        confirmed: a.confirmed + (r.confirmed_leads ?? 0),
-        sits: a.sits + (r.demos_sits ?? 0),
-        sales: a.sales + (r.sales ?? 0),
-      }),
-      { ...EMPTY_AGGREGATE },
-    );
+    // The era pair is PAIR-MATCHED: confirms count only on (rep, day)
+    // combinations that actually logged doors. Pin adoption is partial, so
+    // dividing everyone's confirms by only the pin-users' doors would
+    // inflate lead-per-door ~10x — matched pairs keep both sides of the
+    // fraction describing the same people on the same days.
+    const split: SplitFunnelInputs = { ...EMPTY_SPLIT };
+    const doorDays = new Set<string>();
+    for (const r of logRows) {
+      split.sits += r.demos_sits ?? 0;
+      split.sales += r.sales ?? 0;
+      if (r.log_date >= DOORS_TRACKED_SINCE && (r.doors_knocked ?? 0) > 0) {
+        split.eraDoors += r.doors_knocked ?? 0;
+        doorDays.add(`${r.canvasser_id}:${r.log_date}`);
+      }
+    }
+    for (const m of metricRows) {
+      split.confirmed += m.leads_confirmed ?? 0;
+      if (
+        m.metric_date >= DOORS_TRACKED_SINCE &&
+        doorDays.has(`${m.canvasser_id}:${m.metric_date}`)
+      ) {
+        split.eraConfirmed += m.leads_confirmed ?? 0;
+      }
+    }
 
-    const saleRows = salesR.data ?? [];
     const revenue = saleRows.reduce((a, r) => a + Number(r.sale_amount ?? 0), 0);
     const avgSale = saleRows.length > 0 ? revenue / saleRows.length : 0;
 
-    return { aggregate, companyAvgCommission: avgSale * COMMISSION_BASE };
+    return { split, companyAvgCommission: avgSale * COMMISSION_BASE };
   });
