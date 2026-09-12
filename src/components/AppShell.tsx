@@ -236,7 +236,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             replay in the left slot, the management tier gets the hamburger,
             everyone else keeps the spacer. */}
         <div className="md:hidden flex items-center justify-between px-4 py-2">
-          {user && role === "canvasser" ? (
+          {user && (role === "canvasser" || role === "sales_rep") ? (
             <button
               onClick={startCanvasserTutorial}
               data-tour="help"
@@ -321,7 +321,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="flex items-center gap-3 justify-end">
             {user && (
               <>
-                {(role === "canvasser" || role === "captain") && (
+                {(role === "canvasser" || role === "captain" || role === "sales_rep") && (
                   <button
                     onClick={startCanvasserTutorial}
                     data-tour="help"
@@ -431,11 +431,24 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       {/* Per-page discovery tips: each screen's mini-tour auto-pops the first
           time this account opens it; the header "?" replays the current
-          screen's tips. Canvassers only — and deferred until the intro
-          animation has finished. */}
-      {user && (role === "canvasser" || role === "captain") && !introActive && (
-        <CanvasserTutorial userId={user.id} missionRoute={role === "captain" ? "/mission" : "/dashboard"} />
-      )}
+          screen's tips. Canvasser tier + captains + sales reps (the kombat
+          tour, rep audit R-7) — deferred until the intro animation has
+          finished. Gated on the REAL role: a View-As preview used to write
+          the owner's own ti_tour flags (the same bug class the intro
+          gating fixed). */}
+      {user &&
+        (() => {
+          const tourRole = privilegeRole(realRole);
+          return (
+            (tourRole === "canvasser" || tourRole === "captain" || tourRole === "sales_rep") &&
+            !introActive && (
+              <CanvasserTutorial
+                userId={user.id}
+                missionRoute={tourRole === "captain" ? "/mission" : "/dashboard"}
+              />
+            )
+          );
+        })()}
     </div>
   );
 }

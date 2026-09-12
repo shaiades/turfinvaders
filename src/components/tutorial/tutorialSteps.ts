@@ -37,7 +37,7 @@ export type TutorialStep = {
   showWordmark?: boolean;
 };
 
-export type TourPageId = "field" | "mission" | "leaders" | "wrap" | "learn";
+export type TourPageId = "field" | "mission" | "leaders" | "wrap" | "learn" | "kombat";
 
 /** Which tour a pathname belongs to (canvasser routes only — canvassers
  *  bounce off /my-territory to /field since the merge). */
@@ -51,6 +51,9 @@ export function pageIdForPathname(pathname: string): TourPageId | null {
   if (pathname === "/learn") return "learn";
   if (pathname === "/leaderboard") return "leaders";
   if (pathname === "/daily-wrap") return "wrap";
+  // The closer's one screen (rep audit R-7) — the densest board in the app
+  // finally gets a guide.
+  if (pathname === "/close-kombat") return "kombat";
   return null;
 }
 
@@ -163,6 +166,38 @@ export const PAGE_TOURS: Record<TourPageId, TutorialStep[]> = {
       body: "The end-of-day report: today's winners, who took a doughnut (a zero), and the week's point bosses. It locks at 7 PM.",
     },
   ],
+  // The closer's board (rep audit R-7) — MK-money dialect, never canvasser
+  // vocabulary. Hero is optional: it only renders once a board row matches.
+  kombat: [
+    {
+      id: "kombat-hero",
+      target: "kombat-hero",
+      optional: true,
+      title: "Your corner of the ring",
+      body: "Your money first: volume for the range on screen, your rank, and exactly how far the rep above you is. KA-CHING fires here the moment a sale of yours lands on the board.",
+    },
+    {
+      id: "kombat-range",
+      target: "kombat-range",
+      padding: 6,
+      title: "Pick the fight",
+      body: "Day, Week, Month, Year — the money is always the range on screen. Today shows today's dollars only; page back for last month's war.",
+    },
+    {
+      id: "kombat-standings",
+      target: "kombat-standings",
+      cursorAt: { x: 0.5, y: 0.25 },
+      title: "The bracket",
+      body: "Ranked by sale volume, every range. Gold row is you, the Crown is the champion, Flawless Victory means a 100% close rate. Results land live — cancels move when the office syncs.",
+    },
+    {
+      id: "kombat-legend",
+      target: "kombat-legend",
+      optional: true,
+      title: "Decode the columns",
+      body: "Every column, every rate, and every pay rule — the 50/25/25 save split, why a cancel still counts your sit — one tap away, whenever you need it.",
+    },
+  ],
 };
 
 /** Wrapped around the very first tour a canvasser ever sees. */
@@ -176,6 +211,11 @@ export const WELCOME_STEPS: TutorialStep[] = [
   {
     id: "hud",
     target: "hud",
+    // optional: sales reps have no HUD strip (rep audit R-7) — a
+    // non-optional anchor that never exists froze their first tour for the
+    // 4s target-hunt, then showed canvasser copy. Canvassers/captains
+    // always render the anchor, so nothing changes for them.
+    optional: true,
     title: "Your score strip",
     body: "Your rank, today's leads, and your week points with the distance to the next pay tier — pinned to the top of every screen. If you knock while off the clock, it turns into an alarm.",
   },

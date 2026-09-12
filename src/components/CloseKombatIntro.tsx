@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { clamp01, drawCoin, easeInOut, easeOutBack, limb, makeBeeper, popText, rr } from "./intro-fx";
+import {
+  clamp01,
+  drawCoin,
+  easeInOut,
+  easeOutBack,
+  limb,
+  makeBeeper,
+  popText,
+  rr,
+} from "./intro-fx";
 
 /**
  * Sales-rep first-sign-in intro (owner ask 2026-09-10): sales reps live on
@@ -1087,6 +1096,189 @@ function applyCamera(ctx: CanvasRenderingContext2D, t: number) {
 
 /* ── Component ─────────────────────────────────────────────────────────── */
 
+/* ── Soundtrack (fully synthesized — no audio files) ───────────────────
+ *
+ * Same contract as WelcomeAnimation's score (PR #164): browsers only allow
+ * audio after a user gesture, the common first-open follows the sign-in
+ * click so `tryStart` usually succeeds, and a cold open stays silent until
+ * the 🔇 button unlocks it mid-scene (the timeline schedules from wherever
+ * playback currently is). The makeBeeper SFX cues keep firing on their own
+ * context — this is the bed and percussion under them. Everything is
+ * try/catch: audio is a garnish and must never break the intro. */
+function createKombatAudio() {
+  let ctx: AudioContext | null = null;
+  let master: GainNode | null = null;
+  let noiseBuf: AudioBuffer | null = null;
+  let scheduled = false;
+
+  const ensure = () => {
+    if (ctx) return;
+    ctx = new AudioContext();
+    master = ctx.createGain();
+    master.gain.value = 0.5;
+    master.connect(ctx.destination);
+    noiseBuf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.6), ctx.sampleRate);
+    const d = noiseBuf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  };
+
+  const tone = (
+    at: number,
+    dur: number,
+    freq: number,
+    opts: {
+      type?: OscillatorType;
+      gain?: number;
+      slideTo?: number;
+      lowpass?: number;
+      attack?: number;
+    } = {},
+  ) => {
+    if (!ctx || !master || at + dur < 0) return;
+    const t0 = ctx.currentTime + Math.max(0, at);
+    const osc = ctx.createOscillator();
+    osc.type = opts.type ?? "sine";
+    osc.frequency.setValueAtTime(freq, t0);
+    if (opts.slideTo) osc.frequency.exponentialRampToValueAtTime(opts.slideTo, t0 + dur);
+    const g = ctx.createGain();
+    const peak = opts.gain ?? 0.08;
+    const a = Math.min(opts.attack ?? 0.008, dur / 2);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.linearRampToValueAtTime(peak, t0 + a);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    let head: AudioNode = osc;
+    if (opts.lowpass) {
+      const f = ctx.createBiquadFilter();
+      f.type = "lowpass";
+      f.frequency.value = opts.lowpass;
+      head.connect(f);
+      head = f;
+    }
+    head.connect(g).connect(master);
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.05);
+  };
+
+  const noise = (
+    at: number,
+    dur: number,
+    opts: { gain?: number; kind?: BiquadFilterType; freq?: number; q?: number } = {},
+  ) => {
+    if (!ctx || !master || !noiseBuf || at + dur < 0) return;
+    const t0 = ctx.currentTime + Math.max(0, at);
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuf;
+    src.loop = true;
+    const f = ctx.createBiquadFilter();
+    f.type = opts.kind ?? "bandpass";
+    f.frequency.value = opts.freq ?? 1500;
+    f.Q.value = opts.q ?? 0.8;
+    const g = ctx.createGain();
+    const peak = opts.gain ?? 0.04;
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.linearRampToValueAtTime(peak, t0 + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    src.connect(f).connect(g).connect(master);
+    src.start(t0);
+    src.stop(t0 + dur + 0.05);
+  };
+
+  /** The whole score from `elapsedMs` into the intro; past events skip. */
+  const scheduleFrom = (elapsedMs: number) => {
+    if (!ctx || !master || scheduled) return;
+    scheduled = true;
+    const rel = (ms: number) => (ms - elapsedMs) / 1000;
+    const pad = (fromMs: number, toMs: number, freqs: number[], gain: number) => {
+      const end = rel(toMs);
+      if (end <= 0) return;
+      const start = Math.max(0, rel(fromMs));
+      for (const fq of freqs) {
+        tone(start, end - start, fq, { type: "sawtooth", gain, lowpass: 420, attack: 0.3 });
+      }
+    };
+    // Dark fight bed in E minor, lifting to G major once the deal CLOSES
+    pad(0, T_CLOSED, [82.41, 83.1, 123.47], 0.026);
+    pad(T_CLOSED, DURATION, [98, 98.7, 146.83], 0.038);
+    // Driving bass eighths — the door-kick has a pulse
+    for (let ms = 200; ms < T_CLOSED; ms += 250) {
+      tone(rel(ms), 0.14, 41.2, { gain: 0.13 });
+    }
+    for (let ms = T_CLOSED; ms < T_FADE_OUT; ms += 250) {
+      tone(rel(ms), 0.15, 49, { gain: 0.14 });
+    }
+    // Hats
+    for (let ms = 400; ms < T_POSE; ms += 250) {
+      noise(rel(ms), 0.03, { kind: "highpass", freq: 7000, gain: 0.013 });
+    }
+    // Sprint footsteps to the leap
+    for (let i = 0, ms = T_RUN_START; ms < T_LEAP - 40; i++, ms += 130) {
+      noise(rel(ms), 0.05, { kind: "lowpass", freq: 300, gain: i % 2 ? 0.05 : 0.065 });
+    }
+    // Leap riser into the kick…
+    tone(rel(T_LEAP), 0.28, 200, { type: "sawtooth", slideTo: 900, lowpass: 1200, gain: 0.05 });
+    // …IMPACT (the beeper adds the low square hits on top)
+    tone(rel(T_KICK), 0.16, 110, { slideTo: 38, gain: 0.32 });
+    noise(rel(T_KICK), 0.3, { kind: "bandpass", freq: 2400, q: 0.7, gain: 0.09 });
+    noise(rel(T_LAND), 0.08, { kind: "lowpass", freq: 260, gain: 0.07 });
+    // KA-CHING shimmer under the register beeps
+    for (let i = 0; i < 5; i++) {
+      tone(rel(T_KACHING + 60 + i * 55), 0.06, 2093 * Math.pow(2, i / 8), { gain: 0.035 });
+    }
+    // CLOSED! — bass drop + splash + sparkle run under the beeper fanfare
+    tone(rel(T_CLOSED), 0.5, 98, { gain: 0.13 });
+    noise(rel(T_CLOSED), 0.4, { kind: "bandpass", freq: 3000, q: 1, gain: 0.055 });
+    for (let i = 0; i < 6; i++) {
+      tone(rel(T_CLOSED + 140 + i * 60), 0.07, 1568 * Math.pow(2, i / 6), { gain: 0.04 });
+    }
+    // Ride the visual fade
+    const fadeAt = ctx.currentTime + Math.max(0, rel(T_FADE_OUT));
+    master.gain.setValueAtTime(master.gain.value, fadeAt);
+    master.gain.linearRampToValueAtTime(0.0001, fadeAt + 0.3);
+  };
+
+  return {
+    async tryStart(): Promise<boolean> {
+      try {
+        ensure();
+        if (ctx!.state === "suspended") await ctx!.resume().catch(() => {});
+        return ctx!.state === "running";
+      } catch {
+        return false;
+      }
+    },
+    scheduleFrom(elapsedMs: number) {
+      try {
+        scheduleFrom(elapsedMs);
+      } catch {
+        /* garnish */
+      }
+    },
+    setMuted(muted: boolean) {
+      try {
+        if (!ctx || !master) return;
+        master.gain.cancelScheduledValues(ctx.currentTime);
+        master.gain.linearRampToValueAtTime(muted ? 0.0001 : 0.5, ctx.currentTime + 0.08);
+      } catch {
+        /* garnish */
+      }
+    },
+    stop() {
+      try {
+        if (!ctx || !master) return;
+        master.gain.cancelScheduledValues(ctx.currentTime);
+        master.gain.linearRampToValueAtTime(0.0001, ctx.currentTime + 0.06);
+        const c = ctx;
+        window.setTimeout(() => c.close().catch(() => {}), 120);
+        ctx = null;
+        master = null;
+        scheduled = false;
+      } catch {
+        /* garnish */
+      }
+    },
+  };
+}
+
 export function CloseKombatIntro({
   userId,
   onActiveChange,
@@ -1106,9 +1298,12 @@ export function CloseKombatIntro({
   });
   const [visible, setVisible] = useState(false);
   const [showCaption, setShowCaption] = useState(false);
+  const [soundOn, setSoundOn] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const particlesRef = useRef<Particle[]>([]);
   const beepRef = useRef<ReturnType<typeof makeBeeper> | null>(null);
+  const audioRef = useRef<ReturnType<typeof createKombatAudio> | null>(null);
+  const startRef = useRef(0);
   const doneRef = useRef(false);
 
   useEffect(() => {
@@ -1177,6 +1372,19 @@ export function CloseKombatIntro({
     setVisible(true);
 
     const start = performance.now();
+    startRef.current = start;
+    // Score: usually allowed right away (the sign-in click was this SPA
+    // session's gesture); a cold open stays locked until 🔇 is tapped.
+    if (hold == null) {
+      const audio = createKombatAudio();
+      audioRef.current = audio;
+      audio.tryStart().then((ok) => {
+        if (ok && audioRef.current === audio && !doneRef.current) {
+          audio.scheduleFrom(performance.now() - start);
+          setSoundOn(true);
+        }
+      });
+    }
     let raf = 0;
     let fightDone = false;
     let kickDone = false;
@@ -1254,6 +1462,8 @@ export function CloseKombatIntro({
     return () => {
       cancelAnimationFrame(raf);
       if (failsafe) window.clearTimeout(failsafe);
+      audioRef.current?.stop();
+      audioRef.current = null;
     };
   }, [phase, hold, markSeen, finish]);
 
@@ -1264,6 +1474,23 @@ export function CloseKombatIntro({
     window.addEventListener("keydown", skip);
     return () => window.removeEventListener("keydown", skip);
   }, [phase, hold, finish]);
+
+  // 🔇/🔊 — unlocking mid-scene schedules the score from the current beat.
+  const toggleSound = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (soundOn) {
+      audio.setMuted(true);
+      setSoundOn(false);
+      return;
+    }
+    audio.tryStart().then((ok) => {
+      if (!ok || doneRef.current) return;
+      audio.scheduleFrom(performance.now() - startRef.current);
+      audio.setMuted(false);
+      setSoundOn(true);
+    });
+  }, [soundOn]);
 
   if (phase !== "playing") return null;
 
@@ -1303,6 +1530,21 @@ export function CloseKombatIntro({
               "radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,0.45) 100%)",
           }}
         />
+        {hold == null && (
+          <button
+            type="button"
+            aria-label={soundOn ? "Mute sound" : "Turn sound on"}
+            aria-pressed={soundOn}
+            // A tap here must never read as "skip".
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              toggleSound();
+            }}
+            className="absolute top-2 right-2 h-11 w-11 inline-flex items-center justify-center rounded-full border border-white/25 bg-black/45 text-lg backdrop-blur-sm hover:border-white/50"
+          >
+            <span aria-hidden>{soundOn ? "🔊" : "🔇"}</span>
+          </button>
+        )}
       </div>
       <div
         className="font-display uppercase tracking-widest text-xs sm:text-sm mt-4 text-kombat-gold"

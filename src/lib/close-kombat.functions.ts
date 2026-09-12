@@ -17,6 +17,29 @@ const syncInput = z.object({
   boardIds: z.array(z.string().regex(/^\d+$/)).max(5).optional(),
 });
 
+/**
+ * When did the money stamps (WCC cancels + report_reps splits) last move?
+ * Sales Report boards have no webhooks — those stamps change ONLY when an
+ * admin runs a sync — so the board's "Live" chip says nothing about their
+ * freshness (rep audit R-5). Reads the sync trail on the admin client:
+ * webhook_logs is not rep-readable, but the timestamp alone is harmless
+ * and exactly what stops a rep trusting a stale cancel count.
+ */
+export const getKombatSyncInfo = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async (): Promise<{ lastSyncedAt: string | null }> => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data, error } = await supabaseAdmin
+      .from("webhook_logs")
+      .select("created_at")
+      .eq("step", "Block_Cards_Synced")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return { lastSyncedAt: data?.created_at ?? null };
+  });
+
 export const syncBlockCards = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => syncInput.parse(data))

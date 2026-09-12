@@ -31,6 +31,29 @@ function AuthPage() {
     navigate({ to: dest.to, search: dest.search as never });
   }
 
+  // Forgot password (rep audit, also-spotted): the app had NO reset path —
+  // a forgotten password meant a manager minting a fresh invite link. The
+  // recovery email lands on /auth/welcome, which already knows how to turn
+  // a recovery session into a set-password screen.
+  async function forgotPassword() {
+    if (!email) {
+      toast.error("Type your email above first, then tap Forgot password.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/auth/welcome`,
+      });
+      if (error) throw error;
+      toast.success("Reset link sent — check your email. It signs you in to set a new password.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't send the reset email");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -78,7 +101,9 @@ function AuthPage() {
         // Owner-only — security decision 2026-08-12.)
         // Honest copy (rep audit R-6): nothing pings anyone — an Owner
         // activates new accounts from Manage Players when they next look.
-        toast.success("Welcome to the crew! You're on the list — an owner activates new accounts, usually same day.");
+        toast.success(
+          "Welcome to the crew! You're on the list — an owner activates new accounts, usually same day.",
+        );
         navigate({ to: "/dashboard", search: { tab: "dispatch" } });
       }
     } catch (err) {
@@ -209,6 +234,15 @@ function AuthPage() {
           >
             {mode === "signin" ? "Need an account? Sign up" : "Already a player? Sign in"}
           </button>
+          {mode === "signin" && (
+            <button
+              onClick={forgotPassword}
+              disabled={busy}
+              className="block mx-auto mt-2 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+            >
+              Forgot password?
+            </button>
+          )}
         </ArcadeCard>
       </div>
     </div>
