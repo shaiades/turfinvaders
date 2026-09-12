@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(supabase db query *)",
+      "Bash(supabase link *)"
+    ]
+  }
+}
