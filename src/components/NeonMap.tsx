@@ -712,6 +712,14 @@ export function NeonMap({
           maxNativeZoom={19}
           maxZoom={20}
         />
+        {/* Street names on the imagery (Jorge's ask, 2026-09-12) — Esri's
+            transportation reference layer, the standard hybrid pairing. Its
+            tiles label streets progressively as you zoom in. */}
+        <TileLayer
+          url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}"
+          maxNativeZoom={19}
+          maxZoom={20}
+        />
         <TileLayer
           url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
           maxNativeZoom={19}
