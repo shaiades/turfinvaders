@@ -20,7 +20,6 @@ import {
   Target,
   PhoneCall,
   Sparkles,
-  Truck,
   Swords,
   GraduationCap,
   CircleHelp,
@@ -133,12 +132,13 @@ export function AppShell({ children }: { children: ReactNode }) {
       // keeping the item lit while inner ?tab= rewrites.
       // Short labels so all six fit the mobile bottom bar without truncating
       // (six 62px cells at 375px). "Turf" is the canonical word (go-live
-      // decision); "Dispatch" keeps the meaningful half of Fleet Dispatch.
+      // decision); /leaderboard is the ranked LADDER for captains now
+      // (owner call 2026-09-12) — van ops live on Command.
       return [
         { to: "/dashboard", label: "Command", icon: LayoutDashboard },
         { to: "/mission", label: "Mission", icon: Target },
         { to: "/my-territory", label: "Turf", icon: MapPin },
-        { to: "/leaderboard", label: "Dispatch", icon: Truck },
+        { to: "/leaderboard", label: "Leaders", icon: Trophy },
         { to: "/learn", label: "Learn", icon: GraduationCap },
         { to: "/daily-wrap", label: "Wrap", icon: Sparkles },
       ];
@@ -318,7 +318,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="flex items-center gap-3 justify-end">
             {user && (
               <>
-                {role === "canvasser" && (
+                {(role === "canvasser" || role === "captain") && (
                   <button
                     onClick={startCanvasserTutorial}
                     data-tour="help"
@@ -355,8 +355,10 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </div>
         {/* Score strip rides the sticky header — a canvasser mid-street never
-            hunts for their number. Other roles render nothing here. */}
-        {user && role === "canvasser" && <CanvasserHUD userId={user.id} />}
+            hunts for their number. Captains get it too (audit 2026-09-12):
+            they punch like canvassers, and the OFF CLOCK alarm matters most
+            for the player-coach busy running a van. */}
+        {user && (role === "canvasser" || role === "captain") && <CanvasserHUD userId={user.id} />}
       </header>
       <main className="flex-1 max-w-7xl w-full min-w-0 mx-auto px-4 sm:px-6 py-4 md:py-8 pb-28 md:pb-8">
         {children}
@@ -416,7 +418,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           time this account opens it; the header "?" replays the current
           screen's tips. Canvassers only — and deferred until the intro
           animation has finished. */}
-      {user && role === "canvasser" && !introActive && <CanvasserTutorial userId={user.id} />}
+      {user && (role === "canvasser" || role === "captain") && !introActive && (
+        <CanvasserTutorial userId={user.id} missionRoute={role === "captain" ? "/mission" : "/dashboard"} />
+      )}
     </div>
   );
 }

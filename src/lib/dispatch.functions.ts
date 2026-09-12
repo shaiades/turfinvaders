@@ -269,7 +269,17 @@ export const getClockPresence = createServerFn({ method: "POST" })
       }
       if ((rows ?? []).length < PAGE) break;
     }
-    return { byDate };
+    // Who is ON the clock right now — open (un-clocked-out) shifts. Small
+    // set (≤ headcount), one page is plenty; used for the per-row live dot.
+    const { data: openRows, error: openErr } = await supabaseAdmin
+      .from("time_entries")
+      .select("user_id")
+      .is("clock_out", null)
+      .is("voided_at", null)
+      .limit(1000);
+    if (openErr) throw openErr;
+    const openNow = [...new Set((openRows ?? []).map((r) => r.user_id as string))];
+    return { byDate, openNow };
   });
 
 /**

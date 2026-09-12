@@ -470,6 +470,19 @@ function FleetDispatchInner({
     for (const [d, ids] of Object.entries(clockQ.data?.byDate ?? {})) m.set(d, new Set(ids));
     return m;
   }, [clockQ.data]);
+  // Live punch state per row (audit C-7): the presence fetch already knows
+  // who punched today; openNow says who is STILL on the clock. Only
+  // meaningful on the Day tab looking at today.
+  const openNowSet = useMemo(() => new Set(clockQ.data?.openNow ?? []), [clockQ.data]);
+  const clockStateFor = useMemo(() => {
+    if (tab !== "day" || !isViewingToday || !clockQ.isSuccess) return undefined;
+    const punched = clockedByDay.get(dayISO) ?? new Set<string>();
+    return (ids: string[]): "on" | "off" | null => {
+      if (ids.some((id) => openNowSet.has(id))) return "on";
+      if (ids.some((id) => punched.has(id))) return "off";
+      return null;
+    };
+  }, [tab, isViewingToday, clockQ.isSuccess, clockedByDay, dayISO, openNowSet]);
   /** Presence gates apply only once the fetch SUCCEEDED. On error (local dev
    *  has no service key; a deploy-window blip) the roster fails OPEN to
    *  everyone and the donut list fails SAFE to nobody — missing data must
@@ -1166,6 +1179,7 @@ function FleetDispatchInner({
         </ArcadeCard>
       ) : (
         <DispatchFleet
+          clockStateFor={clockStateFor}
           rows={rows}
           vans={vans}
           crossOfficeVanIds={crossOfficeVanIds}
@@ -1507,12 +1521,18 @@ function DispatchRow({
   r,
   manage,
   gridManage = false,
+  clockState = null,
 }: {
   r: FunnelRow;
   manage?: RowManage;
   gridManage?: boolean;
+  /** "on" = open shift right now · "off" = punched today, clocked out. */
+  clockState?: "on" | "off" | null;
 }) {
-  const { realRole } = useAuth();
+  const { realRole, user } = useAuth();
+  // Your own line glows (audit C-9) — the ladder does it for reps; the
+  // board does it for the captain reading their van.
+  const self = !!user && r.g.ids.includes(user.id);
   // Managers drill from the board into the player's full profile (the
   // canvassers/$id route is MANAGER_ROLES-guarded, so peers keep a plain
   // name — a link would only bounce them). A merged row links to its
@@ -1521,9 +1541,22 @@ function DispatchRow({
   const name = r.g.display_name ?? "—";
   return (
     <div
-      className={`${rowGrid(gridManage || !!manage)} px-2 py-1.5 rounded border border-border bg-surface transition-colors duration-200 hover:border-neon/60`}
+      className={`${rowGrid(gridManage || !!manage)} px-2 py-1.5 rounded border transition-colors duration-200 hover:border-neon/60 ${
+        self ? "border-neon/50 bg-neon/10" : "border-border bg-surface"
+      }`}
     >
       <span className="text-sm truncate flex items-center gap-1.5 min-w-0">
+        {clockState && (
+          <span
+            aria-label={clockState === "on" ? "On the clock" : "Clocked out"}
+            title={clockState === "on" ? "On the clock right now" : "Punched today · clocked out"}
+            className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+              clockState === "on"
+                ? "bg-[var(--victory)] shadow-[0_0_6px_var(--victory)]"
+                : "bg-muted-foreground/50"
+            }`}
+          />
+        )}
         <span aria-hidden>{r.sub > 0 ? "🔥" : "🍩"}</span>
         {profileId ? (
           <>
@@ -1721,6 +1754,7 @@ function DispatchFleet({
   focusTeamId = null,
   fieldDateLabel,
   leadsDateLabel,
+  clockStateFor,
 }: {
   rows: FunnelRow[];
   vans: Van[];
@@ -1732,6 +1766,8 @@ function DispatchFleet({
   focusTeamId?: string | null;
   fieldDateLabel?: string;
   leadsDateLabel?: string;
+  /** Day-tab live punch state per row (ids → on/off/null); undefined off Day. */
+  clockStateFor?: (ids: string[]) => "on" | "off" | null;
 }) {
   const { office: activeOffice, matches } = useOfficeFilter();
   const { realRole } = useAuth();
@@ -1927,6 +1963,7 @@ function DispatchFleet({
                               r={r}
                               manage={manageFor(r, v.id)}
                               gridManage={canEditRows}
+                              clockState={clockStateFor?.(r.g.ids) ?? null}
                             />
                           ))}
                         </div>
@@ -1967,6 +2004,7 @@ function DispatchFleet({
                   r={r}
                   manage={manageFor(r, null)}
                   gridManage={canEditRows}
+                  clockState={clockStateFor?.(r.g.ids) ?? null}
                 />
               ))}
             </div>

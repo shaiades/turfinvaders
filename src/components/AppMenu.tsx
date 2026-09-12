@@ -8,9 +8,10 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { InvitePlayerSheet } from "@/components/InvitePlayerSheet";
+import { startCanvasserTutorial } from "@/components/tutorial/CanvasserTutorial";
 import { useAuth } from "@/hooks/useAuth";
 import { ROLE_LABEL } from "@/lib/role-policy";
-import { GraduationCap, Send, Sparkles, Users } from "lucide-react";
+import { GraduationCap, Send, Sparkles, Users, CircleHelp } from "lucide-react";
 
 const itemCls =
   "w-full flex items-center gap-3 rounded-md border border-border bg-surface px-4 py-3 min-h-12 text-left text-xs font-display uppercase tracking-widest text-foreground hover:border-neon/60 hover:text-neon transition-colors";
@@ -62,6 +63,24 @@ export function AppMenu({
                   Invite a Player
                   <span className="block normal-case font-sans tracking-normal text-[11px] text-muted-foreground mt-0.5">
                     Sign-in link — creates their login if they don't have one
+                  </span>
+                </span>
+              </button>
+            )}
+            {role === "captain" && (
+              <button
+                type="button"
+                onClick={() => {
+                  onOpenChange(false);
+                  startCanvasserTutorial();
+                }}
+                className={itemCls}
+              >
+                <CircleHelp className="w-4 h-4 shrink-0" />
+                <span className="flex-1">
+                  Replay this screen's tips
+                  <span className="block normal-case font-sans tracking-normal text-[11px] text-muted-foreground mt-0.5">
+                    The same walkthrough new players get, for the page you're on
                   </span>
                 </span>
               </button>

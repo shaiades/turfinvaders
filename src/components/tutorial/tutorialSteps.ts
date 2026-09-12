@@ -44,6 +44,10 @@ export type TourPageId = "field" | "mission" | "leaders" | "wrap" | "learn";
 export function pageIdForPathname(pathname: string): TourPageId | null {
   if (pathname === "/field") return "field";
   if (pathname === "/dashboard") return "mission";
+  // Captain twins (audit 2026-09-12): their Mission lives on /mission and
+  // their canvass map on /my-territory — same anchors, same tours.
+  if (pathname === "/mission") return "mission";
+  if (pathname === "/my-territory") return "field";
   if (pathname === "/learn") return "learn";
   if (pathname === "/leaderboard") return "leaders";
   if (pathname === "/daily-wrap") return "wrap";
@@ -173,7 +177,7 @@ export const WELCOME_STEPS: TutorialStep[] = [
     id: "hud",
     target: "hud",
     title: "Your score strip",
-    body: "Your rank, Leads Today, and Pts Today — pinned to the top of every screen, so you always know where you stand.",
+    body: "Your rank, today's leads, and your week points with the distance to the next pay tier — pinned to the top of every screen. If you knock while off the clock, it turns into an alarm.",
   },
 ];
 

@@ -8,7 +8,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { supabase } from "@/integrations/supabase/client";
 import {
-  StatCard,
   ArcadePanel,
   TeamBadge,
   MobileCardList,
@@ -385,105 +384,6 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
   // dangling profiles.team_id so a deleted team can't render as "Unassigned".
   const van = teamQuery.data ?? null;
 
-  const rosterQuery = useQuery({
-    enabled: !!teamId,
-    queryKey: ["captain_roster", teamId, range.startISO, range.endISO],
-    queryFn: async () => {
-      const [profilesRes, logsRes, salesRes] = await Promise.all([
-        supabase
-          .from("profiles")
-          .select("id, display_name, is_active")
-          .eq("team_id", teamId!),
-        supabase
-          .from("daily_logs")
-          .select("canvasser_id, doors_knocked, sales")
-          .eq("team_id", teamId!)
-          .gte("log_date", range.startISO)
-          .lte("log_date", range.endISO),
-        supabase
-          .from("leads")
-          .select("canvasser_id, sale_amount")
-          .eq("team_id", teamId!)
-          .eq("status", "confirmed")
-          .eq("is_sale", true)
-          .gte("created_at", range.startUtcISO)
-          .lt("created_at", range.endUtcExclusiveISO),
-      ]);
-      if (profilesRes.error) throw profilesRes.error;
-      if (logsRes.error) throw logsRes.error;
-      if (salesRes.error) throw salesRes.error;
-
-      const byId = new Map<string, RosterRow>();
-      for (const p of profilesRes.data ?? []) {
-        if (p.is_active === false) continue;
-        byId.set(p.id, {
-          id: p.id,
-          name: p.display_name ?? "Player",
-          doorsKnocked: 0,
-          salesClosed: 0,
-          revenueGenerated: 0,
-          former: false,
-        });
-      }
-      // The log/lead fetches filter on the row SNAPSHOT team_id, so people
-      // removed from the van still arrive here. Seed roster rows for them
-      // (tagged former) instead of dropping their production — the van's
-      // history must not shrink when someone leaves (owner, 2026-08-27).
-      const missingIds = new Set<string>();
-      for (const l of logsRes.data ?? []) {
-        if (l.canvasser_id && !byId.has(l.canvasser_id)) missingIds.add(l.canvasser_id);
-      }
-      for (const s of salesRes.data ?? []) {
-        if (s.canvasser_id && !byId.has(s.canvasser_id)) missingIds.add(s.canvasser_id);
-      }
-      if (missingIds.size > 0) {
-        const formerRes = await supabase
-          .from("profiles")
-          .select("id, display_name")
-          .in("id", [...missingIds]);
-        if (formerRes.error) throw formerRes.error;
-        for (const p of formerRes.data ?? []) {
-          byId.set(p.id, {
-            id: p.id,
-            name: p.display_name ?? "Player",
-              doorsKnocked: 0,
-            salesClosed: 0,
-            revenueGenerated: 0,
-            former: true,
-          });
-        }
-      }
-      for (const l of logsRes.data ?? []) {
-        const m = byId.get(l.canvasser_id);
-        if (!m) continue;
-        m.doorsKnocked += l.doors_knocked ?? 0;
-        m.salesClosed += l.sales ?? 0;
-      }
-      for (const s of salesRes.data ?? []) {
-        const m = s.canvasser_id ? byId.get(s.canvasser_id) : undefined;
-        if (!m) continue;
-        m.revenueGenerated += Number(s.sale_amount ?? 0);
-      }
-      // Former rows are data-carried only: zero-production ones (possible
-      // when their only rows fell outside a sub-filter) stay off the list.
-      const members = [...byId.values()]
-        .filter((m) => !m.former || m.doorsKnocked + m.salesClosed + m.revenueGenerated > 0)
-        .sort((a, b) => b.revenueGenerated - a.revenueGenerated);
-      const totals = members.reduce(
-        (acc, m) => ({
-          doors: acc.doors + m.doorsKnocked,
-          sales: acc.sales + m.salesClosed,
-          revenue: acc.revenue + m.revenueGenerated,
-          // The Roster stat card stays a CURRENT headcount; production
-          // totals above it include former members' history.
-          members: acc.members + (m.former ? 0 : 1),
-        }),
-        { doors: 0, sales: 0, revenue: 0, members: 0 },
-      );
-      return { members, totals };
-    },
-  });
-
   // Cross-van cards read daily_metrics (the leaderboard pipeline) — one
   // aggregated row per canvasser/day, far cheaper than summing raw logs.
   // (Captains CAN read other vans' logs since 20260803010000; perf choice.)
@@ -575,17 +475,7 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
     },
   });
 
-  // Live: refresh the roster/totals as team logs land.
-  useRealtimeInvalidate({
-    channel: "captain-dashboard-live",
-    tables: ["daily_logs"],
-    invalidateKeys: [["captain_roster", teamId]],
-    enabled: !!teamId,
-  });
-
   const myTeam = teamQuery.data ?? { id: teamId ?? "", name: "Unassigned", color: "#10b981" };
-  const members = rosterQuery.data?.members ?? [];
-  const totals = rosterQuery.data?.totals ?? { doors: 0, sales: 0, revenue: 0, members: 0 };
 
   return (
     <div className="space-y-8">
@@ -604,10 +494,9 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
         </div>
       </div>
 
-      {/* Captains work the field too — same punch surface as canvassers
-          (owner decision 2026-08-19: captain hours feed payroll). */}
-      {user && <TimeClock userId={user.id} />}
-
+      {/* Punching lives on Mission — the captain's personal HQ (owner call
+          2026-09-12: Command carried a twin Time Clock one tab away). The
+          crew REVIEW queue stays here: that's a captain power, not a punch. */}
       {/* Flagged punches for THIS van — captains approve or escalate
           (owner directive 2026-08-24). Renders nothing when clean; the
           alerts card below it stays so push can be enabled any time. */}
@@ -650,50 +539,12 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
 
       {van && (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <StatCard
-              label="Team Revenue"
-              value={formatCurrency(totals.revenue)}
-              sublabel={range.label}
-              accent="victory"
-            />
-            <StatCard
-              label="Doors"
-              value={totals.doors.toLocaleString()}
-              sublabel={range.label}
-              accent="neon"
-            />
-            <StatCard
-              label="Sales"
-              value={totals.sales.toLocaleString()}
-              sublabel={range.label}
-              accent="accent"
-            />
-            <StatCard
-              label="Roster"
-              value={totals.members}
-              sublabel="Active members"
-              accent="warning"
-            />
-          </div>
-
           {/* The full dispatch board — same columns as the owner's Fleet
               Dispatch tab, scoped to this van (owner, 2026-08-25). It brings
               its own Day/Week/Month range; the page RangeTabs above govern
               only the Command Center, stat cards, and roster. */}
           <FleetDispatch readOnly focusTeamId={teamId} />
 
-          <ArcadePanel title="Team Roster">
-            {rosterQuery.isLoading ? (
-              <div className="text-sm text-muted-foreground">Loading roster…</div>
-            ) : members.length === 0 ? (
-              <div className="text-sm text-muted-foreground">
-                No active members on this van yet.
-              </div>
-            ) : (
-              <RosterTable members={members} />
-            )}
-          </ArcadePanel>
         </>
       )}
 
@@ -761,110 +612,3 @@ function Mini({ label, value }: { label: string; value: string }) {
   );
 }
 
-type RosterRow = {
-  id: string;
-  name: string;
-  doorsKnocked: number;
-  salesClosed: number;
-  revenueGenerated: number;
-  /** No longer on this van — row exists only for their in-range history. */
-  former: boolean;
-};
-
-function RosterTable({ members }: { members: RosterRow[] }) {
-  const { data: statuses } = useCanvasserStatuses();
-  return (
-    <>
-      <MobileCardList>
-        {members.map((m, i) => {
-          const suspended = isSuspendedStatus(statuses?.[m.id]);
-          return (
-            <MobileCard key={m.id}>
-              <MobileCardHeader
-                left={
-                  <span className="flex items-center gap-2 min-w-0">
-                    <span className="font-display text-xs text-muted-foreground shrink-0">
-                      #{String(i + 1).padStart(2, "0")}
-                    </span>
-                    <Link
-                      to="/canvassers/$canvasserId"
-                      params={{ canvasserId: m.id }}
-                      className="hover:text-neon font-medium truncate"
-                    >
-                      {m.name}
-                    </Link>
-                    {m.former && <FormerBadge />}
-                    {suspended && !m.former && <SuspendedBadge />}
-                  </span>
-                }
-                right={
-                  <span className={metricText(m.revenueGenerated, "text-victory")}>
-                    {formatCurrency(m.revenueGenerated)}
-                  </span>
-                }
-              />
-              <MobileStatGrid cols={2}>
-                <MobileStat label="Doors" value={m.doorsKnocked} lit="text-foreground" />
-                <MobileStat label="Sales" value={m.salesClosed} lit="text-victory" />
-              </MobileStatGrid>
-            </MobileCard>
-          );
-        })}
-      </MobileCardList>
-      <div className="hidden md:block overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border">
-              <th className="text-left py-2">Rank</th>
-              <th className="text-left py-2">Player</th>
-              <th className="text-right py-2">Doors</th>
-              <th className="text-right py-2">Sales</th>
-              <th className="text-right py-2">Revenue</th>
-            </tr>
-          </thead>
-          <tbody>
-            {members.map((m, i) => {
-              const suspended = isSuspendedStatus(statuses?.[m.id]);
-              return (
-                <tr
-                  key={m.id}
-                  className="border-b border-border/40 transition-colors duration-200 hover:bg-surface-elevated"
-                >
-                  <td className="py-2.5 font-display text-xs text-muted-foreground">
-                    {String(i + 1).padStart(2, "0")}
-                  </td>
-                  <td className="py-2.5">
-                    <div className="flex items-center gap-2">
-                      <Link
-                        to="/canvassers/$canvasserId"
-                        params={{ canvasserId: m.id }}
-                        className="transition-colors duration-200 hover:text-neon font-medium"
-                      >
-                        {m.name}
-                      </Link>
-                      {m.former && <FormerBadge />}
-                      {suspended && !m.former && <SuspendedBadge />}
-                    </div>
-                  </td>
-                  <td
-                    className={`py-2.5 text-right ${metricText(m.doorsKnocked, "text-foreground")}`}
-                  >
-                    {m.doorsKnocked}
-                  </td>
-                  <td className={`py-2.5 text-right ${metricText(m.salesClosed, "text-victory")}`}>
-                    {m.salesClosed}
-                  </td>
-                  <td
-                    className={`py-2.5 text-right ${metricText(m.revenueGenerated, "text-victory")}`}
-                  >
-                    {formatCurrency(m.revenueGenerated)}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </>
-  );
-}
