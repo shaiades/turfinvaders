@@ -17,7 +17,11 @@ export async function destinationByRole(userId: string): Promise<RoleDestination
   // like a canvasser-only one (→ /field).
   const roles = (data ?? []).map((r) => privilegeRole(r.role as string) as string);
   const isManager = roles.some(isManagerRole);
-  if (roles.includes("sales_rep") && !isManager && !roles.includes("canvasser")) {
+  // Cage wins for dual-role closer+knocker accounts too (owner call
+  // 2026-09-12): sales_rep outranks canvasser in primaryRole, so AppShell
+  // would bounce a /field landing straight to /close-kombat anyway — the
+  // old canvasser carve-out here was dead code telling the other story.
+  if (roles.includes("sales_rep") && !isManager) {
     return { to: "/close-kombat" };
   }
   const isCanvasserOnly = roles.includes("canvasser") && !isManager;

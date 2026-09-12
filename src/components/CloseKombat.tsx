@@ -58,7 +58,9 @@ import { ChevronLeft, ChevronRight, Crown, RefreshCw, Swords } from "lucide-reac
  */
 export function CloseKombat() {
   return (
-    <OfficeFilterProvider>
+    // Sticky per device: most reps work one office, and this page is their
+    // whole app — resetting to All Offices cost a tap every open (R-13).
+    <OfficeFilterProvider storageKey="ti_kombat_office">
       <CloseKombatInner />
     </OfficeFilterProvider>
   );

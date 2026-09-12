@@ -76,7 +76,9 @@ function AuthPage() {
         // live the moment a role arrives — NOT /field, which is a dead
         // screen without the canvasser role. (Manual role grants stay
         // Owner-only — security decision 2026-08-12.)
-        toast.success("Welcome to the crew! Your manager is being pinged to activate you.");
+        // Honest copy (rep audit R-6): nothing pings anyone — an Owner
+        // activates new accounts from Manage Players when they next look.
+        toast.success("Welcome to the crew! You're on the list — an owner activates new accounts, usually same day.");
         navigate({ to: "/dashboard", search: { tab: "dispatch" } });
       }
     } catch (err) {
