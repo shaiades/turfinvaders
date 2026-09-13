@@ -64,6 +64,40 @@ eq(
   "cancelled",
 );
 
+// The SQL triggers (notify_rep_sale, mirror_wcc_cancel_to_leads) carry a
+// regex copy of the cancel test — pin the exact literals both sides must
+// agree on so a drift in either direction fails here.
+eq(
+  "cancel literal: Cancelled",
+  cardOutcome({ bo: null, rs: null, pm: null, sale: "Sold", wcc: "Cancelled" }),
+  "cancelled",
+);
+eq(
+  "cancel literal: CTC",
+  cardOutcome({ bo: null, rs: null, pm: null, sale: "Sold", wcc: "CTC" }),
+  "cancelled",
+);
+eq(
+  "cancel literal: ctc pending",
+  cardOutcome({ bo: null, rs: null, pm: null, sale: "Sold", wcc: "ctc pending" }),
+  "cancelled",
+);
+eq(
+  "good literal: Completed",
+  cardOutcome({ bo: null, rs: null, pm: null, sale: "Sold", wcc: "Completed" }),
+  "sold",
+);
+eq(
+  "good literal: LVM",
+  cardOutcome({ bo: null, rs: null, pm: null, sale: "Sold", wcc: "LVM" }),
+  "sold",
+);
+eq(
+  "FTD is a PM, never a cancel",
+  cardOutcome({ bo: null, rs: null, pm: null, sale: "Sold", wcc: "FTD" }),
+  "pm",
+);
+
 // ---- 2. THE REGRESSION: an Office-Appt reload must count -----------------
 const oneReload = aggregateCloseKombat([
   card({ iss: "Office Appt", sale: "Reload", sale_price: 21176 }),

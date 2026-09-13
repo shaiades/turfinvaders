@@ -461,6 +461,7 @@ export type Database = {
           reviewed_at: string | null
           reviewed_by: string | null
           sale_amount: number | null
+          sale_cancelled_at: string | null
           status: Database["public"]["Enums"]["lead_status"]
           team_id: string | null
           updated_at: string
@@ -478,6 +479,7 @@ export type Database = {
           reviewed_at?: string | null
           reviewed_by?: string | null
           sale_amount?: number | null
+          sale_cancelled_at?: string | null
           status?: Database["public"]["Enums"]["lead_status"]
           team_id?: string | null
           updated_at?: string
@@ -495,6 +497,7 @@ export type Database = {
           reviewed_at?: string | null
           reviewed_by?: string | null
           sale_amount?: number | null
+          sale_cancelled_at?: string | null
           status?: Database["public"]["Enums"]["lead_status"]
           team_id?: string | null
           updated_at?: string

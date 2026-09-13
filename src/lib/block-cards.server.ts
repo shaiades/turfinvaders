@@ -991,7 +991,10 @@ export function bestSoldMatch(
 
 /** A label that kills the sale's volume: Cancelled, CTC (same bucket as a
  *  cancel — owner, 2026-07-30), or FTD (financial turn down — owner,
- *  2026-07-30). Keep in sync with the label tests in src/lib/close-kombat.ts. */
+ *  2026-07-30). Keep in sync with the label tests in src/lib/close-kombat.ts
+ *  and the SQL copies in notify_rep_sale (20260912230000) and
+ *  mirror_wcc_cancel_to_leads (20260913010000) — the triggers use only the
+ *  cancel/CTC arm, never FTD. */
 export function isDeadLabel(v: string | null | undefined): boolean {
   return (
     /cancel/i.test(v ?? "") ||
