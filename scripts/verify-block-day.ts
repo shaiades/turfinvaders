@@ -10,6 +10,7 @@
 // Exits non-zero on any failure. Extend it whenever attribution changes.
 
 import {
+  copyBaseName,
   deriveCardDate,
   findIssCol,
   isNewAppointmentCopy,
@@ -113,6 +114,18 @@ const chemberlen = [
   col("Canvass Stats", "Sale"), col("Sale", "Sold"), col("Sale Price", "25948"),
 ];
 check("detected as office-generated", isOfficeIss(findIssCol(chemberlen)?.text), true);
+
+console.log("— copyBaseName (SQL mirror: public.copy_base_name, 20260913020000) —");
+// The copy-family cancel stamp joins leads on the SQL mirror of this
+// normalization — pin the exact behaviors both runtimes must agree on.
+check("plain name lowercases + collapses spaces",
+  copyBaseName("RJ  Smith sho"), "rj smith sho");
+check("single (copy) stripped", copyBaseName("Al and Ann Escamilla (copy)"), "al and ann escamilla");
+check("stacked (copy) (copy 2) stripped",
+  copyBaseName("Nate & Andy Dang (copy) (copy 2)"), "nate & andy dang");
+check("case-insensitive marker", copyBaseName("Ledger, Linda (COPY)"), "ledger, linda");
+check("(copy) mid-name survives", copyBaseName("Linda (copy) Fitzle"), "linda (copy) fitzle");
+check("empty stays empty", copyBaseName(""), "");
 
 if (failures > 0) {
   console.error(`\n${failures} check(s) failed`);

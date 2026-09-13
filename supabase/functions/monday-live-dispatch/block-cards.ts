@@ -35,7 +35,10 @@ export function stripCopySuffix(name: unknown): string {
 }
 
 /** Canonical customer key a card shares with the card it was copied from:
- *  copy markers stripped, case- and whitespace-insensitive. */
+ *  copy markers stripped, case- and whitespace-insensitive.
+ *  KEEP IN SYNC: mirrored in SQL as public.copy_base_name (migration
+ *  20260913020000 — the copy-family cancel stamp joins leads on it);
+ *  verify:blockday pins the literals both sides must agree on. */
 export function copyBaseName(name: unknown): string {
   return stripCopySuffix(name).toLowerCase().replace(/\s+/g, ' ')
 }
