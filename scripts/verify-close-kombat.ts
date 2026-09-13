@@ -64,9 +64,10 @@ eq(
   "cancelled",
 );
 
-// The SQL triggers (notify_rep_sale, mirror_wcc_cancel_to_leads) carry a
-// regex copy of the cancel test — pin the exact literals both sides must
-// agree on so a drift in either direction fails here.
+// The SQL triggers (notify_rep_sale, mirror_wcc_cancel_to_leads — including
+// its copy-family clause and backfill in 20260913020000) carry a regex copy
+// of the cancel test — pin the exact literals both sides must agree on so a
+// drift in either direction fails here.
 eq(
   "cancel literal: Cancelled",
   cardOutcome({ bo: null, rs: null, pm: null, sale: "Sold", wcc: "Cancelled" }),
