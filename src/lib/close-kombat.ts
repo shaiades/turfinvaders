@@ -144,7 +144,10 @@ export type CardOutcome =
 
 /** WCC label tests — "Cancelled"/"CTC" and "FTD" (financial turn down) all
  *  kill the sale's volume; CTC counts inside the WCC column while FTD gets
- *  its own (owner, 2026-07-30). */
+ *  its own (owner, 2026-07-30). The cancel regex is also copied in SQL:
+ *  notify_rep_sale (20260912230000) and mirror_wcc_cancel_to_leads
+ *  (20260913010000) — keep all copies in sync, and note both triggers
+ *  deliberately treat only cancel/CTC as dead, never FTD. */
 const isCancelLabel = (v: string | null | undefined): boolean =>
   /cancel/i.test(v ?? "") || /\bctc\b/i.test(v ?? "");
 const isFtdLabel = (v: string | null | undefined): boolean =>

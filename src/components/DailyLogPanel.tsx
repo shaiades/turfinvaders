@@ -390,7 +390,7 @@ function MyRecentLeads({ userId }: { userId?: string }) {
       const { data, error } = await supabase
         .from("leads")
         .select(
-          "id, status, customer_name, address, is_sale, sale_amount, created_at, reviewed_at, deny_reason",
+          "id, status, customer_name, address, is_sale, sale_amount, created_at, reviewed_at, deny_reason, sale_cancelled_at",
         )
         .eq("canvasser_id", userId!)
         .order("created_at", { ascending: false })
@@ -407,46 +407,75 @@ function MyRecentLeads({ userId }: { userId?: string }) {
         <div className="text-sm text-muted-foreground">No leads submitted yet.</div>
       ) : (
         <ul className="divide-y divide-border">
-          {data!.map((l) => (
-            <li key={l.id} className="py-3 flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="font-medium truncate">
-                  {l.customer_name || "Unnamed lead"}
-                  {l.is_sale && l.sale_amount != null && (
-                    <span className="ml-2 font-display text-xs text-victory">
-                      ${Number(l.sale_amount).toLocaleString()}
-                    </span>
+          {data!.map((l) => {
+            // WCC cancel mirrored from the Sales Report (the only cancel
+            // authority) — the lead stays confirmed, the sale's money died.
+            const cancelled = l.status === "confirmed" && !!l.sale_cancelled_at;
+            return (
+              <li key={l.id} className="py-3 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="font-medium truncate">
+                    {l.customer_name || "Unnamed lead"}
+                    {l.is_sale && l.sale_amount != null && (
+                      <span
+                        className={`ml-2 font-display text-xs ${
+                          cancelled ? "text-destructive line-through" : "text-victory"
+                        }`}
+                      >
+                        ${Number(l.sale_amount).toLocaleString()}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-xs text-muted-foreground truncate">
+                    {l.address || "—"} · {new Date(l.created_at).toLocaleString()}
+                  </div>
+                  {/* Denials used to vanish silently — the desk's reason was
+                      fetched and never shown. Seeing it is the coaching. */}
+                  {l.status === "denied" && l.deny_reason && (
+                    <div className="mt-1 text-xs text-destructive">Denied: {l.deny_reason}</div>
+                  )}
+                  {cancelled && (
+                    <div className="mt-1 text-xs text-destructive">
+                      This sale cancelled — the money came back out.
+                    </div>
                   )}
                 </div>
-                <div className="text-xs text-muted-foreground truncate">
-                  {l.address || "—"} · {new Date(l.created_at).toLocaleString()}
-                </div>
-                {/* Denials used to vanish silently — the desk's reason was
-                    fetched and never shown. Seeing it is the coaching. */}
-                {l.status === "denied" && l.deny_reason && (
-                  <div className="mt-1 text-xs text-destructive">Denied: {l.deny_reason}</div>
-                )}
-              </div>
-              <StatusPill status={l.status as "pending" | "confirmed" | "denied"} />
-            </li>
-          ))}
+                <StatusPill
+                  status={l.status as "pending" | "confirmed" | "denied"}
+                  cancelled={cancelled}
+                />
+              </li>
+            );
+          })}
         </ul>
       )}
     </ArcadePanel>
   );
 }
 
-function StatusPill({ status }: { status: "pending" | "confirmed" | "denied" }) {
-  const map = {
+function StatusPill({
+  status,
+  cancelled,
+}: {
+  status: "pending" | "confirmed" | "denied";
+  cancelled?: boolean;
+}) {
+  const map: Record<string, string> = {
     pending: "border-[var(--warning)] text-[var(--warning)]",
     confirmed: "border-[var(--victory)] text-victory",
     denied: "border-destructive text-destructive",
-  } as const;
+  };
+  // A denied lead stays DENIED (money never counted); only a confirmed
+  // lead whose sale's WCC cancelled flips to CANCELLED.
+  const label = cancelled ? "cancelled" : status;
+  const cls = cancelled
+    ? "border-destructive text-destructive"
+    : (map[status] ?? "border-muted-foreground/40 text-muted-foreground");
   return (
     <span
-      className={`text-[10px] font-display uppercase tracking-widest px-2 py-1 rounded border ${map[status]}`}
+      className={`text-[10px] font-display uppercase tracking-widest px-2 py-1 rounded border ${cls}`}
     >
-      {status}
+      {label}
     </span>
   );
 }
