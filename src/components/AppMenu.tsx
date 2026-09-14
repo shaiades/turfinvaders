@@ -11,7 +11,7 @@ import { InvitePlayerSheet } from "@/components/InvitePlayerSheet";
 import { startCanvasserTutorial } from "@/components/tutorial/CanvasserTutorial";
 import { useAuth } from "@/hooks/useAuth";
 import { ROLE_LABEL } from "@/lib/role-policy";
-import { GraduationCap, Send, Sparkles, Users, CircleHelp } from "lucide-react";
+import { GraduationCap, Radar, Send, Sparkles, Users, CircleHelp } from "lucide-react";
 
 const itemCls =
   "w-full flex items-center gap-3 rounded-md border border-border bg-surface px-4 py-3 min-h-12 text-left text-xs font-display uppercase tracking-widest text-foreground hover:border-neon/60 hover:text-neon transition-colors";
@@ -67,6 +67,17 @@ export function AppMenu({
                 </span>
               </button>
             )}
+            {/* All three leadership tiers (owner ask 2026-09-14: captains,
+                managers, owner see everyone's live activity any time). */}
+            <Link to="/crew-map" onClick={() => onOpenChange(false)} className={itemCls}>
+              <Radar className="w-4 h-4 shrink-0" />
+              <span className="flex-1">
+                Crew Map
+                <span className="block normal-case font-sans tracking-normal text-[11px] text-muted-foreground mt-0.5">
+                  Everyone's live positions &amp; today's pins — right now
+                </span>
+              </span>
+            </Link>
             {role === "captain" && (
               <button
                 type="button"

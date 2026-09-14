@@ -11,6 +11,7 @@ import {
 } from "@/hooks/useAuth";
 import { useSwipeNav } from "@/hooks/useSwipeNav";
 import { CanvasserHUD } from "@/components/CanvasserHUD";
+import { CrewBeacon } from "@/components/CrewBeacon";
 import { AppMenu } from "@/components/AppMenu";
 import { CanvasserTutorial, startCanvasserTutorial } from "@/components/tutorial/CanvasserTutorial";
 import { WelcomeAnimation } from "@/components/WelcomeAnimation";
@@ -434,6 +435,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             for the player-coach busy running a van. */}
         {user && (role === "canvasser" || role === "captain") && <CanvasserHUD userId={user.id} />}
       </header>
+      {/* App-wide crew-live publisher — self-gated (field tiers, real role,
+          GPS already granted). Renders nothing. */}
+      <CrewBeacon />
       <main
         className={`flex-1 max-w-7xl w-full min-w-0 mx-auto px-4 sm:px-6 py-4 md:py-8 md:pb-8 ${
           user && navItems.length > 1 ? "pb-28" : "pb-8"

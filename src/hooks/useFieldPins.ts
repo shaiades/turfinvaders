@@ -48,6 +48,15 @@ function haversineMeters(a: LatLng, b: LatLng) {
 
 export type GeoStatus = "acquiring" | "ok" | "denied" | "unavailable";
 
+// Proof-of-permission marker for consumers that must never PROMPT (the
+// AppShell crew beacon): a successful fix here means the OS geolocation
+// permission is granted, so background GPS work can arm without stealing
+// the canvass screen's carefully-staged first prompt. The event covers the
+// same session; the localStorage key covers the next one (and browsers
+// without the Permissions API).
+export const GEO_GRANTED_KEY = "ti_geo_ok";
+export const GEO_GRANTED_EVENT = "ti-geo-granted";
+
 /** One GPS watch for the whole screen (mounting it also fires the browser's
  *  permission prompt — no separate one-shot needed). `enabled` lets Active
  *  Run hold the OS location prompt until the Gratitude Gate is answered —
@@ -56,6 +65,7 @@ export type GeoStatus = "acquiring" | "ok" | "denied" | "unavailable";
 export function useGeoWatch(enabled = true): { me: LatLng | null; geoStatus: GeoStatus } {
   const [me, setMe] = useState<LatLng | null>(null);
   const [geoStatus, setGeoStatus] = useState<GeoStatus>("acquiring");
+  const grantedSignaledRef = useRef(false);
 
   useEffect(() => {
     if (!enabled) return;
@@ -67,6 +77,15 @@ export function useGeoWatch(enabled = true): { me: LatLng | null; geoStatus: Geo
       (pos) => {
         setMe({ lat: pos.coords.latitude, lng: pos.coords.longitude });
         setGeoStatus("ok");
+        if (!grantedSignaledRef.current) {
+          grantedSignaledRef.current = true;
+          try {
+            localStorage.setItem(GEO_GRANTED_KEY, "1");
+          } catch {
+            /* private mode — the event below still arms this session */
+          }
+          window.dispatchEvent(new Event(GEO_GRANTED_EVENT));
+        }
       },
       (err) => {
         console.warn("geo err", err.message);
@@ -76,6 +95,16 @@ export function useGeoWatch(enabled = true): { me: LatLng | null; geoStatus: Geo
           // every pin from wherever the rep stood when permission was revoked,
           // silently flagging real knocks as Remote Drops.
           setMe(null);
+          // Revoked = the granted marker is a lie now. Clearing it keeps the
+          // no-Permissions-API fallback (useGeoGranted) from re-arming the
+          // crew beacon — and re-prompting — on every app open; a later
+          // re-grant re-signals via the ref reset below.
+          grantedSignaledRef.current = false;
+          try {
+            localStorage.removeItem(GEO_GRANTED_KEY);
+          } catch {
+            /* private mode */
+          }
         } else {
           setGeoStatus("unavailable");
         }

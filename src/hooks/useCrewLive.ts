@@ -26,10 +26,12 @@ function haversineMeters(a: LatLng, b: LatLng) {
 }
 
 /**
- * Publisher half of the Crew Map: rides Active Run's existing GPS watch (never
- * opens its own — the OS prompt ordering behind the Gratitude Gate is
- * load-bearing) and posts a throttled position beacon to the private
- * crew-live topic.
+ * Publisher half of the Crew Map: posts a throttled position beacon to the
+ * private crew-live topic. Since 2026-09-14 its one caller is the app-wide
+ * <CrewBeacon/> in AppShell, which pairs it with its OWN useGeoWatch — armed
+ * only after useGeoGranted proves the OS permission is ALREADY granted, so
+ * the canvass screen behind the Gratitude Gate still owns the first prompt
+ * (that ordering stays load-bearing; this hook itself opens no watch).
  *
  * Delivery is REST (`channel.httpSend`), NOT a websocket join: Realtime
  * authorizes a private-channel JOIN against the SELECT policies only, and
