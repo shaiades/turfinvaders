@@ -1524,9 +1524,9 @@ function RepHero({
           </span>
         </span>
         <span>
-          <span className="font-medium text-destructive">{fmtCount(row?.cancels ?? 0)}</span>{" "}
+          <span className="font-medium">{fmtPct(row?.sitPct ?? null)}</span>{" "}
           <span className="text-[9px] font-display uppercase tracking-wider text-muted-foreground">
-            Cancels
+            Sit
           </span>
         </span>
         <span>
