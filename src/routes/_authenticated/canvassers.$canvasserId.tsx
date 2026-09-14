@@ -19,6 +19,7 @@ import { formatCurrency } from "@/lib/utils";
 import { addDaysISO, fmtWorkedDay, laTodayISO } from "@/lib/dates";
 import { useDateRange } from "@/hooks/useDateRange";
 import { RangeTabs } from "@/components/RangeTabs";
+import { buildRepMatcher } from "@/lib/rep-identity";
 import {
   DoorResultsGrid,
   FunnelStageBars,
@@ -133,6 +134,47 @@ function CanvasserProfile() {
   // van's logs). Peers get zero rows back, so don't render fake zeros for them.
   const canReadLogs = isSelf || isAdminRole(role) || role === "captain";
   const canViewRevenue = canReadLogs;
+
+  // RepCard 2026 season for this rep — imported, read-only history. Leadership
+  // only (RLS: owner/office_staff/captain), matched to the profile by name via
+  // the same conservative matcher used elsewhere. A rep split across teams in
+  // RepCard has >1 row, so sum every row `isMe` accepts. This is display-only:
+  // it never touches daily_logs/leads or the points/pay engine.
+  const repcardResultsQuery = useQuery({
+    enabled: isRealUser && canReadLogs,
+    queryKey: ["repcard_results_all"],
+    staleTime: 60 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("repcard_canvasser_results")
+        .select("rep_name, doors_knocked, talked_to, appts_set, door_knocked_days");
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const repcard = (() => {
+    const rows = repcardResultsQuery.data ?? [];
+    const dn = profileQuery.data?.display_name;
+    if (!dn || rows.length === 0) return null;
+    const { matched, isMe } = buildRepMatcher(
+      dn,
+      rows.map((r) => r.rep_name),
+    );
+    if (!matched) return null;
+    const mine = rows.filter((r) => isMe(r.rep_name));
+    if (mine.length === 0) return null;
+    const sum = (k: "doors_knocked" | "talked_to" | "appts_set" | "door_knocked_days") =>
+      mine.reduce((a, r) => a + Number(r[k] ?? 0), 0);
+    return {
+      name: matched,
+      doors: sum("doors_knocked"),
+      talked: sum("talked_to"),
+      appts: sum("appts_set"),
+      days: sum("door_knocked_days"),
+    };
+  })();
 
   // Production stats from real daily_logs, scoped to the selected range —
   // the range TOTALS plus a per-day breakdown (a rep can have two rows on one
@@ -288,6 +330,52 @@ function CanvasserProfile() {
               accent="victory"
             />
           </div>
+
+          {/* RepCard 2026 season — imported field history for reps who also
+              worked in RepCard this year. Its own all-2026 block (RepCard data
+              is a single yearly aggregate with no per-day breakdown, so it must
+              never fold into the range-scoped cards above). Display only. */}
+          {repcard && (
+            <ArcadePanel
+              title="2026 Season · RepCard"
+              action={
+                <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                  Jan 1 – Sep 14, 2026
+                </span>
+              }
+            >
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <StatCard
+                  label="Doors Knocked"
+                  value={repcard.doors.toLocaleString()}
+                  sublabel="RepCard · 2026"
+                  accent="neon"
+                />
+                <StatCard
+                  label="Talked To"
+                  value={repcard.talked.toLocaleString()}
+                  sublabel="RepCard · 2026"
+                  accent="warning"
+                />
+                <StatCard
+                  label="Appts Set"
+                  value={repcard.appts.toLocaleString()}
+                  sublabel="RepCard · 2026"
+                  accent="accent"
+                />
+                <StatCard
+                  label="Days Knocked"
+                  value={repcard.days.toLocaleString()}
+                  sublabel="RepCard · 2026"
+                  accent="victory"
+                />
+              </div>
+              <p className="mt-3 text-[10px] leading-relaxed text-muted-foreground">
+                Imported from RepCard — historical field activity across 2026. Shown for context
+                only; not counted toward points, standings, or pay.
+              </p>
+            </ArcadePanel>
+          )}
 
           {/* Daily Activity — the front of the funnel (doors → talks → leads
               called in) that Fleet Dispatch doesn't carry, day by day. */}
