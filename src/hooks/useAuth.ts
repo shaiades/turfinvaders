@@ -12,9 +12,19 @@ export interface AuthState {
   realRole: AppRole | null;
   teamId: string | null;
   displayName: string | null;
+  /** The profile's actual name, untouched by the View As rep picker. */
+  realDisplayName: string | null;
 }
 
 export const DEV_ROLE_STORAGE_KEY = "dev_role_override";
+// View As rep picker (owner request 2026-09-13): previewing "Sales Rep" as a
+// SPECIFIC person. Close Kombat finds "you" by matching displayName against
+// card-level rep names, so swapping the name IS the whole impersonation —
+// data queries stay keyed to the owner's own user id, and the override only
+// applies while the effective role is sales_rep (whose shell guard pins the
+// app to /close-kombat), so canvasser surfaces that broadcast the name (crew
+// map GPS) can never carry a borrowed one.
+export const DEV_NAME_STORAGE_KEY = "dev_name_override";
 
 function readDevRole(): AppRole | null {
   if (typeof window === "undefined") return null;
@@ -22,9 +32,28 @@ function readDevRole(): AppRole | null {
   return isAppRole(v) ? v : null;
 }
 
+function readDevName(): string | null {
+  if (typeof window === "undefined") return null;
+  const v = window.localStorage.getItem(DEV_NAME_STORAGE_KEY);
+  return v && v.trim() ? v.trim() : null;
+}
+
+/** The name override, gated the same way readDevRole's consumer is: owner
+ *  only, and only inside a Sales Rep preview. */
+function effectiveDevName(realRole: AppRole | null, effRole: AppRole | null): string | null {
+  if (!canUseViewAs(realRole) || effRole !== "sales_rep") return null;
+  return readDevName();
+}
+
 export function useAuth(): AuthState {
   const [state, setState] = useState<AuthState>({
-    loading: true, user: null, role: null, realRole: null, teamId: null, displayName: null,
+    loading: true,
+    user: null,
+    role: null,
+    realRole: null,
+    teamId: null,
+    displayName: null,
+    realDisplayName: null,
   });
 
   useEffect(() => {
@@ -32,7 +61,16 @@ export function useAuth(): AuthState {
 
     async function hydrate(user: User | null) {
       if (!user) {
-        if (active) setState({ loading: false, user: null, role: null, realRole: null, teamId: null, displayName: null });
+        if (active)
+          setState({
+            loading: false,
+            user: null,
+            role: null,
+            realRole: null,
+            teamId: null,
+            displayName: null,
+            realDisplayName: null,
+          });
         return;
       }
       const [{ data: roles }, { data: profile }] = await Promise.all([
@@ -45,6 +83,8 @@ export function useAuth(): AuthState {
       // dev_role_override left in this browser's localStorage must never
       // re-skin anyone but an owner — captains included.
       const override = canUseViewAs(realRole) ? readDevRole() : null;
+      const effRole = privilegeRole(override ?? realRole);
+      const realDisplayName = profile?.display_name ?? user.email ?? null;
       if (active) {
         setState({
           loading: false,
@@ -52,10 +92,11 @@ export function useAuth(): AuthState {
           // `role` drives experience (nav, guards, HUD) and is collapsed to
           // its privilege tier: confirmers live the canvasser app.
           // `realRole` stays raw for labels and the owner-only tier checks.
-          role: privilegeRole(override ?? realRole),
+          role: effRole,
           realRole,
           teamId: profile?.team_id ?? null,
-          displayName: profile?.display_name ?? user.email ?? null,
+          displayName: effectiveDevName(realRole, effRole) ?? realDisplayName,
+          realDisplayName,
         });
       }
     }
@@ -65,16 +106,22 @@ export function useAuth(): AuthState {
       hydrate(session?.user ?? null);
     });
 
-    // Listen for dev-role override changes from this tab or others.
+    // Listen for View As override changes (role or rep name) from this tab
+    // or others.
     function onOverride() {
-      setState((s) => ({
-        ...s,
-        role: privilegeRole((canUseViewAs(s.realRole) ? readDevRole() : null) ?? s.realRole),
-      }));
+      setState((s) => {
+        const override = canUseViewAs(s.realRole) ? readDevRole() : null;
+        const effRole = privilegeRole(override ?? s.realRole);
+        return {
+          ...s,
+          role: effRole,
+          displayName: effectiveDevName(s.realRole, effRole) ?? s.realDisplayName,
+        };
+      });
     }
     window.addEventListener("dev-role-changed", onOverride);
     window.addEventListener("storage", (e) => {
-      if (e.key === DEV_ROLE_STORAGE_KEY) onOverride();
+      if (e.key === DEV_ROLE_STORAGE_KEY || e.key === DEV_NAME_STORAGE_KEY) onOverride();
     });
 
     return () => {
@@ -95,3 +142,11 @@ export function setDevRoleOverride(role: AppRole | null) {
   window.dispatchEvent(new Event("dev-role-changed"));
 }
 
+export function setDevNameOverride(name: string | null) {
+  if (typeof window === "undefined") return;
+  const v = name?.trim() || null;
+  if (v) window.localStorage.setItem(DEV_NAME_STORAGE_KEY, v);
+  else window.localStorage.removeItem(DEV_NAME_STORAGE_KEY);
+  // Same event as the role override: one listener recomputes both.
+  window.dispatchEvent(new Event("dev-role-changed"));
+}
