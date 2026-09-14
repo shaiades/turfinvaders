@@ -570,6 +570,7 @@ export function NeonMap({
   pendingPolygon,
   flyTo,
   territoryPopups = false,
+  revealAssignees = false,
   houseBubbles = false,
   onHouseTap,
   zipTints,
@@ -599,6 +600,11 @@ export function NeonMap({
    *  recent history + an edit button) instead of firing onTerritoryClick
    *  directly. The popup's button calls onTerritoryClick to open the sheet. */
   territoryPopups?: boolean;
+  /** Reveal assignee identities (the "Now · <name>" line + the earlier-name
+   *  history) inside the territory popup. Default false hides names even when
+   *  the popup is open; leadership surfaces flip it on behind an explicit
+   *  "show assignments" toggle. Names are also RLS-gated at the data layer. */
+  revealAssignees?: boolean;
   /** D2DU-style bubble over every house (OSM buildings) at street zoom. */
   houseBubbles?: boolean;
   /** Makes house bubbles tappable — the canvass screen's one-tap result sheet. */
@@ -776,21 +782,27 @@ export function NeonMap({
               {withPopup && (
                 <Popup className="turf-popup" minWidth={190}>
                   <div className="nm-pop-title">{t.name?.trim() || "Area"}</div>
-                  <div className="nm-pop-now">
-                    Now · <b>{t.currentAssignee ?? "Unassigned"}</b>
-                  </div>
-                  {earlier.length > 0 ? (
-                    <div className="nm-pop-hist">
-                      <div className="nm-pop-head">Earlier</div>
-                      {earlier.map((h, i) => (
-                        <div key={i} className="nm-pop-row">
-                          <span className="nm-pop-name">{h.name}</span>
-                          <span className="nm-pop-when">{h.when}</span>
+                  {revealAssignees ? (
+                    <>
+                      <div className="nm-pop-now">
+                        Now · <b>{t.currentAssignee ?? "Unassigned"}</b>
+                      </div>
+                      {earlier.length > 0 ? (
+                        <div className="nm-pop-hist">
+                          <div className="nm-pop-head">Earlier</div>
+                          {earlier.map((h, i) => (
+                            <div key={i} className="nm-pop-row">
+                              <span className="nm-pop-name">{h.name}</span>
+                              <span className="nm-pop-when">{h.when}</span>
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
+                      ) : (
+                        <div className="nm-pop-empty">No earlier assignments</div>
+                      )}
+                    </>
                   ) : (
-                    <div className="nm-pop-empty">No earlier assignments</div>
+                    <div className="nm-pop-empty">Assignment names hidden</div>
                   )}
                   <button
                     type="button"

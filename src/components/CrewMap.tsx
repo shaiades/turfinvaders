@@ -117,9 +117,9 @@ export function CrewMap({ onBack }: { onBack: () => void }) {
         color: assigneeColor(t.assigned_user_id),
         polygon: (t.polygon_coordinates ?? []) as LatLng[],
         dashed: !t.assigned_user_id,
-        assignmentLabel: t.assigned_user_id
-          ? (t.assignee?.display_name ?? "Assigned")
-          : "Unassigned",
+        // Status only — no assignee name on the turf pill. Who's where is
+        // already carried by the live crew avatars; territory pills stay nameless.
+        assignmentLabel: t.assigned_user_id ? "Assigned" : "Unassigned",
       })),
     [turfsQ.data],
   );

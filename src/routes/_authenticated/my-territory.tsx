@@ -25,7 +25,7 @@ import { useZipTints, useZipAssignmentActions } from "@/hooks/useZipAssignments"
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { Crosshair, Pencil, MapPin, MapPinned, Trash2, Users, X, Zap } from "lucide-react";
+import { Crosshair, Eye, EyeOff, Pencil, MapPin, MapPinned, Trash2, Users, X, Zap } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/my-territory")({
   head: () => ({ meta: [{ title: "My Territory — Turf Invaders" }] }),
@@ -160,6 +160,11 @@ function ManagerTerritoryView({
   // their ZIPs into turfs with the drawing flow below.
   const isAdmin = role === "owner" || role === "office_staff";
   const [assignZips, setAssignZips] = useState(false);
+  // Assignee names are OFF by default — the map shows areas without who's on
+  // them. Owners/managers flip this on to reveal the name pills + the popup's
+  // "Now / Earlier" assignment history. (This surface is already leadership-
+  // only, and the underlying names are RLS-gated to owner/office_staff/captain.)
+  const [showAssignments, setShowAssignments] = useState(false);
   const [zipTarget, setZipTarget] = useState<string | null>(null);
   const [flyTo, setFlyTo] = useState<{
     bounds: [[number, number], [number, number]];
@@ -408,13 +413,16 @@ function ManagerTerritoryView({
         color: assigneeColor(t.assigned_user_id),
         polygon: (t.polygon_coordinates ?? []) as LatLng[],
         dashed: !t.assigned_user_id,
-        assignmentLabel: t.assigned_user_id
-          ? (t.assignee?.display_name ?? "Assigned")
-          : "Unassigned",
+        // Name pill only when assignments are revealed (default hides it).
+        assignmentLabel: showAssignments
+          ? t.assigned_user_id
+            ? (t.assignee?.display_name ?? "Assigned")
+            : "Unassigned"
+          : undefined,
         currentAssignee: t.assigned_user_id ? (t.assignee?.display_name ?? "Assigned") : null,
         history: historyByTurf.get(t.id) ?? [],
       })),
-    [turfsQuery.data, historyByTurf],
+    [turfsQuery.data, historyByTurf, showAssignments],
   );
 
   // RepCard historical areas as faint dashed coverage. Polygons are simplified
@@ -440,13 +448,13 @@ function ManagerTerritoryView({
           color: r.color || "#8b5cf6",
           polygon: simplifyRing((r.polygon_coordinates ?? []) as LatLng[]),
           dashed: true,
-          assignmentLabel: label,
+          assignmentLabel: showAssignments ? label : undefined,
           currentAssignee: r.rep_name ?? null,
           history: r.assigned_at ? [{ name: "RepCard 2026", when: fmt(r.assigned_at) }] : [],
         };
       })
       .filter((t) => t.polygon.length >= 3);
-  }, [repcardTerritoryQuery.data]);
+  }, [repcardTerritoryQuery.data, showAssignments]);
 
   // Combined layer: RepCard coverage underneath, live turfs drawn on top.
   const mapTerritories: Territory[] = useMemo(
@@ -689,6 +697,17 @@ function ManagerTerritoryView({
               <Users className="w-3.5 h-3.5" /> Crew Map
             </Button>
           )}
+          {/* Owner/manager-only reveal of who's assigned to each area + the
+              assignment history. Off by default so names never sit on the map. */}
+          <Button
+            variant={showAssignments ? "default" : "outline"}
+            onClick={() => setShowAssignments((v) => !v)}
+            className="gap-2"
+            title="Reveal assignee names and area history"
+          >
+            {showAssignments ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+            {showAssignments ? "Hide names" : "Show names"}
+          </Button>
           <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
             {drawing
               ? "Drag on the map to draw an area"
@@ -757,6 +776,7 @@ function ManagerTerritoryView({
             // sheet. Disabled mid-draw (a stray tap would fight drawing) and
             // in assign mode (the tap belongs to the ZIP underneath).
             territoryPopups={!drawing && !assignZips}
+            revealAssignees={showAssignments}
           />
 
           {/* Floating fallback: always visible when a polygon is pending */}
