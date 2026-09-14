@@ -315,7 +315,8 @@ export function ActiveRun({
     void pins.dropAtDevice("lead").then((res) => {
       if (res.ok && user?.id) {
         qc.invalidateQueries({ queryKey: ["my_pins_today", user.id] });
-        // Lead pins bump leads_called_in via trigger — refresh daily-log reads.
+        // Lead pins bump doors/talked via trigger (the Monday card credits
+        // the lead itself, once per card) — refresh daily-log reads.
         qc.invalidateQueries({ queryKey: dailyLogKeys.all(user.id) });
       }
     });
