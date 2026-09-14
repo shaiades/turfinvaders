@@ -122,8 +122,8 @@ export function useCanvasserStats(userId: string) {
         .eq("status", "confirmed")
         .eq("is_sale", true)
         // WCC-cancelled sales pay nothing (owner, 2026-09-12) — mirrored onto
-        // leads by the block_cards trigger. calc_weekly_paycheck doesn't know
-        // the stamp; the pay engine is a separate policy decision.
+        // leads by the block_cards trigger. calc_weekly_paycheck v7 applies
+        // the same exclusion (20260913040000), so display and engine agree.
         .is("sale_cancelled_at", null)
         .gte("created_at", laMidnightUtcISO(w < m ? w : m));
       if (error) throw error;

@@ -1,10 +1,14 @@
 // DISPLAY-ONLY mirror of public.calc_weekly_paycheck.
 //
 // The authoritative pay engine lives in Postgres — latest definition:
-// supabase/migrations/20260718192842_2f90b1c4-b52e-45f8-94a6-ed821aab8869.sql.
-// If the SQL changes, change this file in the same commit. These helpers are
-// for dashboard hints and projections only; real paychecks must come from the
-// calc_weekly_paycheck RPC (via getWeeklyPaycheck/getWeeklyPaychecks server fns).
+// supabase/migrations/20260913040000_commission_clawback.sql (v7: WCC-
+// cancelled sales — leads.sale_cancelled_at — pay no commission and earn no
+// monthly volume bonus; sales paid in an already-approved run are recovered
+// by create_payroll_run's ledgered clawback pass, capped at each week's
+// commission). If the SQL changes, change this file in the same commit.
+// These helpers are for dashboard hints and projections only; real paychecks
+// must come from the calc_weekly_paycheck RPC (via getWeeklyPaycheck/
+// getWeeklyPaychecks server fns).
 
 /** Points: a pitch-miss sit = 1 pt, a sale = 2 pts (demos_sits includes sale rows). */
 export const POINTS_TIER_MID = 3;
