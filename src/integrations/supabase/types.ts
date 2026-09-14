@@ -807,11 +807,77 @@ export type Database = {
           },
         ]
       }
+      commission_clawbacks: {
+        Row: {
+          amount: number
+          canvasser_id: string
+          created_at: string
+          id: string
+          kind: string
+          lead_id: string
+          line_id: string
+          run_id: string
+          source_run_id: string | null
+        }
+        Insert: {
+          amount: number
+          canvasser_id: string
+          created_at?: string
+          id?: string
+          kind: string
+          lead_id: string
+          line_id: string
+          run_id: string
+          source_run_id?: string | null
+        }
+        Update: {
+          amount?: number
+          canvasser_id?: string
+          created_at?: string
+          id?: string
+          kind?: string
+          lead_id?: string
+          line_id?: string
+          run_id?: string
+          source_run_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "commission_clawbacks_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "commission_clawbacks_line_id_fkey"
+            columns: ["line_id"]
+            isOneToOne: false
+            referencedRelation: "payroll_run_lines"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "commission_clawbacks_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "payroll_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "commission_clawbacks_source_run_id_fkey"
+            columns: ["source_run_id"]
+            isOneToOne: false
+            referencedRelation: "payroll_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       payroll_run_lines: {
         Row: {
           base_pay: number
           canvasser_id: string
           commission: number
+          commission_adjustment: number
           display_name: string
           dt_hours: number
           exceptions: Json
@@ -835,6 +901,7 @@ export type Database = {
           base_pay?: number
           canvasser_id: string
           commission?: number
+          commission_adjustment?: number
           display_name: string
           dt_hours?: number
           exceptions?: Json
@@ -858,6 +925,7 @@ export type Database = {
           base_pay?: number
           canvasser_id?: string
           commission?: number
+          commission_adjustment?: number
           display_name?: string
           dt_hours?: number
           exceptions?: Json
@@ -1278,7 +1346,21 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      commission_clawback_outstanding: {
+        Row: {
+          canvasser_id: string | null
+          customer_name: string | null
+          direction: string | null
+          display_name: string | null
+          lead_id: string | null
+          outstanding: number | null
+          paid_commission: number | null
+          paid_week: string | null
+          recovered: number | null
+          sale_amount: number | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       archive_agent: { Args: { _user_id: string }; Returns: undefined }

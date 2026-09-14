@@ -22,7 +22,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { RankPill } from "@/components/RankPill";
 import { useOfficeFilter } from "@/components/OfficeFilterContext";
 import { cn } from "@/lib/utils";
-import { addDaysISO, laMidnightUtcISO, monthStartISO, nextMonthStartISO } from "@/lib/dates";
+import { addDaysISO, laDateISO, laMidnightUtcISO, monthStartISO, nextMonthStartISO } from "@/lib/dates";
 import { useWeekSelector } from "@/hooks/useWeekSelector";
 
 type LogRow = {
@@ -179,6 +179,55 @@ export function PayrollLedger() {
   });
   const run = runQuery.data ?? null;
 
+  // WCC-cancelled sales the engine excluded from this week's commission
+  // (calc_weekly_paycheck v7) — itemized so the office can reconcile checks
+  // already cut by hand for weeks that predate the exclusion. All cancelled
+  // rows are fetched (a handful) and bucketed to the week client-side with
+  // the engine's own COALESCE(reviewed_at, created_at) LA-date attribution.
+  const cancelledQuery = useQuery({
+    queryKey: ["payroll-cancelled-sales", startStr],
+    queryFn: async () => {
+      const { data: rows, error } = await supabase
+        .from("leads")
+        .select("id, canvasser_id, customer_name, sale_amount, reviewed_at, created_at")
+        .eq("status", "confirmed")
+        .not("sale_cancelled_at", "is", null);
+      if (error) throw error;
+      return (rows ?? []).filter((l) => {
+        const d = laDateISO(new Date(l.reviewed_at ?? l.created_at));
+        return d >= startStr && d <= endStr;
+      });
+    },
+  });
+
+  // Cross-week adjustments ledgered onto this week's run (clawbacks of
+  // sales paid in prior approved runs; refunds when a cancel later healed).
+  const runAdjustmentsQuery = useQuery({
+    queryKey: ["payroll-run-clawbacks", run?.id ?? "none"],
+    enabled: !!run,
+    queryFn: async () => {
+      const { data: rows, error } = await supabase
+        .from("commission_clawbacks")
+        .select("id, canvasser_id, kind, amount, leads(customer_name)")
+        .eq("run_id", run!.id);
+      if (error) throw error;
+      return rows ?? [];
+    },
+  });
+
+  // Paid-but-cancelled commission the runs haven't recovered yet (and
+  // healed-sale refunds still owed) — needs office action on a future run.
+  const outstandingQuery = useQuery({
+    queryKey: ["payroll-clawback-outstanding"],
+    queryFn: async () => {
+      const { data: rows, error } = await supabase
+        .from("commission_clawback_outstanding")
+        .select("*");
+      if (error) throw error;
+      return rows ?? [];
+    },
+  });
+
   const createRun = useMutation({
     mutationFn: async () => {
       const { error } = await supabase.rpc("create_payroll_run", { _week_start: startStr });
@@ -187,6 +236,8 @@ export function PayrollLedger() {
     onSuccess: () => {
       toast.success("Draft run created — review the lines, then approve to freeze");
       qc.invalidateQueries({ queryKey: ["payroll-run", startStr] });
+      qc.invalidateQueries({ queryKey: ["payroll-run-clawbacks"] });
+      qc.invalidateQueries({ queryKey: ["payroll-clawback-outstanding"] });
     },
     onError: (e: Error) => toast.error("Couldn't create run", { description: e.message }),
   });
@@ -386,6 +437,7 @@ export function PayrollLedger() {
     "Total Sales Volume ($)",
     "Commission Rate",
     "Commission Earned ($)",
+    "Commission Adjustment ($)",
     "Sit Bonus",
     "Monster Bonus",
     "Total Pay ($)",
@@ -424,6 +476,7 @@ export function PayrollLedger() {
           "",
           "",
           Number(l.commission).toFixed(2),
+          Number(l.commission_adjustment ?? 0).toFixed(2),
           Number(l.sit_bonus).toFixed(2),
           Number(l.monster_bonus).toFixed(2),
           Number(l.total_pay).toFixed(2),
@@ -454,6 +507,7 @@ export function PayrollLedger() {
         r.sale_amount.toFixed(2),
         `${(r.commRate * 100).toFixed(0)}%`,
         r.commission.toFixed(2),
+        "", // cross-week adjustments exist only on runs, never in the live view
         r.sitBonus.toFixed(2),
         r.monster.toFixed(2),
         r.payError ? "ERROR" : r.totalPay.toFixed(2),
@@ -601,6 +655,101 @@ export function PayrollLedger() {
           )}
         </div>
       </ArcadeCard>
+
+      {(() => {
+        const cancelled = cancelledQuery.data ?? [];
+        const adjustments = runAdjustmentsQuery.data ?? [];
+        const outstanding = outstandingQuery.data ?? [];
+        if (cancelled.length === 0 && adjustments.length === 0 && outstanding.length === 0)
+          return null;
+        const nameById = new Map(
+          (data?.profiles ?? []).map((p) => [p.id, p.display_name ?? "Unknown"]),
+        );
+        const commRateById = new Map(rows.map((r) => [r.id, r.commRate]));
+        const name = (id: string | null) => (id && nameById.get(id)) || "Unknown";
+        return (
+          <ArcadeCard className="p-4 space-y-3 text-xs">
+            {cancelled.length > 0 && (
+              <div>
+                <div className="font-display text-[10px] uppercase tracking-widest text-destructive mb-1">
+                  Cancelled sales — excluded from this week's commission
+                </div>
+                {/* WCC cancels stamped onto leads (PRs #203/#204). The engine
+                    pays nothing on these; the estimate uses the canvasser's
+                    live rate for the week and shows "—" when the engine has
+                    no pay row to take a rate from (never a guessed rate). */}
+                <ul className="space-y-0.5">
+                  {cancelled.map((l) => {
+                    const rate = commRateById.get(l.canvasser_id);
+                    return (
+                      <li key={l.id} className="text-muted-foreground">
+                        {name(l.canvasser_id)} — {l.customer_name ?? "Unknown"} · $
+                        {Number(l.sale_amount ?? 0).toFixed(2)}
+                        <span className="text-destructive ml-1">
+                          {rate
+                            ? `(−$${(Number(l.sale_amount ?? 0) * rate).toFixed(2)} commission)`
+                            : "(rate — · no pay row this week)"}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
+            {adjustments.length > 0 && (
+              <div>
+                <div className="font-display text-[10px] uppercase tracking-widest text-warning mb-1">
+                  Cross-week adjustments on this run
+                </div>
+                <ul className="space-y-0.5">
+                  {adjustments.map((a) => (
+                    <li key={a.id} className="text-muted-foreground">
+                      {name(a.canvasser_id)} —{" "}
+                      {(a.leads as { customer_name: string | null } | null)?.customer_name ??
+                        "Unknown"}
+                      <span
+                        className={cn(
+                          "ml-1",
+                          a.kind === "clawback" ? "text-destructive" : "text-victory",
+                        )}
+                      >
+                        {a.kind === "clawback" ? "−" : "+"}${Number(a.amount).toFixed(2)}{" "}
+                        {a.kind === "clawback" ? "clawback" : "refund"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {outstanding.length > 0 && (
+              <div>
+                <div className="font-display text-[10px] uppercase tracking-widest text-warning mb-1">
+                  Outstanding — not yet recovered on any run
+                </div>
+                <ul className="space-y-0.5">
+                  {outstanding.map((o) => (
+                    <li key={`${o.direction}-${o.lead_id}`} className="text-muted-foreground">
+                      {o.display_name ?? name(o.canvasser_id)} — {o.customer_name ?? "Unknown"}
+                      <span
+                        className={cn(
+                          "ml-1",
+                          o.direction === "collect" ? "text-destructive" : "text-victory",
+                        )}
+                      >
+                        {o.direction === "collect" ? "collect" : "refund"} $
+                        {Number(o.outstanding ?? 0).toFixed(2)}
+                      </span>
+                      {o.paid_week ? (
+                        <span className="ml-1">· paid wk {o.paid_week}</span>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </ArcadeCard>
+        );
+      })()}
 
       <ArcadePanel
         title={`Payroll Ledger · ${rows.length} agents`}
