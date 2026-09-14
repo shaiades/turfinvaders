@@ -70,6 +70,7 @@ import {
 } from "@/lib/dispatch.functions";
 import { FleetDispatchManage } from "@/components/FleetDispatchManage";
 import { GlossarySheet } from "@/components/GlossarySheet";
+import { RepcardSeasonBoard } from "@/components/RepcardSeasonBoard";
 import { FormerBadge } from "@/components/FormerBadge";
 import { AddAgentDialog } from "@/components/AddAgentDialog";
 import { RenameCanvasserDialog, type NameGroupRef } from "@/components/RenameCanvasserDialog";
@@ -177,6 +178,7 @@ function FleetDispatchInner({
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
   const [manageOpen, setManageOpen] = useState(false);
   const [glossaryOpen, setGlossaryOpen] = useState(false);
+  const [showRepcard, setShowRepcard] = useState(false);
   const [movePlayersOpen, setMovePlayersOpen] = useState(false);
   const { office: officeTab, matches } = useOfficeFilter();
 
@@ -1100,6 +1102,26 @@ function FleetDispatchInner({
           {range.sub}
         </span>
       </div>
+
+      {/* Opt-in RepCard 2026 season view — off by default so the daily dispatch
+          board is unchanged. Its own all-2026 table (RepCard data has no
+          per-day split), read-only, never fed into points/standings/pay. */}
+      {isManagerRole(realRole) && (
+        <div className="space-y-2">
+          <button
+            type="button"
+            onClick={() => setShowRepcard((v) => !v)}
+            className={`px-3 py-2 rounded-full text-[10px] font-display uppercase tracking-widest whitespace-nowrap border transition-colors ${
+              showRepcard
+                ? "bg-accent text-background border-accent"
+                : "border-accent/50 text-accent hover:border-accent"
+            }`}
+          >
+            {showRepcard ? "Hide RepCard 2026" : "Show RepCard 2026"}
+          </button>
+          {showRepcard && <RepcardSeasonBoard />}
+        </div>
+      )}
 
       {!readOnly && <WebhookUrlBanner />}
       {!readOnly && <MondayTokenCard />}
