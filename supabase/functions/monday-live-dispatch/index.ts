@@ -1,6 +1,6 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { fetchItemBatched } from './monday.ts'
+import { fetchItemBatched, mondayQuery } from './monday.ts'
 import {
   buildBlockCardRow,
   copyBaseName,
@@ -151,6 +151,84 @@ serve(async (req) => {
       return new Response(JSON.stringify({ challenge: body.challenge }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
+    }
+
+    // ── Admin: ensure the Incoming Leads Date-column webhook ── deploy-side
+    // tooling, not a Monday event. Delivery URLs must carry the shared
+    // secret (enforced below for real deliveries), and that secret lives
+    // only in this function's env — so the function registers its own
+    // webhook, with the same URL recipe as rotate-boards' edgeUrl(). Auth:
+    // the project's service-role key in x-admin-key, compared by digest.
+    if (body.adminAction === 'ensure_lead_date_webhook') {
+      const digest = async (s: string) => {
+        const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s))
+        return Array.from(new Uint8Array(d)).map((b) => b.toString(16).padStart(2, '0')).join('')
+      }
+      const adminKey = req.headers.get('x-admin-key') ?? ''
+      const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+      if (!serviceKey || !adminKey || (await digest(adminKey)) !== (await digest(serviceKey))) {
+        return new Response('Unauthorized', { status: 401, headers: corsHeaders })
+      }
+      const respond = (status: number, payload: Record<string, unknown>) =>
+        new Response(JSON.stringify(payload), {
+          status,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      const webhookSecret = Deno.env.get('MONDAY_WEBHOOK_SECRET') ?? ''
+      if (!webhookSecret) {
+        return respond(500, {
+          ok: false,
+          error: 'MONDAY_WEBHOOK_SECRET is not set — refusing to register a secretless webhook',
+        })
+      }
+      const { data: sRow } = await supabaseAdmin
+        .from('system_settings')
+        .select('id, monday_api_token, incoming_leads_board_id, monday_webhooks')
+        .limit(1)
+        .maybeSingle()
+      const adminToken = (sRow as any)?.monday_api_token ? String((sRow as any).monday_api_token) : null
+      const leadsBoardId = String((sRow as any)?.incoming_leads_board_id ?? '4155518549')
+      if (!adminToken) return respond(500, { ok: false, error: 'No Monday token in system_settings' })
+      if (!/^\d+$/.test(leadsBoardId)) {
+        return respond(500, { ok: false, error: `Bad incoming_leads_board_id: ${leadsBoardId}` })
+      }
+
+      const listRes = await mondayQuery(adminToken, `query { webhooks (board_id: ${leadsBoardId}) { id event } }`)
+      if (listRes.error) return respond(502, { ok: false, error: `webhook list failed: ${listRes.error}` })
+      const hooks = (listRes.data?.webhooks ?? []) as Array<{ id: string; event: string }>
+      const existing = hooks.find((h) => h.event === 'change_column_value')
+      if (existing) return respond(200, { ok: true, existing: String(existing.id) })
+
+      const url =
+        'https://xogitpqeuwalerxygvjw.supabase.co/functions/v1/monday-live-dispatch' +
+        `?apikey=sb_publishable_ivjX0mrVvSLM1DHfDTDVuw_qHUtGeS2&secret=${webhookSecret}`
+      if (url.length > 255) {
+        return respond(500, { ok: false, error: `webhook URL is ${url.length} chars — Monday caps at 255` })
+      }
+      const createRes = await mondayQuery(
+        adminToken,
+        `mutation { create_webhook (board_id: ${leadsBoardId}, url: ${JSON.stringify(url)}, event: change_column_value) { id } }`,
+      )
+      const createdId = (createRes.data?.create_webhook as { id?: string } | undefined)?.id
+      if (createRes.error || !createdId) {
+        return respond(502, { ok: false, error: `create_webhook failed: ${createRes.error ?? 'no id returned'}` })
+      }
+      const registry = Array.isArray((sRow as any)?.monday_webhooks) ? [...(sRow as any).monday_webhooks] : []
+      registry.push({
+        event: 'change_column_value',
+        board_id: leadsBoardId,
+        webhook_id: String(createdId),
+        registered_at: new Date().toISOString(),
+      })
+      await supabaseAdmin
+        .from('system_settings')
+        .update({ monday_webhooks: registry })
+        .eq('id', (sRow as any).id)
+      await supabaseAdmin.from('webhook_logs').insert({
+        step: 'Admin_Lead_Date_Webhook',
+        data: { boardId: leadsBoardId, webhookId: String(createdId) },
+      })
+      return respond(200, { ok: true, created: String(createdId) })
     }
 
     // Optional shared-secret gate, soft rollout: no-op until MONDAY_WEBHOOK_SECRET
