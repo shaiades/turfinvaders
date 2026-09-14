@@ -162,6 +162,7 @@ export type Database = {
           no_demo: number
           no_shows: number
           non_core: number
+          not_home: number
           not_interested: number
           notes: string | null
           office_location: string
@@ -188,6 +189,7 @@ export type Database = {
           no_demo?: number
           no_shows?: number
           non_core?: number
+          not_home?: number
           not_interested?: number
           notes?: string | null
           office_location?: string
@@ -214,6 +216,7 @@ export type Database = {
           no_demo?: number
           no_shows?: number
           non_core?: number
+          not_home?: number
           not_interested?: number
           notes?: string | null
           office_location?: string

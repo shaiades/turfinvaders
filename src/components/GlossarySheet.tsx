@@ -13,8 +13,9 @@ const SECTIONS: Array<{ heading: string; terms: Array<[string, string]> }> = [
   {
     heading: "Door work",
     terms: [
-      ["Drs", "Doors Knocked — knock and not-home pins on the map, plus Mission Log entries"],
-      ["Tlk", "Talked To — talked-to, renter, and go-back pins, plus Mission Log entries"],
+      ["Drs", "Doors Knocked — the total: every map result counts a door (Tlk + NH), plus Mission Log entries"],
+      ["Tlk", "Talked To — talked-to, renter, go-back, lead, NI, and appt pins, plus Mission Log entries"],
+      ["NH", "Not Home — nobody answered (NH pins from the field map, no Mission Log field); counts the door, never a talk"],
       ["NI", "Not Interested — NI pins from the field map (no Mission Log field)"],
       [
         "Rnt",
