@@ -1,7 +1,14 @@
 import { Link, useRouter, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { useAuth, setDevRoleOverride, type AppRole } from "@/hooks/useAuth";
+import {
+  useAuth,
+  setDevRoleOverride,
+  setDevNameOverride,
+  DEV_NAME_STORAGE_KEY,
+  type AppRole,
+} from "@/hooks/useAuth";
 import { useSwipeNav } from "@/hooks/useSwipeNav";
 import { CanvasserHUD } from "@/components/CanvasserHUD";
 import { AppMenu } from "@/components/AppMenu";
@@ -70,6 +77,44 @@ export function AppShell({ children }: { children: ReactNode }) {
   // "canvasser" (privilegeRole in useAuth) and must not read as a View As
   // override.
   const isOverridden = role !== privilegeRole(realRole) && realRole !== null;
+
+  // View As rep picker (owner request 2026-09-13): inside a Sales Rep
+  // preview, choose WHICH rep — the name is what Close Kombat's matcher
+  // keys on, so this is the whole impersonation. Display-only: data stays
+  // the owner's, and useAuth ignores the key outside a sales_rep preview.
+  const [nameOverride, setNameOverride] = useState<string | null>(() =>
+    typeof window === "undefined" ? null : window.localStorage.getItem(DEV_NAME_STORAGE_KEY),
+  );
+  const applyNameOverride = (v: string | null) => {
+    setDevNameOverride(v);
+    setNameOverride(v?.trim() || null);
+  };
+  const showRepPicker = !!user && canUseViewAs(realRole) && role === "sales_rep";
+  const repNamesQuery = useQuery({
+    queryKey: ["view-as-rep-names"],
+    enabled: showRepPicker,
+    staleTime: 5 * 60 * 1000,
+    queryFn: async (): Promise<string[]> => {
+      const { data: roleRows, error: rolesErr } = await supabase
+        .from("user_roles")
+        .select("user_id")
+        .eq("role", "sales_rep");
+      if (rolesErr) throw rolesErr;
+      const ids = [...new Set((roleRows ?? []).map((r) => r.user_id))];
+      if (ids.length === 0) return [];
+      const { data: profs, error: profErr } = await supabase
+        .from("profiles")
+        .select("display_name")
+        .in("id", ids);
+      if (profErr) throw profErr;
+      const names = new Set<string>();
+      for (const p of profs ?? []) {
+        const n = (p.display_name ?? "").trim();
+        if (n) names.add(n);
+      }
+      return [...names].sort((a, b) => a.localeCompare(b));
+    },
+  });
 
   // Canvasser guard: block manual navigation to leadership routes.
   useEffect(() => {
@@ -208,6 +253,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               onChange={(e) => {
                 const v = e.target.value as AppRole;
                 setDevRoleOverride(v === realRole ? null : v);
+                if (v !== "sales_rep") applyNameOverride(null);
               }}
               className="bg-surface border border-border rounded px-2 py-1.5 min-h-11 md:min-h-9 text-base md:text-xs font-medium focus:outline-none focus:ring-1 focus:ring-[var(--neon-magenta)]"
             >
@@ -217,9 +263,32 @@ export function AppShell({ children }: { children: ReactNode }) {
               <option value="sales_rep">Sales Rep</option>
               <option value="office_staff">Manager</option>
             </select>
+            {showRepPicker && (
+              <select
+                value={nameOverride ?? ""}
+                onChange={(e) => applyNameOverride(e.target.value || null)}
+                aria-label="Preview as a specific rep"
+                className="bg-surface border border-border rounded px-2 py-1.5 min-h-11 md:min-h-9 text-base md:text-xs font-medium focus:outline-none focus:ring-1 focus:ring-[var(--neon-magenta)]"
+              >
+                <option value="">Yourself</option>
+                {/* Keep a stale/still-loading selection visible so the select
+                    never silently snaps back to "Yourself". */}
+                {nameOverride && !(repNamesQuery.data ?? []).includes(nameOverride) && (
+                  <option value={nameOverride}>{nameOverride}</option>
+                )}
+                {(repNamesQuery.data ?? []).map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            )}
             {isOverridden && (
               <button
-                onClick={() => setDevRoleOverride(null)}
+                onClick={() => {
+                  setDevRoleOverride(null);
+                  applyNameOverride(null);
+                }}
                 className="ml-auto min-h-11 md:min-h-9 px-2 rounded border border-[var(--neon-magenta)]/40 text-[10px] uppercase tracking-widest text-[var(--neon-magenta)]"
               >
                 Reset to {realRole}
