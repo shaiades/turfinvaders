@@ -5,7 +5,7 @@ import "leaflet-rotate";
 import { LocateFixed, Navigation2 } from "lucide-react";
 import { PIN_COLORS, type PinType } from "@/lib/pin-results";
 import { ZipBordersLayer, ZIP_MIN_ZOOM, type ZipTint } from "@/components/ZipBorders";
-import { HouseBubblesLayer, type OsmHouse } from "@/components/HouseBubbles";
+import { HouseBubblesLayer, HOUSE_MIN_ZOOM, type OsmHouse } from "@/components/HouseBubbles";
 
 // Canonical copy lives in lib/pin-results (SSR-safe); re-exported here so map
 // consumers keep a single import site.
@@ -303,6 +303,23 @@ function FlyTo({
     lastKey.current = target.key;
     map.flyToBounds(L.latLngBounds(target.bounds), { padding: [30, 30], maxZoom: 16 });
   }, [map, target]);
+  return null;
+}
+
+/** Report zoom to the "zoom in for house circles" pill (zoomend + initial
+ *  read — BearingWatcher pattern). */
+function ZoomWatcher({ onZoom }: { onZoom: (z: number) => void }) {
+  const map = useMap();
+  const cbRef = useRef(onZoom);
+  cbRef.current = onZoom;
+  useEffect(() => {
+    const report = () => cbRef.current(map.getZoom());
+    map.on("zoomend", report);
+    report();
+    return () => {
+      map.off("zoomend", report);
+    };
+  }, [map]);
   return null;
 }
 
@@ -647,6 +664,9 @@ export function NeonMap({
 
   // Map bearing (leaflet-rotate) — drives the compass needle.
   const [bearing, setBearing] = useState(0);
+  // Current zoom — drives the "zoom in for house circles" pill on bubble
+  // screens (below HOUSE_MIN_ZOOM the map is silently circle-less otherwise).
+  const [zoomLevel, setZoomLevel] = useState<number | null>(null);
   // Assign mode must see the ZIPs it's assigning, whatever the toggle says.
   const zipsEnabled = zipOn || !!onZipTap;
 
@@ -728,6 +748,7 @@ export function NeonMap({
         <InvalidateOnMount />
         <AttributionPrefixOff />
         <BearingWatcher onBearing={setBearing} />
+        {houseBubbles && <ZoomWatcher onZoom={setZoomLevel} />}
         <FlyTo target={flyTo} />
         <ClickCapture onClick={handleClick} />
         <ZipBordersLayer enabled={zipsEnabled} tints={zipTints} onZipTap={onZipTap} />
@@ -943,6 +964,21 @@ export function NeonMap({
             "Tap map to drop pin"
           )}
         </div>
+      )}
+
+      {/* "Every home has a circle" only holds at door-to-door zoom — between
+          neighborhood browse (z14) and there, say so instead of showing a
+          silently circle-less map. One tap fixes it. Bottom-center is free
+          on both bubble screens (armed chips bottom-3, trophy bottom-16
+          left, controls bottom-16 right). */}
+      {houseBubbles && zoomLevel != null && zoomLevel >= 14 && zoomLevel < HOUSE_MIN_ZOOM && (
+        <button
+          type="button"
+          onClick={() => mapRef.current?.setZoom(HOUSE_MIN_ZOOM)}
+          className="absolute bottom-16 left-1/2 -translate-x-1/2 z-[1000] min-h-11 rounded-full border border-neon/60 bg-surface/90 backdrop-blur px-4 font-display text-[10px] uppercase tracking-widest text-neon"
+        >
+          Zoom in for house circles
+        </button>
       )}
 
       {/* Map controls: compass + ZIP borders toggle + recenter, bottom-right */}
