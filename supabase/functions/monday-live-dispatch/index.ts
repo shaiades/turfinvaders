@@ -258,13 +258,18 @@ serve(async (req) => {
       data: { boardId, activeBoardOC, activeBoardSD, boardOffice, isIncomingLeadsBoard },
     })
 
-    // Leads-board column changes: only the confirmation team's "Lead Status"
-    // column feeds the dispatch funnel. Every other column change on the
+    // Leads-board column changes: the confirmation team's "Lead Status"
+    // column feeds the dispatch funnel, and the "Date" column declares the
+    // day the lead was actually generated (owner, 2026-09-14) — an edit to
+    // it re-homes the card's counted units. Every other column change on the
     // 5,000+-item CRM board is dropped here, before any Monday API spend.
     const LEAD_STATUS_COL_ID = 'dup__of_sd_lead'
+    const LEAD_DATE_COL_ID = 'date8__1'
     const isLeadStatusEvent =
       isIncomingLeadsBoard && !isCreateEvent && changedColumnId === LEAD_STATUS_COL_ID
-    if (isIncomingLeadsBoard && !isCreateEvent && !isLeadStatusEvent) {
+    const isLeadDateEvent =
+      isIncomingLeadsBoard && !isCreateEvent && changedColumnId === LEAD_DATE_COL_ID
+    if (isIncomingLeadsBoard && !isCreateEvent && !isLeadStatusEvent && !isLeadDateEvent) {
       await supabaseAdmin.from('webhook_logs').insert({
         step: 'Ignored_Leads_Board_Other_Column',
         data: { pulseId: String(pulseId), boardId, changedColumnId: changedColumnId ?? null },
@@ -334,6 +339,19 @@ serve(async (req) => {
     const cols: Array<{ id: string; text: string | null; column: { title: string; id: string } }> =
       item.column_values || []
 
+    // The Incoming Leads board's "Date" column = the day the lead was
+    // actually GENERATED (owner, 2026-09-14). The office backdates it when
+    // entering a lead the canvasser earned on an earlier day (late turn-ins,
+    // reconfirm re-entries), so the credit lands on the real day — never the
+    // day the card was typed in. Blank/malformed values return null.
+    const readLeadDate = (): string | null => {
+      const c =
+        cols.find((x) => x.id === LEAD_DATE_COL_ID || x.column?.id === LEAD_DATE_COL_ID) ??
+        cols.find((x) => (x.column?.title || '').trim().toLowerCase() === 'date')
+      const t = (c?.text || '').trim()
+      return /^\d{4}-\d{2}-\d{2}$/.test(t) ? t : null
+    }
+
     // Only cards BORN in the Inbound group are canvasser production. The
     // confirmers create new cards on this board when recycling old leads
     // (Futures / Never Confirmed / Reschedules / QR / Internet …) — those must
@@ -352,6 +370,49 @@ serve(async (req) => {
         })
         return new Response('Non-Inbound leads-board card ignored', { status: 200, headers: corsHeaders })
       }
+    }
+
+    // ── Lead Date edited ── the office backdated (or fixed) the card's Date
+    // column: move the card's already-counted units (gen credit + current
+    // funnel bucket) onto that day. The RPC is the guard rail — backdate-only
+    // moves, a 14-day window, drift checks — so a no-op edit or an
+    // out-of-window date records a skip and changes nothing. No agent match
+    // needed: the markers name the canvasser holding each unit.
+    if (isLeadDateEvent) {
+      const pid = String(pulseId)
+      const cardLeadDate = readLeadDate()
+      if (!cardLeadDate) {
+        await supabaseAdmin.from('webhook_logs').insert({
+          step: 'Lead_Date_Reconcile_Skipped',
+          data: { pulseId: pid, itemName: item.name ?? null, note: 'Date column blank or malformed' },
+        })
+        return new Response('Lead date blank', { status: 200, headers: corsHeaders })
+      }
+      const recRes = await supabaseAdmin.rpc('reconcile_lead_day', {
+        _pulse_id: pid,
+        _target_date: cardLeadDate,
+        _reason: 'date_column_edit',
+      })
+      if (recRes.error) {
+        await supabaseAdmin.from('webhook_logs').insert({
+          step: 'Lead_Date_Reconcile_Error',
+          data: { pulseId: pid, target: cardLeadDate, error: recRes.error.message },
+        })
+        // Transient (or the RPC migration is missing): 502 so Monday's retry
+        // loop redelivers instead of silently stranding the counts.
+        return new Response('Lead date reconcile failed', { status: 502, headers: corsHeaders })
+      }
+      await supabaseAdmin.from('webhook_logs').insert({
+        step: 'Lead_Date_Reconcile_Result',
+        data: { pulseId: pid, itemName: item.name ?? null, target: cardLeadDate, result: recRes.data ?? null },
+      })
+      if (triggerUuid) {
+        await supabaseAdmin.from('webhook_logs').insert({
+          step: 'Event_Processed',
+          data: { triggerUuid, pulseId: pid },
+        })
+      }
+      return new Response('Lead date reconciled', { status: 200, headers: corsHeaders })
     }
 
     // Agent name column. The Incoming Leads board's Agent column id is stable
@@ -956,7 +1017,9 @@ serve(async (req) => {
     // counts as Future (owner, 2026-08-31 — it left 15 leads out of every
     // funnel cell in wk 8/24). Counts are attributed to the day the lead was
     // SUBMITTED (Jorge Najera, 2026-08-24) — a Friday lead confirmed Monday
-    // updates Friday's funnel, not Monday's. Transition semantics mirror the
+    // updates Friday's funnel, not Monday's — and a backdated Date column
+    // overrides even that (owner, 2026-09-14): a re-entered old lead counts
+    // on the day it was actually generated. Transition semantics mirror the
     // Block path: undo the previous bucket on the day it was counted (the
     // prior marker's metric_date), apply the new one on the attributed day.
     // Never touches daily_logs, leads_submitted, or the sale sync.
@@ -1010,6 +1073,38 @@ serve(async (req) => {
       const genProcessed = genRows.find((r) => r.step === 'Lead_Generated_Processed') ?? null
       const genCredited = genRows.find((r) => r.step === 'Lead_Generated_Credited') ?? null
 
+      // The card's Date column may have been backdated after the gen credit
+      // landed (re-entering an old lead, the office usually edits Date after
+      // the create event already fired), so re-home the counted units BEFORE
+      // deriving attribution. The restamp is in place — marker ids don't
+      // change, so the CAS below still keys on the same rows — and the claim
+      // RPC re-reads prev state under the shared lock, so no local refresh
+      // is needed. Only runs when Date names an EARLIER day than the gen
+      // credit: the common fresh-lead flip (Date = gen day) costs nothing.
+      const cardLeadDate = readLeadDate()
+      let genDay = genProcessed
+        ? (((genProcessed.data ?? {}) as { metric_date?: string }).metric_date ??
+            laDateOf(genProcessed.created_at))
+        : null
+      if (cardLeadDate && genDay && cardLeadDate < genDay) {
+        const recRes = await supabaseAdmin.rpc('reconcile_lead_day', {
+          _pulse_id: pid,
+          _target_date: cardLeadDate,
+          _reason: 'lead_status_flip',
+        })
+        if (recRes.error) {
+          await supabaseAdmin.from('webhook_logs').insert({
+            step: 'Lead_Date_Reconcile_Error',
+            data: { pulseId: pid, target: cardLeadDate, error: recRes.error.message },
+          })
+          // Attributing this flip against un-reconciled markers would count
+          // the lead on the wrong day: 502 so Monday redelivers.
+          return new Response('Lead date reconcile failed', { status: 502, headers: corsHeaders })
+        }
+        const rec = (recRes.data ?? {}) as { gen?: { day?: string } }
+        if (rec.gen?.day) genDay = rec.gen.day
+      }
+
       // Previous state is MARKER-derived, never event-derived: the marker
       // records the bucket, day, and canvasser holding the card's current
       // +1 (the claim RPC re-derives all three under its lock for the
@@ -1044,8 +1139,8 @@ serve(async (req) => {
       let attributedDate = flipDate
       let attributedVia = 'flip_day'
       if (genProcessed) {
-        const rec = (genProcessed.data ?? {}) as { metric_date?: string }
-        attributedDate = rec.metric_date ?? laDateOf(genProcessed.created_at) ?? flipDate
+        // genDay already reflects any Date-column reconcile above.
+        attributedDate = genDay ?? flipDate
         attributedVia = 'lead_generated_processed'
       } else if (genCredited) {
         attributedDate = laDateOf(genCredited.created_at) ?? flipDate
@@ -1168,7 +1263,18 @@ serve(async (req) => {
         return new Response('Claim insert failed', { status: 502, headers: corsHeaders })
       }
 
-      const genDate = todayLA()
+      // A backdated Date column = the lead's true generation day (late
+      // turn-ins / re-entries), clamped to the last 14 days like the
+      // recycled-card clamp; blank, malformed, stale, or future dates fall
+      // back to today. Date edits AFTER this create are caught by the
+      // isLeadDateEvent branch and the flip-time reconcile.
+      const cardLeadDate = readLeadDate()
+      const genToday = todayLA()
+      const genFloor = laDateOf(new Date(Date.now() - 14 * 86400000).toISOString())
+      const genDate =
+        cardLeadDate && genFloor && cardLeadDate >= genFloor && cardLeadDate < genToday
+          ? cardLeadDate
+          : genToday
       const genOffice = boardOffice ?? match.office_location ?? 'San Diego'
       const { error: genErr } = await supabaseAdmin.rpc('increment_leads_generated', {
         _canvasser_id: match.id,
@@ -1193,7 +1299,14 @@ serve(async (req) => {
       }
       await supabaseAdmin.from('webhook_logs').insert({
         step: 'Lead_Generated_Processed',
-        data: { pulseId: pid, canvasser_id: match.id, metric_date: genDate, office: genOffice },
+        data: {
+          pulseId: pid,
+          canvasser_id: match.id,
+          metric_date: genDate,
+          office: genOffice,
+          genVia: genDate === genToday ? 'create_day' : 'date_column',
+          leadDate: cardLeadDate,
+        },
       })
       return new Response('Lead generated credited', { status: 200, headers: corsHeaders })
     }
