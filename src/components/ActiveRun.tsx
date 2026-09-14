@@ -34,6 +34,8 @@ import {
   Zap,
   X,
   Loader2,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 
 /**
@@ -187,6 +189,10 @@ export function ActiveRun({
   // route SSRs and a render-time window read is a hydration mismatch.
   const piggy = usePiggyBank(user?.id);
   const [piggyDemo, setPiggyDemo] = useState<{ on: boolean; rateMs?: number }>({ on: false });
+  // Captain-only reveal of assignee names on turf pills. Off by default so the
+  // map shows areas without who's on them (canvassers already only see — and
+  // are RLS-limited to — their own turf, labeled by turf name, never a person).
+  const [showAssignments, setShowAssignments] = useState(false);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("piggy_demo") === "1") {
@@ -262,14 +268,17 @@ export function ActiveRun({
         dashed: !t.assigned_user_id,
         // Canvassers get the turf's NAME on the pill — labeling their own map
         // with their own name told them nothing (go-live audit 2026-09-09).
-        // Captains see all turfs, so assignee names stay the useful label.
+        // Captains see all turfs: assignment STATUS by default (no names), with
+        // the assignee name only when the captain flips "Show names" on.
         assignmentLabel: isCaptain
           ? t.assigned_user_id
-            ? (t.assignee?.display_name ?? "Assigned")
+            ? showAssignments
+              ? (t.assignee?.display_name ?? "Assigned")
+              : "Assigned"
             : "Unassigned"
           : t.name?.trim() || "Your turf",
       })),
-    [turfsQuery.data, isCaptain],
+    [turfsQuery.data, isCaptain, showAssignments],
   );
 
   // Memoized (structural sharing keeps turfsQuery.data stable) — this screen
@@ -364,6 +373,20 @@ export function ActiveRun({
                 className="min-h-11 px-3 inline-flex items-center gap-1.5 rounded-md border border-[color-mix(in_oklab,var(--neon)_40%,var(--border))] text-[10px] font-display uppercase tracking-widest text-neon hover:bg-surface-elevated"
               >
                 <Pencil className="w-3.5 h-3.5" /> Turf Tools
+              </button>
+            )}
+            {isCaptain && (
+              <button
+                onClick={() => setShowAssignments((v) => !v)}
+                aria-label={showAssignments ? "Hide assignee names" : "Show assignee names"}
+                title={showAssignments ? "Hide assignee names" : "Show assignee names"}
+                className={`min-h-11 min-w-11 inline-flex items-center justify-center rounded-md border hover:bg-surface-elevated ${
+                  showAssignments
+                    ? "border-neon text-neon"
+                    : "border-[color-mix(in_oklab,var(--accent)_45%,var(--border))] text-[var(--accent)]"
+                }`}
+              >
+                {showAssignments ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             )}
           </div>
