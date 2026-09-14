@@ -10,6 +10,7 @@ import { ArcadePanel } from "@/components/arcade";
 import { ActiveRun } from "@/components/ActiveRun";
 import { CrewMap } from "@/components/CrewMap";
 import { NeonMap, type Territory, type LatLng } from "@/components/NeonMap";
+import { simplifyRing } from "@/lib/simplify-polygon";
 import {
   AreaDetailsSheet,
   DeleteAreaConfirmDialog,
@@ -30,6 +31,15 @@ export const Route = createFileRoute("/_authenticated/my-territory")({
   head: () => ({ meta: [{ title: "My Territory — Turf Invaders" }] }),
   component: MyTerritoryPage,
 });
+
+type RepcardTerritoryRow = {
+  repcard_area_id: number;
+  rep_name: string | null;
+  team: string | null;
+  color: string | null;
+  assigned_at: string | null;
+  polygon_coordinates: LatLng[];
+};
 
 type TurfRow = {
   id: string;
@@ -201,6 +211,32 @@ function ManagerTerritoryView({
         .order("created_at", { ascending: false });
       if (error) throw error;
       return (data ?? []) as unknown as TurfRow[];
+    },
+  });
+
+  // RepCard 2026 territory history — read-only coverage drawn on the same map.
+  // Static historical data (RLS-gated to leadership), so fetch every row once,
+  // paged past PostgREST's 1000-row cap, and cache it for the session.
+  const repcardTerritoryQuery = useQuery({
+    enabled: !!user?.id,
+    queryKey: ["repcard_territory"],
+    staleTime: 60 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+    queryFn: async () => {
+      const PAGE = 1000;
+      const rows: RepcardTerritoryRow[] = [];
+      for (let from = 0; from < 20000; from += PAGE) {
+        const { data, error } = await supabase
+          .from("repcard_territory_history")
+          .select("repcard_area_id, rep_name, team, color, assigned_at, polygon_coordinates")
+          .order("assigned_at", { ascending: true })
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        const batch = (data ?? []) as unknown as RepcardTerritoryRow[];
+        rows.push(...batch);
+        if (batch.length < PAGE) break;
+      }
+      return rows;
     },
   });
 
@@ -379,6 +415,51 @@ function ManagerTerritoryView({
         history: historyByTurf.get(t.id) ?? [],
       })),
     [turfsQuery.data, historyByTurf],
+  );
+
+  // RepCard historical areas as faint dashed coverage. Polygons are simplified
+  // (RDP) so thousands render on the canvas; ids are prefixed `repcard:` so a
+  // tap shows the read-only popup but never opens the turf editor.
+  const repcardTerritories: Territory[] = useMemo(() => {
+    const fmt = (iso: string | null) =>
+      iso
+        ? new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(
+            new Date(iso),
+          )
+        : "";
+    return (repcardTerritoryQuery.data ?? [])
+      .map((r): Territory => {
+        const label = r.rep_name
+          ? r.team
+            ? `${r.rep_name} · ${r.team}`
+            : r.rep_name
+          : "RepCard area";
+        return {
+          id: `repcard:${r.repcard_area_id}`,
+          name: r.rep_name ?? "RepCard area",
+          color: r.color || "#8b5cf6",
+          polygon: simplifyRing((r.polygon_coordinates ?? []) as LatLng[]),
+          dashed: true,
+          assignmentLabel: label,
+          currentAssignee: r.rep_name ?? null,
+          history: r.assigned_at ? [{ name: "RepCard 2026", when: fmt(r.assigned_at) }] : [],
+        };
+      })
+      .filter((t) => t.polygon.length >= 3);
+  }, [repcardTerritoryQuery.data]);
+
+  // Combined layer: RepCard coverage underneath, live turfs drawn on top.
+  const mapTerritories: Territory[] = useMemo(
+    () => [...repcardTerritories, ...territories],
+    [repcardTerritories, territories],
+  );
+
+  // Auto-fit frames the LIVE turfs only — otherwise the 2,700 RepCard areas
+  // would zoom the map out to the whole two-county extent on load and break the
+  // assignment workflow. The RepCard coverage is still there when you zoom out.
+  const fitPolygons: LatLng[][] = useMemo(
+    () => territories.map((t) => t.polygon).filter((p) => p.length >= 3),
+    [territories],
   );
 
   const saveTurf = useMutation({
@@ -649,7 +730,8 @@ function ManagerTerritoryView({
               2 km self-cage made cross-county turf hunting impossible. The
               me-dot still renders; recenter still jumps to it. */}
           <NeonMap
-            territories={territories}
+            territories={mapTerritories}
+            fitPolygons={fitPolygons}
             pins={[]}
             houses={[]}
             me={me}
@@ -662,6 +744,9 @@ function ManagerTerritoryView({
             onTerritoryClick={
               !drawing && !assignZips
                 ? (id) => {
+                    // RepCard historical areas are read-only — the popup shows
+                    // their info, but they have no editable turf row.
+                    if (id.startsWith("repcard:")) return;
                     setEditingTurfId(id);
                     setIsModalOpen(true);
                   }
