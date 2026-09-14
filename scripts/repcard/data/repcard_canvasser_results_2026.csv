@@ -1,0 +1,108 @@
+Rank,User,Office,Team,DoorsKnocked,VerifiedDoorKnock,TalkedTo,TalkRatioPct,ApptsSet,CloseRatioPct,AvgDoorsPerDay,AvgDistancePerKnockMi,FirstDoorKnock,LastDoorKnock,TimeInField,DoorKnockedDays
+1,Logan Temple,Orange County,Logan,12162,12111,1507,12.4,402,26.7,47.3,0.02,11:53 am,4:18 pm,4.63 h,176
+2,Ernie Ruiz,SD Corporate Office,Jorge,9461,9404,428,4.5,0,0,36.8,0.02,11:42 am,4:36 pm,4.97 h,88
+3,Ian Ryan,SD Corporate Office,Eric,9389,9303,2562,27.3,165,6.4,36.5,0.03,11:46 am,4:55 pm,5.15 h,119
+4,Renat Kogay,SD Corporate Office,Jorge,8284,8111,3721,44.9,1,0,32.2,0.03,11:45 am,4:42 pm,5 h,74
+5,Eduardo Ordaz,Orange County,Logan,7544,7358,1751,23.2,128,7.3,29.4,0.02,11:27 am,4:23 pm,5 h,75
+6,Evan Hanulak,SD Corporate Office,,5155,5075,632,12.3,28,4.4,20.1,0.02,11:39 am,5:08 pm,5.48 h,44
+7,Eric Eriqui,SD Corporate Office,Eric,4993,4461,1115,22.3,195,17.5,19.4,0.06,12:22 pm,4:34 pm,4.38 h,111
+8,Antonio Higareda,SD Corporate Office,,4947,4918,1507,30.5,33,2.2,19.2,0.02,11:40 am,4:16 pm,4.6 h,60
+9,Miguel Munoz,SD Corporate Office,Bobby,4279,3074,552,12.9,2,0.4,16.6,0.13,12:27 pm,3:40 pm,3.87 h,105
+10,Bobby Orellano,SD Corporate Office,,4196,2575,254,6.1,1,0.4,16.3,1.14,1:04 pm,3:48 pm,3.43 h,112
+11,Josiah White,SD Corporate Office,Eric,3754,3741,867,23.1,13,1.5,14.6,0.01,11:56 am,4:55 pm,4.98 h,36
+12,Zavi Ginella,SD Corporate Office,Jorge,3333,3046,496,14.9,33,6.7,13,0.04,11:55 am,4:18 pm,4.38 h,44
+13,Andrew Sepulveda,SD Corporate Office,Bobby,3284,2805,209,6.4,1,0.5,12.8,0.06,11:44 am,4:23 pm,4.65 h,36
+14,Matt C,SD Corporate Office,Bobby,3092,2864,375,12.1,42,11.2,12,0.04,12:08 pm,4:07 pm,4.45 h,47
+15,Ethan Munoz,SD Corporate Office,Bobby,3073,2873,762,24.8,0,0,12,0.04,12:19 pm,4:20 pm,4.55 h,42
+16,Aiden Gilbert,SD Corporate Office,Eric,2784,2688,407,14.6,10,2.5,10.8,0.05,11:58 am,5:03 pm,5.08 h,34
+16,Greyson Tambo,SD Corporate Office,,2784,2732,565,20.3,15,2.7,10.8,0.02,11:36 am,4:30 pm,4.9 h,23
+17,Josh R,SD Corporate Office,Eric,2731,2660,595,21.8,5,0.8,10.6,0.03,11:58 am,4:54 pm,4.93 h,38
+18,Kieran O’Connor,Orange County,Logan,2663,2634,554,20.8,3,0.5,10.4,0.02,11:37 am,4:41 pm,5.38 h,48
+19,❌ Shawn Salgado,Orange County,Logan,2638,2327,161,6.1,3,1.9,10.3,0.06,11:36 am,4:37 pm,5.02 h,24
+20,Marcelle Acosta,SD Corporate Office,Bobby,2282,2060,525,23,17,3.2,8.9,0.09,12:10 pm,3:44 pm,4.27 h,50
+21,Angelique Kenney,SD Corporate Office,Bobby,2139,2103,349,16.3,28,8,8.3,0.12,11:50 am,5:14 pm,5.4 h,37
+22,Dominik Delfino,SD Corporate Office,Bobby,2076,2068,576,27.7,0,0,8.1,0.02,11:54 am,4:45 pm,4.85 h,20
+23,Nolan Gunn,SD Corporate Office,Jorge,2036,1668,267,13.1,0,0,7.9,0.07,12:02 pm,3:29 pm,3.65 h,34
+24,❌ John Porzio,Orange County,Logan,1955,1933,109,5.6,13,11.9,7.6,0.02,11:33 am,5:24 pm,5.85 h,16
+25,Ernie Ruiz,SD Corporate Office,Bobby,1931,1876,213,11,15,7,7.5,0.06,12:14 pm,4:09 pm,5.53 h,12
+26,Devhante Hayes,SD Corporate Office,Eric,1887,1797,345,18.3,1,0.3,7.3,0.06,11:44 am,5:34 pm,5.83 h,17
+27,Nate Hernandez,SD Corporate Office,Eric,1803,1227,325,18,13,4,7,1.01,12:44 pm,4:11 pm,3.58 h,50
+28,Steph Blair,SD Corporate Office,,1754,1638,71,4,2,2.8,6.8,0.03,11:53 am,4:57 pm,5.07 h,17
+29,Jose Miranda,Orange County,Logan,1489,1462,491,33,0,0,5.8,0.03,11:32 am,4:29 pm,4.95 h,14
+30,Levon Gukasyan,SD Corporate Office,Bobby,1462,1384,79,5.4,3,3.8,5.7,0.04,11:51 am,3:16 pm,3.75 h,40
+31,Carlos Salizar,SD Corporate Office,,1395,1368,247,17.7,10,4,5.4,0.02,12:08 pm,5:22 pm,5.23 h,12
+32,Walker King,SD Corporate Office,Eric,1337,1232,240,18,1,0.4,5.2,0.04,12:18 pm,5:03 pm,4.75 h,10
+33,Jimmy Contreras,SD Corporate Office,Bobby,1332,896,408,30.6,1,0.2,5.2,0.1,1:24 pm,3:48 pm,3.67 h,26
+34,Alex Depalma,SD Corporate Office,Jorge,1331,1319,266,20,21,7.9,5.2,0.02,11:30 am,4:07 pm,4.62 h,11
+35,Samuel Rodriguez,SD Corporate Office,Jorge,1316,1076,192,14.6,0,0,5.1,0.66,11:43 am,4:54 pm,5.18 h,18
+36,Chris Lopez,SD Corporate Office,Eric,1296,1284,74,5.7,1,1.4,5,0.02,11:47 am,4:45 pm,4.97 h,13
+37,Jose Esqueda,SD Corporate Office,,1240,1228,228,18.4,0,0,4.8,0.03,11:45 am,4:49 pm,5.07 h,21
+38,Jermaine Wilkerson,SD Corporate Office,Jorge,1190,938,175,14.7,4,2.3,4.6,0.07,1:00 pm,3:46 pm,3.77 h,13
+40,Jaime C,SD Corporate Office,Eric,988,986,0,0,0,0,3.8,0.01,12:11 pm,4:58 pm,4.78 h,11
+41,Diego Ochoa,SD Corporate Office,Bobby,985,969,179,18.2,2,1.1,3.8,0.03,11:32 am,5:29 pm,5.95 h,7
+42,Cynthia King,SD Corporate Office,,969,934,353,36.4,5,1.4,3.8,0.04,12:06 pm,4:48 pm,4.9 h,22
+43,Marcus Mullen,SD Corporate Office,Bobby,885,838,106,12,9,8.5,3.4,0.03,11:26 am,5:23 pm,5.95 h,6
+44,Joshua Lewis,SD Corporate Office,Eric,838,829,172,20.5,8,4.7,3.3,0.02,12:21 pm,4:27 pm,4.57 h,9
+45,Marcos Rios,SD Corporate Office,Eric,825,796,180,21.8,8,4.4,3.2,0.03,11:57 am,4:35 pm,4.63 h,13
+46,Lucas Guerrazzi,SD Corporate Office,Eric,812,809,199,24.5,5,2.5,3.2,0.02,12:07 pm,4:33 pm,4.43 h,7
+47,Juan Alvarado,SD Corporate Office,Eric,727,707,111,15.3,7,6.3,2.8,0.04,12:18 pm,4:47 pm,4.48 h,15
+48,Daniel Lima,SD Corporate Office,Bobby,718,472,78,10.9,3,3.8,2.8,1.13,11:47 am,5:08 pm,5.35 h,9
+49,Jonathan Hanna,SD Corporate Office,Jorge,680,670,201,29.6,0,0,2.6,0.02,12:11 pm,4:53 pm,5.17 h,10
+50,Matthew Reilly,SD Corporate Office,Bobby,679,677,180,26.5,1,0.6,2.6,0.02,12:03 pm,5:04 pm,5.02 h,8
+51,Grady O’brien,SD Corporate Office,Jorge,677,676,0,0,0,0,2.6,0.02,12:16 pm,5:12 pm,4.93 h,7
+52,Alex Martinez,SD Corporate Office,,639,638,0,0,0,0,2.5,0.02,11:12 am,5:08 pm,5.93 h,5
+53,Zach Frost,SD Corporate Office,Eric,615,502,24,3.9,0,0,2.4,0.34,11:58 am,5:03 pm,5.08 h,6
+54,Richie Cuevas,SD Corporate Office,,612,506,158,25.8,0,0,2.4,0.05,12:36 pm,5:07 pm,4.52 h,6
+55,Richy Gomero,SD Corporate Office,Jorge,583,312,69,11.8,5,7.2,2.3,0.12,1:01 pm,2:00 pm,1.48 h,14
+56,Riley Eliott,SD Corporate Office,Eric,553,544,148,26.8,0,0,2.2,0.02,12:37 pm,4:55 pm,4.3 h,6
+57,Parsa Derakhshan,Orange County,Logan,550,544,133,24.2,0,0,2.1,0.02,11:41 am,3:36 pm,5.13 h,5
+58,Jorge Najera,SD Corporate Office,Jorge,546,348,129,23.6,58,45,2.1,2.01,3:49 pm,5:43 pm,3.63 h,21
+59,Ryan Gustafson,SD Corporate Office,,545,537,101,18.5,6,5.9,2.1,0.03,12:28 pm,5:27 pm,4.98 h,5
+60,Meroe Craft,SD Corporate Office,Bobby,543,538,28,5.2,0,0,2.1,0.02,11:36 am,5:21 pm,5.75 h,3
+61,Bri Lafleur,SD Corporate Office,Eric,537,487,80,14.9,0,0,2.1,0.04,12:01 pm,3:28 pm,4.13 h,10
+62,Matt Lougharn,SD Corporate Office,Bobby,493,471,32,6.5,0,0,1.9,0.06,12:19 pm,5:23 pm,5.07 h,5
+63,Daniel Earl,SD Corporate Office,Jorge,429,420,177,41.3,0,0,1.7,0.02,11:56 am,4:39 pm,4.72 h,4
+64,Raven McAuliffe,Orange County,Logan,405,399,31,7.7,0,0,1.6,0.02,12:28 pm,5:26 pm,4.97 h,5
+65,❌ Ryan Layaou,SD Corporate Office,Bobby,361,338,54,15,2,3.7,1.4,0.03,11:48 am,2:24 pm,4.1 h,10
+66,Daniel Sawyer,SD Corporate Office,Bobby,349,301,39,11.2,1,2.6,1.4,0.06,12:10 pm,3:08 pm,3.57 h,5
+67,Aidan McCormick,SD Corporate Office,,310,306,82,26.5,0,0,1.2,0.02,1:02 pm,4:20 pm,5.48 h,3
+68,❌ Sammy Portillo,Orange County,Logan,307,285,90,29.3,5,5.6,1.2,0.04,11:10 am,5:19 pm,6.15 h,3
+69,Jakob Marino,SD Corporate Office,Bobby,303,302,70,23.1,0,0,1.2,0.04,10:06 am,4:36 pm,6.5 h,2
+69,Matthew Bryant,SD Corporate Office,Bobby,303,300,0,0,0,0,1.2,0.02,12:03 pm,4:40 pm,4.62 h,4
+70,❌ Tony Aguilar,Orange County,Logan,287,271,53,18.5,0,0,1.1,0.03,11:33 am,3:13 pm,4.75 h,5
+71,Sean Horsely,SD Corporate Office,Bobby,268,237,52,19.4,0,0,1,0.06,12:03 pm,4:24 pm,4.35 h,4
+72,Donovan Barrett,SD Corporate Office,Bobby,245,224,0,0,0,0,1,0.04,11:29 am,5:33 pm,6.07 h,1
+73,Luke Conley,SD Corporate Office,,233,233,0,0,0,0,0.9,0.02,1:28 pm,5:19 pm,3.85 h,2
+74,❌ Stephen Tonkin,Orange County,Logan,228,201,64,28.1,10,15.6,0.9,0.04,12:24 pm,1:52 pm,2.55 h,8
+75,Hunter Thomas,SD Corporate Office,Jorge,227,219,52,22.9,0,0,0.9,0.03,12:59 pm,4:36 pm,3.62 h,5
+76,Austin Mcclusky,SD Corporate Office,Bobby,223,223,62,27.8,3,4.8,0.9,0.02,11:51 am,4:34 pm,4.72 h,3
+77,❌ Detrione Sexton,SD Corporate Office,Bobby,218,218,53,24.3,0,0,0.8,0.02,12:00 pm,5:15 pm,5.25 h,3
+78,Angel De Dios,SD Corporate Office,,215,205,9,4.2,0,0,0.8,0.03,12:41 pm,3:50 pm,3.15 h,4
+80,Gustavo Oliveira,SD Corporate Office,Eric,208,205,62,29.8,0,0,0.8,0.02,12:50 pm,5:08 pm,4.3 h,3
+81,Bryan Muscialgi,SD Corporate Office,Bobby,206,203,47,22.8,0,0,0.8,0.02,11:00 am,4:10 pm,4.17 h,2
+82,❌ Chris Sutherland,Orange County,Logan,195,194,53,27.2,3,5.7,0.8,0.01,11:52 am,5:10 pm,5.3 h,2
+83,Ethan Chagan,Orange County,Logan,175,166,0,0,0,0,0.7,0.03,1:44 pm,5:17 pm,3.55 h,2
+84,JJ Esquerre,SD Corporate Office,,166,154,0,0,0,0,0.6,0.03,12:35 pm,5:22 pm,4.78 h,2
+85,Gio Solis,SD Corporate Office,Eric,143,142,31,21.7,7,22.6,0.6,0.01,11:42 am,5:11 pm,5.48 h,2
+86,❌ Sean Slee,Orange County,Logan,140,140,35,25,0,0,0.5,0.01,12:09 pm,5:39 pm,5.5 h,1
+87,Vinny Cruz,SD Corporate Office,Jorge,138,105,29,21,0,0,0.5,0.06,1:18 pm,5:00 pm,3.7 h,2
+88,Tanner MacKenzie,SD Corporate Office,Jorge,125,125,0,0,0,0,0.5,0.02,12:33 pm,3:00 pm,4.4 h,6
+89,Jovanny Paz,SD Corporate Office,Bobby,120,116,12,10,3,25,0.5,0.03,12:42 pm,2:08 pm,2.52 h,5
+90,Emilio Camarena,SD Corporate Office,Eric,113,112,52,46,3,5.8,0.4,0.03,2:41 pm,5:05 pm,2.4 h,3
+91,Abdi Zokirov,SD Corporate Office,Bobby,98,87,0,0,0,0,0.4,0.03,12:26 pm,2:40 pm,3.82 h,2
+92,❌ Thomas Glessing,Orange County,Logan,89,80,22,24.7,2,9.1,0.3,0.05,1:13 pm,2:31 pm,3.47 h,2
+93,Alex Armas,SD Corporate Office,,80,74,12,15,0,0,0.3,0.04,12:07 pm,5:28 pm,5.35 h,1
+94,Ernesto Aquino,SD Corporate Office,,67,27,22,32.8,0,0,0.3,0.17,1:22 pm,2:26 pm,2.6 h,2
+94,Lorenzo Navarro,SD Corporate Office,Jorge,67,56,9,13.4,0,0,0.3,0.05,1:55 pm,4:24 pm,3.38 h,2
+95,Shayan Roshanravani,SD Corporate Office,Eric,28,25,7,25,0,0,0.1,0.18,2:51 pm,3:33 pm,22 m,1
+96,Kevin Flathers,SD Corporate Office,,22,21,3,13.6,1,33.3,0.1,0.03,11:55 am,3:38 pm,3.72 h,1
+97,Anita Jensen,SD Corporate Office,Jorge,10,10,0,0,0,0,-,0.01,11:55 am,12:30 pm,35 m,1
+97,❌ Matt Glessing,SD Corporate Office,,10,10,5,50,1,20,-,0.02,2:47 pm,2:58 pm,0 m,0
+98,Jason Grajewski,SD Corporate Office,Eric,9,9,0,0,0,0,-,0.01,12:36 pm,4:53 pm,0 m,0
+99,Christian Clayton,SD Corporate Office,Bobby,5,5,0,0,0,0,-,0.02,1:44 pm,2:24 pm,0 m,0
+100,Alejandro Parrilla,SD Corporate Office,,3,3,0,0,0,0,-,0.01,11:56 am,2:39 pm,0 m,0
+101,Sean Lusk,SD Corporate Office,Bobby,1,1,0,0,0,0,-,0.05,3:57 pm,3:57 pm,0 m,0
+102,Christien Rowan,SD Corporate Office,Bobby,0,0,0,0,0,0,-,-,-,-,-,0
+102,Tyler Ward,SD Corporate Office,Jorge,0,0,0,0,0,0,-,-,-,-,-,0
+102,❌ Kevin Urrieta,Orange County,Logan,0,0,0,0,0,0,-,-,-,-,-,0
+102,❌ Leo Favero,Orange County,Logan,0,0,0,0,0,0,-,-,-,-,-,0
