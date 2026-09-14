@@ -565,6 +565,7 @@ function FleetDispatchInner({
         sal: 0,
         drs: 0,
         tlk: 0,
+        nh: 0,
         ni: 0,
         rnt: 0,
       };
@@ -596,6 +597,7 @@ function FleetDispatchInner({
           // shipped lack these keys — a bare += would NaN the whole row.
           res.drs += rr.drs ?? 0;
           res.tlk += rr.tlk ?? 0;
+          res.nh += rr.nh ?? 0;
           res.ni += rr.ni ?? 0;
           res.rnt += rr.rnt ?? 0;
         }
@@ -759,6 +761,7 @@ function FleetDispatchInner({
         sal: 0,
         drs: 0,
         tlk: 0,
+        nh: 0,
         ni: 0,
         rnt: 0,
       };
@@ -786,6 +789,7 @@ function FleetDispatchInner({
           // shipped lack these keys — a bare += would NaN the whole row.
           res.drs += rr.drs ?? 0;
           res.tlk += rr.tlk ?? 0;
+          res.nh += rr.nh ?? 0;
           res.ni += rr.ni ?? 0;
           res.rnt += rr.rnt ?? 0;
         }
@@ -1259,8 +1263,9 @@ type FunnelRow = {
 /** The door-work group — raw daily_logs field counters, in front of the two
  *  lead halves. Sources are honest per column: Drs/Tlk/Rnt come from map
  *  pins AND the Mission Log form (Rnt joined via 20260910200000 — a Renter
- *  pin bumps BOTH Rnt and Tlk); NI is pin-only. Remote-drop pins never
- *  count anywhere. */
+ *  pin bumps BOTH Rnt and Tlk); NI and NH are pin-only (NH joined via
+ *  20260914230000). Every pin counts a door, so Drs is the group's total.
+ *  Remote-drop pins never count anywhere. */
 const DOOR_COLS: Array<{
   short: string;
   full: string;
@@ -1269,15 +1274,21 @@ const DOOR_COLS: Array<{
 }> = [
   {
     short: "Drs",
-    full: "Doors Knocked — knock + not-home map pins, plus Mission Log entries",
+    full: "Doors Knocked — the total: every map result counts a door (Tlk + NH, plus legacy knock pins and Mission Log entries)",
     key: "drs",
     color: "neon",
   },
   {
     short: "Tlk",
-    full: "Talked To — talked-to / renter / go-back map pins, plus Mission Log entries",
+    full: "Talked To — talked-to / renter / go-back / lead / NI / appt map pins, plus Mission Log entries",
     key: "tlk",
     color: "victory",
+  },
+  {
+    short: "NH",
+    full: "Not Home — nobody answered (NH map pins; no Mission Log field). Counts the door, never a talk",
+    key: "nh",
+    color: "accent",
   },
   {
     short: "NI",
@@ -1360,15 +1371,15 @@ const RESULT_COLS: Array<{
  *  the read-only leaderboard) appends a trailing actions column — every row
  *  variant appends a cell so the columns stay aligned. */
 const ROW_GRID =
-  "grid grid-cols-[minmax(7.5rem,1fr)_repeat(4,2.3rem)_0.75rem_repeat(4,2.3rem)_0.75rem_repeat(9,2.3rem)_4.5rem] items-center gap-1";
+  "grid grid-cols-[minmax(7.5rem,1fr)_repeat(5,2.3rem)_0.75rem_repeat(4,2.3rem)_0.75rem_repeat(9,2.3rem)_4.5rem] items-center gap-1";
 const ROW_GRID_MANAGE =
-  "grid grid-cols-[minmax(7.5rem,1fr)_repeat(4,2.3rem)_0.75rem_repeat(4,2.3rem)_0.75rem_repeat(9,2.3rem)_4.5rem_5rem] items-center gap-1";
+  "grid grid-cols-[minmax(7.5rem,1fr)_repeat(5,2.3rem)_0.75rem_repeat(4,2.3rem)_0.75rem_repeat(9,2.3rem)_4.5rem_5rem] items-center gap-1";
 const rowGrid = (manage: boolean) => (manage ? ROW_GRID_MANAGE : ROW_GRID);
 
-/** Board rows need ~58.5rem (~63.5rem with the actions column); the van card
+/** Board rows need ~61rem (~66rem with the actions column); the van card
  *  scrolls horizontally below that. */
-const ROW_MIN_W = "min-w-[58.5rem]";
-const rowMinW = (manage: boolean) => (manage ? "min-w-[63.5rem]" : ROW_MIN_W);
+const ROW_MIN_W = "min-w-[61rem]";
+const rowMinW = (manage: boolean) => (manage ? "min-w-[66rem]" : ROW_MIN_W);
 
 /** A row's stats without its identity — what totals and stat-cell runs share. */
 type DispatchStats = Omit<FunnelRow, "g" | "effTeam">;
@@ -1391,6 +1402,7 @@ const hasProduction = (r: FunnelRow) =>
     // pins/Mission Log only still earns their row (zero lead halves).
     r.res.drs +
     r.res.tlk +
+    r.res.nh +
     r.res.ni +
     r.res.rnt >
   0;
@@ -1417,6 +1429,7 @@ const totalsOfRows = (list: FunnelRow[]): DispatchStats =>
         sal: a.res.sal + r.res.sal,
         drs: a.res.drs + r.res.drs,
         tlk: a.res.tlk + r.res.tlk,
+        nh: a.res.nh + r.res.nh,
         ni: a.res.ni + r.res.ni,
         rnt: a.res.rnt + r.res.rnt,
       },
@@ -1439,6 +1452,7 @@ const totalsOfRows = (list: FunnelRow[]): DispatchStats =>
         sal: 0,
         drs: 0,
         tlk: 0,
+        nh: 0,
         ni: 0,
         rnt: 0,
       },
@@ -1462,7 +1476,7 @@ type RowManage = {
   onMerge: () => void;
 };
 
-/** The shared 20-cell stat run — door work · divider · funnel · divider ·
+/** The shared 21-cell stat run — door work · divider · funnel · divider ·
  *  results · Pts · Volume. Used by every rep line and (bold) by the Van Total
  *  line so the two can never drift; cells align because both render inside
  *  the same rowGrid. */
@@ -1667,7 +1681,7 @@ function DispatchGroupCaption({
       <span />
       {/* Door work shares the funnel's date label — the range memo sets
           logStart/logEnd ≡ funnelStart/funnelEnd on every tab. */}
-      <span className="col-span-4 text-center text-[8px] font-display uppercase tracking-widest text-muted-foreground/70 border-b border-border/60 pb-0.5">
+      <span className="col-span-5 text-center text-[8px] font-display uppercase tracking-widest text-muted-foreground/70 border-b border-border/60 pb-0.5">
         Door Work
         {dateLabel && <span className="text-muted-foreground/50"> · {dateLabel}</span>}
       </span>

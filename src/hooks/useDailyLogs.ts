@@ -37,6 +37,7 @@ export const DAILY_LOG_COUNTERS = [
   "no_shows",
   "no_demo",
   "not_interested",
+  "not_home",
 ] as const;
 export type DailyLogCounter = (typeof DAILY_LOG_COUNTERS)[number];
 

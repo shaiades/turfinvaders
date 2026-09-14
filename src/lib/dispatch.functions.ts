@@ -28,9 +28,12 @@ export type DispatchResults = {
   ol: number;
   sal: number;
   /** Door-work counters (the board's "Door Work" group) — raw daily_logs
-   *  field activity (map pins + Mission Log), unlike the lead results above. */
+   *  field activity (map pins + Mission Log), unlike the lead results above.
+   *  Drs is the total: every pin counts a door, so Drs ⊇ Tlk + NH (legacy
+   *  knock pins and manual Log edits are the remainder). */
   drs: number;
   tlk: number;
+  nh: number;
   ni: number;
   rnt: number;
 };
@@ -57,7 +60,7 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
       supabaseAdmin
         .from("daily_logs")
         .select(
-          "canvasser_id, demos_sits, sales, no_demo, future_leads, ctc, non_core, one_legs, unmarked, doors_knocked, people_talked_to, not_interested, renters, office_location, log_date, team_id",
+          "canvasser_id, demos_sits, sales, no_demo, future_leads, ctc, non_core, one_legs, unmarked, doors_knocked, people_talked_to, not_interested, renters, not_home, office_location, log_date, team_id",
         )
         .gte("log_date", data.log_start)
         .lte("log_date", data.log_end),
@@ -100,6 +103,7 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
       sal: 0,
       drs: 0,
       tlk: 0,
+      nh: 0,
       ni: 0,
       rnt: 0,
     });
@@ -139,6 +143,7 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
         t.ol += l.one_legs ?? 0;
         t.drs += l.doors_knocked ?? 0;
         t.tlk += l.people_talked_to ?? 0;
+        t.nh += l.not_home ?? 0;
         t.ni += l.not_interested ?? 0;
         t.rnt += l.renters ?? 0;
       }
