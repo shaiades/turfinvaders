@@ -90,6 +90,7 @@ export function ObjectionDojo() {
 
   const [recordFor, setRecordFor] = useState<Objection | null>(null);
   const [watchFor, setWatchFor] = useState<Objection | null>(null);
+  const [mineFor, setMineFor] = useState<Objection | null>(null);
 
   if (objections.isError) {
     return (
@@ -129,6 +130,8 @@ export function ObjectionDojo() {
             const approved = all.filter((a) => a.status === "approved");
             const mine = all.filter((a) => a.canvasser_id === user?.id);
             const minePending = mine.filter((a) => a.status === "pending").length;
+            const mineApproved = mine.filter((a) => a.status === "approved").length;
+            const mineDenied = mine.filter((a) => a.status === "denied").length;
             return (
               <div
                 key={o.id}
@@ -155,10 +158,23 @@ export function ObjectionDojo() {
                   >
                     <Eye className="w-3.5 h-3.5 mr-1.5" /> Watch
                   </Button>
-                  {minePending > 0 && (
-                    <span className="text-[10px] font-display uppercase tracking-widest text-warning">
-                      {minePending} of yours awaiting review
-                    </span>
+                  {mine.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setMineFor(o)}
+                      className="inline-flex items-center gap-1.5 text-[10px] font-display uppercase tracking-widest border border-border rounded-full px-2.5 py-1 hover:bg-surface"
+                    >
+                      <span className="text-muted-foreground">Mine:</span>
+                      {minePending > 0 && (
+                        <span className="text-warning">{minePending} pending</span>
+                      )}
+                      {mineApproved > 0 && (
+                        <span className="text-victory">{mineApproved} live</span>
+                      )}
+                      {mineDenied > 0 && (
+                        <span className="text-destructive">{mineDenied} needs work</span>
+                      )}
+                    </button>
                   )}
                 </div>
               </div>
@@ -179,6 +195,13 @@ export function ObjectionDojo() {
           objection={watchFor}
           attempts={(byObjection.get(watchFor.id) ?? []).filter((a) => a.status === "approved")}
           onClose={() => setWatchFor(null)}
+        />
+      )}
+      {mineFor && user && (
+        <MyAttemptsDialog
+          objection={mineFor}
+          attempts={(byObjection.get(mineFor.id) ?? []).filter((a) => a.canvasser_id === user.id)}
+          onClose={() => setMineFor(null)}
         />
       )}
     </div>
@@ -440,6 +463,88 @@ function WatchDialog({
                   {new Date(a.created_at).toLocaleDateString()}
                 </span>
               </button>
+            </li>
+          ))}
+        </ul>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ============ My attempts (outcome visibility) ============ */
+
+const MY_STATUS: Record<ObjectionAttempt["status"], { label: string; className: string }> = {
+  pending: { label: "Awaiting review", className: "text-warning" },
+  approved: { label: "Live", className: "text-victory" },
+  denied: { label: "Needs another take", className: "text-destructive" },
+};
+
+function MyAttemptsDialog({
+  objection,
+  attempts,
+  onClose,
+}: {
+  objection: Objection;
+  attempts: ObjectionAttempt[];
+  onClose: () => void;
+}) {
+  const [playing, setPlaying] = useState<{ id: string; url: string } | null>(null);
+
+  async function play(a: ObjectionAttempt) {
+    try {
+      setPlaying({ id: a.id, url: await signedAttemptUrl(a.storage_path) });
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="font-display uppercase tracking-widest text-sm">
+            My Attempts · {objection.title}
+          </DialogTitle>
+          <DialogDescription>
+            Where your takes stand. Re-record from the objection card whenever you're ready.
+          </DialogDescription>
+        </DialogHeader>
+
+        {playing && (
+          <video
+            src={playing.url}
+            controls
+            autoPlay
+            playsInline
+            className="w-full rounded-lg border border-border bg-black aspect-video object-contain"
+          />
+        )}
+
+        <ul className="divide-y divide-border max-h-64 overflow-y-auto">
+          {attempts.map((a) => (
+            <li key={a.id} className="py-2.5 px-2">
+              <button
+                type="button"
+                onClick={() => play(a)}
+                className={`w-full text-left rounded hover:bg-surface flex items-center justify-between gap-3 ${
+                  playing?.id === a.id ? "bg-surface" : ""
+                }`}
+              >
+                <span className="shrink-0 text-[10px] text-muted-foreground">
+                  {new Date(a.created_at).toLocaleDateString()}
+                </span>
+                <span
+                  className={`shrink-0 text-[10px] font-display uppercase tracking-widest ${MY_STATUS[a.status].className}`}
+                >
+                  {MY_STATUS[a.status].label}
+                </span>
+              </button>
+              {a.status === "denied" && (
+                <p className="mt-1 text-xs italic text-muted-foreground">
+                  Coach says:{" "}
+                  {a.deny_reason?.trim() || "no note left — ask a Manager for pointers."}
+                </p>
+              )}
             </li>
           ))}
         </ul>
