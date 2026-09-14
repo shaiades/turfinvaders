@@ -1,10 +1,15 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { requiresGratitudeGate } from "@/lib/roles";
 import { assigneeColor } from "@/lib/assignee-colors";
-import { getMondayFormUrl } from "@/lib/monday-form";
+import {
+  getMondayFormUrlWithPrefill,
+  isLeadCloseV2Enabled,
+  LEAD_SUBMITTED_MESSAGE_TYPE,
+} from "@/lib/monday-form";
+import { useCanvasserProfile } from "@/hooks/useCanvasserProfile";
 import { useGeoWatch, useFieldPins, type ActivePin } from "@/hooks/useFieldPins";
 import { useCrewBeacon } from "@/hooks/useCrewLive";
 import { usePiggyBank } from "@/hooks/usePiggyBank";
@@ -33,7 +38,6 @@ import {
   Users,
   Zap,
   X,
-  Loader2,
 } from "lucide-react";
 
 /**
@@ -55,8 +59,6 @@ import {
  * own pins like any canvasser. Turf drawing lives behind the route's Turf
  * Tools toggle (ManagerTerritoryView), not here.
  */
-
-type PinType = ActivePin;
 
 // The knock results (owner directive 2026-08-15; one-tap-counts since
 // 2026-09-10; Appt REMOVED 2026-09-11 — "appt set and submit new lead are
@@ -174,11 +176,14 @@ export function ActiveRun({
   // Captains see their ZIP zones tinted while canvassing — the frame they
   // chunk turfs inside. Canvassers keep plain borders (their turf is the map).
   const zipZones = useZipTints({ enabled: isCaptain });
+  // Lead-form prefill: profiles.display_name is the exact string the Monday
+  // webhook's Agent matcher keys on, so prefilled beats doorstep-typed.
+  // Same cache entry the HUD/piggy surfaces already warm (30s staleTime).
+  const selfProfile = useCanvasserProfile(user?.id);
 
   const [active, setActive] = useState<ActivePin>("not_home");
   const [editingPinId, setEditingPinId] = useState<string | null>(null);
   const [leadOpen, setLeadOpen] = useState(false);
-  const [pending, setPending] = useState<PinType | null>(null);
   const [houseTarget, setHouseTarget] = useState<OsmHouse | null>(null);
   const [standingsOpen, setStandingsOpen] = useState(false);
 
@@ -302,23 +307,25 @@ export function ActiveRun({
     ? ((pins.pinsQuery.data ?? []).find((p) => p.id === editingPinId) ?? null)
     : null;
 
-  async function openLead() {
+  function openLead() {
     if (!me) {
       toast.error("No GPS fix yet — enable Location and try again.");
       return;
     }
-    setPending("lead");
-    try {
-      const res = await pins.dropAtDevice("lead");
+    // Form first — the lead is the revenue event; the pin is bookkeeping.
+    // The drop (fresh GPS fix + insert, up to ~8s) runs behind the overlay so
+    // the doorstep never waits on a spinner; dropAtDevice toasts its own
+    // failures and sonner renders above the sheet's z-[2000]. A failed drop
+    // never blocks or closes the form — the pin stays the correction sheets'
+    // problem, the lead is Monday's.
+    setLeadOpen(true);
+    void pins.dropAtDevice("lead").then((res) => {
       if (res.ok && user?.id) {
         qc.invalidateQueries({ queryKey: ["my_pins_today", user.id] });
         // Lead pins bump leads_called_in via trigger — refresh daily-log reads.
         qc.invalidateQueries({ queryKey: dailyLogKeys.all(user.id) });
       }
-      setLeadOpen(true);
-    } finally {
-      setPending(null);
-    }
+    });
   }
 
   return (
@@ -513,22 +520,34 @@ export function ActiveRun({
           <button
             type="button"
             onClick={openLead}
-            disabled={pending === "lead"}
+            aria-label={
+              (pins.counts["lead"] ?? 0) > 0
+                ? `Submit New Lead — ${pins.counts["lead"]} leads today`
+                : "Submit New Lead"
+            }
             className="arcade-btn-3d w-full min-h-[3.75rem] md:min-h-[4.25rem] flex items-center justify-center gap-2.5 px-4"
             style={{
               ["--btn-color" as string]: "var(--victory)",
               ["--btn-fg" as string]: "#06110a",
             }}
           >
-            {pending === "lead" ? (
-              <Loader2 className="w-6 h-6 animate-spin" />
-            ) : (
-              <Zap className="w-6 h-6" />
-            )}
+            <Zap className="w-6 h-6" />
             <span className="font-display text-xs md:text-sm uppercase tracking-widest">
               Submit New Lead
             </span>
           </button>
+          {/* pointer-events-none: the badge overlays the button's corner —
+              a tap there must still open the form. Count is announced via
+              the button's aria-label (a bare span's isn't). */}
+          {(pins.counts["lead"] ?? 0) > 0 && (
+            <span
+              aria-hidden
+              className="pointer-events-none absolute -top-1.5 -right-1.5 z-10 min-w-5 rounded-full border bg-surface px-1.5 text-center font-display text-[10px] leading-5"
+              style={{ color: "#39ff14", borderColor: "#39ff14" }}
+            >
+              {pins.counts["lead"]}
+            </span>
+          )}
         </div>
 
         {/* The old "Today · N doors · N talked" footer and the How-it-works
@@ -537,7 +556,33 @@ export function ActiveRun({
             third copies earn nothing on a phone. */}
       </div>
 
-      {leadOpen && <LeadSheet onClose={() => setLeadOpen(false)} />}
+      {leadOpen && (
+        <LeadSheet
+          prefill={{
+            agent: selfProfile.data?.display_name ?? displayName ?? null,
+            office: selfProfile.data?.office_location ?? null,
+          }}
+          onClose={(submitted) => {
+            setLeadOpen(false);
+            // Close-out refresh: reconcile the background pin insert, the
+            // trigger-bumped daily-log counters (HUD Leads, Stats, Log), and
+            // the my-leads list — the exact keys a hard refresh used to buy.
+            if (user?.id) {
+              qc.invalidateQueries({ queryKey: ["my_pins_today", user.id] });
+              qc.invalidateQueries({ queryKey: dailyLogKeys.all(user.id) });
+              qc.invalidateQueries({ queryKey: ["my_leads", user.id] });
+            }
+            if (submitted) {
+              try {
+                navigator.vibrate?.([15, 60, 15]);
+              } catch {
+                /* unsupported */
+              }
+              toast.success("⚡ Lead submitted — it's on the board!");
+            }
+          }}
+        />
+      )}
 
       {/* One-tap result on a tapped house bubble (drop or same-day switch) */}
       <HouseResultSheet
@@ -554,7 +599,13 @@ export function ActiveRun({
           // submits the lead (one flow, owner directive 2026-09-10).
           if (pin_type === "lead") setLeadOpen(true);
         }}
-        onSwitch={(pinId, pin_type) => pins.updatePin.mutate({ id: pinId, pin_type })}
+        onSwitch={(pinId, pin_type) => {
+          pins.updatePin.mutate({ id: pinId, pin_type });
+          // Switching a result TO lead is submitting a lead — same one flow
+          // as the tile's drop path above; without this the switch minted a
+          // lead pin with no Monday lead behind it.
+          if (pin_type === "lead") setLeadOpen(true);
+        }}
       />
 
       {/* SALE / DK / PTT / CL% standings + Stats Key */}
@@ -573,30 +624,132 @@ export function ActiveRun({
         onSelect={(pin_type) => {
           if (editingPinId) pins.updatePin.mutate({ id: editingPinId, pin_type });
           setEditingPinId(null);
+          // Correcting a pin TO lead opens the form too — a lead IS the
+          // Monday form (one flow, owner directive 2026-09-10).
+          if (pin_type === "lead") setLeadOpen(true);
         }}
         onDelete={() => {
           if (editingPinId) pins.deletePin.mutate(editingPinId);
           setEditingPinId(null);
         }}
       />
-
     </GratitudeGate>
   );
 }
 
-function LeadSheet({ onClose }: { onClose: () => void }) {
-  // Read once on mount, never at module scope (localStorage + SSR safety).
-  const [formUrl] = useState(getMondayFormUrl);
+function LeadSheet({
+  prefill,
+  onClose,
+}: {
+  prefill: { agent: string | null; office: string | null };
+  onClose: (submitted: boolean) => void;
+}) {
+  // Read once on mount, never at module scope (localStorage + SSR safety) —
+  // and prefill latches with it, so a profile fetch landing mid-form can
+  // never swap the iframe src and wipe what the rep already typed.
+  const [formUrl] = useState(() => getMondayFormUrlWithPrefill(prefill));
+  const [detectOn] = useState(isLeadCloseV2Enabled);
+  const [submitted, setSubmitted] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  // The close callback closes over ActiveRun state — keep the freshest copy
+  // reachable from the delayed auto-close timer without re-arming effects.
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+
+  // The form host's origin, for the message check below. try/catch so a
+  // malformed knockout.monday_form_url override can't crash the sheet.
+  const mondayOrigin = useMemo(() => {
+    try {
+      return new URL(formUrl).origin;
+    } catch {
+      return null;
+    }
+  }, [formUrl]);
+
+  // Deterministic submit signals, both message-typed — no height heuristics
+  // to misfire on resizes or validation errors:
+  //  1. Monday's workforms embed posts {source:"workforms",
+  //     type:"submit_success"} to its parent the moment a submission lands
+  //     (verified 2026-09-14 against a scratch form) — the primary signal,
+  //     and it fires for ANY forms.monday.com form, the office's original
+  //     included.
+  //  2. Our /lead-submitted route (the app form's optional redirect target)
+  //     posts LEAD_SUBMITTED_MESSAGE_TYPE from inside the iframe —
+  //     same-origin backstop if Monday ever renames theirs.
+  // Kill switch: localStorage["knockout.lead_close_v2"] = "off" degrades the
+  // flow to the labelled Done bar below.
+  useEffect(() => {
+    if (!detectOn) return;
+    let fired = false;
+    let timer: number | undefined;
+    function onMessage(e: MessageEvent) {
+      if (fired) return;
+      // Only our own iframe may speak — not some other embed on the page.
+      // Fail closed: no frame, no signal.
+      const frameWin = iframeRef.current?.contentWindow;
+      if (!frameWin || e.source !== frameWin) return;
+      const data = e.data as { type?: unknown; source?: unknown } | null;
+      const fromMonday =
+        mondayOrigin !== null &&
+        e.origin === mondayOrigin &&
+        data?.source === "workforms" &&
+        data?.type === "submit_success";
+      const fromRedirect =
+        e.origin === window.location.origin && data?.type === LEAD_SUBMITTED_MESSAGE_TYPE;
+      if (!fromMonday && !fromRedirect) return;
+      fired = true;
+      setSubmitted(true);
+      try {
+        navigator.vibrate?.(15);
+      } catch {
+        /* unsupported */
+      }
+      // A short victory beat on the Done bar, then back to the map.
+      timer = window.setTimeout(() => closeRef.current(true), 900);
+    }
+    window.addEventListener("message", onMessage);
+    return () => {
+      window.removeEventListener("message", onMessage);
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [detectOn, mondayOrigin]);
+
+  // iOS soft keyboard: the layout viewport pans under `fixed inset-0` and
+  // can push the header X (or the Done bar) outside the visible screen.
+  // Track the visual viewport so both exits stay reachable; feature-detected,
+  // browsers without visualViewport keep plain inset-0 behavior.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    const el = rootRef.current;
+    if (!vv || !el) return;
+    function sync() {
+      el!.style.height = `${vv!.height}px`;
+      el!.style.transform = `translateY(${vv!.offsetTop}px)`;
+    }
+    sync();
+    vv.addEventListener("resize", sync);
+    vv.addEventListener("scroll", sync);
+    return () => {
+      vv.removeEventListener("resize", sync);
+      vv.removeEventListener("scroll", sync);
+      el.style.height = "";
+      el.style.transform = "";
+    };
+  }, []);
+
   return (
     // z-[2000]: the old /field had no map, but here Leaflet's panes and the
     // in-map chrome sit at z-[1000] in the same stacking context — z-50
     // would leave the recenter button poking through the lead form.
-    <div className="fixed inset-0 z-[2000] bg-background flex flex-col">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-background">
+    <div ref={rootRef} className="fixed inset-0 z-[2000] bg-background flex flex-col">
+      {/* pt calc: py-3 base + notch inset — this header paints outside
+          AppShell's pt-safe, so standalone PWA needs its own. */}
+      <div className="flex items-center justify-between px-4 pb-3 pt-[calc(env(safe-area-inset-top)+0.75rem)] border-b border-border bg-background">
         <div className="font-display text-xs uppercase tracking-widest text-neon">⚡ New Lead</div>
         <button
           type="button"
-          onClick={onClose}
+          onClick={() => onClose(submitted)}
           aria-label="Close"
           className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-full hover:bg-surface active:scale-95 transition"
         >
@@ -604,11 +757,36 @@ function LeadSheet({ onClose }: { onClose: () => void }) {
         </button>
       </div>
       <iframe
+        ref={iframeRef}
         src={formUrl}
         title="Submit New Lead"
         className="flex-1 w-full border-0"
         allow="clipboard-write; camera; microphone; geolocation"
       />
+      {/* The labelled exit the bare X never was — and the celebration rail
+          when the submit signal lands. X and Done are semantically identical
+          (the DETECTION state decides the celebration, not the control). */}
+      <div className="border-t border-border bg-background px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
+        <div className={submitted ? "pulse-glow-wrapper w-full" : "w-full"}>
+          <button
+            type="button"
+            onClick={() => onClose(submitted)}
+            className="arcade-btn-3d w-full min-h-11 flex items-center justify-center gap-2 px-4"
+            style={
+              submitted
+                ? {
+                    ["--btn-color" as string]: "var(--victory)",
+                    ["--btn-fg" as string]: "#06110a",
+                  }
+                : undefined
+            }
+          >
+            <span className="font-display text-xs uppercase tracking-widest">
+              {submitted ? "✓ Lead submitted — Back to the Map" : "Done — Back to the Map"}
+            </span>
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
