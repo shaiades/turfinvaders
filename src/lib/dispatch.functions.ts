@@ -146,6 +146,7 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
         t.drs += l.doors_knocked ?? 0;
         t.tlk += l.people_talked_to ?? 0;
         t.nh += l.not_home ?? 0;
+        // Single ledger since 20260914260000: Monday-card credits only.
         t.ld += l.leads_called_in ?? 0;
         t.ni += l.not_interested ?? 0;
         t.rnt += l.renters ?? 0;

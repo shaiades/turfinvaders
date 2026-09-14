@@ -1297,7 +1297,7 @@ const DOOR_COLS: Array<{
   },
   {
     short: "Lead",
-    full: "Leads at the door — Submit New Lead taps (lead pins) plus Mission Log entries; each counts under Tlk and Drs. Pipeline truth (what the office actually received) is the funnel's Sub",
+    full: "Leads — credited from your Monday cards, once per card on its day (single ledger since 20260914260000). The field tap already counts its door + talk under Drs/Tlk",
     key: "ld",
     color: "neon",
   },
