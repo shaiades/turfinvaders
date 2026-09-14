@@ -637,6 +637,126 @@ export type Database = {
           },
         ]
       }
+      repcard_canvasser_results: {
+        Row: {
+          active: boolean
+          appts_set: number
+          avg_distance_mi: number | null
+          avg_doors_per_day: number | null
+          close_ratio_pct: number | null
+          door_knocked_days: number
+          doors_knocked: number
+          first_door_knock: string | null
+          id: string
+          imported_at: string
+          last_door_knock: string | null
+          office: string | null
+          period_end: string
+          period_start: string
+          rep_name: string
+          repcard_user_id: number | null
+          source: string
+          talk_ratio_pct: number | null
+          talked_to: number
+          team: string | null
+          time_in_field_hours: number | null
+          verified_door_knock: number
+        }
+        Insert: {
+          active?: boolean
+          appts_set?: number
+          avg_distance_mi?: number | null
+          avg_doors_per_day?: number | null
+          close_ratio_pct?: number | null
+          door_knocked_days?: number
+          doors_knocked?: number
+          first_door_knock?: string | null
+          id?: string
+          imported_at?: string
+          last_door_knock?: string | null
+          office?: string | null
+          period_end: string
+          period_start: string
+          rep_name: string
+          repcard_user_id?: number | null
+          source?: string
+          talk_ratio_pct?: number | null
+          talked_to?: number
+          team?: string | null
+          time_in_field_hours?: number | null
+          verified_door_knock?: number
+        }
+        Update: {
+          active?: boolean
+          appts_set?: number
+          avg_distance_mi?: number | null
+          avg_doors_per_day?: number | null
+          close_ratio_pct?: number | null
+          door_knocked_days?: number
+          doors_knocked?: number
+          first_door_knock?: string | null
+          id?: string
+          imported_at?: string
+          last_door_knock?: string | null
+          office?: string | null
+          period_end?: string
+          period_start?: string
+          rep_name?: string
+          repcard_user_id?: number | null
+          source?: string
+          talk_ratio_pct?: number | null
+          talked_to?: number
+          team?: string | null
+          time_in_field_hours?: number | null
+          verified_door_knock?: number
+        }
+        Relationships: []
+      }
+      repcard_territory_history: {
+        Row: {
+          assigned_at: string | null
+          assigned_by_name: string | null
+          color: string | null
+          id: string
+          imported_at: string
+          office: string | null
+          polygon_coordinates: Json
+          rep_name: string | null
+          repcard_area_id: number | null
+          repcard_user_id: number | null
+          source: string
+          team: string | null
+        }
+        Insert: {
+          assigned_at?: string | null
+          assigned_by_name?: string | null
+          color?: string | null
+          id?: string
+          imported_at?: string
+          office?: string | null
+          polygon_coordinates: Json
+          rep_name?: string | null
+          repcard_area_id?: number | null
+          repcard_user_id?: number | null
+          source?: string
+          team?: string | null
+        }
+        Update: {
+          assigned_at?: string | null
+          assigned_by_name?: string | null
+          color?: string | null
+          id?: string
+          imported_at?: string
+          office?: string | null
+          polygon_coordinates?: Json
+          rep_name?: string | null
+          repcard_area_id?: number | null
+          repcard_user_id?: number | null
+          source?: string
+          team?: string | null
+        }
+        Relationships: []
+      }
       system_settings: {
         Row: {
           active_monday_board_oc: string | null

@@ -694,6 +694,10 @@ export function NeonMap({
         center={[fallbackCenter.lat, fallbackCenter.lng]}
         zoom={follow ? 17 : 13}
         zoomControl={false}
+        // Canvas renderer: draws vector layers on a single <canvas> instead of
+        // one SVG node per shape, so the map stays smooth with thousands of
+        // polygons (e.g. the imported RepCard territory-history coverage).
+        preferCanvas
         scrollWheelZoom
         // leaflet-rotate: two-finger twist on phones, shift-drag on desktop
         // (owner ask 2026-09-11: "the map does not spin"). The compass button
