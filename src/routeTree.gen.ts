@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as LeadSubmittedRouteImport } from './routes/lead-submitted'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
@@ -32,6 +33,11 @@ import { Route as AuthenticatedTeamsTeamIdRouteImport } from './routes/_authenti
 import { Route as AuthenticatedCanvassersCanvasserIdRouteImport } from './routes/_authenticated/canvassers.$canvasserId'
 import { Route as AuthenticatedCanvassersCanvasserIdFieldRouteImport } from './routes/_authenticated/canvassers.$canvasserId.field'
 
+const LeadSubmittedRoute = LeadSubmittedRouteImport.update({
+  id: '/lead-submitted',
+  path: '/lead-submitted',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
   path: '/auth',
@@ -152,6 +158,7 @@ const AuthenticatedCanvassersCanvasserIdFieldRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/lead-submitted': typeof LeadSubmittedRoute
   '/close-kombat': typeof AuthenticatedCloseKombatRoute
   '/confirmation-desk': typeof AuthenticatedConfirmationDeskRoute
   '/daily-wrap': typeof AuthenticatedDailyWrapRoute
@@ -175,6 +182,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/lead-submitted': typeof LeadSubmittedRoute
   '/close-kombat': typeof AuthenticatedCloseKombatRoute
   '/confirmation-desk': typeof AuthenticatedConfirmationDeskRoute
   '/daily-wrap': typeof AuthenticatedDailyWrapRoute
@@ -200,6 +208,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
+  '/lead-submitted': typeof LeadSubmittedRoute
   '/_authenticated/close-kombat': typeof AuthenticatedCloseKombatRoute
   '/_authenticated/confirmation-desk': typeof AuthenticatedConfirmationDeskRoute
   '/_authenticated/daily-wrap': typeof AuthenticatedDailyWrapRoute
@@ -225,6 +234,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/auth'
+    | '/lead-submitted'
     | '/close-kombat'
     | '/confirmation-desk'
     | '/daily-wrap'
@@ -248,6 +258,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/auth'
+    | '/lead-submitted'
     | '/close-kombat'
     | '/confirmation-desk'
     | '/daily-wrap'
@@ -272,6 +283,7 @@ export interface FileRouteTypes {
     | '/'
     | '/_authenticated'
     | '/auth'
+    | '/lead-submitted'
     | '/_authenticated/close-kombat'
     | '/_authenticated/confirmation-desk'
     | '/_authenticated/daily-wrap'
@@ -297,6 +309,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  LeadSubmittedRoute: typeof LeadSubmittedRoute
   AuthCallbackRoute: typeof AuthCallbackRoute
   AuthWelcomeRoute: typeof AuthWelcomeRoute
   ApiInternalRotateBoardsRoute: typeof ApiInternalRotateBoardsRoute
@@ -304,6 +317,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/lead-submitted': {
+      id: '/lead-submitted'
+      path: '/lead-submitted'
+      fullPath: '/lead-submitted'
+      preLoaderRoute: typeof LeadSubmittedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/auth': {
       id: '/auth'
       path: '/auth'
@@ -520,6 +540,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  LeadSubmittedRoute: LeadSubmittedRoute,
   AuthCallbackRoute: AuthCallbackRoute,
   AuthWelcomeRoute: AuthWelcomeRoute,
   ApiInternalRotateBoardsRoute: ApiInternalRotateBoardsRoute,
