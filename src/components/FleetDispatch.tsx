@@ -566,6 +566,7 @@ function FleetDispatchInner({
         drs: 0,
         tlk: 0,
         nh: 0,
+        ld: 0,
         ni: 0,
         rnt: 0,
       };
@@ -598,6 +599,7 @@ function FleetDispatchInner({
           res.drs += rr.drs ?? 0;
           res.tlk += rr.tlk ?? 0;
           res.nh += rr.nh ?? 0;
+          res.ld += rr.ld ?? 0;
           res.ni += rr.ni ?? 0;
           res.rnt += rr.rnt ?? 0;
         }
@@ -762,6 +764,7 @@ function FleetDispatchInner({
         drs: 0,
         tlk: 0,
         nh: 0,
+        ld: 0,
         ni: 0,
         rnt: 0,
       };
@@ -790,6 +793,7 @@ function FleetDispatchInner({
           res.drs += rr.drs ?? 0;
           res.tlk += rr.tlk ?? 0;
           res.nh += rr.nh ?? 0;
+          res.ld += rr.ld ?? 0;
           res.ni += rr.ni ?? 0;
           res.rnt += rr.rnt ?? 0;
         }
@@ -1264,7 +1268,8 @@ type FunnelRow = {
  *  lead halves. Sources are honest per column: Drs/Tlk/Rnt come from map
  *  pins AND the Mission Log form (Rnt joined via 20260910200000 — a Renter
  *  pin bumps BOTH Rnt and Tlk); NI and NH are pin-only (NH joined via
- *  20260914230000). Every pin counts a door, so Drs is the group's total.
+ *  20260914230000). Lead = leads_called_in (lead pins + Mission Log).
+ *  Every pin counts a door, so Drs is the group's total.
  *  Remote-drop pins never count anywhere. */
 const DOOR_COLS: Array<{
   short: string;
@@ -1289,6 +1294,12 @@ const DOOR_COLS: Array<{
     full: "Not Home — nobody answered (NH map pins; no Mission Log field). Counts the door, never a talk",
     key: "nh",
     color: "accent",
+  },
+  {
+    short: "Lead",
+    full: "Leads at the door — Submit New Lead taps (lead pins) plus Mission Log entries; each counts under Tlk and Drs. Pipeline truth (what the office actually received) is the funnel's Sub",
+    key: "ld",
+    color: "neon",
   },
   {
     short: "NI",
@@ -1371,15 +1382,15 @@ const RESULT_COLS: Array<{
  *  the read-only leaderboard) appends a trailing actions column — every row
  *  variant appends a cell so the columns stay aligned. */
 const ROW_GRID =
-  "grid grid-cols-[minmax(7.5rem,1fr)_repeat(5,2.3rem)_0.75rem_repeat(4,2.3rem)_0.75rem_repeat(9,2.3rem)_4.5rem] items-center gap-1";
+  "grid grid-cols-[minmax(7.5rem,1fr)_repeat(6,2.3rem)_0.75rem_repeat(4,2.3rem)_0.75rem_repeat(9,2.3rem)_4.5rem] items-center gap-1";
 const ROW_GRID_MANAGE =
-  "grid grid-cols-[minmax(7.5rem,1fr)_repeat(5,2.3rem)_0.75rem_repeat(4,2.3rem)_0.75rem_repeat(9,2.3rem)_4.5rem_5rem] items-center gap-1";
+  "grid grid-cols-[minmax(7.5rem,1fr)_repeat(6,2.3rem)_0.75rem_repeat(4,2.3rem)_0.75rem_repeat(9,2.3rem)_4.5rem_5rem] items-center gap-1";
 const rowGrid = (manage: boolean) => (manage ? ROW_GRID_MANAGE : ROW_GRID);
 
-/** Board rows need ~61rem (~66rem with the actions column); the van card
+/** Board rows need ~63.5rem (~68.5rem with the actions column); the van card
  *  scrolls horizontally below that. */
-const ROW_MIN_W = "min-w-[61rem]";
-const rowMinW = (manage: boolean) => (manage ? "min-w-[66rem]" : ROW_MIN_W);
+const ROW_MIN_W = "min-w-[63.5rem]";
+const rowMinW = (manage: boolean) => (manage ? "min-w-[68.5rem]" : ROW_MIN_W);
 
 /** A row's stats without its identity — what totals and stat-cell runs share. */
 type DispatchStats = Omit<FunnelRow, "g" | "effTeam">;
@@ -1403,6 +1414,7 @@ const hasProduction = (r: FunnelRow) =>
     r.res.drs +
     r.res.tlk +
     r.res.nh +
+    r.res.ld +
     r.res.ni +
     r.res.rnt >
   0;
@@ -1430,6 +1442,7 @@ const totalsOfRows = (list: FunnelRow[]): DispatchStats =>
         drs: a.res.drs + r.res.drs,
         tlk: a.res.tlk + r.res.tlk,
         nh: a.res.nh + r.res.nh,
+        ld: a.res.ld + r.res.ld,
         ni: a.res.ni + r.res.ni,
         rnt: a.res.rnt + r.res.rnt,
       },
@@ -1453,6 +1466,7 @@ const totalsOfRows = (list: FunnelRow[]): DispatchStats =>
         drs: 0,
         tlk: 0,
         nh: 0,
+        ld: 0,
         ni: 0,
         rnt: 0,
       },
@@ -1476,7 +1490,7 @@ type RowManage = {
   onMerge: () => void;
 };
 
-/** The shared 21-cell stat run — door work · divider · funnel · divider ·
+/** The shared 22-cell stat run — door work · divider · funnel · divider ·
  *  results · Pts · Volume. Used by every rep line and (bold) by the Van Total
  *  line so the two can never drift; cells align because both render inside
  *  the same rowGrid. */
@@ -1681,7 +1695,7 @@ function DispatchGroupCaption({
       <span />
       {/* Door work shares the funnel's date label — the range memo sets
           logStart/logEnd ≡ funnelStart/funnelEnd on every tab. */}
-      <span className="col-span-5 text-center text-[8px] font-display uppercase tracking-widest text-muted-foreground/70 border-b border-border/60 pb-0.5">
+      <span className="col-span-6 text-center text-[8px] font-display uppercase tracking-widest text-muted-foreground/70 border-b border-border/60 pb-0.5">
         Door Work
         {dateLabel && <span className="text-muted-foreground/50"> · {dateLabel}</span>}
       </span>
