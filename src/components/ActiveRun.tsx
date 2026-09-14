@@ -11,7 +11,6 @@ import {
 } from "@/lib/monday-form";
 import { useCanvasserProfile } from "@/hooks/useCanvasserProfile";
 import { useGeoWatch, useFieldPins, type ActivePin } from "@/hooks/useFieldPins";
-import { useCrewBeacon } from "@/hooks/useCrewLive";
 import { usePiggyBank } from "@/hooks/usePiggyBank";
 import { useZipTints } from "@/hooks/useZipAssignments";
 import { dailyLogKeys } from "@/hooks/useDailyLogs";
@@ -164,15 +163,9 @@ export function ActiveRun({
   }, [user?.id]);
   const { me, geoStatus } = useGeoWatch(!loading && (!requiresGratitudeGate(role) || gatePassed));
   const pins = useFieldPins(user?.id, me);
-  // Crew Map beacon: throttled live position on the private crew-live topic,
-  // riding the watch above (never a second GPS watch). Best-effort — a
-  // refused join (role without the publish grant) is silent by design.
-  useCrewBeacon({
-    userId: user?.id,
-    name: displayName,
-    me,
-    enabled: !loading && !!user?.id && (!requiresGratitudeGate(role) || gatePassed),
-  });
+  // Crew Map beacon: moved to AppShell (<CrewBeacon/>, owner ask 2026-09-14)
+  // so reps broadcast from EVERY tab, not just this screen — this watch's
+  // first fix still writes the geo-granted marker that arms it.
   // Captains see their ZIP zones tinted while canvassing — the frame they
   // chunk turfs inside. Canvassers keep plain borders (their turf is the map).
   const zipZones = useZipTints({ enabled: isCaptain });

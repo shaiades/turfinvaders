@@ -10,9 +10,16 @@ import { laTodayISO } from "@/lib/dates";
 
 /** The open (un-clocked-out) shift, newest first; null when off the clock.
  *  Punch state must be KNOWN, not assumed — consumers treat pending/error
- *  as unknown, never as "off the clock". */
-export function useOpenShift(userId: string) {
+ *  as unknown, never as "off the clock". Opts: the crew beacon polls this
+ *  gently (a manager's remote clock-out must eventually stop the broadcast
+ *  even if this device never punches or refocuses). */
+export function useOpenShift(
+  userId: string,
+  opts: { enabled?: boolean; refetchInterval?: number } = {},
+) {
   return useQuery({
+    enabled: opts.enabled ?? true,
+    refetchInterval: opts.refetchInterval,
     queryKey: ["time-clock-open", userId],
     queryFn: async () => {
       const { data, error } = await supabase

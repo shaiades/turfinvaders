@@ -24,6 +24,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useCrewLive, useCrewPins } from "@/hooks/useCrewLive";
 import { useGeoWatch } from "@/hooks/useFieldPins";
+import { useGeoGranted } from "@/hooks/useGeoGranted";
 import { useDispatchRoster } from "@/hooks/useFleetRoster";
 import { getClockPresence } from "@/lib/dispatch.functions";
 import { assigneeColor } from "@/lib/assignee-colors";
@@ -71,9 +72,13 @@ export function CrewMap({ onBack }: { onBack: () => void }) {
   const pinsQ = useCrewPins(allowed);
   const { positions, status: liveStatus } = useCrewLive(allowed);
   const rosterQ = useDispatchRoster({ enabled: allowed });
-  // Viewer's own dot for orientation. Same watch hook as every map screen;
-  // captains/admins have long since answered the OS prompt on this route.
-  const { me } = useGeoWatch(allowed);
+  // Viewer's own dot for orientation — armed only if the OS permission is
+  // ALREADY granted. Captains can now land here pre-Gratitude-Gate (the
+  // hamburger / /crew-map route, 2026-09-14), and the first location prompt
+  // belongs to the canvass screen, never a map view. No grant = no self
+  // dot; the crew layer is unaffected.
+  const geoGranted = useGeoGranted();
+  const { me } = useGeoWatch(allowed && geoGranted);
 
   const [rawFocusId, setFocusId] = useState<string | null>(null);
   const [flyTo, setFlyTo] = useState<{
