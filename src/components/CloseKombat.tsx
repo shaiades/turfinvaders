@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import { isAdminRole } from "@/lib/roles";
+import { isAdminRole, privilegeRole } from "@/lib/roles";
 import { buildRepMatcher } from "@/lib/rep-identity";
 import { DEFAULT_OFFICE, OFFICE_FILTER_OPTIONS } from "@/lib/offices";
 import {
@@ -55,6 +55,7 @@ import { toast } from "sonner";
 import { rewardToast } from "@/lib/reward-toast";
 import { useCountUp } from "@/hooks/useCountUp";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
+import { SaleVictoryOverlay, useSaleVictory, type VictoryFx } from "@/components/SaleVictoryFx";
 import {
   ChevronDown,
   ChevronLeft,
@@ -186,7 +187,7 @@ const SAVE_LINK_PAD_DAYS = 42;
 
 function CloseKombatInner() {
   const qc = useQueryClient();
-  const { realRole, role, displayName } = useAuth();
+  const { user, realRole, role, displayName, realDisplayName } = useAuth();
   const { matches, office } = useOfficeFilter();
   const isAdmin = isAdminRole(realRole);
   // The rep-first layout keys off the EFFECTIVE role so View As previews it;
@@ -517,6 +518,38 @@ function CloseKombatInner() {
     return () => clearTimeout(t);
   }, [heroFlash]);
 
+  // Belt Drop — "a sale landed while you were away", once per app open.
+  // VIEW-AS LANDMINE: isRep is the EFFECTIVE role, and during an owner's
+  // Sales Rep preview displayName IS the picked rep's name — so the matcher
+  // would happily match the previewed rep and the owner's browser would
+  // celebrate (and persist a baseline for) someone else's numbers. The
+  // privilegeRole(realRole) gate kills both during previews; a REAL rep can
+  // never carry a name override (canUseViewAs is false for them). Do NOT
+  // fold this into the KA-CHING effect above: that one is per-settle
+  // in-memory keyed to the visible range; this is per-app-open persisted and
+  // keyed to the LA month — they're already mutually exclusive per settle.
+  const victoryEligible =
+    isRep && privilegeRole(realRole) === "sales_rep" && displayName === realDisplayName;
+  const { fx: victoryFx, dismiss: dismissVictory } = useSaleVictory({
+    userId: user?.id ?? null,
+    eligible: victoryEligible,
+    settled: cardsQuery.isSuccess && !cardsQuery.isPlaceholderData,
+    officeCards,
+    matcher,
+    office,
+    fetchStart,
+    fetchEnd,
+  });
+  // ?sale_victory_demo=1 screens the ceremony from any role with canned
+  // numbers and ZERO baseline reads/writes (ck_anim / piggy_demo precedent);
+  // parsed post-mount because this route SSRs.
+  const [victoryDemo, setVictoryDemo] = useState<VictoryFx | null>(null);
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("sale_victory_demo") === "1") {
+      setVictoryDemo({ salesDelta: 1, dollarDelta: 12450 });
+    }
+  }, []);
+
   // --- Admin sync: pull the boards from Monday on demand ---
   const sync = useMutation({
     mutationFn: (scope: "active" | "all") => syncBlockCards({ data: { scope } }),
@@ -742,6 +775,17 @@ function CloseKombatInner() {
           hasNames={allBoardNames.length > 0}
           flash={heroFlash}
           dim={cardsQuery.isPlaceholderData}
+        />
+      )}
+
+      {/* Belt Drop ceremony — real detection (reps) or forced demo (any role) */}
+      {(victoryFx || victoryDemo) && (
+        <SaleVictoryOverlay
+          fx={(victoryFx ?? victoryDemo)!}
+          onDone={() => {
+            dismissVictory();
+            setVictoryDemo(null);
+          }}
         />
       )}
 
