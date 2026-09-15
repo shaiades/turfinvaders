@@ -125,7 +125,18 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <Outlet />
-      <Toaster theme="dark" position="top-right" />
+      {/* top-center + offsets clear the sticky header/HUD — a mid-street
+          phone actually sees the toast; richColors makes success/warn/error
+          read as themselves instead of one gray chrome. Reward moments get
+          the gold reward-toast look via rewardToast() (src/lib/reward-toast). */}
+      <Toaster
+        theme="dark"
+        position="top-center"
+        richColors
+        offset={{ top: 76 }}
+        mobileOffset={{ top: 84 }}
+        toastOptions={{ classNames: { toast: "arcade-toast" } }}
+      />
     </QueryClientProvider>
   );
 }

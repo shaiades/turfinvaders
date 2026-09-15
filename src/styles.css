@@ -636,3 +636,65 @@
   color: inherit !important;
   text-decoration: none !important;
 }
+
+/* ── Sonner reskin ─────────────────────────────────────────────────────
+   Plain classes on purpose (sonner receives them as strings — an @utility
+   here would be invisible to Tailwind's content scan). !important beats
+   sonner's inline --normal-bg/--border-radius styling. */
+.arcade-toast {
+  border-radius: var(--radius-lg) !important;
+  border-color: color-mix(in oklab, var(--neon) 30%, var(--border)) !important;
+  box-shadow:
+    0 0 20px -6px color-mix(in oklab, var(--neon) 40%, transparent),
+    0 8px 24px -12px rgb(0 0 0 / 0.6) !important;
+}
+/* The gold "you EARNED this" look — KA-CHING, lead submitted, clock-in.
+   Layered by rewardToast(); everything else keeps plain sonner. */
+.reward-toast {
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--kombat-gold) 22%, var(--surface)) 0%,
+    var(--surface) 100%
+  ) !important;
+  border: 1.5px solid var(--kombat-gold) !important;
+  color: var(--kombat-gold) !important;
+  font-family: var(--font-display);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--kombat-gold) 35%, transparent),
+    0 0 28px -4px color-mix(in oklab, var(--kombat-gold) 65%, transparent) !important;
+  text-shadow: 0 0 10px color-mix(in oklab, var(--kombat-gold) 70%, transparent);
+}
+.reward-toast [data-description] {
+  color: var(--muted-foreground);
+  font-family: var(--font-sans);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+/* KA-CHING hero spike — two beats of gold, then done. A one-shot celebration
+   (the old animate-pulse read as a loading skeleton, not a sale landing). */
+@keyframes kombat-kaching {
+  0% {
+    box-shadow: 0 0 0 0 transparent;
+    filter: brightness(1);
+  }
+  20% {
+    box-shadow:
+      0 0 0 3px var(--kombat-gold),
+      0 0 42px 4px color-mix(in oklab, var(--kombat-gold) 60%, transparent);
+    filter: brightness(1.18);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+    filter: brightness(1);
+  }
+}
+@utility kombat-kaching {
+  animation: kombat-kaching 1.2s ease-out 2;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}

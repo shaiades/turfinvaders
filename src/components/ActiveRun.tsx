@@ -15,6 +15,7 @@ import { usePiggyBank } from "@/hooks/usePiggyBank";
 import { useZipTints } from "@/hooks/useZipAssignments";
 import { dailyLogKeys } from "@/hooks/useDailyLogs";
 import { PiggyBankHUD } from "@/components/PiggyBankHUD";
+import { BumpBadge } from "@/components/BumpBadge";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { GratitudeGate, hasPassedGratitudeGate } from "@/components/GratitudeGate";
 import { NeonMap, type Territory, type LatLng } from "@/components/NeonMap";
@@ -25,6 +26,7 @@ import type { OsmHouse } from "@/components/HouseBubbles";
 import { ArcadePanel } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { rewardToast } from "@/lib/reward-toast";
 import {
   DoorClosed,
   Sparkles,
@@ -504,12 +506,10 @@ export function ActiveRun({
                       <span className="font-display text-[7px] uppercase tracking-wide leading-none whitespace-nowrap">
                         {r.chipLabel}
                       </span>
-                      <span
-                        className="absolute -top-1 -right-1 min-w-4 rounded-full bg-surface px-1 text-center font-display text-[9px] leading-4"
-                        style={{ color: r.color }}
-                      >
-                        {pins.counts[r.type] ?? 0}
-                      </span>
+                      <BumpBadge
+                        count={pins.counts[r.type] ?? 0}
+                        color={r.color}
+                      />
                     </button>
                   );
                 })}
@@ -590,7 +590,7 @@ export function ActiveRun({
                   ? Math.max(0, piggy.dollars - piggyAtLeadOpenRef.current)
                   : 0;
               setPiggyCelebrate((c) => ({ seq: (c?.seq ?? 0) + 1, dollars: delta }));
-              toast.success("⚡ Lead submitted — it's on the board!");
+              rewardToast("⚡ Lead submitted — it's on the board!", { vibrate: false });
             }
           }}
         />

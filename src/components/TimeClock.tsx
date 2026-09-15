@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Clock, Play, Square, Utensils, AlertTriangle } from "lucide-react";
 import { addDaysISO, fmtWallTime, laDateISO, laTodayISO } from "@/lib/dates";
 import { toast } from "sonner";
+import { rewardToast } from "@/lib/reward-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useOpenShift, useTodayShifts } from "@/hooks/useTimeClockSelf";
 
@@ -164,7 +165,7 @@ export function TimeClock({ userId }: { userId: string }) {
           description: "Sundays aren't scheduled — this shift is flagged for review (and paid).",
         });
       } else {
-        toast.success("Clocked in");
+        rewardToast("Clocked in — game on");
       }
       qc.invalidateQueries({ queryKey: ["time-clock-open", userId] });
       qc.invalidateQueries({ queryKey: ["time-clock-today", userId] });
