@@ -148,7 +148,7 @@ export type ItemFetchResult = { item: Record<string, unknown> | null; error: str
 // created_at feeds the Lead Status attribution chain's last resort: a
 // recycled card with no gen or status markers dates to its board birth day.
 const ITEM_FIELDS =
-  "id name created_at board { id name } group { id title } column_values { id text column { title id } ... on FormulaValue { display_value } }";
+  "id name created_at board { id name } group { id title } column_values { id text column { title id } ... on FormulaValue { display_value } ... on LocationValue { lat lng } }";
 
 type Waiter = (r: ItemFetchResult) => void;
 let batch: { token: string; waiters: Map<string, Waiter[]> } | null = null;
