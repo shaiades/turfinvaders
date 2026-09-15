@@ -141,10 +141,10 @@ function customerBadgeIcon(size: number, hit: number): L.DivIcon {
   const key = `${size}|${hit}`;
   let icon = badgeIconCache.get(key);
   if (!icon) {
-    const img = Math.round(size * 0.64);
+    const img = Math.round(size * 0.68);
     const html = `
     <div style="width:${hit}px;height:${hit}px;display:flex;align-items:center;justify-content:center;">
-      <div style="width:${size}px;height:${size}px;border-radius:9999px;background:#f5f7fa;border:2px solid #12283a;box-shadow:0 0 10px rgba(18,40,58,0.9),0 0 4px rgba(255,255,255,0.55);display:flex;align-items:center;justify-content:center;">
+      <div style="width:${size}px;height:${size}px;border-radius:9999px;background:#f5f7fa;border:1.5px solid #12283a;box-shadow:0 0 6px rgba(18,40,58,0.7);display:flex;align-items:center;justify-content:center;">
         <img src="/tidal-mark.png" alt="" width="${img}" height="${img}" style="display:block;" />
       </div>
     </div>`;
@@ -200,7 +200,11 @@ export function CustomerHomesLayer({ tappable = true }: { tappable?: boolean }) 
 
   if (visible.length === 0) return null;
   const zoom = view?.zoom ?? 13;
-  const size = zoom >= 16 ? 32 : zoom >= 13 ? 24 : 16;
+  // Sized to the house-bubble result circle (26px — owner 2026-09-15:
+  // "replace the circle where the results go with that logo, that's the
+  // size"), shrinking further as the map zooms out. The hit box stays
+  // finger-sized regardless.
+  const size = zoom >= 16 ? 26 : zoom >= 13 ? 16 : 11;
   const hit = tappable ? Math.max(size, 40) : size;
   const icon = customerBadgeIcon(size, hit);
 
