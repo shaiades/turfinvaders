@@ -27,7 +27,8 @@ import {
  * Mechanics are identical to WelcomeAnimation: played once per account
  * (localStorage answers first, auth user_metadata is the cross-device
  * backstop; the flag is written when playback STARTS so a crash can't loop
- * it), tap/keypress skips, `prefers-reduced-motion` marks it seen unplayed.
+ * it), tap/keypress skips. `prefers-reduced-motion` skips playback but
+ * leaves the flag unwritten, so turning it off later still gets the showing.
  *
  * Preview/demo from ANY role: `?ck_anim=1` force-plays without writing any
  * flag; add `&ck_hold=<ms>` to freeze the scene at that timestamp.
@@ -1308,6 +1309,9 @@ export function CloseKombatIntro({
 
   useEffect(() => {
     onActiveChange?.(phase !== "done");
+    // Unmount mid-play (sign-out, role swap) must release the tutorial hold —
+    // a stuck `introActive` silently suppresses the page tours all session.
+    return () => onActiveChange?.(false);
   }, [phase, onActiveChange]);
 
   const markSeen = useCallback(() => {
@@ -1323,13 +1327,13 @@ export function CloseKombatIntro({
     setPhase("done");
   }, []);
 
-  // Decide whether to play — same protocol as WelcomeAnimation.
+  // Decide whether to play — same protocol as WelcomeAnimation (reduced
+  // motion skips playback without burning the once-ever flag).
   useEffect(() => {
     if (phase !== "checking") return;
     let cancelled = false;
     (async () => {
       if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
-        markSeen();
         if (!cancelled) finish();
         return;
       }
@@ -1350,7 +1354,7 @@ export function CloseKombatIntro({
     return () => {
       cancelled = true;
     };
-  }, [phase, userId, markSeen, finish]);
+  }, [phase, userId, finish]);
 
   // Playback
   useEffect(() => {

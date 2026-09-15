@@ -14,7 +14,7 @@ import { CanvasserHUD } from "@/components/CanvasserHUD";
 import { CrewBeacon } from "@/components/CrewBeacon";
 import { AppMenu } from "@/components/AppMenu";
 import { CanvasserTutorial, startCanvasserTutorial } from "@/components/tutorial/CanvasserTutorial";
-import { WelcomeAnimation } from "@/components/WelcomeAnimation";
+import { WelcomeAnimation, isWelcomeAnimationForced } from "@/components/WelcomeAnimation";
 import { CloseKombatIntro, isCloseKombatIntroForced } from "@/components/CloseKombatIntro";
 import { CLOSE_KOMBAT_ROLES, ROLE_LABEL, canUseViewAs, privilegeRole } from "@/lib/roles";
 import {
@@ -492,6 +492,12 @@ export function AppShell({ children }: { children: ReactNode }) {
           `?ck_anim=1` previews the kick from any account, `?welcome_anim=1`
           still previews the van from non-rep accounts. */}
       {user &&
+        // Wait for a role: a brand-new account used to burn its once-ever
+        // intro in the role-less waiting room, then get hard-reloaded into
+        // the real app with the flag already spent. Now the intro plays on
+        // the first load of the app they'll actually use. Forced previews
+        // stay available to role-less accounts.
+        (realRole !== null || isCloseKombatIntroForced() || isWelcomeAnimationForced()) &&
         // Gate on the REAL role: an owner previewing View As → Sales Rep used
         // to trigger a non-forced playback that burned the owner's own
         // ti_ck_intro flag (rep audit). Previews go through ?ck_anim=1,

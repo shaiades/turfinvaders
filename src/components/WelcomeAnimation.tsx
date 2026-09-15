@@ -15,7 +15,8 @@ import { clamp01, easeInOut, easeOutBack, limb, popText, rr } from "./intro-fx";
  *
  * Preview/demo: `?welcome_anim=1` force-plays without writing any flag;
  * add `&welcome_hold=<ms>` to freeze the scene at that timestamp.
- * `prefers-reduced-motion` marks the flag and never plays (unless forced).
+ * `prefers-reduced-motion` skips playback but leaves the flag unwritten, so
+ * turning reduced motion off later still gets the one first-open showing.
  *
  * Everything is drawn on a 640×360 virtual canvas rendered at device
  * resolution — no image assets, no new dependencies (shape/pop-text/beeper
@@ -25,6 +26,14 @@ import { clamp01, easeInOut, easeOutBack, limb, popText, rr } from "./intro-fx";
 
 const DURATION = 5000;
 const seenKey = (uid: string) => `ti_welcome_anim_v1:${uid}`;
+
+/** `?welcome_anim=1` forces a preview for any signed-in account (flags are
+ *  never written). AppShell also uses this to keep forced previews working
+ *  for role-less accounts, which otherwise don't mount the intro at all. */
+export function isWelcomeAnimationForced(): boolean {
+  if (typeof window === "undefined") return false;
+  return new URLSearchParams(window.location.search).get("welcome_anim") === "1";
+}
 
 type AnimMeta = { ti_welcome_anim?: string };
 
@@ -866,7 +875,7 @@ export function WelcomeAnimation({
   onActiveChange?: (active: boolean) => void;
 }) {
   const params = typeof window === "undefined" ? null : new URLSearchParams(window.location.search);
-  const forced = params?.get("welcome_anim") === "1";
+  const forced = isWelcomeAnimationForced();
   const holdParam = forced ? params?.get("welcome_hold") : null;
   const hold = holdParam ? Math.min(DURATION - 1, Math.max(0, Number(holdParam) || 0)) : null;
 
@@ -888,6 +897,9 @@ export function WelcomeAnimation({
 
   useEffect(() => {
     onActiveChange?.(phase !== "done");
+    // Unmount mid-play (sign-out, role swap) must release the tutorial hold —
+    // a stuck `introActive` silently suppresses the page tours all session.
+    return () => onActiveChange?.(false);
   }, [phase, onActiveChange]);
 
   const markSeen = useCallback(() => {
@@ -904,14 +916,14 @@ export function WelcomeAnimation({
     setPhase("done");
   }, []);
 
-  // Decide whether to play: reduced motion never plays; metadata seen on
-  // another device just records locally and stays hidden.
+  // Decide whether to play: reduced motion skips playback WITHOUT burning
+  // the once-ever flag (turn it off later, the intro still owes you one);
+  // metadata seen on another device just records locally and stays hidden.
   useEffect(() => {
     if (phase !== "checking") return;
     let cancelled = false;
     (async () => {
       if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
-        markSeen();
         if (!cancelled) finish();
         return;
       }
@@ -932,7 +944,7 @@ export function WelcomeAnimation({
     return () => {
       cancelled = true;
     };
-  }, [phase, userId, markSeen, finish]);
+  }, [phase, userId, finish]);
 
   // Playback: rAF timeline against the 640×360 virtual space, rendered at
   // device resolution for crisp vector shapes.
