@@ -37,6 +37,11 @@ export function getMondayFormUrl(): string {
 export function getMondayFormUrlWithPrefill(prefill: {
   agent?: string | null;
   office?: string | null;
+  /** House-anchored leads only (tap the house → Lead): the OSM-grade street
+   *  address of the tapped house. Inert until the app form's Address
+   *  question maps a QueryParam named "address" (unknown params are ignored,
+   *  so this is safe to send meanwhile). */
+  address?: string | null;
 }): string {
   const base = getMondayFormUrl();
   try {
@@ -47,6 +52,7 @@ export function getMondayFormUrlWithPrefill(prefill: {
     if (u.hostname !== "forms.monday.com") return base;
     if (prefill.agent) u.searchParams.set("agent", prefill.agent);
     if (prefill.office) u.searchParams.set("office", prefill.office);
+    if (prefill.address) u.searchParams.set("address", prefill.address);
     return u.toString();
   } catch {
     return base;

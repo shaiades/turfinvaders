@@ -181,6 +181,10 @@ export function ActiveRun({
   const [active, setActive] = useState<ActivePin>("not_home");
   const [editingPinId, setEditingPinId] = useState<string | null>(null);
   const [leadOpen, setLeadOpen] = useState(false);
+  // House-anchored Lead flow only: the tapped house's OSM-grade address,
+  // shown in the LeadSheet header + sent as the form's `address` prefill
+  // param so the rep never re-types what the map already knows.
+  const [leadAddress, setLeadAddress] = useState<string | null>(null);
   const [houseTarget, setHouseTarget] = useState<OsmHouse | null>(null);
   const [standingsOpen, setStandingsOpen] = useState(false);
 
@@ -325,11 +329,12 @@ export function ActiveRun({
     ? ((pins.pinsQuery.data ?? []).find((p) => p.id === editingPinId) ?? null)
     : null;
 
-  function openLead() {
+  function openLead(address: string | null = null) {
     if (!me) {
       toast.error("No GPS fix yet — enable Location and try again.");
       return;
     }
+    setLeadAddress(address);
     piggyAtLeadOpenRef.current = piggy.dollars;
     // Form first — the lead is the revenue event; the pin is bookkeeping.
     // The drop (fresh GPS fix + insert, up to ~8s) runs behind the overlay so
@@ -538,7 +543,7 @@ export function ActiveRun({
         <div className="pulse-glow-wrapper w-full" data-tour="field-lead">
           <button
             type="button"
-            onClick={openLead}
+            onClick={() => openLead()}
             aria-label={
               (pins.counts["lead"] ?? 0) > 0
                 ? `Submit New Lead — ${pins.counts["lead"]} leads today`
@@ -580,9 +585,11 @@ export function ActiveRun({
           prefill={{
             agent: selfProfile.data?.display_name ?? displayName ?? null,
             office: selfProfile.data?.office_location ?? null,
+            address: leadAddress,
           }}
           onClose={(submitted) => {
             setLeadOpen(false);
+            setLeadAddress(null);
             // Close-out refresh: reconcile the background pin insert, the
             // trigger-bumped daily-log counters (HUD Leads, Stats, Log), and
             // the my-leads list — the exact keys a hard refresh used to buy.
@@ -643,15 +650,27 @@ export function ActiveRun({
         onDrop={(h, pin_type) => {
           pins.guardedMapDrop({ lat: h.lat, lng: h.lng }, pin_type);
           // A lead IS the Monday form — the pin marks the house, the form
-          // submits the lead (one flow, owner directive 2026-09-10).
-          if (pin_type === "lead") setLeadOpen(true);
+          // submits the lead (one flow, owner directive 2026-09-10). The
+          // house's address rides along (header + form prefill); the OSM
+          // housenumber gate keeps guessed numbers out of the pipeline.
+          if (pin_type === "lead") {
+            setLeadAddress(h.num && h.street ? `${h.num} ${h.street}` : null);
+            setLeadOpen(true);
+          }
         }}
         onSwitch={(pinId, pin_type) => {
           pins.updatePin.mutate({ id: pinId, pin_type });
           // Switching a result TO lead is submitting a lead — same one flow
           // as the tile's drop path above; without this the switch minted a
           // lead pin with no Monday lead behind it.
-          if (pin_type === "lead") setLeadOpen(true);
+          if (pin_type === "lead") {
+            setLeadAddress(
+              houseTarget?.num && houseTarget.street
+                ? `${houseTarget.num} ${houseTarget.street}`
+                : null,
+            );
+            setLeadOpen(true);
+          }
         }}
       />
 
@@ -672,8 +691,12 @@ export function ActiveRun({
           if (editingPinId) pins.updatePin.mutate({ id: editingPinId, pin_type });
           setEditingPinId(null);
           // Correcting a pin TO lead opens the form too — a lead IS the
-          // Monday form (one flow, owner directive 2026-09-10).
-          if (pin_type === "lead") setLeadOpen(true);
+          // Monday form (one flow, owner directive 2026-09-10). No house
+          // context on a bare pin — no address prefill.
+          if (pin_type === "lead") {
+            setLeadAddress(null);
+            setLeadOpen(true);
+          }
         }}
         onDelete={() => {
           if (editingPinId) pins.deletePin.mutate(editingPinId);
@@ -688,7 +711,7 @@ function LeadSheet({
   prefill,
   onClose,
 }: {
-  prefill: { agent: string | null; office: string | null };
+  prefill: { agent: string | null; office: string | null; address?: string | null };
   onClose: (submitted: boolean) => void;
 }) {
   // Read once on mount, never at module scope (localStorage + SSR safety) —
@@ -793,7 +816,16 @@ function LeadSheet({
       {/* pt calc: py-3 base + notch inset — this header paints outside
           AppShell's pt-safe, so standalone PWA needs its own. */}
       <div className="flex items-center justify-between px-4 pb-3 pt-[calc(env(safe-area-inset-top)+0.75rem)] border-b border-border bg-background">
-        <div className="font-display text-xs uppercase tracking-widest text-neon">⚡ New Lead</div>
+        <div className="min-w-0">
+          <div className="font-display text-xs uppercase tracking-widest text-neon">
+            ⚡ New Lead
+          </div>
+          {/* The tapped house's address — on screen while the rep fills the
+              form, so it never has to be memorized off the map. */}
+          {prefill.address && (
+            <div className="truncate text-[11px] text-muted-foreground">{prefill.address}</div>
+          )}
+        </div>
         <button
           type="button"
           onClick={() => onClose(submitted)}
