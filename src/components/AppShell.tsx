@@ -12,6 +12,7 @@ import {
 import { useSwipeNav } from "@/hooks/useSwipeNav";
 import { CanvasserHUD } from "@/components/CanvasserHUD";
 import { CrewBeacon } from "@/components/CrewBeacon";
+import { LeadConfirmedCelebration } from "@/components/LeadConfirmedCelebration";
 import { AppMenu } from "@/components/AppMenu";
 import { CanvasserTutorial, startCanvasserTutorial } from "@/components/tutorial/CanvasserTutorial";
 import { WelcomeAnimation, isWelcomeAnimationForced } from "@/components/WelcomeAnimation";
@@ -438,6 +439,12 @@ export function AppShell({ children }: { children: ReactNode }) {
       {/* App-wide crew-live publisher — self-gated (field tiers, real role,
           GPS already granted). Renders nothing. */}
       <CrewBeacon />
+      {/* Lead-confirmed celebration — realtime INSERT on lead_events, gated to
+          canvasser+captain. Renders nothing; fires confetti + toast + beep on
+          the payoff moment (desk or Monday confirms). Demo: ?lead_confirm_demo=1 */}
+      {user && (role === "canvasser" || role === "captain") && (
+        <LeadConfirmedCelebration userId={user.id} />
+      )}
       <main
         className={`flex-1 max-w-7xl w-full min-w-0 mx-auto px-4 sm:px-6 py-4 md:py-8 md:pb-8 ${
           user && navItems.length > 1 ? "pb-28" : "pb-8"
