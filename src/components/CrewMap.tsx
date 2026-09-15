@@ -345,22 +345,23 @@ export function CrewMap({ onBack }: { onBack: () => void }) {
           </div>
         </ArcadePanel>
       ) : (
-        <div className="relative">
-          <NeonMap
-            territories={territories}
-            pins={mapPins}
-            crew={crewMarkers}
-            me={me}
-            height="clamp(420px, 62dvh, 900px)"
-            flyTo={flyTo}
-            mode={{ kind: "view" }}
-          />
-          {pinsTrimmed && (
-            <div className="absolute top-3 left-3 z-[1000] rounded border border-border bg-surface/90 backdrop-blur px-3 py-2 font-display text-[9px] uppercase tracking-widest text-muted-foreground">
-              Big day — showing each player's freshest pins. Tap a name for their full trail.
-            </div>
-          )}
-        </div>
+        <NeonMap
+          territories={territories}
+          pins={mapPins}
+          crew={crewMarkers}
+          me={me}
+          height="clamp(420px, 62dvh, 900px)"
+          flyTo={flyTo}
+          mode={{ kind: "view" }}
+          // Inside the frame so the notice follows the map into fullscreen.
+          overlay={
+            pinsTrimmed ? (
+              <div className="absolute top-3 left-3 z-[1000] rounded border border-border bg-surface/90 backdrop-blur px-3 py-2 font-display text-[9px] uppercase tracking-widest text-muted-foreground">
+                Big day — showing each player's freshest pins. Tap a name for their full trail.
+              </div>
+            ) : undefined
+          }
+        />
       )}
 
       {reps.length > 0 && (

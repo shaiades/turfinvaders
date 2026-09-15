@@ -1,8 +1,17 @@
 import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { MapContainer, TileLayer, Polygon, Polyline, Marker, Popup, useMapEvents, useMap } from "react-leaflet";
+import {
+  MapContainer,
+  TileLayer,
+  Polygon,
+  Polyline,
+  Marker,
+  Popup,
+  useMapEvents,
+  useMap,
+} from "react-leaflet";
 import L from "leaflet";
 import "leaflet-rotate";
-import { LocateFixed, Navigation2 } from "lucide-react";
+import { LocateFixed, Maximize2, Minimize2, Navigation2 } from "lucide-react";
 import { viewBounds } from "@/lib/map-bounds";
 import { PIN_COLORS, type PinType } from "@/lib/pin-results";
 import { ZipBordersLayer, ZIP_MIN_ZOOM, type ZipTint } from "@/components/ZipBorders";
@@ -166,7 +175,12 @@ function flaggedPinIcon(size = 22, hit = size) {
         <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font:700 11px/1 ui-sans-serif,system-ui;text-shadow:0 0 4px #000;">!</div>
       </div>
     </div>`;
-    return L.divIcon({ html, className: "neon-pin-flag", iconSize: [hit, hit], iconAnchor: [hit / 2, hit / 2] });
+    return L.divIcon({
+      html,
+      className: "neon-pin-flag",
+      iconSize: [hit, hit],
+      iconAnchor: [hit / 2, hit / 2],
+    });
   });
 }
 
@@ -178,14 +192,19 @@ function pulseDotIcon(color: string) {
       <div style="position:absolute;inset:5px;border-radius:9999px;background:${color};border:2px solid #fff;box-shadow:0 0 14px ${color};"></div>
     </div>`;
     return L.divIcon({
-      html, className: "neon-pin-me", iconSize: [22, 22], iconAnchor: [11, 11],
+      html,
+      className: "neon-pin-me",
+      iconSize: [22, 22],
+      iconAnchor: [11, 11],
     });
   });
 }
 
 function ClickCapture({ onClick }: { onClick: (ll: LatLng) => void }) {
   useMapEvents({
-    click(e) { onClick({ lat: e.latlng.lat, lng: e.latlng.lng }); },
+    click(e) {
+      onClick({ lat: e.latlng.lat, lng: e.latlng.lng });
+    },
   });
   return null;
 }
@@ -382,13 +401,14 @@ function InvalidateOnMount() {
     const t3 = setTimeout(run, 1000);
     window.addEventListener("resize", run);
     return () => {
-      clearTimeout(t1); clearTimeout(t2); clearTimeout(t3);
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
       window.removeEventListener("resize", run);
     };
   }, [map]);
   return null;
 }
-
 
 type Mode =
   | { kind: "view" }
@@ -424,7 +444,12 @@ function territoryLabelIcon(label: string, color: string) {
     const safe = label.replace(/[<>&"']/g, "");
     const html = `
     <div style="transform:translate(-50%,-50%);display:inline-flex;align-items:center;background:rgba(11,15,26,0.85);border:1px solid ${color};color:${color};font:700 11px/1 ui-sans-serif,system-ui;padding:4px 9px;border-radius:9999px;white-space:nowrap;box-shadow:0 0 10px color-mix(in srgb, ${color} 40%, transparent);">${safe}</div>`;
-    return L.divIcon({ html, className: "neon-territory-label", iconSize: [0, 0], iconAnchor: [0, 0] });
+    return L.divIcon({
+      html,
+      className: "neon-territory-label",
+      iconSize: [0, 0],
+      iconAnchor: [0, 0],
+    });
   });
 }
 
@@ -432,7 +457,8 @@ function territoryLabelIcon(label: string, color: string) {
 function pointInPolygon(pt: LatLng, poly: LatLng[]): boolean {
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const a = poly[i], b = poly[j];
+    const a = poly[i],
+      b = poly[j];
     if (
       a.lat > pt.lat !== b.lat > pt.lat &&
       pt.lng < ((b.lng - a.lng) * (pt.lat - a.lat)) / (b.lat - a.lat) + a.lng
@@ -450,7 +476,9 @@ function labelAnchor(polygon: LatLng[]): [number, number] {
   const c = L.latLngBounds(polygon.map((p) => [p.lat, p.lng] as [number, number])).getCenter();
   const center = { lat: c.lat, lng: c.lng };
   if (pointInPolygon(center, polygon)) return [center.lat, center.lng];
-  let area = 0, cx = 0, cy = 0;
+  let area = 0,
+    cx = 0,
+    cy = 0;
   for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
     const cross = polygon[j].lng * polygon[i].lat - polygon[i].lng * polygon[j].lat;
     area += cross;
@@ -654,6 +682,7 @@ function NeonMapInner({
   zipTints,
   onZipTap,
   crew,
+  overlay,
 }: {
   territories: Territory[];
   pins?: FieldPin[];
@@ -689,6 +718,11 @@ function NeonMapInner({
   /** Crew Map: live rep positions as pulsing avatar markers (default pane —
    *  custom panes render displaced under leaflet-rotate). */
   crew?: CrewMarker[];
+  /** Screen-owned floating controls (armed chips, piggy pill, Assign/Discard
+   *  buttons…) rendered INSIDE the map frame so they ride along into
+   *  fullscreen. Position them absolute with z-[1000] like before — a
+   *  sibling-of-NeonMap overlay gets left behind when the map goes fixed. */
+  overlay?: ReactNode;
 }) {
   const [draft, setDraft] = useState<LatLng[]>([]);
   const mapRef = useRef<L.Map | null>(null);
@@ -738,6 +772,40 @@ function NeonMapInner({
   // house bubbles) while the finger is the priority. They come right back
   // when draw mode ends.
   const drawingNow = mode.kind === "draw";
+  // Full screen = CSS takeover (fixed overlay), NOT the Fullscreen API —
+  // iPhone Safari doesn't allow element fullscreen and this app lives on
+  // phones. z-[1500] sits above page chrome and the z-30 bottom nav but
+  // below every sheet (Active Run's z-[2000] surfaces, radix z-[9999]), so
+  // house-result and draw→assign flows keep working over the expanded map.
+  const [isFull, setIsFull] = useState(false);
+  useEffect(() => {
+    // Leaflet sizes itself off the container — retile after the box jumps
+    // (InvalidateOnMount's staggered pattern; no window resize fires here).
+    const m = mapRef.current;
+    if (!m) return;
+    const run = () => m.invalidateSize();
+    run();
+    const t1 = window.setTimeout(run, 120);
+    const t2 = window.setTimeout(run, 400);
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, [isFull]);
+  useEffect(() => {
+    if (!isFull) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden"; // the page must not scroll behind the map
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsFull(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [isFull]);
+
   // Feedback for a discarded stroke — the old silent return read as "my
   // drawing didn't register".
   const [drawHint, setDrawHint] = useState<string | null>(null);
@@ -859,375 +927,438 @@ function NeonMapInner({
     setDraft([]);
   }
 
+  // Cap px heights at 65vh so short phones keep room for controls below
+  // the map; string heights (e.g. Active Run's clamp()) pass verbatim.
+  const heightCss = typeof height === "number" ? `min(${height}px, 65vh)` : height;
+
   return (
-    <div
-      className="relative rounded-lg overflow-hidden border border-[color-mix(in_oklab,var(--neon)_35%,var(--border))]"
-      style={{
-        // Cap px heights at 65vh so short phones keep room for controls below
-        // the map; string heights (e.g. Active Run's clamp()) pass verbatim.
-        height: typeof height === "number" ? `min(${height}px, 65vh)` : height,
-        boxShadow: "0 0 24px -8px color-mix(in oklab, var(--neon) 50%, transparent), inset 0 0 80px -20px color-mix(in oklab, var(--neon) 25%, transparent)",
-      }}
-    >
-      <MapContainer
-        center={[fallbackCenter.lat, fallbackCenter.lng]}
-        zoom={follow ? 17 : 13}
-        zoomControl={false}
-        // Canvas renderer: draws vector layers on a single <canvas> instead of
-        // one SVG node per shape, so the map stays smooth with thousands of
-        // polygons (e.g. the imported RepCard territory-history coverage).
-        preferCanvas
-        scrollWheelZoom
-        // leaflet-rotate: two-finger twist on phones, shift-drag on desktop
-        // (owner ask 2026-09-11: "the map does not spin"). The compass button
-        // below resets north; the plugin's own control stays off.
-        rotate
-        touchRotate
-        shiftKeyRotate
-        rotateControl={false}
-        bearing={0}
-        style={{ height: "100%", width: "100%", background: "#0b0f1a" }}
-        ref={(instance) => { mapRef.current = instance; }}
+    <>
+      {/* Spacer keeps the page layout (and scroll position) put while the
+          map floats fullscreen above it. */}
+      {isFull && <div aria-hidden style={{ height: heightCss }} />}
+      <div
+        className={
+          isFull
+            ? "fixed left-0 right-0 z-[1500] overflow-hidden bg-background"
+            : "relative rounded-lg overflow-hidden border border-[color-mix(in_oklab,var(--neon)_35%,var(--border))]"
+        }
+        style={
+          isFull
+            ? {
+                // Installed-PWA case (viewport-fit=cover): stop at the notch
+                // and home bar; plain Safari resolves these to 0 = edge to edge.
+                top: "env(safe-area-inset-top, 0px)",
+                bottom: "env(safe-area-inset-bottom, 0px)",
+              }
+            : {
+                height: heightCss,
+                boxShadow:
+                  "0 0 24px -8px color-mix(in oklab, var(--neon) 50%, transparent), inset 0 0 80px -20px color-mix(in oklab, var(--neon) 25%, transparent)",
+              }
+        }
       >
-        <TileLayer
-          attribution='&copy; Esri'
-          url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-          maxNativeZoom={19}
-          maxZoom={20}
-        />
-        {/* Street names on the imagery (Jorge's ask, 2026-09-12) — Esri's
+        <MapContainer
+          center={[fallbackCenter.lat, fallbackCenter.lng]}
+          zoom={follow ? 17 : 13}
+          zoomControl={false}
+          // Canvas renderer: draws vector layers on a single <canvas> instead of
+          // one SVG node per shape, so the map stays smooth with thousands of
+          // polygons (e.g. the imported RepCard territory-history coverage).
+          preferCanvas
+          scrollWheelZoom
+          // leaflet-rotate: two-finger twist on phones, shift-drag on desktop
+          // (owner ask 2026-09-11: "the map does not spin"). The compass button
+          // below resets north; the plugin's own control stays off.
+          rotate
+          touchRotate
+          shiftKeyRotate
+          rotateControl={false}
+          bearing={0}
+          style={{ height: "100%", width: "100%", background: "#0b0f1a" }}
+          ref={(instance) => {
+            mapRef.current = instance;
+          }}
+        >
+          <TileLayer
+            attribution="&copy; Esri"
+            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+            maxNativeZoom={19}
+            maxZoom={20}
+          />
+          {/* Street names on the imagery (Jorge's ask, 2026-09-12) — Esri's
             transportation reference layer, the standard hybrid pairing. Its
             tiles label streets progressively as you zoom in. */}
-        <TileLayer
-          url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}"
-          maxNativeZoom={19}
-          maxZoom={20}
-        />
-        <TileLayer
-          url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
-          maxNativeZoom={19}
-          maxZoom={20}
-        />
-        <InvalidateOnMount />
-        <AttributionPrefixOff />
-        <BearingWatcher onBearing={setBearing} />
-        {houseBubbles && <ZoomWatcher onZoom={setZoomLevel} />}
-        {hasDashedLabels && <ViewTracker onView={setLabelView} />}
-        <FlyTo target={flyTo} />
-        <ClickCapture onClick={handleClick} />
-        <ZipBordersLayer
-          enabled={zipsEnabled && !drawingNow}
-          tints={zipTints}
-          onZipTap={onZipTap}
-        />
-        {/* Every Tidal customer, every surface (owner 2026-09-14) — except
+          <TileLayer
+            url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}"
+            maxNativeZoom={19}
+            maxZoom={20}
+          />
+          <TileLayer
+            url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
+            maxNativeZoom={19}
+            maxZoom={20}
+          />
+          <InvalidateOnMount />
+          <AttributionPrefixOff />
+          <BearingWatcher onBearing={setBearing} />
+          {houseBubbles && <ZoomWatcher onZoom={setZoomLevel} />}
+          {hasDashedLabels && <ViewTracker onView={setLabelView} />}
+          <FlyTo target={flyTo} />
+          <ClickCapture onClick={handleClick} />
+          <ZipBordersLayer
+            enabled={zipsEnabled && !drawingNow}
+            tints={zipTints}
+            onZipTap={onZipTap}
+          />
+          {/* Every Tidal customer, every surface (owner 2026-09-14) — except
             mid-draw: the badges are DOM markers the stroke has to composite
             over, and unmounting (not just inerting) also keeps a badge tap
             from eating polygon vertices. */}
-        {!drawingNow && <CustomerHomesLayer tappable />}
-        {houseBubbles && !drawingNow && (
-          <HouseBubblesLayer enabled pins={pins} onHouseTap={onHouseTap} />
-        )}
-        {hasFit && <FitPolygons polygons={fitPolygons!} />}
-        {follow ? (
-          <>
-            <TrackingBreaker onBreak={() => setTracking(false)} />
-            <FollowMe
-              me={me}
-              tracking={tracking}
-              initialSnap={!hasFit}
-              paused={mode.kind === "draw"}
-            />
-          </>
-        ) : (
-          allPoints.length > 0 && !hasFit && <FitBounds points={allPoints} />
-        )}
-
-        {territoryRender.map(({ t, positions, pathOptions }) => {
-          // Popup mode: click opens the on-map card (below), not the sheet —
-          // the card's button opens the sheet. Otherwise keep the plain
-          // click→onTerritoryClick used by the canvasser/spectator maps.
-          const withPopup = territoryPopups && !!onTerritoryClick;
-          // "Earlier" = history minus the current assignment (usually the
-          // newest row); if currently unassigned, show all recent rows.
-          const earlier = (t.history ?? []).slice(t.currentAssignee ? 1 : 0, t.currentAssignee ? 5 : 4);
-          return (
-            <Polygon
-              key={t.id}
-              positions={positions}
-              pathOptions={pathOptions}
-              eventHandlers={
-                !withPopup && onTerritoryClick ? { click: () => onTerritoryClick(t.id) } : undefined
-              }
-            >
-              {withPopup && (
-                <Popup className="turf-popup" minWidth={190}>
-                  <div className="nm-pop-title">{t.name?.trim() || "Area"}</div>
-                  <div className="nm-pop-now">
-                    Now · <b>{t.currentAssignee ?? "Unassigned"}</b>
-                  </div>
-                  {earlier.length > 0 ? (
-                    <div className="nm-pop-hist">
-                      <div className="nm-pop-head">Earlier</div>
-                      {earlier.map((h, i) => (
-                        <div key={i} className="nm-pop-row">
-                          <span className="nm-pop-name">{h.name}</span>
-                          <span className="nm-pop-when">{h.when}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="nm-pop-empty">No earlier assignments</div>
-                  )}
-                  <button
-                    type="button"
-                    className="nm-pop-btn"
-                    onClick={() => {
-                      // Close the on-map card before the sheet takes over, so
-                      // it isn't left open behind (and after) the sheet.
-                      mapRef.current?.closePopup();
-                      onTerritoryClick!(t.id);
-                    }}
-                  >
-                    Assign / edit →
-                  </button>
-                </Popup>
-              )}
-            </Polygon>
-          );
-        })}
-
-        {visibleLabels.map((l) => (
-          <Marker
-            key={l.key}
-            position={l.anchor}
-            icon={territoryLabelIcon(l.label, l.color)}
-            interactive={false}
-          />
-        ))}
-
-        {pendingPolygon && pendingPolygon.length >= 3 && (
-          <Polygon
-            positions={pendingPolygon.map((p) => [p.lat, p.lng] as [number, number])}
-            pathOptions={{
-              color: "#ffffff",
-              weight: 2,
-              dashArray: "6 6",
-              fillColor: "#ffffff",
-              fillOpacity: 0.08,
-              interactive: false,
-            }}
-          />
-        )}
-
-        {mode.kind === "draw" && (
-          <FreehandCapture
-            onStrokeEnd={() => {
-              justDrewRef.current = Date.now();
-            }}
-            onComplete={(poly) => {
-              setDraft([]); // a committed stroke supersedes any tapped vertices
-              mode.onComplete(poly);
-            }}
-            onDiscard={() => flashDrawHint("Too small — zoom in and draw a bigger loop")}
-          />
-        )}
-
-        {mode.kind === "draw" && draft.length > 0 && (
-          <>
-            <Polygon
-              positions={draft.map((p) => [p.lat, p.lng] as [number, number])}
-              pathOptions={{
-                color: "var(--neon)" as unknown as string,
-                weight: 2,
-                dashArray: "4 6",
-                fillColor: "#39ff14",
-                fillOpacity: 0.1,
-              }}
-            />
-            {draft.map((p, i) => (
-              <Marker key={i} position={[p.lat, p.lng]} icon={glowingDotIcon("#39ff14", 12)} />
-            ))}
-          </>
-        )}
-
-        {houses.map((h) => (
-          <Marker key={h.id} position={[h.lat, h.lng]} icon={houseIcon(h.name)} />
-        ))}
-
-        {pins.map((p) => {
-          const tappable = !!onPinClick && !p.pending;
-          return (
-            <Marker
-              key={p.id}
-              position={[p.lat, p.lng]}
-              opacity={p.pending ? 0.6 : 1}
-              // Inert markers must not swallow map taps — an untappable pin
-              // would otherwise be a dead zone over the door next to it.
-              interactive={tappable}
-              eventHandlers={tappable ? { click: () => onPinClick(p.id) } : undefined}
-              icon={
-                p.is_remote_drop
-                  ? flaggedPinIcon(22, tappable ? 30 : 22)
-                  : p.pin_type === "lead"
-                    ? leadStarIcon()
-                    : glowingDotIcon(PIN_COLORS[p.pin_type], 18, tappable ? 30 : 18, p.accent ?? undefined)
-              }
-            />
-          );
-        })}
-
-        {me && <Marker position={[me.lat, me.lng]} icon={pulseDotIcon("#00e5ff")} />}
-
-        {(crew ?? []).map((c) => (
-          <Marker
-            key={`crew-${c.id}`}
-            position={[c.lat, c.lng]}
-            icon={crewAvatarIcon(c.name, c.color)}
-            // Avatars float above every pin; taps pass through — the legend
-            // chips below the map are the interaction surface.
-            zIndexOffset={1000}
-            interactive={false}
-          />
-        ))}
-      </MapContainer>
-
-      {/* Draw mode controls */}
-      {mode.kind === "draw" && (
-        <div className="absolute top-3 right-3 z-[1000] flex flex-col gap-2 text-xs">
-          <div className="rounded border border-neon/60 bg-surface/90 backdrop-blur px-3 py-2 font-display text-[10px] uppercase tracking-widest text-neon">
-            Drag to draw an area · tap for points{draft.length > 0 ? ` · ${draft.length} pts` : ""}
-          </div>
-          {drawHint && (
-            <div className="rounded border border-yellow-400/60 bg-surface/90 backdrop-blur px-3 py-2 font-display text-[10px] uppercase tracking-widest text-yellow-300">
-              {drawHint}
-            </div>
+          {!drawingNow && <CustomerHomesLayer tappable />}
+          {houseBubbles && !drawingNow && (
+            <HouseBubblesLayer enabled pins={pins} onHouseTap={onHouseTap} />
           )}
-          <div className="flex gap-2">
-            <button
-              onClick={finishDraft}
-              disabled={draft.length < 3}
-              className="flex-1 min-h-[40px] rounded bg-victory text-black font-display text-[10px] uppercase tracking-widest px-3 py-2 disabled:opacity-40"
-            >
-              Save Polygon
-            </button>
-            <button
-              onClick={() => setDraft([])}
-              className="min-h-[40px] rounded border border-border bg-surface/90 px-3 py-2 font-display text-[10px] uppercase tracking-widest"
-            >
-              Clear
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Pin mode legend — shows the armed result so a scrolled-away picker
-          can't silently mislabel a street of doors */}
-      {mode.kind === "pin" && (
-        <div className="absolute top-3 right-3 z-[1000] flex items-center gap-2 rounded border border-neon/60 bg-surface/90 backdrop-blur px-3 py-2 font-display text-[10px] uppercase tracking-widest text-neon">
-          {mode.armed ? (
+          {hasFit && <FitPolygons polygons={fitPolygons!} />}
+          {follow ? (
             <>
-              <span
-                className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
-                style={{ background: mode.armed.color, boxShadow: `0 0 8px ${mode.armed.color}` }}
+              <TrackingBreaker onBreak={() => setTracking(false)} />
+              <FollowMe
+                me={me}
+                tracking={tracking}
+                initialSnap={!hasFit}
+                paused={mode.kind === "draw"}
               />
-              Dropping: {mode.armed.label}
             </>
           ) : (
-            "Tap map to drop pin"
+            allPoints.length > 0 && !hasFit && <FitBounds points={allPoints} />
           )}
-        </div>
-      )}
 
-      {/* "Every home has a circle" only holds at door-to-door zoom — between
+          {territoryRender.map(({ t, positions, pathOptions }) => {
+            // Popup mode: click opens the on-map card (below), not the sheet —
+            // the card's button opens the sheet. Otherwise keep the plain
+            // click→onTerritoryClick used by the canvasser/spectator maps.
+            const withPopup = territoryPopups && !!onTerritoryClick;
+            // "Earlier" = history minus the current assignment (usually the
+            // newest row); if currently unassigned, show all recent rows.
+            const earlier = (t.history ?? []).slice(
+              t.currentAssignee ? 1 : 0,
+              t.currentAssignee ? 5 : 4,
+            );
+            return (
+              <Polygon
+                key={t.id}
+                positions={positions}
+                pathOptions={pathOptions}
+                eventHandlers={
+                  !withPopup && onTerritoryClick
+                    ? { click: () => onTerritoryClick(t.id) }
+                    : undefined
+                }
+              >
+                {withPopup && (
+                  <Popup className="turf-popup" minWidth={190}>
+                    <div className="nm-pop-title">{t.name?.trim() || "Area"}</div>
+                    <div className="nm-pop-now">
+                      Now · <b>{t.currentAssignee ?? "Unassigned"}</b>
+                    </div>
+                    {earlier.length > 0 ? (
+                      <div className="nm-pop-hist">
+                        <div className="nm-pop-head">Earlier</div>
+                        {earlier.map((h, i) => (
+                          <div key={i} className="nm-pop-row">
+                            <span className="nm-pop-name">{h.name}</span>
+                            <span className="nm-pop-when">{h.when}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="nm-pop-empty">No earlier assignments</div>
+                    )}
+                    <button
+                      type="button"
+                      className="nm-pop-btn"
+                      onClick={() => {
+                        // Close the on-map card before the sheet takes over, so
+                        // it isn't left open behind (and after) the sheet.
+                        mapRef.current?.closePopup();
+                        onTerritoryClick!(t.id);
+                      }}
+                    >
+                      Assign / edit →
+                    </button>
+                  </Popup>
+                )}
+              </Polygon>
+            );
+          })}
+
+          {visibleLabels.map((l) => (
+            <Marker
+              key={l.key}
+              position={l.anchor}
+              icon={territoryLabelIcon(l.label, l.color)}
+              interactive={false}
+            />
+          ))}
+
+          {pendingPolygon && pendingPolygon.length >= 3 && (
+            <Polygon
+              positions={pendingPolygon.map((p) => [p.lat, p.lng] as [number, number])}
+              pathOptions={{
+                color: "#ffffff",
+                weight: 2,
+                dashArray: "6 6",
+                fillColor: "#ffffff",
+                fillOpacity: 0.08,
+                interactive: false,
+              }}
+            />
+          )}
+
+          {mode.kind === "draw" && (
+            <FreehandCapture
+              onStrokeEnd={() => {
+                justDrewRef.current = Date.now();
+              }}
+              onComplete={(poly) => {
+                setDraft([]); // a committed stroke supersedes any tapped vertices
+                mode.onComplete(poly);
+              }}
+              onDiscard={() => flashDrawHint("Too small — zoom in and draw a bigger loop")}
+            />
+          )}
+
+          {mode.kind === "draw" && draft.length > 0 && (
+            <>
+              <Polygon
+                positions={draft.map((p) => [p.lat, p.lng] as [number, number])}
+                pathOptions={{
+                  color: "var(--neon)" as unknown as string,
+                  weight: 2,
+                  dashArray: "4 6",
+                  fillColor: "#39ff14",
+                  fillOpacity: 0.1,
+                }}
+              />
+              {draft.map((p, i) => (
+                <Marker key={i} position={[p.lat, p.lng]} icon={glowingDotIcon("#39ff14", 12)} />
+              ))}
+            </>
+          )}
+
+          {houses.map((h) => (
+            <Marker key={h.id} position={[h.lat, h.lng]} icon={houseIcon(h.name)} />
+          ))}
+
+          {pins.map((p) => {
+            const tappable = !!onPinClick && !p.pending;
+            return (
+              <Marker
+                key={p.id}
+                position={[p.lat, p.lng]}
+                opacity={p.pending ? 0.6 : 1}
+                // Inert markers must not swallow map taps — an untappable pin
+                // would otherwise be a dead zone over the door next to it.
+                interactive={tappable}
+                eventHandlers={tappable ? { click: () => onPinClick(p.id) } : undefined}
+                icon={
+                  p.is_remote_drop
+                    ? flaggedPinIcon(22, tappable ? 30 : 22)
+                    : p.pin_type === "lead"
+                      ? leadStarIcon()
+                      : glowingDotIcon(
+                          PIN_COLORS[p.pin_type],
+                          18,
+                          tappable ? 30 : 18,
+                          p.accent ?? undefined,
+                        )
+                }
+              />
+            );
+          })}
+
+          {me && <Marker position={[me.lat, me.lng]} icon={pulseDotIcon("#00e5ff")} />}
+
+          {(crew ?? []).map((c) => (
+            <Marker
+              key={`crew-${c.id}`}
+              position={[c.lat, c.lng]}
+              icon={crewAvatarIcon(c.name, c.color)}
+              // Avatars float above every pin; taps pass through — the legend
+              // chips below the map are the interaction surface.
+              zIndexOffset={1000}
+              interactive={false}
+            />
+          ))}
+        </MapContainer>
+
+        {/* Draw mode controls */}
+        {mode.kind === "draw" && (
+          <div className="absolute top-3 right-3 z-[1000] flex flex-col gap-2 text-xs">
+            <div className="rounded border border-neon/60 bg-surface/90 backdrop-blur px-3 py-2 font-display text-[10px] uppercase tracking-widest text-neon">
+              Drag to draw an area · tap for points
+              {draft.length > 0 ? ` · ${draft.length} pts` : ""}
+            </div>
+            {drawHint && (
+              <div className="rounded border border-yellow-400/60 bg-surface/90 backdrop-blur px-3 py-2 font-display text-[10px] uppercase tracking-widest text-yellow-300">
+                {drawHint}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={finishDraft}
+                disabled={draft.length < 3}
+                className="flex-1 min-h-[40px] rounded bg-victory text-black font-display text-[10px] uppercase tracking-widest px-3 py-2 disabled:opacity-40"
+              >
+                Save Polygon
+              </button>
+              <button
+                onClick={() => setDraft([])}
+                className="min-h-[40px] rounded border border-border bg-surface/90 px-3 py-2 font-display text-[10px] uppercase tracking-widest"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Pin mode legend — shows the armed result so a scrolled-away picker
+          can't silently mislabel a street of doors */}
+        {mode.kind === "pin" && (
+          <div className="absolute top-3 right-3 z-[1000] flex items-center gap-2 rounded border border-neon/60 bg-surface/90 backdrop-blur px-3 py-2 font-display text-[10px] uppercase tracking-widest text-neon">
+            {mode.armed ? (
+              <>
+                <span
+                  className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                  style={{ background: mode.armed.color, boxShadow: `0 0 8px ${mode.armed.color}` }}
+                />
+                Dropping: {mode.armed.label}
+              </>
+            ) : (
+              "Tap map to drop pin"
+            )}
+          </div>
+        )}
+
+        {/* "Every home has a circle" only holds at door-to-door zoom — between
           neighborhood browse (z14) and there, say so instead of showing a
           silently circle-less map. One tap fixes it. Bottom-center is free
           on both bubble screens (armed chips bottom-3, trophy bottom-16
           left, controls bottom-16 right). */}
-      {houseBubbles && zoomLevel != null && zoomLevel >= 14 && zoomLevel < HOUSE_MIN_ZOOM && (
-        <button
-          type="button"
-          onClick={() => mapRef.current?.setZoom(HOUSE_MIN_ZOOM)}
-          className="absolute bottom-16 left-1/2 -translate-x-1/2 z-[1000] min-h-11 rounded-full border border-neon/60 bg-surface/90 backdrop-blur px-4 font-display text-[10px] uppercase tracking-widest text-neon"
-        >
-          Zoom in for house circles
-        </button>
-      )}
-
-      {/* Map controls: compass + ZIP borders toggle + recenter, bottom-right */}
-      <div className="absolute bottom-16 right-3 z-[1000] flex flex-col items-center gap-2">
-        {/* Compass: needle tracks the bearing (two-finger twist / shift-drag
-            spins the map); tap snaps back to north. */}
-        <button
-          type="button"
-          aria-label="Reset map rotation to north"
-          title={bearing === 0 ? "Facing north — twist with two fingers to rotate" : `Rotated ${Math.round(bearing)}° — tap to face north`}
-          onClick={() => mapRef.current?.setBearing?.(0)}
-          className="flex h-11 w-11 items-center justify-center rounded-full border bg-surface/90 backdrop-blur"
-          style={
-            bearing !== 0
-              ? { color: "#ffd60a", borderColor: "#ffd60a99", boxShadow: "0 0 10px -2px #ffd60a" }
-              : { color: "var(--muted-foreground)", borderColor: "var(--border)" }
-          }
-        >
-          <span
-            className="relative flex items-center justify-center"
-            style={{ transform: `rotate(${bearing}deg)`, transition: "transform 120ms linear" }}
-          >
-            <Navigation2 className="h-5 w-5" fill="currentColor" />
-            <span
-              className="absolute -top-1.5 font-display text-[7px] leading-none"
-              aria-hidden
-            >
-              N
-            </span>
-          </span>
-        </button>
-        <button
-          type="button"
-          aria-label={zipOn ? "Hide ZIP code borders" : "Show ZIP code borders"}
-          aria-pressed={zipOn}
-          title={`ZIP code borders ${zipOn ? "on" : "off"} — visible from zoom ${ZIP_MIN_ZOOM}+`}
-          onClick={toggleZip}
-          className="flex h-11 w-11 items-center justify-center rounded-full border bg-surface/90 backdrop-blur font-display text-[10px] tracking-widest"
-          style={
-            zipOn
-              ? {
-                  color: "var(--neon)",
-                  borderColor: "color-mix(in oklab, var(--neon) 60%, var(--border))",
-                  boxShadow: "0 0 10px -2px color-mix(in oklab, var(--neon) 60%, transparent)",
-                }
-              : { color: "var(--muted-foreground)", borderColor: "var(--border)" }
-          }
-        >
-          ZIP
-        </button>
-        {/* Recenter on my location — and re-arm follow-my-dot after a browse */}
-        {me && !drawingNow && (
+        {houseBubbles && zoomLevel != null && zoomLevel >= 14 && zoomLevel < HOUSE_MIN_ZOOM && (
           <button
             type="button"
-            aria-label="Center map on my location"
-            onClick={() => {
-              const m = mapRef.current;
-              if (!m) return;
-              setTracking(true);
-              m.setView([me.lat, me.lng], Math.max(m.getZoom(), 17), { animate: true });
-            }}
-            className="flex h-11 w-11 items-center justify-center rounded-full border bg-surface/90 backdrop-blur"
-            style={
-              follow && tracking
-                ? { color: "#00e5ff", borderColor: "#00e5ff99", boxShadow: "0 0 10px -2px #00e5ff" }
-                : {
-                    color: "var(--neon)",
-                    borderColor: "color-mix(in oklab, var(--neon) 60%, var(--border))",
-                  }
-            }
+            onClick={() => mapRef.current?.setZoom(HOUSE_MIN_ZOOM)}
+            className="absolute bottom-16 left-1/2 -translate-x-1/2 z-[1000] min-h-11 rounded-full border border-neon/60 bg-surface/90 backdrop-blur px-4 font-display text-[10px] uppercase tracking-widest text-neon"
           >
-            <LocateFixed className="h-5 w-5" />
+            Zoom in for house circles
           </button>
         )}
+
+        {/* Map controls: fullscreen + compass + ZIP borders toggle + recenter,
+          bottom-right */}
+        <div className="absolute bottom-16 right-3 z-[1000] flex flex-col items-center gap-2">
+          <button
+            type="button"
+            aria-label={isFull ? "Exit full screen" : "View map full screen"}
+            aria-pressed={isFull}
+            title={isFull ? "Exit full screen" : "Full screen"}
+            onClick={() => setIsFull((f) => !f)}
+            className="flex h-11 w-11 items-center justify-center rounded-full border bg-surface/90 backdrop-blur"
+            style={
+              isFull
+                ? {
+                    color: "var(--neon)",
+                    borderColor: "color-mix(in oklab, var(--neon) 60%, var(--border))",
+                    boxShadow: "0 0 10px -2px color-mix(in oklab, var(--neon) 60%, transparent)",
+                  }
+                : { color: "var(--muted-foreground)", borderColor: "var(--border)" }
+            }
+          >
+            {isFull ? <Minimize2 className="h-5 w-5" /> : <Maximize2 className="h-5 w-5" />}
+          </button>
+          {/* Compass: needle tracks the bearing (two-finger twist / shift-drag
+            spins the map); tap snaps back to north. */}
+          <button
+            type="button"
+            aria-label="Reset map rotation to north"
+            title={
+              bearing === 0
+                ? "Facing north — twist with two fingers to rotate"
+                : `Rotated ${Math.round(bearing)}° — tap to face north`
+            }
+            onClick={() => mapRef.current?.setBearing?.(0)}
+            className="flex h-11 w-11 items-center justify-center rounded-full border bg-surface/90 backdrop-blur"
+            style={
+              bearing !== 0
+                ? { color: "#ffd60a", borderColor: "#ffd60a99", boxShadow: "0 0 10px -2px #ffd60a" }
+                : { color: "var(--muted-foreground)", borderColor: "var(--border)" }
+            }
+          >
+            <span
+              className="relative flex items-center justify-center"
+              style={{ transform: `rotate(${bearing}deg)`, transition: "transform 120ms linear" }}
+            >
+              <Navigation2 className="h-5 w-5" fill="currentColor" />
+              <span className="absolute -top-1.5 font-display text-[7px] leading-none" aria-hidden>
+                N
+              </span>
+            </span>
+          </button>
+          <button
+            type="button"
+            aria-label={zipOn ? "Hide ZIP code borders" : "Show ZIP code borders"}
+            aria-pressed={zipOn}
+            title={`ZIP code borders ${zipOn ? "on" : "off"} — visible from zoom ${ZIP_MIN_ZOOM}+`}
+            onClick={toggleZip}
+            className="flex h-11 w-11 items-center justify-center rounded-full border bg-surface/90 backdrop-blur font-display text-[10px] tracking-widest"
+            style={
+              zipOn
+                ? {
+                    color: "var(--neon)",
+                    borderColor: "color-mix(in oklab, var(--neon) 60%, var(--border))",
+                    boxShadow: "0 0 10px -2px color-mix(in oklab, var(--neon) 60%, transparent)",
+                  }
+                : { color: "var(--muted-foreground)", borderColor: "var(--border)" }
+            }
+          >
+            ZIP
+          </button>
+          {/* Recenter on my location — and re-arm follow-my-dot after a browse */}
+          {me && !drawingNow && (
+            <button
+              type="button"
+              aria-label="Center map on my location"
+              onClick={() => {
+                const m = mapRef.current;
+                if (!m) return;
+                setTracking(true);
+                m.setView([me.lat, me.lng], Math.max(m.getZoom(), 17), { animate: true });
+              }}
+              className="flex h-11 w-11 items-center justify-center rounded-full border bg-surface/90 backdrop-blur"
+              style={
+                follow && tracking
+                  ? {
+                      color: "#00e5ff",
+                      borderColor: "#00e5ff99",
+                      boxShadow: "0 0 10px -2px #00e5ff",
+                    }
+                  : {
+                      color: "var(--neon)",
+                      borderColor: "color-mix(in oklab, var(--neon) 60%, var(--border))",
+                    }
+              }
+            >
+              <LocateFixed className="h-5 w-5" />
+            </button>
+          )}
+        </div>
+
+        {/* Screen-owned floating controls — inside the frame so they follow
+          the map into fullscreen. */}
+        {overlay}
       </div>
-    </div>
+    </>
   );
 }
 

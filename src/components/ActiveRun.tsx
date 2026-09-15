@@ -445,91 +445,91 @@ export function ActiveRun({
             </ArcadePanel>
           )}
           {mapGate === "ready" && (
-            <div className="relative">
-              <NeonMap
-                territories={territories}
-                pins={pins.pinsQuery.data ?? []}
-                houses={[]}
-                me={me}
-                height="clamp(420px, 64dvh, 900px)"
-                follow
-                fitPolygons={lockPolygons}
-                houseBubbles
-                zipTints={isCaptain ? zipZones.tints : undefined}
-                onHouseTap={(h) => setHouseTarget(h)}
-                mode={{
-                  kind: "pin",
-                  onDrop: (ll: LatLng) => pins.guardedMapDrop(ll, active),
-                  armed: armedResult
-                    ? { label: armedResult.label, color: armedResult.color }
-                    : undefined,
-                }}
-                onPinClick={(id) => setEditingPinId(id)}
-              />
+            <NeonMap
+              territories={territories}
+              pins={pins.pinsQuery.data ?? []}
+              houses={[]}
+              me={me}
+              height="clamp(420px, 64dvh, 900px)"
+              follow
+              fitPolygons={lockPolygons}
+              houseBubbles
+              zipTints={isCaptain ? zipZones.tints : undefined}
+              onHouseTap={(h) => setHouseTarget(h)}
+              mode={{
+                kind: "pin",
+                onDrop: (ll: LatLng) => pins.guardedMapDrop(ll, active),
+                armed: armedResult
+                  ? { label: armedResult.label, color: armedResult.color }
+                  : undefined,
+              }}
+              onPinClick={(id) => setEditingPinId(id)}
+              // Inside the map frame (not siblings) so piggy/trophy/chips
+              // ride along when the map goes fullscreen.
+              overlay={
+                <>
+                  {/* Piggy bank — every knock is worth money, watch it stack */}
+                  <div data-tour="field-bank" className="absolute top-3 left-3 z-[1000]">
+                    <PiggyBankHUD
+                      dollars={piggy.dollars}
+                      perKnock={piggy.perKnock}
+                      knocks={piggy.knocks}
+                      paceKnocks={piggy.paceKnocks}
+                      source={piggy.source}
+                      demo={piggyDemo.on}
+                      demoRateMs={piggyDemo.rateMs}
+                      celebrate={piggyCelebrate}
+                    />
+                  </div>
 
-              {/* Piggy bank — every knock is worth money, watch it stack */}
-              <div data-tour="field-bank" className="absolute top-3 left-3 z-[1000]">
-                <PiggyBankHUD
-                  dollars={piggy.dollars}
-                  perKnock={piggy.perKnock}
-                  knocks={piggy.knocks}
-                  paceKnocks={piggy.paceKnocks}
-                  source={piggy.source}
-                  demo={piggyDemo.on}
-                  demoRateMs={piggyDemo.rateMs}
-                  celebrate={piggyCelebrate}
-                />
-              </div>
+                  {/* Standings — the video app's leaderboard, one tap from the map */}
+                  <button
+                    type="button"
+                    data-tour="field-standings"
+                    aria-label="Open standings"
+                    onClick={() => setStandingsOpen(true)}
+                    className="absolute bottom-16 left-3 z-[1000] flex h-11 w-11 items-center justify-center rounded-full border border-neon/60 bg-surface/90 backdrop-blur text-neon"
+                  >
+                    <Trophy className="h-5 w-5" />
+                  </button>
 
-              {/* Standings — the video app's leaderboard, one tap from the map */}
-              <button
-                type="button"
-                data-tour="field-standings"
-                aria-label="Open standings"
-                onClick={() => setStandingsOpen(true)}
-                className="absolute bottom-16 left-3 z-[1000] flex h-11 w-11 items-center justify-center rounded-full border border-neon/60 bg-surface/90 backdrop-blur text-neon"
-              >
-                <Trophy className="h-5 w-5" />
-              </button>
-
-              {/* Armed-result switcher pinned to the map — the ONE picker
+                  {/* Armed-result switcher pinned to the map — the ONE picker
                     (the old page's duplicate grid is gone with the merge) */}
-              <div
-                data-tour="field-chips"
-                className="absolute bottom-3 left-1/2 -translate-x-1/2 z-[1000] flex items-center gap-1.5 rounded-full border border-border bg-surface/90 backdrop-blur px-2 py-1.5"
-              >
-                {ARMED_RESULTS.map((r) => {
-                  const isArmed = active === r.type;
-                  return (
-                    <button
-                      key={r.type}
-                      type="button"
-                      aria-label={`${r.fullLabel} — arm this result`}
-                      onClick={() => setActive(r.type)}
-                      className="relative flex min-h-11 w-16 flex-col items-center justify-center gap-1 rounded-xl py-1.5"
-                      style={{
-                        color: r.color,
-                        background: isArmed
-                          ? `color-mix(in oklab, ${r.color} 22%, var(--surface))`
-                          : "transparent",
-                        boxShadow: isArmed
-                          ? `0 0 0 2px ${r.color}, 0 0 14px -2px ${r.color}`
-                          : "none",
-                      }}
-                    >
-                      {r.icon}
-                      <span className="font-display text-[7px] uppercase tracking-wide leading-none whitespace-nowrap">
-                        {r.chipLabel}
-                      </span>
-                      <BumpBadge
-                        count={pins.counts[r.type] ?? 0}
-                        color={r.color}
-                      />
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+                  <div
+                    data-tour="field-chips"
+                    className="absolute bottom-3 left-1/2 -translate-x-1/2 z-[1000] flex items-center gap-1.5 rounded-full border border-border bg-surface/90 backdrop-blur px-2 py-1.5"
+                  >
+                    {ARMED_RESULTS.map((r) => {
+                      const isArmed = active === r.type;
+                      return (
+                        <button
+                          key={r.type}
+                          type="button"
+                          aria-label={`${r.fullLabel} — arm this result`}
+                          onClick={() => setActive(r.type)}
+                          className="relative flex min-h-11 w-16 flex-col items-center justify-center gap-1 rounded-xl py-1.5"
+                          style={{
+                            color: r.color,
+                            background: isArmed
+                              ? `color-mix(in oklab, ${r.color} 22%, var(--surface))`
+                              : "transparent",
+                            boxShadow: isArmed
+                              ? `0 0 0 2px ${r.color}, 0 0 14px -2px ${r.color}`
+                              : "none",
+                          }}
+                        >
+                          {r.icon}
+                          <span className="font-display text-[7px] uppercase tracking-wide leading-none whitespace-nowrap">
+                            {r.chipLabel}
+                          </span>
+                          <BumpBadge count={pins.counts[r.type] ?? 0} color={r.color} />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              }
+            />
           )}
         </div>
 
