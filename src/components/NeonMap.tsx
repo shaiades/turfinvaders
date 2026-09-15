@@ -1,4 +1,4 @@
-import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Component, Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   MapContainer,
   TileLayer,
@@ -961,6 +961,11 @@ function NeonMapInner({
           center={[fallbackCenter.lat, fallbackCenter.lng]}
           zoom={follow ? 17 : 13}
           zoomControl={false}
+          // Stock shift-drag box-zoom FIGHTS leaflet-rotate's shiftKeyRotate
+          // for the same gesture — both enabled, a shift-drag box-zoomed and
+          // spun at once and could fling the panes thousands of px off-screen
+          // (the "map went black" report). Rotation owns shift-drag.
+          boxZoom={false}
           // Canvas renderer: draws vector layers on a single <canvas> instead of
           // one SVG node per shape, so the map stays smooth with thousands of
           // polygons (e.g. the imported RepCard territory-history coverage).
@@ -1399,11 +1404,10 @@ class MapCrashBoundary extends Component<
         </div>
       );
     }
-    return (
-      <div key={this.state.attempt} className="contents">
-        {this.props.children}
-      </div>
-    );
+    // Keyed Fragment, NOT a display:contents div — an extra wrapper element
+    // around the map broke leaflet-rotate's gesture math (rotate flung the
+    // panes thousands of px off-screen: the "map went black" report).
+    return <Fragment key={this.state.attempt}>{this.props.children}</Fragment>;
   }
 }
 

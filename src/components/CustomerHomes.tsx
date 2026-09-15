@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Marker, Popup, useMap } from "react-leaflet";
+import { CircleMarker, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -182,6 +182,16 @@ function customerBadgeIcon(size: number, hit: number): L.DivIcon {
  *  "off-frame", never a random hole. */
 const RENDER_CAP = 350;
 
+/** Below this zoom the DOM logo badges give way to canvas dots. */
+const BADGE_MIN_ZOOM = 13;
+/** Badge palette, reused by the far-zoom dots so they read as the same layer. */
+const DOT_STYLE = {
+  color: "#12283a",
+  weight: 1.5,
+  fillColor: "#f5f7fa",
+  fillOpacity: 0.95,
+} as const;
+
 export function CustomerHomesLayer({ tappable = true }: { tappable?: boolean }) {
   const map = useMap();
   const { data } = useCustomerHomes();
@@ -200,8 +210,21 @@ export function CustomerHomesLayer({ tappable = true }: { tappable?: boolean }) 
 
   const badges = useMemo(() => groupByHouse(data ?? []), [data]);
 
+  const zoom = view?.zoom ?? 13;
+  // Wide zooms draw EVERY in-frame customer as a canvas dot: the county view
+  // used to trim to the 350 center-nearest DOM badges, which read as "my
+  // previous sales are missing". Dots are vectors on the shared canvas
+  // renderer, so thousands cost nothing and no cap is needed.
+  const dotsMode = zoom < BADGE_MIN_ZOOM;
+
+  const dotVisible = useMemo(() => {
+    if (!dotsMode || !view || badges.length === 0) return [] as CustomerBadge[];
+    const frame = view.bounds.pad(0.15);
+    return badges.filter((b) => frame.contains([b.lat, b.lng] as [number, number]));
+  }, [dotsMode, badges, view]);
+
   const visible = useMemo(() => {
-    if (!view || badges.length === 0) return [] as CustomerBadge[];
+    if (dotsMode || !view || badges.length === 0) return [] as CustomerBadge[];
     const frame = view.bounds.pad(0.15);
     const inFrame = badges.filter((b) => frame.contains([b.lat, b.lng] as [number, number]));
     if (inFrame.length <= RENDER_CAP) return inFrame;
@@ -213,10 +236,27 @@ export function CustomerHomesLayer({ tappable = true }: { tappable?: boolean }) 
       return dy * dy + dx * dx;
     };
     return inFrame.sort((a, b) => d2(a) - d2(b)).slice(0, RENDER_CAP);
-  }, [badges, view]);
+  }, [dotsMode, badges, view]);
+
+  if (dotsMode) {
+    if (dotVisible.length === 0) return null;
+    const radius = zoom >= 11 ? 4 : 3;
+    return (
+      <>
+        {dotVisible.map((b) => (
+          <CircleMarker
+            key={b.key}
+            center={[b.lat, b.lng]}
+            radius={radius}
+            pathOptions={DOT_STYLE}
+            interactive={false}
+          />
+        ))}
+      </>
+    );
+  }
 
   if (visible.length === 0) return null;
-  const zoom = view?.zoom ?? 13;
   // Sized to the house-bubble result circle (26px — owner 2026-09-15:
   // "replace the circle where the results go with that logo, that's the
   // size"), shrinking further as the map zooms out. The hit box stays
