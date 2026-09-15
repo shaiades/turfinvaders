@@ -16,6 +16,8 @@ import { useZipTints } from "@/hooks/useZipAssignments";
 import { dailyLogKeys } from "@/hooks/useDailyLogs";
 import { PiggyBankHUD } from "@/components/PiggyBankHUD";
 import { BumpBadge } from "@/components/BumpBadge";
+import { LeadStrikeFx } from "@/components/LeadStrikeFx";
+import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { GratitudeGate, hasPassedGratitudeGate } from "@/components/GratitudeGate";
 import { NeonMap, type Territory, type LatLng } from "@/components/NeonMap";
@@ -195,10 +197,23 @@ export function ActiveRun({
     null,
   );
   const piggyAtLeadOpenRef = useRef<number | null>(null);
+  // Lead-strike cutscene: the 2.2s Doorstep Finisher plays full-screen AFTER
+  // the LeadSheet closes on a detected submit, THEN hands off to
+  // piggyCelebrate + rewardToast (sonner's z-999999999 and the map-layer
+  // coins would both fight the overlay if fired concurrently). `dollars`
+  // freezes the close-time measured delta so onDone never re-reads live
+  // piggy state (a late-settling pin would double-count vs the knock-coin).
+  const prefersReducedMotion = usePrefersReducedMotion();
+  const [leadStrike, setLeadStrike] = useState<{ seq: number; dollars: number } | null>(null);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("piggy_demo") === "1") {
       setPiggyDemo({ on: true, rateMs: Number(params.get("piggy_rate")) || undefined });
+    }
+    // ?lead_strike_demo=1 screens the cutscene with zero DB traffic
+    // (piggy_demo precedent — parsed post-mount, this route SSRs).
+    if (params.get("lead_strike_demo") === "1") {
+      setLeadStrike({ seq: 1, dollars: 0 });
     }
   }, []);
 
@@ -582,16 +597,36 @@ export function ActiveRun({
               } catch {
                 /* unsupported */
               }
-              // Replay the coin win now that the map is visible again. If the
-              // background pin hadn't settled by close, delta is 0 and the
-              // late knock-coin carries the $ instead — no double count.
+              // Measured across the sheet — if the background pin hadn't
+              // settled by close, delta is 0 and the late knock-coin carries
+              // the $ instead (no double count).
               const delta =
                 piggy.dollars !== null && piggyAtLeadOpenRef.current !== null
                   ? Math.max(0, piggy.dollars - piggyAtLeadOpenRef.current)
                   : 0;
-              setPiggyCelebrate((c) => ({ seq: (c?.seq ?? 0) + 1, dollars: delta }));
-              rewardToast("⚡ Lead submitted — it's on the board!", { vibrate: false });
+              if (prefersReducedMotion) {
+                // No cutscene — the reward still lands, exactly as before.
+                setPiggyCelebrate((c) => ({ seq: (c?.seq ?? 0) + 1, dollars: delta }));
+                rewardToast("⚡ Lead submitted — it's on the board!", { vibrate: false });
+              } else {
+                // Doorstep Finisher first; coins + toast fire from onDone.
+                setLeadStrike((s) => ({ seq: (s?.seq ?? 0) + 1, dollars: delta }));
+              }
             }
+          }}
+        />
+      )}
+
+      {/* Doorstep Finisher — plays over the returned map; on done the coin
+          burst + gold toast land as the receipt. key={seq} guarantees a
+          fresh timeline on rapid re-submits; demo: ?lead_strike_demo=1. */}
+      {leadStrike && (
+        <LeadStrikeFx
+          key={leadStrike.seq}
+          onDone={() => {
+            setLeadStrike(null);
+            setPiggyCelebrate((c) => ({ seq: (c?.seq ?? 0) + 1, dollars: leadStrike.dollars }));
+            rewardToast("⚡ Lead submitted — it's on the board!", { vibrate: false });
           }}
         />
       )}
