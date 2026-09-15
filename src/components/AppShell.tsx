@@ -12,9 +12,10 @@ import {
 import { useSwipeNav } from "@/hooks/useSwipeNav";
 import { CanvasserHUD } from "@/components/CanvasserHUD";
 import { CrewBeacon } from "@/components/CrewBeacon";
+import { LeadConfirmedCelebration } from "@/components/LeadConfirmedCelebration";
 import { AppMenu } from "@/components/AppMenu";
 import { CanvasserTutorial, startCanvasserTutorial } from "@/components/tutorial/CanvasserTutorial";
-import { WelcomeAnimation } from "@/components/WelcomeAnimation";
+import { WelcomeAnimation, isWelcomeAnimationForced } from "@/components/WelcomeAnimation";
 import { CloseKombatIntro, isCloseKombatIntroForced } from "@/components/CloseKombatIntro";
 import { CLOSE_KOMBAT_ROLES, ROLE_LABEL, canUseViewAs, privilegeRole } from "@/lib/roles";
 import {
@@ -438,6 +439,12 @@ export function AppShell({ children }: { children: ReactNode }) {
       {/* App-wide crew-live publisher — self-gated (field tiers, real role,
           GPS already granted). Renders nothing. */}
       <CrewBeacon />
+      {/* Lead-confirmed celebration — realtime INSERT on lead_events, gated to
+          canvasser+captain. Renders nothing; fires confetti + toast + beep on
+          the payoff moment (desk or Monday confirms). Demo: ?lead_confirm_demo=1 */}
+      {user && (role === "canvasser" || role === "captain") && (
+        <LeadConfirmedCelebration userId={user.id} />
+      )}
       <main
         className={`flex-1 max-w-7xl w-full min-w-0 mx-auto px-4 sm:px-6 py-4 md:py-8 md:pb-8 ${
           user && navItems.length > 1 ? "pb-28" : "pb-8"
@@ -492,6 +499,12 @@ export function AppShell({ children }: { children: ReactNode }) {
           `?ck_anim=1` previews the kick from any account, `?welcome_anim=1`
           still previews the van from non-rep accounts. */}
       {user &&
+        // Wait for a role: a brand-new account used to burn its once-ever
+        // intro in the role-less waiting room, then get hard-reloaded into
+        // the real app with the flag already spent. Now the intro plays on
+        // the first load of the app they'll actually use. Forced previews
+        // stay available to role-less accounts.
+        (realRole !== null || isCloseKombatIntroForced() || isWelcomeAnimationForced()) &&
         // Gate on the REAL role: an owner previewing View As → Sales Rep used
         // to trigger a non-forced playback that burned the owner's own
         // ti_ck_intro flag (rep audit). Previews go through ?ck_anim=1,

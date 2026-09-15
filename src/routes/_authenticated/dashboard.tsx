@@ -45,11 +45,6 @@ import { TimeClock } from "@/components/TimeClock";
 import { TimeClockReviewQueue } from "@/components/TimeClockReviewQueue";
 import { PushAlertsCard } from "@/components/PushAlertsCard";
 import { FormerBadge } from "@/components/FormerBadge";
-import {
-  SuspendedBadge,
-  useCanvasserStatuses,
-  isSuspendedStatus,
-} from "@/components/SuspendedBadge";
 import { useTodayLeads } from "@/hooks/useTodayLeads";
 import { useDateRange } from "@/hooks/useDateRange";
 import { RangeTabs } from "@/components/RangeTabs";

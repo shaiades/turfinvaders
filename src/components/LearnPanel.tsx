@@ -4,6 +4,7 @@ import { ArcadePanel } from "@/components/arcade";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ObjectionDojo } from "@/components/ObjectionDojo";
+import { useAuth } from "@/hooks/useAuth";
 import {
   CATEGORY_LABEL,
   TRAINING_VIDEOS,
@@ -12,7 +13,7 @@ import {
   type Transcript,
   type TrainingVideo,
 } from "@/data/training-videos";
-import { Clapperboard, PlayCircle, ScrollText, Search, X } from "lucide-react";
+import { Clapperboard, PlayCircle, ScrollText, Search, Sparkles, X } from "lucide-react";
 
 /**
  * The Learn page (own bottom-bar tab for canvassers since 2026-09-08): the
@@ -56,6 +57,7 @@ function useTranscripts() {
 }
 
 export function LearnPanel() {
+  const { role } = useAuth();
   const transcripts = useTranscripts();
   const [query, setQuery] = useState("");
   const [player, setPlayer] = useState<{ video: TrainingVideo; start: number } | null>(null);
@@ -233,6 +235,27 @@ export function LearnPanel() {
           ))}
         </div>
       </div>
+
+      {role === "canvasser" && (
+        <button
+          type="button"
+          onClick={() => {
+            const search = window.location.search.includes("welcome_anim=1")
+              ? window.location.search
+              : "?welcome_anim=1";
+            window.location.assign(window.location.pathname + search);
+          }}
+          className="w-full text-left relative overflow-hidden rounded-xl border-2 border-[color-mix(in_oklab,var(--victory)_50%,transparent)] bg-[linear-gradient(140deg,color-mix(in_oklab,var(--victory)_8%,var(--surface)),color-mix(in_oklab,var(--victory)_4%,var(--surface)))] p-6 hover:opacity-95 transition"
+        >
+          <div className="flex items-center gap-2 text-[10px] font-display uppercase tracking-widest text-victory">
+            <Sparkles className="w-3.5 h-3.5" /> First Impressions
+          </div>
+          <div className="mt-2 font-display text-xl text-foreground">Replay the intro</div>
+          <div className="mt-2 text-xs text-muted-foreground">
+            The first-day welcome scene — your door-knock moment, set to music
+          </div>
+        </button>
+      )}
 
       <div data-tour="learn-dojo">
         <ObjectionDojo />

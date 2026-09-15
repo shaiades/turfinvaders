@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
+import { useCountUp } from "@/hooks/useCountUp";
 
 type Size = "sm" | "md" | "lg";
 
@@ -27,38 +27,8 @@ export function LiveLeadCounter({
   accent?: "neon" | "victory" | "warning";
 }) {
   const cfg = SIZES[size];
-  const [display, setDisplay] = useState(value);
-  const prevRef = useRef(value);
-  const [bump, setBump] = useState(false);
-
-  useEffect(() => {
-    const from = prevRef.current;
-    const to = value;
-    if (from === to) return;
-    prevRef.current = to;
-
-    // Tick up/down with quick ease.
-    const start = performance.now();
-    const duration = Math.min(800, 120 + Math.abs(to - from) * 18);
-    let raf = 0;
-    const step = (now: number) => {
-      const t = Math.min(1, (now - start) / duration);
-      const eased = 1 - Math.pow(1 - t, 3);
-      setDisplay(Math.round(from + (to - from) * eased));
-      if (t < 1) raf = requestAnimationFrame(step);
-    };
-    raf = requestAnimationFrame(step);
-
-    if (to > from) {
-      setBump(true);
-      const id = window.setTimeout(() => setBump(false), 320);
-      return () => {
-        cancelAnimationFrame(raf);
-        window.clearTimeout(id);
-      };
-    }
-    return () => cancelAnimationFrame(raf);
-  }, [value]);
+  // Tick up/down with quick ease + increase-only bump (shared hook).
+  const { display, bump } = useCountUp(value);
 
   const padded = String(Math.max(0, Math.floor(display))).padStart(cfg.pad, "0");
   const accentColor =

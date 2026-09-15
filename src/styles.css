@@ -204,11 +204,6 @@
       0 0 36px 2px color-mix(in oklab, var(--destructive) 90%, transparent);
   }
 }
-@utility suspended-glow {
-  animation: suspend-pulse 1.4s ease-in-out infinite;
-  border-color: var(--destructive);
-  color: var(--destructive);
-}
 @keyframes neon-mega-pulse {
   0%,
   100% {
@@ -265,72 +260,6 @@
 .arcade-btn-3d:disabled {
   opacity: 0.7;
   cursor: not-allowed;
-}
-
-/* Neon arcade key — dark faceplate with a colored rim-light, icon chip, and
- * glowing score readout (Active Run tally keys, 2026-09-10 polish). The color
- * lives in the rim/icon/count instead of a filled slab, so the keys sit in
- * the same dark-arcade idiom as the rest of the shell. Same --btn-color API
- * as arcade-btn-3d (which the TimeClock punch buttons and the Submit New
- * Lead CTA keep — a filled key stays the "big yes" affordance). */
-@utility arcade-key {
-  position: relative;
-  overflow: hidden;
-  border-radius: 1rem;
-  border: 1.5px solid color-mix(in oklab, var(--btn-color, var(--neon)) 50%, var(--border));
-  background: linear-gradient(
-    180deg,
-    color-mix(in oklab, var(--btn-color, var(--neon)) 14%, var(--surface-elevated)) 0%,
-    color-mix(in oklab, var(--btn-color, var(--neon)) 6%, var(--surface)) 55%,
-    color-mix(in oklab, var(--btn-color, var(--neon)) 3%, var(--surface)) 100%
-  );
-  color: var(--foreground);
-  box-shadow:
-    0 5px 0 0 color-mix(in oklab, var(--btn-color, var(--neon)) 22%, oklch(0.13 0.02 270)),
-    0 12px 26px -10px color-mix(in oklab, var(--btn-color, var(--neon)) 50%, transparent),
-    inset 0 1px 0 color-mix(in oklab, white 14%, transparent),
-    inset 0 0 30px -14px color-mix(in oklab, var(--btn-color, var(--neon)) 55%, transparent);
-  transition:
-    transform 90ms ease,
-    box-shadow 90ms ease,
-    filter 120ms ease;
-  will-change: transform;
-}
-.arcade-key:hover {
-  filter: brightness(1.1);
-}
-.arcade-key:active {
-  transform: translateY(3px);
-  box-shadow:
-    0 2px 0 0 color-mix(in oklab, var(--btn-color, var(--neon)) 22%, oklch(0.13 0.02 270)),
-    0 5px 14px -8px color-mix(in oklab, var(--btn-color, var(--neon)) 50%, transparent),
-    inset 0 1px 0 color-mix(in oklab, white 8%, transparent),
-    inset 0 0 30px -12px color-mix(in oklab, var(--btn-color, var(--neon)) 65%, transparent);
-}
-.arcade-key:disabled {
-  opacity: 0.65;
-  cursor: not-allowed;
-}
-
-/* Sub-parts: colored icon chip + glowing tabular readout. */
-@utility arcade-key-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  border-radius: 0.625rem;
-  color: var(--btn-color, var(--neon));
-  background: color-mix(in oklab, var(--btn-color, var(--neon)) 16%, transparent);
-  border: 1px solid color-mix(in oklab, var(--btn-color, var(--neon)) 40%, transparent);
-  box-shadow: 0 0 16px -6px color-mix(in oklab, var(--btn-color, var(--neon)) 70%, transparent);
-}
-@utility arcade-key-count {
-  font-family: var(--font-display);
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-  color: var(--btn-color, var(--neon));
-  text-shadow: 0 0 14px color-mix(in oklab, var(--btn-color, var(--neon)) 60%, transparent);
 }
 
 @utility timer-display {
@@ -400,15 +329,26 @@
     box-shadow 150ms ease,
     transform 150ms ease;
 }
-/* Glowing green points badge */
-@utility points-badge-glow {
-  color: var(--victory);
-  background: color-mix(in oklab, var(--victory) 12%, transparent);
-  border: 1px solid color-mix(in oklab, var(--victory) 45%, transparent);
-  border-radius: 999px;
-  padding: 1px 8px;
-  box-shadow: 0 0 10px color-mix(in oklab, var(--victory) 45%, transparent);
-  text-shadow: 0 0 8px color-mix(in oklab, var(--victory) 60%, transparent);
+/* Fresh doughnut — one zero day, still warm; a gentle hop next to the
+   static freezer marker below (daily-wrap's "fresh doughnut" list). */
+@keyframes doughnut-bounce {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  40% {
+    transform: translateY(-5px);
+  }
+  60% {
+    transform: translateY(-2px);
+  }
+}
+@utility bouncing-doughnut {
+  display: inline-block;
+  animation: doughnut-bounce 1.4s ease-in-out infinite;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
 }
 
 /* Static doughnut marker — no animation to avoid motion fatigue */
@@ -695,4 +635,66 @@
 .leaflet-control-attribution a {
   color: inherit !important;
   text-decoration: none !important;
+}
+
+/* ── Sonner reskin ─────────────────────────────────────────────────────
+   Plain classes on purpose (sonner receives them as strings — an @utility
+   here would be invisible to Tailwind's content scan). !important beats
+   sonner's inline --normal-bg/--border-radius styling. */
+.arcade-toast {
+  border-radius: var(--radius-lg) !important;
+  border-color: color-mix(in oklab, var(--neon) 30%, var(--border)) !important;
+  box-shadow:
+    0 0 20px -6px color-mix(in oklab, var(--neon) 40%, transparent),
+    0 8px 24px -12px rgb(0 0 0 / 0.6) !important;
+}
+/* The gold "you EARNED this" look — KA-CHING, lead submitted, clock-in.
+   Layered by rewardToast(); everything else keeps plain sonner. */
+.reward-toast {
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--kombat-gold) 22%, var(--surface)) 0%,
+    var(--surface) 100%
+  ) !important;
+  border: 1.5px solid var(--kombat-gold) !important;
+  color: var(--kombat-gold) !important;
+  font-family: var(--font-display);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--kombat-gold) 35%, transparent),
+    0 0 28px -4px color-mix(in oklab, var(--kombat-gold) 65%, transparent) !important;
+  text-shadow: 0 0 10px color-mix(in oklab, var(--kombat-gold) 70%, transparent);
+}
+.reward-toast [data-description] {
+  color: var(--muted-foreground);
+  font-family: var(--font-sans);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+/* KA-CHING hero spike — two beats of gold, then done. A one-shot celebration
+   (the old animate-pulse read as a loading skeleton, not a sale landing). */
+@keyframes kombat-kaching {
+  0% {
+    box-shadow: 0 0 0 0 transparent;
+    filter: brightness(1);
+  }
+  20% {
+    box-shadow:
+      0 0 0 3px var(--kombat-gold),
+      0 0 42px 4px color-mix(in oklab, var(--kombat-gold) 60%, transparent);
+    filter: brightness(1.18);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+    filter: brightness(1);
+  }
+}
+@utility kombat-kaching {
+  animation: kombat-kaching 1.2s ease-out 2;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
 }

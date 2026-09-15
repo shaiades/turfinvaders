@@ -1,6 +1,8 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { PiggyBank as PiggyBankIcon } from "lucide-react";
 import { cn, formatCurrency } from "@/lib/utils";
+import { useCountUp } from "@/hooks/useCountUp";
+import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { clamp01, drawCoin, easeInOut, makeBeeper, popText } from "./intro-fx";
 
 /**
@@ -70,59 +72,6 @@ const fmtCents = (n: number) => n.toLocaleString("en-US", { style: "currency", c
 const fmtBank = (n: number) =>
   n >= 10_000 ? `$${Math.round(n / 1000)}K` : formatCurrency(Math.round(n));
 
-function usePrefersReducedMotion() {
-  const [reduced, setReduced] = useState(
-    () =>
-      typeof window !== "undefined" &&
-      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true,
-  );
-  useEffect(() => {
-    const mq = window.matchMedia?.("(prefers-reduced-motion: reduce)");
-    if (!mq) return;
-    const onChange = () => setReduced(mq.matches);
-    mq.addEventListener?.("change", onChange);
-    return () => mq.removeEventListener?.("change", onChange);
-  }, []);
-  return reduced;
-}
-
-/** LiveLeadCounter's tick, minus the digit tiles — one text run. */
-function useCountUp(value: number, instant: boolean) {
-  const [display, setDisplay] = useState(value);
-  const [bump, setBump] = useState(false);
-  const prevRef = useRef(value);
-  useEffect(() => {
-    const from = prevRef.current;
-    const to = value;
-    if (from === to) return;
-    prevRef.current = to;
-    if (instant) {
-      setDisplay(to);
-      return;
-    }
-    const start = performance.now();
-    const duration = Math.min(800, 120 + Math.abs(to - from) * 18);
-    let raf = 0;
-    const step = (now: number) => {
-      const t = Math.min(1, (now - start) / duration);
-      const eased = 1 - Math.pow(1 - t, 3);
-      setDisplay(from + (to - from) * eased);
-      if (t < 1) raf = requestAnimationFrame(step);
-    };
-    raf = requestAnimationFrame(step);
-    if (to > from) {
-      setBump(true);
-      const id = window.setTimeout(() => setBump(false), 320);
-      return () => {
-        cancelAnimationFrame(raf);
-        window.clearTimeout(id);
-      };
-    }
-    return () => cancelAnimationFrame(raf);
-  }, [value, instant]);
-  return { display, bump };
-}
-
 function PigFill({
   pct,
   bump,
@@ -179,6 +128,7 @@ export const PiggyBankHUD = memo(function PiggyBankHUD({
   variant = "map",
   demo = false,
   demoRateMs,
+  celebrate = null,
   className,
 }: {
   dollars: number | null;
@@ -191,6 +141,11 @@ export const PiggyBankHUD = memo(function PiggyBankHUD({
   /** Preview driver (?piggy_demo=1) — fakes knocks locally, writes nothing. */
   demo?: boolean;
   demoRateMs?: number;
+  /** Bump `seq` to replay a coin burst on demand — the lead pin's own coin
+   *  plays behind the LeadSheet overlay, so ActiveRun re-fires it here when
+   *  the sheet closes. `dollars` is the measured piggy delta (0 → coins
+   *  only, no floater — never a fabricated number). */
+  celebrate?: { seq: number; dollars: number } | null;
   className?: string;
 }) {
   const reduced = usePrefersReducedMotion();
@@ -371,6 +326,15 @@ export const PiggyBankHUD = memo(function PiggyBankHUD({
     if (delta <= 0) return;
     enqueueCoins(delta, perKnockEff !== null ? delta * perKnockEff : 0);
   }, [kn, perKnockEff, enqueueCoins]);
+
+  // On-demand burst (lead submitted) — see the `celebrate` prop doc.
+  const prevCelebrateRef = useRef(0);
+  useEffect(() => {
+    const seq = celebrate?.seq ?? 0;
+    if (seq === prevCelebrateRef.current) return;
+    prevCelebrateRef.current = seq;
+    enqueueCoins(4, celebrate?.dollars ?? 0); // reduced-motion gate inside
+  }, [celebrate, enqueueCoins]);
 
   // $100 bucket rollover → one-time flare + a small coin fountain.
   const prevBucketRef = useRef<number | null>(null);

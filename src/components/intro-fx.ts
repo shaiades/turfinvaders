@@ -104,13 +104,37 @@ export function drawCoin(ctx: CanvasRenderingContext2D, r: number) {
   ctx.stroke();
 }
 
-/** Best-effort bleeps — silent unless the AudioContext is already allowed. */
+/** Best-effort bleeps. iOS Safari starts AudioContexts suspended outside a
+ *  gesture handler, so a blocked beep arms a one-time pointerdown unlock —
+ *  creating/resuming the context INSIDE the next tap — instead of staying
+ *  silent forever (the piggy ka-ching fires ~550ms after the tap, well
+ *  outside the gesture window, which is why the unlock rides its own tap). */
 export function makeBeeper() {
   let ctx: AudioContext | null = null;
+  let unlockArmed = false;
+  const armUnlock = () => {
+    if (unlockArmed || typeof window === "undefined") return;
+    unlockArmed = true;
+    window.addEventListener(
+      "pointerdown",
+      () => {
+        try {
+          ctx ??= new AudioContext();
+          if (ctx.state !== "running") void ctx.resume().catch(() => {});
+        } catch {
+          /* audio is a garnish — never let it break anything */
+        }
+      },
+      { once: true, capture: true, passive: true },
+    );
+  };
   return (freq: number, durMs: number, delayMs = 0, type: OscillatorType = "square") => {
     try {
       ctx ??= new AudioContext();
-      if (ctx.state !== "running") return;
+      if (ctx.state !== "running") {
+        armUnlock(); // silent now; the next tap anywhere unlocks the context
+        return;
+      }
       const t0 = ctx.currentTime + delayMs / 1000;
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();

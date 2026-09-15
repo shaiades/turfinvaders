@@ -52,6 +52,9 @@ import { getKombatSyncInfo, syncBlockCards } from "@/lib/close-kombat.functions"
 import { GlossarySheet, type GlossarySections } from "@/components/GlossarySheet";
 import { PushAlertsCard } from "@/components/PushAlertsCard";
 import { toast } from "sonner";
+import { rewardToast } from "@/lib/reward-toast";
+import { useCountUp } from "@/hooks/useCountUp";
+import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import {
   ChevronDown,
   ChevronLeft,
@@ -493,7 +496,7 @@ function CloseKombatInner() {
     const prev = kaChingRef.current;
     kaChingRef.current = { key, sales: mySales };
     if (!prev || prev.key !== key || mySales <= prev.sales) return;
-    toast.success("KA-CHING! Sale confirmed — it's on the board. 🥊");
+    rewardToast("KA-CHING! Sale confirmed — it's on the board. 🥊");
     setHeroFlash(true);
   }, [
     isRep,
@@ -1460,6 +1463,11 @@ function RepHero({
   flash: boolean;
   dim: boolean;
 }) {
+  // Hooks before the identity-miss return (rules of hooks). The money tween
+  // makes a landed sale COUNT UP instead of teleporting — the board's most
+  // valuable number finally moves when it grows.
+  const reduced = usePrefersReducedMotion();
+  const { display: revenueDisplay, bump: revenueBump } = useCountUp(row?.revenue ?? 0, reduced);
   if (!matched && hasNames) {
     // Identity miss (R-4): say so instead of silently rendering a stranger's
     // board — the old failure mode was a rep who "wasn't on" their own ladder.
@@ -1482,7 +1490,9 @@ function RepHero({
       className={cn(
         "rounded-xl border border-kombat-gold/40 bg-[color-mix(in_oklab,var(--kombat-gold)_7%,var(--surface))] p-5 transition-opacity",
         dim && "opacity-50",
-        flash && "animate-pulse ring-2 ring-kombat-gold/60",
+        // Purpose-built gold spike (2 beats, then done) — the old
+        // animate-pulse read as a loading skeleton, not a KA-CHING.
+        flash && "kombat-kaching",
       )}
     >
       <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -1490,8 +1500,13 @@ function RepHero({
           <div className="text-[10px] font-display uppercase tracking-widest text-kombat-gold/80">
             Your {rangeLabel} · Volume
           </div>
-          <div className="mt-1.5 font-display text-4xl sm:text-5xl text-kombat-gold leading-none tabular-nums">
-            {fmtMoney(row?.revenue ?? 0)}
+          <div
+            className={cn(
+              "mt-1.5 font-display text-4xl sm:text-5xl text-kombat-gold leading-none tabular-nums",
+              revenueBump && !reduced && "transition-transform duration-200 scale-105",
+            )}
+          >
+            {fmtMoney(revenueDisplay)}
           </div>
         </div>
         {row && (

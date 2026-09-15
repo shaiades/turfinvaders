@@ -213,7 +213,9 @@ export function useFieldPins(userId: string | undefined, me: LatLng | null) {
           // Best-effort verdict from the current fix so a doomed remote drop
           // never counts optimistically (no coin, then a retraction) — the
           // mutationFn's fresh fix still owns the row that gets inserted.
-          is_remote_drop: me ? haversineMeters(me, ll) > 18 : false,
+          // Uses the real limit: the old hardcoded 18 m guess flagged honest
+          // 20-68 m taps, so their coin only arrived after the refetch.
+          is_remote_drop: me ? haversineMeters(me, ll) > REMOTE_DROP_LIMIT_M : false,
           pending: true,
         },
       ]);

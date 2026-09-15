@@ -96,6 +96,27 @@ export function AppMenu({
                 </span>
               </button>
             )}
+            {role === "sales_rep" && (
+              <button
+                type="button"
+                onClick={() => {
+                  onOpenChange(false);
+                  const search = window.location.search.includes("ck_anim=1")
+                    ? window.location.search
+                    : `?ck_anim=1`;
+                  window.location.assign(window.location.pathname + search);
+                }}
+                className={itemCls}
+              >
+                <Sparkles className="w-4 h-4 shrink-0" />
+                <span className="flex-1">
+                  Replay the intro
+                  <span className="block normal-case font-sans tracking-normal text-[11px] text-muted-foreground mt-0.5">
+                    The door-kick opening scene — live action at golden hour
+                  </span>
+                </span>
+              </button>
+            )}
             {isAdminTier && (
               <Link to="/users" onClick={() => onOpenChange(false)} className={itemCls}>
                 <Users className="w-4 h-4 shrink-0" />

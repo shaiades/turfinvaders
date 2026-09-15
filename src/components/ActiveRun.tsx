@@ -15,6 +15,7 @@ import { usePiggyBank } from "@/hooks/usePiggyBank";
 import { useZipTints } from "@/hooks/useZipAssignments";
 import { dailyLogKeys } from "@/hooks/useDailyLogs";
 import { PiggyBankHUD } from "@/components/PiggyBankHUD";
+import { BumpBadge } from "@/components/BumpBadge";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { GratitudeGate, hasPassedGratitudeGate } from "@/components/GratitudeGate";
 import { NeonMap, type Territory, type LatLng } from "@/components/NeonMap";
@@ -25,6 +26,7 @@ import type { OsmHouse } from "@/components/HouseBubbles";
 import { ArcadePanel } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { rewardToast } from "@/lib/reward-toast";
 import {
   DoorClosed,
   Sparkles,
@@ -185,6 +187,14 @@ export function ActiveRun({
   // route SSRs and a render-time window read is a hydration mismatch.
   const piggy = usePiggyBank(user?.id);
   const [piggyDemo, setPiggyDemo] = useState<{ on: boolean; rateMs?: number }>({ on: false });
+  // Lead-submitted coin burst: the pin's own coin plays while the LeadSheet
+  // (z-[2000]) covers the map, so the win is replayed on close where the rep
+  // can SEE it. `dollars` is the measured piggy delta across the sheet —
+  // real, column-traceable, never a fabricated lead value.
+  const [piggyCelebrate, setPiggyCelebrate] = useState<{ seq: number; dollars: number } | null>(
+    null,
+  );
+  const piggyAtLeadOpenRef = useRef<number | null>(null);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("piggy_demo") === "1") {
@@ -305,6 +315,7 @@ export function ActiveRun({
       toast.error("No GPS fix yet — enable Location and try again.");
       return;
     }
+    piggyAtLeadOpenRef.current = piggy.dollars;
     // Form first — the lead is the revenue event; the pin is bookkeeping.
     // The drop (fresh GPS fix + insert, up to ~8s) runs behind the overlay so
     // the doorstep never waits on a spinner; dropAtDevice toasts its own
@@ -451,6 +462,7 @@ export function ActiveRun({
                   source={piggy.source}
                   demo={piggyDemo.on}
                   demoRateMs={piggyDemo.rateMs}
+                  celebrate={piggyCelebrate}
                 />
               </div>
 
@@ -494,12 +506,10 @@ export function ActiveRun({
                       <span className="font-display text-[7px] uppercase tracking-wide leading-none whitespace-nowrap">
                         {r.chipLabel}
                       </span>
-                      <span
-                        className="absolute -top-1 -right-1 min-w-4 rounded-full bg-surface px-1 text-center font-display text-[9px] leading-4"
-                        style={{ color: r.color }}
-                      >
-                        {pins.counts[r.type] ?? 0}
-                      </span>
+                      <BumpBadge
+                        count={pins.counts[r.type] ?? 0}
+                        color={r.color}
+                      />
                     </button>
                   );
                 })}
@@ -572,7 +582,15 @@ export function ActiveRun({
               } catch {
                 /* unsupported */
               }
-              toast.success("⚡ Lead submitted — it's on the board!");
+              // Replay the coin win now that the map is visible again. If the
+              // background pin hadn't settled by close, delta is 0 and the
+              // late knock-coin carries the $ instead — no double count.
+              const delta =
+                piggy.dollars !== null && piggyAtLeadOpenRef.current !== null
+                  ? Math.max(0, piggy.dollars - piggyAtLeadOpenRef.current)
+                  : 0;
+              setPiggyCelebrate((c) => ({ seq: (c?.seq ?? 0) + 1, dollars: delta }));
+              rewardToast("⚡ Lead submitted — it's on the board!", { vibrate: false });
             }
           }}
         />

@@ -92,8 +92,9 @@ function rectsDiffer(a: SpotRect | null, b: SpotRect): boolean {
   );
 }
 
-/** Wordmark palette for the first-tour finale (canvas-confetti wants hex). */
-const CONFETTI_COLORS = ["#ff4fd8", "#4fa3ff", "#54f06a", "#ffa438", "#ffe95e"];
+/** Wordmark palette for the first-tour finale (canvas-confetti wants hex).
+ *  Exported so LeadConfirmedCelebration bursts the same colors. */
+export const CONFETTI_COLORS = ["#ff4fd8", "#4fa3ff", "#54f06a", "#ffa438", "#ffe95e"];
 
 export function CanvasserTutorial({
   userId,
