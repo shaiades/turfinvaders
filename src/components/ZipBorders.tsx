@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Marker, Polygon, useMap } from "react-leaflet";
 import L from "leaflet";
 import { viewBounds } from "@/lib/map-bounds";
+import { withTimeout } from "@/lib/abort-timeout";
 
 /**
  * ZIP-code borders overlay (owner ask 2026-09-10: "put borders around each
@@ -153,7 +154,9 @@ async function fetchZctas(bounds: L.LatLngBounds, tier: Tier, signal: AbortSigna
     maxAllowableOffset: String(TIER_OFFSET[tier]),
     f: "geojson",
   });
-  const res = await fetch(`${ZCTA_QUERY_URL}?${params}`, { signal });
+  // 12 s deadline: a hung TIGERweb connection must not hold the ZIP layer
+  // hostage until the next pan (server-side generalization has no such cap).
+  const res = await fetch(`${ZCTA_QUERY_URL}?${params}`, { signal: withTimeout(signal, 12_000) });
   if (!res.ok) throw new Error(`ZCTA query ${res.status}`);
   const data = (await res.json()) as {
     features?: Array<{ properties?: Record<string, unknown>; geometry?: { type?: string } }>;

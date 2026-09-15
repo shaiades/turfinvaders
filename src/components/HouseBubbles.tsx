@@ -3,6 +3,7 @@ import { Marker, useMap } from "react-leaflet";
 import L from "leaflet";
 import { toast } from "sonner";
 import { viewBounds } from "@/lib/map-bounds";
+import { withTimeout } from "@/lib/abort-timeout";
 import { PIN_COLORS, type PinType } from "@/lib/pin-results";
 import type { FieldPin } from "@/components/NeonMap";
 
@@ -298,7 +299,13 @@ async function overpassRequest(
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: `data=${encodeURIComponent(query)}`,
-        signal,
+        // 10 s client deadline per endpoint. `[timeout:8]` is a server-side
+        // hint that never covers a hung connection — before this, a stalled
+        // primary blocked the mirror failover until the next pan's abort,
+        // which read as "house circles never load". The deadline aborts as
+        // TimeoutError, so the AbortError rethrow below (user pan) still
+        // only matches real aborts and the mirror gets its turn.
+        signal: withTimeout(signal, 10_000),
       });
       if (!res.ok) throw new Error(`overpass ${res.status}`);
       const data = (await res.json()) as { elements?: OverpassElement[]; remark?: string };

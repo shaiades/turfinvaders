@@ -1,5 +1,5 @@
 import { createFileRoute, Navigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -166,6 +166,67 @@ function ManagerTerritoryView({
     key: number;
   } | null>(null);
 
+  // Crash insurance for a drawn-but-unsaved area: the polygon is stashed in
+  // localStorage the moment the finger lifts, restored on the next visit, and
+  // cleared on save/discard. Before this, a mid-assign tab crash (WebKit
+  // reclaiming a heavy map) silently ate the drawing — the manager thought it
+  // saved, the teammate never saw it.
+  const pendingKey = user?.id ? `ti_pending_turf:v1:${user.id}` : null;
+  const restoredPendingRef = useRef(false);
+  useEffect(() => {
+    if (restoredPendingRef.current || !pendingKey) return;
+    restoredPendingRef.current = true;
+    try {
+      const raw = localStorage.getItem(pendingKey);
+      if (!raw) return;
+      const saved = JSON.parse(raw) as { polygon?: LatLng[]; at?: number };
+      const poly = Array.isArray(saved.polygon) ? saved.polygon : [];
+      const fresh = typeof saved.at === "number" && Date.now() - saved.at < 12 * 60 * 60 * 1000;
+      if (poly.length < 3 || !fresh) {
+        localStorage.removeItem(pendingKey);
+        return;
+      }
+      setPendingPolygon(poly);
+      let s = 90,
+        n = -90,
+        w = 180,
+        e = -180;
+      for (const p of poly) {
+        if (p.lat < s) s = p.lat;
+        if (p.lat > n) n = p.lat;
+        if (p.lng < w) w = p.lng;
+        if (p.lng > e) e = p.lng;
+      }
+      setFlyTo((prev) => ({
+        bounds: [
+          [s, w],
+          [n, e],
+        ],
+        key: (prev?.key ?? 0) + 1,
+      }));
+      toast.info("Restored your unsaved drawn area — assign it or discard it.", {
+        duration: 8000,
+      });
+    } catch {
+      /* private mode / corrupt entry — nothing to restore */
+    }
+  }, [pendingKey]);
+  useEffect(() => {
+    if (!pendingKey || !restoredPendingRef.current) return;
+    try {
+      if (pendingPolygon && pendingPolygon.length >= 3) {
+        localStorage.setItem(
+          pendingKey,
+          JSON.stringify({ polygon: pendingPolygon, at: Date.now() }),
+        );
+      } else {
+        localStorage.removeItem(pendingKey);
+      }
+    } catch {
+      /* best effort */
+    }
+  }, [pendingPolygon, pendingKey]);
+
   async function flyToQuery(q: string) {
     if (searchBusy) return;
     setSearchBusy(true);
@@ -196,10 +257,13 @@ function ManagerTerritoryView({
     await flyToQuery(q);
   }
 
-  // Managers see every turf (canvasser self-scoping lives in ActiveRun now)
+  // Managers see every turf (canvasser self-scoping lives in ActiveRun now).
+  // "manager" in the key: a captain flips between this view and ActiveRun,
+  // and the two queries select different shapes (only this one embeds
+  // assigner) — sharing ["turfs", uid, role] served each the other's rows.
   const turfsQuery = useQuery({
     enabled: !!user?.id,
-    queryKey: ["turfs", user?.id, role],
+    queryKey: ["turfs", "manager", user?.id],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("turfs")
@@ -284,7 +348,7 @@ function ManagerTerritoryView({
         .from("profiles")
         // teams must be disambiguated: profiles↔teams also relate via
         // teams.captain_id, so a bare teams(name) is ambiguous (PGRST201).
-        .select("id, display_name, office_location, teams!profiles_team_fk(name)")
+        .select("id, display_name, office_location, is_placeholder, teams!profiles_team_fk(name)")
         .in("id", ids)
         .order("display_name", { ascending: true });
       if (pErr) throw pErr;
@@ -295,6 +359,7 @@ function ManagerTerritoryView({
             display_name: (p.display_name as string | null) ?? (p.id as string),
             office_location: (p.office_location as string | null) ?? null,
             team_name: ((p.teams as { name: string | null } | null)?.name as string | null) ?? null,
+            is_placeholder: (p.is_placeholder as boolean | null) === true,
           },
         ]),
       );
@@ -313,12 +378,20 @@ function ManagerTerritoryView({
           continue;
         }
         const p = profById.get(id);
+        // Placeholder profiles (Monday-minted name variants — dispatch grants
+        // them a canvasser role) are NOT assign targets: no login ever runs
+        // as their id, so a turf assigned to one is invisible to the real
+        // person forever (the canvasser SELECT policy matches auth.uid()).
+        // They shadowed real teammates in this picker under the same display
+        // name — the "I drew it but they can't see it" bug. Profile-less
+        // role rows are skipped for the same reason.
+        if (!p || p.is_placeholder) continue;
         byId.set(id, {
           id,
-          display_name: p?.display_name ?? id,
+          display_name: p.display_name,
           role: r.role as string,
-          office_location: p?.office_location ?? null,
-          team_name: p?.team_name ?? null,
+          office_location: p.office_location,
+          team_name: p.team_name,
         } satisfies AssignableUser);
       }
       return [...byId.values()].sort((a, b) => a.display_name.localeCompare(b.display_name));
@@ -730,7 +803,10 @@ function ManagerTerritoryView({
               2 km self-cage made cross-county turf hunting impossible. The
               me-dot still renders; recenter still jumps to it. */}
           <NeonMap
-            territories={mapTerritories}
+            // Mid-draw the canvas repaints per stroke sample — 2,800 RepCard
+            // history rings under the finger is what crashed iOS Safari.
+            // Live turfs stay for context; the coverage returns on release.
+            territories={drawing ? territories : mapTerritories}
             fitPolygons={fitPolygons}
             pins={[]}
             houses={[]}

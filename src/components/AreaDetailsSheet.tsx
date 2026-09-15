@@ -339,7 +339,15 @@ export function AreaDetailsSheet({
               disabled={saving || !dirty}
               className="w-full font-display uppercase tracking-widest"
             >
-              {saving ? "Saving…" : "Save"}
+              {/* Name the outcome: a plain "Save" with nobody picked wrote an
+                  UNASSIGNED area that read as a finished assignment. */}
+              <span className="truncate">
+                {saving
+                  ? "Saving…"
+                  : selectedId
+                    ? `Assign to ${users.find((u) => u.id === selectedId)?.display_name ?? "rep"}`
+                    : "Save unassigned"}
+              </span>
             </Button>
           </SheetFooter>
         </SheetContent>

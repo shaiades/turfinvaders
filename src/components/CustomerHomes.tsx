@@ -46,29 +46,46 @@ type CustomerBadge = {
 };
 
 const PAGE = 1000; // PostgREST caps un-ranged selects — page explicitly.
+const PAGE_WAVE = 4; // pages fetched concurrently — ~2,800 rows land in one round trip
 
 async function fetchCustomerHomes(): Promise<CustomerHome[]> {
   const out: CustomerHome[] = [];
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabase
-      .from("customer_homes")
-      .select("monday_item_id, last_name, products, lat, lng, address, sold_on")
-      .order("monday_item_id")
-      .range(from, from + PAGE - 1);
-    if (error) throw new Error(error.message);
-    for (const r of data ?? []) {
-      if (typeof r.lat !== "number" || typeof r.lng !== "number" || !r.monday_item_id) continue;
-      out.push({
-        monday_item_id: r.monday_item_id,
-        last_name: r.last_name,
-        products: r.products,
-        lat: r.lat,
-        lng: r.lng,
-        address: r.address,
-        sold_on: r.sold_on,
-      });
+  // Waves of concurrent pages instead of one-at-a-time: sequential paging
+  // put 3+ mobile round trips on the map's first paint. Order is preserved
+  // (each wave's results are consumed in offset order) and the first short
+  // page ends the walk.
+  for (let wave = 0; ; wave++) {
+    const results = await Promise.all(
+      Array.from({ length: PAGE_WAVE }, (_, i) => {
+        const from = (wave * PAGE_WAVE + i) * PAGE;
+        return supabase
+          .from("customer_homes")
+          .select("monday_item_id, last_name, products, lat, lng, address, sold_on")
+          .order("monday_item_id")
+          .range(from, from + PAGE - 1);
+      }),
+    );
+    let done = false;
+    for (const { data, error } of results) {
+      if (error) throw new Error(error.message);
+      for (const r of data ?? []) {
+        if (typeof r.lat !== "number" || typeof r.lng !== "number" || !r.monday_item_id) continue;
+        out.push({
+          monday_item_id: r.monday_item_id,
+          last_name: r.last_name,
+          products: r.products,
+          lat: r.lat,
+          lng: r.lng,
+          address: r.address,
+          sold_on: r.sold_on,
+        });
+      }
+      if (!data || data.length < PAGE) {
+        done = true;
+        break;
+      }
     }
-    if (!data || data.length < PAGE) break;
+    if (done) break;
   }
   return out;
 }
