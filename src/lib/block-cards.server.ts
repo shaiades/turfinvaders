@@ -36,6 +36,9 @@ type MondayCol = {
   id: string;
   text: string | null;
   display_value?: string | null;
+  /** LocationValue fragment fields — present only on the Location column. */
+  lat?: number | null;
+  lng?: number | null;
   column: { title: string; id: string };
 };
 
@@ -115,6 +118,15 @@ function colText(cols: MondayCol[], title: string): string | null {
   return t === "" ? null : t;
 }
 
+/** The Location column: exact title first, else any column the LocationValue
+ *  fragment populated (a renamed column still carries lat/lng). */
+function findLocationCol(cols: MondayCol[]): MondayCol | undefined {
+  return (
+    cols.find((c) => (c.column?.title || "").trim().toLowerCase() === "location") ??
+    cols.find((c) => typeof c.lat === "number" && typeof c.lng === "number")
+  );
+}
+
 /** Monday item → block_cards row (Reps people column `.text` is Monday's
  *  comma-separated display names). Deliberately WITHOUT wcc or report_reps:
  *  the upsert must never clobber what the Sales-Report pass stamped there. */
@@ -130,6 +142,8 @@ export function buildBlockCardRow(
   const saleCol = findSaleOutcomeCol(cols);
   const saleText = (saleCol?.text || "").trim();
   const priceCol = findSalePriceCol(cols);
+  const locCol = findLocationCol(cols);
+  const hasCoords = typeof locCol?.lat === "number" && typeof locCol?.lng === "number";
   const reps = (colText(cols, "reps") ?? "")
     .split(",")
     .map((s) => s.trim())
@@ -155,11 +169,16 @@ export function buildBlockCardRow(
     // marker; phone links a save card to the original sale's card.
     comments: colText(cols, "comments"),
     phone: colText(cols, "phone"),
+    // Monday Location column (customer-homes map, owner 2026-09-14): exact
+    // house coordinates + formatted address for the customer_homes view.
+    lat: hasCoords ? (locCol!.lat as number) : null,
+    lng: hasCoords ? (locCol!.lng as number) : null,
+    address: (locCol?.text || "").trim() || null,
   };
 }
 
 const ITEM_PAGE_FIELDS =
-  "cursor items { id name group { id title } column_values { id text column { title id } ... on FormulaValue { display_value } } }";
+  "cursor items { id name group { id title } column_values { id text column { title id } ... on FormulaValue { display_value } ... on LocationValue { lat lng } } }";
 
 const CHUNK = 200;
 const chunks = <T>(arr: T[], size: number): T[][] => {

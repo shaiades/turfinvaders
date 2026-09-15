@@ -16,6 +16,7 @@ export type Database = {
     Tables: {
       block_cards: {
         Row: {
+          address: string | null
           board_id: string
           bo: string | null
           canvass_stats: string | null
@@ -24,7 +25,9 @@ export type Database = {
           created_at: string
           group_title: string | null
           iss: string | null
+          lat: number | null
           lead_name: string | null
+          lng: number | null
           monday_item_id: string
           office_location: string
           ol: string | null
@@ -40,6 +43,7 @@ export type Database = {
           wcc: string | null
         }
         Insert: {
+          address?: string | null
           board_id: string
           bo?: string | null
           canvass_stats?: string | null
@@ -48,7 +52,9 @@ export type Database = {
           created_at?: string
           group_title?: string | null
           iss?: string | null
+          lat?: number | null
           lead_name?: string | null
+          lng?: number | null
           monday_item_id: string
           office_location?: string
           ol?: string | null
@@ -64,6 +70,7 @@ export type Database = {
           wcc?: string | null
         }
         Update: {
+          address?: string | null
           board_id?: string
           bo?: string | null
           canvass_stats?: string | null
@@ -72,7 +79,9 @@ export type Database = {
           created_at?: string
           group_title?: string | null
           iss?: string | null
+          lat?: number | null
           lead_name?: string | null
+          lng?: number | null
           monday_item_id?: string
           office_location?: string
           ol?: string | null
@@ -86,6 +95,48 @@ export type Database = {
           sale_price?: number | null
           updated_at?: string
           wcc?: string | null
+        }
+        Relationships: []
+      }
+      customer_homes_legacy: {
+        Row: {
+          address: string | null
+          board_name: string | null
+          created_at: string
+          customer_name: string | null
+          lat: number | null
+          lng: number | null
+          monday_item_id: string
+          office_location: string
+          products: string | null
+          sale: string | null
+          sold_on: string | null
+        }
+        Insert: {
+          address?: string | null
+          board_name?: string | null
+          created_at?: string
+          customer_name?: string | null
+          lat?: number | null
+          lng?: number | null
+          monday_item_id: string
+          office_location?: string
+          products?: string | null
+          sale?: string | null
+          sold_on?: string | null
+        }
+        Update: {
+          address?: string | null
+          board_name?: string | null
+          created_at?: string
+          customer_name?: string | null
+          lat?: number | null
+          lng?: number | null
+          monday_item_id?: string
+          office_location?: string
+          products?: string | null
+          sale?: string | null
+          sold_on?: string | null
         }
         Relationships: []
       }
@@ -1469,6 +1520,20 @@ export type Database = {
       }
     }
     Views: {
+      customer_homes: {
+        Row: {
+          address: string | null
+          last_name: string | null
+          lat: number | null
+          lng: number | null
+          monday_item_id: string | null
+          office_location: string | null
+          products: string | null
+          sold_on: string | null
+          source: string | null
+        }
+        Relationships: []
+      }
       commission_clawback_outstanding: {
         Row: {
           canvasser_id: string | null

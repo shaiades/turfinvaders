@@ -6,6 +6,7 @@ import { LocateFixed, Navigation2 } from "lucide-react";
 import { PIN_COLORS, type PinType } from "@/lib/pin-results";
 import { ZipBordersLayer, ZIP_MIN_ZOOM, type ZipTint } from "@/components/ZipBorders";
 import { HouseBubblesLayer, HOUSE_MIN_ZOOM, type OsmHouse } from "@/components/HouseBubbles";
+import { CustomerHomesLayer } from "@/components/CustomerHomes";
 
 // Canonical copy lives in lib/pin-results (SSR-safe); re-exported here so map
 // consumers keep a single import site.
@@ -756,6 +757,9 @@ export function NeonMap({
         <FlyTo target={flyTo} />
         <ClickCapture onClick={handleClick} />
         <ZipBordersLayer enabled={zipsEnabled} tints={zipTints} onZipTap={onZipTap} />
+        {/* Every Tidal customer, every surface, always on (owner 2026-09-14).
+            Inert while drawing so badge taps can't eat polygon vertices. */}
+        <CustomerHomesLayer tappable={mode.kind !== "draw"} />
         {houseBubbles && <HouseBubblesLayer enabled pins={pins} onHouseTap={onHouseTap} />}
         {hasFit && <FitPolygons polygons={fitPolygons!} />}
         {follow ? (

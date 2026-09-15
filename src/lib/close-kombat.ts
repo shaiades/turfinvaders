@@ -133,6 +133,12 @@ export type BlockCard = {
    *  builders exclude it so upserts never clobber). When non-empty it
    *  overrides `reps` for the VOLUME split only (owner, 2026-08-25). */
   report_reps: string[] | null;
+  /** Monday Location column (customer-homes map, owner 2026-09-14).
+   *  Optional so pre-existing fixtures/literals keep compiling — the row
+   *  builders always write all three. */
+  lat?: number | null;
+  lng?: number | null;
+  address?: string | null;
 };
 
 /** Sale-column values that mean sold — keep in sync with SOLD_VALUES in

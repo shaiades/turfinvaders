@@ -14,6 +14,9 @@ export type MondayCol = {
   id: string
   text: string | null
   display_value?: string | null
+  /** LocationValue fragment fields — present only on the Location column. */
+  lat?: number | null
+  lng?: number | null
   column: { title: string; id: string }
 }
 
@@ -210,6 +213,11 @@ export type BlockCardRow = {
    *  SYNC with buildBlockCardRow in src/lib/block-cards.server.ts. */
   comments: string | null
   phone: string | null
+  /** Monday Location column (customer-homes map, owner 2026-09-14): exact
+   *  house coordinates + formatted address. Feeds the customer_homes view. */
+  lat: number | null
+  lng: number | null
+  address: string | null
 }
 
 type MondayItemLike = {
@@ -225,6 +233,15 @@ function colText(cols: MondayCol[], title: string): string | null {
   const c = cols.find((c) => (c.column?.title || '').trim().toLowerCase() === title)
   const t = (c?.text || '').trim()
   return t === '' ? null : t
+}
+
+/** The Location column: exact title first, else any column the LocationValue
+ *  fragment populated (a renamed column still carries lat/lng). */
+export function findLocationCol(cols: MondayCol[]): MondayCol | undefined {
+  return (
+    cols.find((c) => (c.column?.title || '').trim().toLowerCase() === 'location') ??
+    cols.find((c) => typeof c.lat === 'number' && typeof c.lng === 'number')
+  )
 }
 
 /**
@@ -246,6 +263,8 @@ export function buildBlockCardRow(
   const saleCol = findSaleOutcomeCol(cols)
   const saleText = (saleCol?.text || '').trim()
   const priceCol = findSalePriceCol(cols)
+  const locCol = findLocationCol(cols)
+  const hasCoords = typeof locCol?.lat === 'number' && typeof locCol?.lng === 'number'
   const reps = (colText(cols, 'reps') ?? '')
     .split(',')
     .map((s) => s.trim())
@@ -269,5 +288,8 @@ export function buildBlockCardRow(
     canvass_stats: colText(cols, 'canvass stats'),
     comments: colText(cols, 'comments'),
     phone: colText(cols, 'phone'),
+    lat: hasCoords ? (locCol!.lat as number) : null,
+    lng: hasCoords ? (locCol!.lng as number) : null,
+    address: (locCol?.text || '').trim() || null,
   }
 }
