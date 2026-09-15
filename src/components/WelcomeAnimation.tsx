@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { isLaToday } from "@/lib/dates";
 import { clamp01, easeInOut, easeOutBack, limb, popText, rr } from "./intro-fx";
 
 /**
@@ -7,16 +8,20 @@ import { clamp01, easeInOut, easeOutBack, limb, popText, rr } from "./intro-fx";
  * pixels to an early-2000s look — smooth vector shapes, gradients/glow,
  * articulated run cycle, camera punch-ins, THPS-style pop text, NFS-style
  * van underglow): a ≤5s cutscene — the rep sprints out of the van, knocks
- * the door, and celebrates writing up a lead — played ONCE per account, the
- * first time they open the app signed in. Tap/keypress skips. Same seen-flag
- * scheme as the page tours: localStorage answers first, auth user_metadata
- * is the cross-device backstop (fire-and-forget). The flag is written when
+ * the door, and celebrates writing up a lead — played once per LA calendar
+ * day (owner ask 2026-09-14; date buckets are America/Los_Angeles per
+ * src/lib/dates.ts), the first time they open the app signed in that day.
+ * Tap/keypress skips. Flag scheme like the page tours (which stay
+ * once-ever): localStorage answers first, auth user_metadata is the
+ * cross-device backstop (fire-and-forget) — both hold an ISO instant, and
+ * "seen" means its LA date is today (legacy once-ever stamps read as stale,
+ * so everyone replays once on rollout day). The flag is written when
  * playback STARTS so a mid-animation crash can never loop it.
  *
  * Preview/demo: `?welcome_anim=1` force-plays without writing any flag;
  * add `&welcome_hold=<ms>` to freeze the scene at that timestamp.
  * `prefers-reduced-motion` skips playback but leaves the flag unwritten, so
- * turning reduced motion off later still gets the one first-open showing.
+ * turning reduced motion off later still gets that day's showing.
  *
  * Everything is drawn on a 640×360 virtual canvas rendered at device
  * resolution — no image assets, no new dependencies (shape/pop-text/beeper
@@ -39,7 +44,8 @@ type AnimMeta = { ti_welcome_anim?: string };
 
 function readLocal(key: string): boolean {
   try {
-    return window.localStorage.getItem(key) !== null;
+    // Daily replay: "seen" = the stored stamp's LA date is today.
+    return isLaToday(window.localStorage.getItem(key));
   } catch {
     return true; // can't persist "seen" → never loop the intro
   }
@@ -903,10 +909,11 @@ export function WelcomeAnimation({
   }, [phase, onActiveChange]);
 
   const markSeen = useCallback(() => {
-    if (forced) return; // previews never burn the real first-open
+    if (forced) return; // previews never stamp the real daily flag
     writeLocal(seenKey(userId));
     const patch: AnimMeta = { ti_welcome_anim: new Date().toISOString() };
-    // Fire-and-forget cross-device backstop, same as the tours.
+    // Fire-and-forget cross-device backstop, same as the tours (at most one
+    // updateUser per LA day — playback only starts when today is unstamped).
     supabase.auth.updateUser({ data: patch }).catch(() => {});
   }, [forced, userId]);
 
@@ -916,9 +923,10 @@ export function WelcomeAnimation({
     setPhase("done");
   }, []);
 
-  // Decide whether to play: reduced motion skips playback WITHOUT burning
-  // the once-ever flag (turn it off later, the intro still owes you one);
-  // metadata seen on another device just records locally and stays hidden.
+  // Decide whether to play: reduced motion skips playback WITHOUT stamping
+  // today's flag (turn it off later, the intro still owes you that day's
+  // showing); metadata stamped TODAY on another device records locally and
+  // stays hidden — a stale stamp from any past day means play again.
   useEffect(() => {
     if (phase !== "checking") return;
     let cancelled = false;
@@ -934,7 +942,7 @@ export function WelcomeAnimation({
         new Promise<AnimMeta>((resolve) => window.setTimeout(() => resolve({}), 1200)),
       ]).catch(() => ({}) as AnimMeta);
       if (cancelled) return;
-      if (meta.ti_welcome_anim) {
+      if (isLaToday(meta.ti_welcome_anim)) {
         writeLocal(seenKey(userId));
         finish();
       } else {

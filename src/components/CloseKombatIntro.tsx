@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { isLaToday } from "@/lib/dates";
 import {
   clamp01,
   drawCoin,
@@ -24,11 +25,13 @@ import {
  * swaggers back out with a money bag over the shoulder while the homeowner
  * waves goodbye — a closed deal, Close Kombat style.
  *
- * Mechanics are identical to WelcomeAnimation: played once per account
- * (localStorage answers first, auth user_metadata is the cross-device
- * backstop; the flag is written when playback STARTS so a crash can't loop
- * it), tap/keypress skips. `prefers-reduced-motion` skips playback but
- * leaves the flag unwritten, so turning it off later still gets the showing.
+ * Mechanics are identical to WelcomeAnimation: played once per LA calendar
+ * day (owner ask 2026-09-14; localStorage answers first, auth user_metadata
+ * is the cross-device backstop — both hold an ISO instant and "seen" means
+ * its LA date is today, so legacy once-ever stamps replay on rollout day;
+ * the flag is written when playback STARTS so a crash can't loop it),
+ * tap/keypress skips. `prefers-reduced-motion` skips playback but leaves
+ * the flag unwritten, so turning it off later still gets that day's showing.
  *
  * Preview/demo from ANY role: `?ck_anim=1` force-plays without writing any
  * flag; add `&ck_hold=<ms>` to freeze the scene at that timestamp.
@@ -50,7 +53,8 @@ export function isCloseKombatIntroForced(): boolean {
 
 function readLocal(key: string): boolean {
   try {
-    return window.localStorage.getItem(key) !== null;
+    // Daily replay: "seen" = the stored stamp's LA date is today.
+    return isLaToday(window.localStorage.getItem(key));
   } catch {
     return true; // can't persist "seen" → never loop the intro
   }
@@ -1315,7 +1319,7 @@ export function CloseKombatIntro({
   }, [phase, onActiveChange]);
 
   const markSeen = useCallback(() => {
-    if (forced) return; // previews never burn the real first-open
+    if (forced) return; // previews never stamp the real daily flag
     writeLocal(seenKey(userId));
     const patch: AnimMeta = { ti_ck_intro: new Date().toISOString() };
     supabase.auth.updateUser({ data: patch }).catch(() => {});
@@ -1328,7 +1332,8 @@ export function CloseKombatIntro({
   }, []);
 
   // Decide whether to play — same protocol as WelcomeAnimation (reduced
-  // motion skips playback without burning the once-ever flag).
+  // motion skips playback without stamping today's flag; only a metadata
+  // stamp from TODAY suppresses — any past day means play again).
   useEffect(() => {
     if (phase !== "checking") return;
     let cancelled = false;
@@ -1344,7 +1349,7 @@ export function CloseKombatIntro({
         new Promise<AnimMeta>((resolve) => window.setTimeout(() => resolve({}), 1200)),
       ]).catch(() => ({}) as AnimMeta);
       if (cancelled) return;
-      if (meta.ti_ck_intro) {
+      if (isLaToday(meta.ti_ck_intro)) {
         writeLocal(seenKey(userId));
         finish();
       } else {

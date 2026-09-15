@@ -18,6 +18,18 @@ export function laTodayISO(): string {
   return laDateISO(new Date());
 }
 
+/** True iff `value` (an ISO instant or bare YYYY-MM-DD) lands on today's LA
+ *  calendar date. Unparseable/legacy values (e.g. an old once-ever "1" flag)
+ *  are NOT today — the intro seen-flags use this so "seen" means "seen
+ *  today". Bare dates compare as strings on purpose: Date.parse reads them
+ *  as UTC midnight, which is 4-5pm the PREVIOUS LA day. */
+export function isLaToday(value: string | null | undefined): boolean {
+  if (!value) return false;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value === laTodayISO();
+  const ms = Date.parse(value);
+  return !Number.isNaN(ms) && laDateISO(new Date(ms)) === laTodayISO();
+}
+
 /** "05:30" / "05:30:00" (PT wall-clock time string, e.g. a PG `time`) → "5:30 AM". */
 export function fmtWallTime(t: string): string {
   const [h, m] = t.split(":").map(Number);

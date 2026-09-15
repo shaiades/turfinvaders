@@ -108,29 +108,34 @@ export function drawCoin(ctx: CanvasRenderingContext2D, r: number) {
  *  gesture handler, so a blocked beep arms a one-time pointerdown unlock —
  *  creating/resuming the context INSIDE the next tap — instead of staying
  *  silent forever (the piggy ka-ching fires ~550ms after the tap, well
- *  outside the gesture window, which is why the unlock rides its own tap). */
+ *  outside the gesture window, which is why the unlock rides its own tap).
+ *  ONE module-level AudioContext serves every beeper — contexts are a
+ *  scarce OS resource and the cutscenes mint a beeper per playback, so a
+ *  per-closure context would leak one per lead submit. (CloseKombatIntro's
+ *  music engine keeps its own context: it needs a master gain + close.) */
+let sharedCtx: AudioContext | null = null;
+let unlockArmed = false;
+const armUnlock = () => {
+  if (unlockArmed || typeof window === "undefined") return;
+  unlockArmed = true;
+  window.addEventListener(
+    "pointerdown",
+    () => {
+      try {
+        sharedCtx ??= new AudioContext();
+        if (sharedCtx.state !== "running") void sharedCtx.resume().catch(() => {});
+      } catch {
+        /* audio is a garnish — never let it break anything */
+      }
+    },
+    { once: true, capture: true, passive: true },
+  );
+};
 export function makeBeeper() {
-  let ctx: AudioContext | null = null;
-  let unlockArmed = false;
-  const armUnlock = () => {
-    if (unlockArmed || typeof window === "undefined") return;
-    unlockArmed = true;
-    window.addEventListener(
-      "pointerdown",
-      () => {
-        try {
-          ctx ??= new AudioContext();
-          if (ctx.state !== "running") void ctx.resume().catch(() => {});
-        } catch {
-          /* audio is a garnish — never let it break anything */
-        }
-      },
-      { once: true, capture: true, passive: true },
-    );
-  };
   return (freq: number, durMs: number, delayMs = 0, type: OscillatorType = "square") => {
     try {
-      ctx ??= new AudioContext();
+      sharedCtx ??= new AudioContext();
+      const ctx = sharedCtx;
       if (ctx.state !== "running") {
         armUnlock(); // silent now; the next tap anywhere unlocks the context
         return;
