@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { MapContainer, TileLayer, Polygon, Polyline, Marker, Popup, useMapEvents, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet-rotate";
 import { LocateFixed, Navigation2 } from "lucide-react";
+import { viewBounds } from "@/lib/map-bounds";
 import { PIN_COLORS, type PinType } from "@/lib/pin-results";
 import { ZipBordersLayer, ZIP_MIN_ZOOM, type ZipTint } from "@/components/ZipBorders";
 import { HouseBubblesLayer, HOUSE_MIN_ZOOM, type OsmHouse } from "@/components/HouseBubbles";
@@ -54,6 +55,12 @@ export type CrewMarker = {
 };
 
 const REMOTE_DROP_COLOR = "#8a8f99";
+
+// Dashed-territory labels (RepCard history / unassigned) are the only
+// unbounded label source — cull them to the viewport at neighborhood zoom
+// and cap the count. Live assigned-turf labels always render.
+const DASHED_LABEL_MIN_ZOOM = 13;
+const DASHED_LABEL_CAP = 120;
 
 // L.divIcon is a stateless descriptor, so instances are safely shared across
 // markers. Caching keeps each marker's `icon` prop identity stable between
@@ -324,6 +331,30 @@ function ZoomWatcher({ onZoom }: { onZoom: (z: number) => void }) {
   return null;
 }
 
+/** Report viewport bounds + zoom on move/zoom end — drives dashed-label
+ *  culling. viewBounds() (not getBounds) because leaflet-rotate can collapse
+ *  the latter to a point. */
+function ViewTracker({
+  onView,
+}: {
+  onView: (v: { bounds: L.LatLngBounds; zoom: number }) => void;
+}) {
+  const map = useMap();
+  const cbRef = useRef(onView);
+  cbRef.current = onView;
+  useEffect(() => {
+    const report = () => cbRef.current({ bounds: viewBounds(map), zoom: map.getZoom() });
+    map.on("moveend", report);
+    map.on("zoomend", report);
+    report();
+    return () => {
+      map.off("moveend", report);
+      map.off("zoomend", report);
+    };
+  }, [map]);
+  return null;
+}
+
 /** Report the map's bearing to the compass button (leaflet-rotate fires
  *  'rotate' both for two-finger twists and programmatic setBearing). */
 function BearingWatcher({ onBearing }: { onBearing: (deg: number) => void }) {
@@ -384,12 +415,17 @@ function houseIcon(name: string) {
 }
 
 /** Assignee name pill centered on a turf (video-style "JN · Jorge Najera").
- *  color may be hsl() (assignee colors) — alpha via color-mix, never hex suffix. */
+ *  color may be hsl() (assignee colors) — alpha via color-mix, never hex suffix.
+ *  Cached like every other divIcon here: the manager map can hold thousands of
+ *  RepCard-history labels, and a fresh icon identity per GPS-tick render made
+ *  react-leaflet rebuild every one of their DOM nodes each second. */
 function territoryLabelIcon(label: string, color: string) {
-  const safe = label.replace(/[<>&"']/g, "");
-  const html = `
+  return cachedIcon(`tlabel|${label}|${color}`, () => {
+    const safe = label.replace(/[<>&"']/g, "");
+    const html = `
     <div style="transform:translate(-50%,-50%);display:inline-flex;align-items:center;background:rgba(11,15,26,0.85);border:1px solid ${color};color:${color};font:700 11px/1 ui-sans-serif,system-ui;padding:4px 9px;border-radius:9999px;white-space:nowrap;box-shadow:0 0 10px color-mix(in srgb, ${color} 40%, transparent);">${safe}</div>`;
-  return L.divIcon({ html, className: "neon-territory-label", iconSize: [0, 0], iconAnchor: [0, 0] });
+    return L.divIcon({ html, className: "neon-territory-label", iconSize: [0, 0], iconAnchor: [0, 0] });
+  });
 }
 
 /** Ray-cast point-in-polygon (lng as x, lat as y). */
@@ -438,15 +474,18 @@ function labelAnchor(polygon: LatLng[]): [number, number] {
 function FreehandCapture({
   onComplete,
   onStrokeEnd,
+  onDiscard,
 }: {
   onComplete: (polygon: LatLng[]) => void;
   onStrokeEnd: () => void;
+  /** A finished stroke was thrown away (too small / too few points). */
+  onDiscard: () => void;
 }) {
   const map = useMap();
   const [stroke, setStroke] = useState<LatLng[]>([]);
   // Callbacks live in refs so the pointer listeners bind once per map.
-  const cbRef = useRef({ onComplete, onStrokeEnd });
-  cbRef.current = { onComplete, onStrokeEnd };
+  const cbRef = useRef({ onComplete, onStrokeEnd, onDiscard });
+  cbRef.current = { onComplete, onStrokeEnd, onDiscard };
 
   useEffect(() => {
     const el = map.getContainer();
@@ -466,6 +505,14 @@ function FreehandCapture({
     type IdxPoint = L.Point & { _i?: number };
     let pts: IdxPoint[] = [];
     let lls: LatLng[] = [];
+    // Stroke state flushes at most once per frame: setState per 6px pointer
+    // sample repainted the whole vector canvas per sample, which is what
+    // froze (and on iOS crashed) mid-draw.
+    let raf = 0;
+    const flushStroke = () => {
+      raf = 0;
+      setStroke([...lls]);
+    };
 
     const toPoint = (e: PointerEvent) => {
       const rect = el.getBoundingClientRect();
@@ -483,6 +530,10 @@ function FreehandCapture({
       isStroke = false;
       pts = [];
       lls = [];
+      if (raf) {
+        cancelAnimationFrame(raf);
+        raf = 0;
+      }
       setStroke([]);
     };
 
@@ -515,7 +566,7 @@ function FreehandCapture({
       if (!isStroke && p.distanceTo(pts[0]) >= 10) isStroke = true;
       if (isStroke) {
         e.preventDefault();
-        setStroke([...lls]);
+        if (!raf) raf = requestAnimationFrame(flushStroke);
       }
     };
 
@@ -528,7 +579,10 @@ function FreehandCapture({
       if (!wasStroke) return; // tap → the map click adds a vertex instead
       cbRef.current.onStrokeEnd(); // suppress Leaflet's trailing synthetic click
       const simplified = L.LineUtil.simplify(drawnPts, 2.5) as IdxPoint[];
-      if (simplified.length < 3) return;
+      if (simplified.length < 3) {
+        cbRef.current.onDiscard();
+        return;
+      }
       // Discard degenerate scribbles: the auto-closed ring must enclose a
       // real area (~30×30px), or a stray swipe becomes a sliver turf.
       let areaPx = 0;
@@ -537,11 +591,17 @@ function FreehandCapture({
         const b = simplified[(i + 1) % simplified.length];
         areaPx += a.x * b.y - b.x * a.y;
       }
-      if (Math.abs(areaPx) / 2 < 900) return;
+      if (Math.abs(areaPx) / 2 < 900) {
+        cbRef.current.onDiscard();
+        return;
+      }
       const ring = simplified
         .map((p) => (p._i != null ? drawnLls[p._i] : null))
         .filter((p): p is LatLng => p != null);
-      if (ring.length < 3) return;
+      if (ring.length < 3) {
+        cbRef.current.onDiscard();
+        return;
+      }
       cbRef.current.onComplete(ring);
     };
 
@@ -557,6 +617,7 @@ function FreehandCapture({
       map.dragging.enable();
       el.style.touchAction = prevTouchAction;
       el.style.cursor = prevCursor;
+      if (raf) cancelAnimationFrame(raf);
       el.removeEventListener("pointerdown", onDown);
       el.removeEventListener("pointermove", onMove);
       el.removeEventListener("pointerup", onUp);
@@ -573,7 +634,7 @@ function FreehandCapture({
   );
 }
 
-export function NeonMap({
+function NeonMapInner({
   territories,
   pins = [],
   houses = [],
@@ -668,8 +729,25 @@ export function NeonMap({
   // Current zoom — drives the "zoom in for house circles" pill on bubble
   // screens (below HOUSE_MIN_ZOOM the map is silently circle-less otherwise).
   const [zoomLevel, setZoomLevel] = useState<number | null>(null);
+  // Viewport (moveend/zoomend) — drives dashed-label culling below.
+  const [labelView, setLabelView] = useState<{ bounds: L.LatLngBounds; zoom: number } | null>(null);
   // Assign mode must see the ZIPs it's assigning, whatever the toggle says.
   const zipsEnabled = zipOn || !!onZipTap;
+  // Drawing needs a light map: the vector canvas repaints on every stroke
+  // sample, so shed the heavy read-only layers (customer badges, ZIP borders,
+  // house bubbles) while the finger is the priority. They come right back
+  // when draw mode ends.
+  const drawingNow = mode.kind === "draw";
+  // Feedback for a discarded stroke — the old silent return read as "my
+  // drawing didn't register".
+  const [drawHint, setDrawHint] = useState<string | null>(null);
+  const drawHintTimer = useRef(0);
+  useEffect(() => () => window.clearTimeout(drawHintTimer.current), []);
+  function flashDrawHint(msg: string) {
+    setDrawHint(msg);
+    window.clearTimeout(drawHintTimer.current);
+    drawHintTimer.current = window.setTimeout(() => setDrawHint(null), 3500);
+  }
 
   const fallbackCenter = useMemo<LatLng>(() => {
     if (center) return center;
@@ -679,15 +757,95 @@ export function NeonMap({
     return { lat: 39.8283, lng: -98.5795 }; // continental US center
   }, [center, me, territories, pins]);
 
+  const hasFit = !!fitPolygons?.some((p) => p.length >= 3);
+
+  // Only the initial FitBounds consumes this — skip the flatten (it walks
+  // every vertex of every ring, per GPS tick otherwise) when following or
+  // when fitPolygons frames the view instead.
   const allPoints = useMemo<LatLng[]>(() => {
+    if (follow || hasFit) return [];
     const pts: LatLng[] = [];
     territories.forEach((t) => pts.push(...t.polygon));
     pins.forEach((p) => pts.push({ lat: p.lat, lng: p.lng }));
     if (me) pts.push(me);
     return pts;
-  }, [territories, pins, me]);
+  }, [follow, hasFit, territories, pins, me]);
 
-  const hasFit = !!fitPolygons?.some((p) => p.length >= 3);
+  // Leaflet-facing props are memoized against the territory set's identity.
+  // Inline `t.polygon.map(...)` / object-literal pathOptions handed every
+  // Polygon a fresh identity per render, so each GPS tick ran setLatLngs +
+  // setStyle across all ~2,800 manager-map rings and forced a full canvas
+  // repaint every second.
+  const territoryRender = useMemo(
+    () =>
+      territories.map((t) => ({
+        t,
+        positions: t.polygon.map((p) => [p.lat, p.lng] as [number, number]),
+        pathOptions: {
+          color: t.color,
+          weight: 2,
+          fillColor: t.color,
+          ...(t.dashed ? { dashArray: "6 8", fillOpacity: 0.06 } : { fillOpacity: 0.15 }),
+        },
+      })),
+    [territories],
+  );
+
+  // Label anchors are memoized against the territory set's identity:
+  // labelAnchor runs point-in-polygon + centroid math per ring, this
+  // component re-renders on every GPS tick, and the manager map carries
+  // ~2,800 RepCard-history rings — recomputing every anchor each second
+  // froze (and on iOS crashed) that screen.
+  const territoryLabels = useMemo(
+    () =>
+      territories
+        .filter((t) => !!t.assignmentLabel && t.polygon.length >= 3)
+        .map((t) => {
+          let s = 90,
+            n = -90,
+            w = 180,
+            e = -180;
+          for (const p of t.polygon) {
+            if (p.lat < s) s = p.lat;
+            if (p.lat > n) n = p.lat;
+            if (p.lng < w) w = p.lng;
+            if (p.lng > e) e = p.lng;
+          }
+          return {
+            key: `${t.id}-label`,
+            label: t.assignmentLabel!,
+            color: t.color,
+            dashed: !!t.dashed,
+            anchor: labelAnchor(t.polygon),
+            bbox: { s, n, w, e },
+          };
+        }),
+    [territories],
+  );
+  const hasDashedLabels = useMemo(() => territoryLabels.some((l) => l.dashed), [territoryLabels]);
+
+  // Live (solid) turf labels always render — a roster's worth at most.
+  // Dashed coverage (RepCard history, unassigned areas) is throttled hard:
+  // neighborhood zoom only, viewport only, capped — the county-wide "label
+  // wall" was thousands of permanent DOM markers.
+  const visibleLabels = useMemo(() => {
+    const live = territoryLabels.filter((l) => !l.dashed);
+    if (live.length === territoryLabels.length) return territoryLabels;
+    if (!labelView || labelView.zoom < DASHED_LABEL_MIN_ZOOM) return live;
+    const b = labelView.bounds.pad(0.2);
+    const bn = b.getNorth(),
+      bs = b.getSouth(),
+      be = b.getEast(),
+      bw = b.getWest();
+    const out = live.slice();
+    for (const l of territoryLabels) {
+      if (out.length >= live.length + DASHED_LABEL_CAP) break;
+      if (l.dashed && l.bbox.s <= bn && l.bbox.n >= bs && l.bbox.w <= be && l.bbox.e >= bw) {
+        out.push(l);
+      }
+    }
+    return out;
+  }, [territoryLabels, labelView]);
 
   function handleClick(ll: LatLng) {
     if (Date.now() - justDrewRef.current < 400) return;
@@ -754,13 +912,22 @@ export function NeonMap({
         <AttributionPrefixOff />
         <BearingWatcher onBearing={setBearing} />
         {houseBubbles && <ZoomWatcher onZoom={setZoomLevel} />}
+        {hasDashedLabels && <ViewTracker onView={setLabelView} />}
         <FlyTo target={flyTo} />
         <ClickCapture onClick={handleClick} />
-        <ZipBordersLayer enabled={zipsEnabled} tints={zipTints} onZipTap={onZipTap} />
-        {/* Every Tidal customer, every surface, always on (owner 2026-09-14).
-            Inert while drawing so badge taps can't eat polygon vertices. */}
-        <CustomerHomesLayer tappable={mode.kind !== "draw"} />
-        {houseBubbles && <HouseBubblesLayer enabled pins={pins} onHouseTap={onHouseTap} />}
+        <ZipBordersLayer
+          enabled={zipsEnabled && !drawingNow}
+          tints={zipTints}
+          onZipTap={onZipTap}
+        />
+        {/* Every Tidal customer, every surface (owner 2026-09-14) — except
+            mid-draw: the badges are DOM markers the stroke has to composite
+            over, and unmounting (not just inerting) also keeps a badge tap
+            from eating polygon vertices. */}
+        {!drawingNow && <CustomerHomesLayer tappable />}
+        {houseBubbles && !drawingNow && (
+          <HouseBubblesLayer enabled pins={pins} onHouseTap={onHouseTap} />
+        )}
         {hasFit && <FitPolygons polygons={fitPolygons!} />}
         {follow ? (
           <>
@@ -776,7 +943,7 @@ export function NeonMap({
           allPoints.length > 0 && !hasFit && <FitBounds points={allPoints} />
         )}
 
-        {territories.map((t) => {
+        {territoryRender.map(({ t, positions, pathOptions }) => {
           // Popup mode: click opens the on-map card (below), not the sheet —
           // the card's button opens the sheet. Otherwise keep the plain
           // click→onTerritoryClick used by the canvasser/spectator maps.
@@ -787,13 +954,8 @@ export function NeonMap({
           return (
             <Polygon
               key={t.id}
-              positions={t.polygon.map((p) => [p.lat, p.lng] as [number, number])}
-              pathOptions={{
-                color: t.color,
-                weight: 2,
-                fillColor: t.color,
-                ...(t.dashed ? { dashArray: "6 8", fillOpacity: 0.06 } : { fillOpacity: 0.15 }),
-              }}
+              positions={positions}
+              pathOptions={pathOptions}
               eventHandlers={
                 !withPopup && onTerritoryClick ? { click: () => onTerritoryClick(t.id) } : undefined
               }
@@ -835,17 +997,14 @@ export function NeonMap({
           );
         })}
 
-        {territories.map((t) => {
-          if (!t.assignmentLabel || t.polygon.length < 3) return null;
-          return (
-            <Marker
-              key={`${t.id}-label`}
-              position={labelAnchor(t.polygon)}
-              icon={territoryLabelIcon(t.assignmentLabel, t.color)}
-              interactive={false}
-            />
-          );
-        })}
+        {visibleLabels.map((l) => (
+          <Marker
+            key={l.key}
+            position={l.anchor}
+            icon={territoryLabelIcon(l.label, l.color)}
+            interactive={false}
+          />
+        ))}
 
         {pendingPolygon && pendingPolygon.length >= 3 && (
           <Polygon
@@ -870,6 +1029,7 @@ export function NeonMap({
               setDraft([]); // a committed stroke supersedes any tapped vertices
               mode.onComplete(poly);
             }}
+            onDiscard={() => flashDrawHint("Too small — zoom in and draw a bigger loop")}
           />
         )}
 
@@ -938,6 +1098,11 @@ export function NeonMap({
           <div className="rounded border border-neon/60 bg-surface/90 backdrop-blur px-3 py-2 font-display text-[10px] uppercase tracking-widest text-neon">
             Drag to draw an area · tap for points{draft.length > 0 ? ` · ${draft.length} pts` : ""}
           </div>
+          {drawHint && (
+            <div className="rounded border border-yellow-400/60 bg-surface/90 backdrop-blur px-3 py-2 font-display text-[10px] uppercase tracking-widest text-yellow-300">
+              {drawHint}
+            </div>
+          )}
           <div className="flex gap-2">
             <button
               onClick={finishDraft}
@@ -1038,7 +1203,7 @@ export function NeonMap({
           ZIP
         </button>
         {/* Recenter on my location — and re-arm follow-my-dot after a browse */}
-        {me && mode.kind !== "draw" && (
+        {me && !drawingNow && (
           <button
             type="button"
             aria-label="Center map on my location"
@@ -1063,5 +1228,58 @@ export function NeonMap({
         )}
       </div>
     </div>
+  );
+}
+
+type NeonMapProps = Parameters<typeof NeonMapInner>[0];
+
+/** A layer throw (a bad polygon, a plugin edge case) must cost the map, not
+ *  the whole route — without this the router's root "Connection Lost" screen
+ *  swallowed the page. Retry remounts a fresh MapContainer. */
+class MapCrashBoundary extends Component<
+  { height: number | string; children: ReactNode },
+  { crashed: boolean; attempt: number }
+> {
+  state = { crashed: false, attempt: 0 };
+  static getDerivedStateFromError() {
+    return { crashed: true };
+  }
+  componentDidCatch(err: unknown) {
+    console.error("[NeonMap] map crashed", err);
+  }
+  render() {
+    if (this.state.crashed) {
+      const h = this.props.height;
+      return (
+        <div
+          className="flex flex-col items-center justify-center gap-3 rounded-lg border border-border bg-surface/60"
+          style={{ height: typeof h === "number" ? `min(${h}px, 65vh)` : h }}
+        >
+          <div className="font-display text-[10px] uppercase tracking-widest text-muted-foreground">
+            The map hit a snag
+          </div>
+          <button
+            type="button"
+            onClick={() => this.setState((s) => ({ crashed: false, attempt: s.attempt + 1 }))}
+            className="min-h-11 rounded border border-neon/60 bg-surface px-4 font-display text-[10px] uppercase tracking-widest text-neon"
+          >
+            Reload map
+          </button>
+        </div>
+      );
+    }
+    return (
+      <div key={this.state.attempt} className="contents">
+        {this.props.children}
+      </div>
+    );
+  }
+}
+
+export function NeonMap(props: NeonMapProps) {
+  return (
+    <MapCrashBoundary height={props.height ?? 480}>
+      <NeonMapInner {...props} />
+    </MapCrashBoundary>
   );
 }

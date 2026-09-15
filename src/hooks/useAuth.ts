@@ -45,6 +45,47 @@ function effectiveDevName(realRole: AppRole | null, effRole: AppRole | null): st
   return readDevName();
 }
 
+// useAuth has no provider: AppShell, the page, ActiveRun, CrewBeacon, … each
+// mount their own copy, and each used to fire its own auth.getUser() network
+// validation plus a roles + profile read — 4× the same three requests
+// serialized ahead of the map's first paint. Share one in-flight getUser and
+// one short-lived roles/profile fetch across all mounts instead. TTL is
+// seconds: role grants are rare admin ops, and every auth event still
+// re-hydrates through the same path.
+let sharedGetUser: ReturnType<typeof supabase.auth.getUser> | null = null;
+function getUserShared() {
+  if (!sharedGetUser) {
+    sharedGetUser = supabase.auth.getUser();
+    void sharedGetUser.finally(() => {
+      sharedGetUser = null;
+    });
+  }
+  return sharedGetUser;
+}
+
+type HydrateFetch = Promise<{
+  roles: Array<{ role: string }> | null;
+  profile: { team_id: string | null; display_name: string | null } | null;
+}>;
+let rolesProfileCache: { uid: string; at: number; promise: HydrateFetch } | null = null;
+const ROLES_PROFILE_TTL_MS = 15_000;
+function fetchRolesProfile(uid: string): HydrateFetch {
+  const now = Date.now();
+  if (
+    rolesProfileCache &&
+    rolesProfileCache.uid === uid &&
+    now - rolesProfileCache.at < ROLES_PROFILE_TTL_MS
+  ) {
+    return rolesProfileCache.promise;
+  }
+  const promise = Promise.all([
+    supabase.from("user_roles").select("role").eq("user_id", uid),
+    supabase.from("profiles").select("team_id, display_name").eq("id", uid).maybeSingle(),
+  ]).then(([{ data: roles }, { data: profile }]) => ({ roles, profile }));
+  rolesProfileCache = { uid, at: now, promise };
+  return promise;
+}
+
 export function useAuth(): AuthState {
   const [state, setState] = useState<AuthState>({
     loading: true,
@@ -73,10 +114,7 @@ export function useAuth(): AuthState {
           });
         return;
       }
-      const [{ data: roles }, { data: profile }] = await Promise.all([
-        supabase.from("user_roles").select("role").eq("user_id", user.id),
-        supabase.from("profiles").select("team_id, display_name").eq("id", user.id).maybeSingle(),
-      ]);
+      const { roles, profile } = await fetchRolesProfile(user.id);
       const r = roles?.map((x) => x.role as AppRole) ?? [];
       const realRole = primaryRole(r);
       // View As is owner-only (owner decision 2026-08-12): a stale
@@ -101,7 +139,7 @@ export function useAuth(): AuthState {
       }
     }
 
-    supabase.auth.getUser().then(({ data }) => hydrate(data.user));
+    getUserShared().then(({ data }) => hydrate(data.user));
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       hydrate(session?.user ?? null);
     });
