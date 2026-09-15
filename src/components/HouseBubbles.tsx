@@ -1,10 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Marker, useMap } from "react-leaflet";
 import L from "leaflet";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { supabase } from "@/integrations/supabase/client";
 import { viewBounds } from "@/lib/map-bounds";
 import { withTimeout } from "@/lib/abort-timeout";
-import { PIN_COLORS, type PinType } from "@/lib/pin-results";
+import { PIN_COLORS } from "@/lib/pin-results";
+import {
+  houseCache,
+  haversineM,
+  ingestBuilding,
+  ingestAddrNode,
+  MATCH_METERS,
+  type OsmHouse,
+  type OverpassElement,
+} from "@/lib/house-cache";
 import type { FieldPin } from "@/components/NeonMap";
 
 /**
@@ -16,8 +28,13 @@ import type { FieldPin } from "@/components/NeonMap";
  *    imports) — these sit where the county put them (driveway/parcel), and
  *    they always show their number: the number IS the house there.
  * Un-worked houses wear a neutral ring; a house whose door was logged today
- * wears its result's color. Tapping a bubble hands the house (plus its
- * current pin, if any) to the page, which opens the one-tap result sheet.
+ * wears its result's color; a house with a saved note wears a 📝 badge.
+ * Tapping a bubble hands the house (plus its current pin, if any) to the
+ * page, which opens the one-tap result sheet.
+ *
+ * The cache/dedupe/snap geometry lives in src/lib/house-cache.ts (pure,
+ * verified by scripts/verify-house-snap.ts); this file owns the Overpass
+ * fetch pipeline and rendering.
  *
  * Dense frames that would overflow one Overpass print are re-fetched as
  * quadrants (depth 1, sequential) so truncation never leaves arbitrary
@@ -28,75 +45,20 @@ import type { FieldPin } from "@/components/NeonMap";
  * under-bubble label is the house number where OSM knows it.
  */
 
+export type { OsmHouse } from "@/lib/house-cache";
+
 /** Bubbles only make sense at door-to-door zoom — below it they'd overlap
  *  2-3 deep and nothing would be tappable. NeonMap shows a "zoom in" pill
  *  between z14 and here so a zoomed-out rep is never silently circle-less. */
 export const HOUSE_MIN_ZOOM = 17;
 const NUMBER_MIN_ZOOM = 18;
-/** A pin belongs to a house when it landed within this many meters of the
- *  building centroid (GPS-at-the-door vs roof-center offset). */
-const MATCH_METERS = 14;
-/** An address point within this many meters of a building centroid is the
- *  same home. Deliberately small: SoCal lots run 15-18 m wide, so a bigger
- *  radius would eat the address point of a REAL unmapped home next door —
- *  the exact gap this feature closes. Too-small cost: an occasional second
- *  ring on one large roof (cosmetic; either circle logs the same door). */
-const DEDUPE_METERS = 12;
-/** A mixed-tagged multipolygon (building=* on BOTH the relation and its
- *  outer way) yields two bbox centers ~0-2 m apart — merge only that tight
- *  radius, or a pure-relation home next to a townhome WAY gets eaten. */
-const REL_WAY_MERGE_METERS = 3;
 /** DOM divIcon markers a mid-range field phone pans smoothly with. */
 const RENDER_CAP = 300;
 
-export type OsmHouse = {
-  /** Namespaced OSM id ("w…"/"r…"/"n…") — ways, relations, and nodes have
-   *  SEPARATE id spaces; un-namespaced numbers silently merge houses. */
-  id: string;
-  lat: number;
-  lng: number;
-  /** Stable [lat, lng] tuple minted once at ingest — react-leaflet compares
-   *  position by identity, so a fresh array per render would setLatLng every
-   *  GPS tick for every bubble. */
-  pos: [number, number];
-  /** OSM addr:housenumber when mapped; "" otherwise. */
-  num: string;
-  kind: "building" | "addr";
-  /** Today's latest valid pin on this house (set by the matcher at tap time). */
-  currentPinId?: string;
-  currentType?: PinType;
-};
-
-// Outbuildings that shouldn't get a knock bubble.
-const EXCLUDED_BUILDINGS = new Set([
-  "garage",
-  "garages",
-  "shed",
-  "carport",
-  "roof",
-  "greenhouse",
-  "hut",
-  "kiosk",
-  "service",
-  "ruins",
-  "no", // building=no explicitly marks "not a building"
-]);
-
-// Address NODES carrying these keys are POIs that happen to have an address
-// (a shop, a clinic, a gym), not homes; county address-point imports carry
-// only addr:* keys.
-const POI_KEYS = [
-  "shop",
-  "amenity",
-  "office",
-  "craft",
-  "tourism",
-  "leisure",
-  "healthcare",
-  "emergency",
-  "historic",
-  "man_made",
-] as const;
+// Untyped table access (ObjectionDojo/gratitude pattern) until generated
+// types catch up with house_notes — the default SupabaseClient generics
+// keep the builder loose without per-call-site casts.
+const rawTable = (name: string) => (supabase as unknown as SupabaseClient).from(name);
 
 // Public Overpass endpoints, tried in order. After both fail we go quiet for
 // a minute — a field crew must never turn into a retry storm.
@@ -114,160 +76,11 @@ const NODE_CAP = 900;
 // Sequential quadrant fetches are spaced — polite to the public endpoints.
 const QUADRANT_SPACING_MS = 300;
 
-// Session caches (module scope — shared across remounts).
-const houseCache = new Map<string, OsmHouse>();
+// Fetch-state session caches (module scope — shared across remounts).
 const coveredBounds: L.LatLngBounds[] = [];
 const MAX_COVERED = 64; // splits add up to 5 rects per dense view
 let lastFailAt = 0;
 let failNoticeShown = false;
-
-function haversineM(aLat: number, aLng: number, bLat: number, bLng: number) {
-  const R = 6371000;
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLat = toRad(bLat - aLat);
-  const dLng = toRad(bLng - aLng);
-  const s1 = Math.sin(dLat / 2);
-  const s2 = Math.sin(dLng / 2);
-  const h = s1 * s1 + Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * s2 * s2;
-  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
-}
-
-// Tiny grid index over the cache so building↔address dedupe stays O(1) per
-// ingest instead of scanning the whole session cache. Cell ≈ 28 m ≥
-// DEDUPE_METERS, so a 3×3 neighborhood always covers the radius.
-const CELL_DEG = 0.00025;
-const grid = new Map<string, Set<string>>();
-const cellOf = (lat: number, lng: number) =>
-  `${Math.round(lat / CELL_DEG)}:${Math.round(lng / CELL_DEG)}`;
-function gridAdd(h: OsmHouse) {
-  const k = cellOf(h.lat, h.lng);
-  let s = grid.get(k);
-  if (!s) grid.set(k, (s = new Set()));
-  s.add(h.id);
-}
-function gridDelete(h: OsmHouse) {
-  grid.get(cellOf(h.lat, h.lng))?.delete(h.id);
-}
-function nearestWithin(
-  lat: number,
-  lng: number,
-  kind: OsmHouse["kind"],
-  maxM: number,
-): OsmHouse | null {
-  const ci = Math.round(lat / CELL_DEG);
-  const cj = Math.round(lng / CELL_DEG);
-  let best: OsmHouse | null = null;
-  let bestD = maxM;
-  for (let di = -1; di <= 1; di++) {
-    for (let dj = -1; dj <= 1; dj++) {
-      const s = grid.get(`${ci + di}:${cj + dj}`);
-      if (!s) continue;
-      for (const id of s) {
-        const h = houseCache.get(id);
-        if (!h || h.kind !== kind) continue;
-        const d = haversineM(lat, lng, h.lat, h.lng);
-        if (d <= bestD) {
-          bestD = d;
-          best = h;
-        }
-      }
-    }
-  }
-  return best;
-}
-
-type OverpassElement = {
-  type: string;
-  id: number;
-  lat?: number;
-  lon?: number;
-  center?: { lat: number; lon: number };
-  tags?: Record<string, string>;
-};
-
-function ingestBuilding(el: OverpassElement) {
-  if (!el.center) return;
-  const id = `${el.type[0]}${el.id}`;
-  if (houseCache.has(id)) return;
-  const kind = (el.tags?.building ?? "yes").toLowerCase();
-  if (EXCLUDED_BUILDINGS.has(kind)) return;
-  if (el.tags?.["building:part"]) return;
-  const { lat, lon: lng } = el.center;
-  const h: OsmHouse = {
-    id,
-    lat,
-    lng,
-    pos: [lat, lng],
-    num: el.tags?.["addr:housenumber"] ?? "",
-    kind: "building",
-  };
-  // Mixed-tagging double: a minority of multipolygons carry building=* on
-  // BOTH the relation and its outer way. Dedupe ONLY rel↔way pairs — never
-  // way↔way, since townhome centroids sit closer than any safe radius. The
-  // way wins: its centroid is the true polygon centroid vs the relation's
-  // bbox center.
-  const twinB = nearestWithin(lat, lng, "building", REL_WAY_MERGE_METERS);
-  if (twinB && twinB.id[0] !== id[0]) {
-    if (id[0] === "w") {
-      // Incoming way replaces the cached relation.
-      if (!h.num && twinB.num) h.num = twinB.num;
-      houseCache.delete(twinB.id);
-      gridDelete(twinB);
-    } else {
-      // Incoming relation defers to the cached way.
-      if (!twinB.num && h.num) twinB.num = h.num;
-      return;
-    }
-  }
-  // A footprint supersedes an address point on the same roof (quadrant
-  // fetches make arrival order unpredictable, so dedupe runs both ways) —
-  // UNLESS they carry different housenumbers: on sub-15 m beach/zero-lot
-  // tracts, a real unmapped neighbor's point can sit under 12 m from the
-  // adjacent footprint's centroid, and that home keeps its own circle.
-  const twin = nearestWithin(lat, lng, "addr", DEDUPE_METERS);
-  if (twin && (!twin.num || !h.num || twin.num === h.num)) {
-    if (!h.num && twin.num) h.num = twin.num;
-    houseCache.delete(twin.id);
-    gridDelete(twin);
-  }
-  houseCache.set(id, h);
-  gridAdd(h);
-}
-
-function ingestAddrNode(el: OverpassElement) {
-  if (el.lat == null || el.lon == null) return;
-  const id = `n${el.id}`;
-  if (houseCache.has(id)) return;
-  const tags = el.tags ?? {};
-  if (POI_KEYS.some((k) => tags[k])) return;
-  // An entrance node is by definition a vertex of a mapped building — its
-  // home already has a footprint bubble. Skipping it kills the most common
-  // "two circles on one roof" twin at the source.
-  if (tags.entrance) return;
-  // Unit-level points (multifamily imports): a big apartment roof would
-  // sprout dozens of always-labeled circles and eat the node budget.
-  if (tags["addr:unit"]) return;
-  const { lat, lon: lng } = el;
-  const num = tags["addr:housenumber"] ?? "";
-  const roof = nearestWithin(lat, lng, "building", DEDUPE_METERS);
-  // Same home unless the numbers disagree — a differing number under 12 m
-  // is a real neighbor on a tiny lot, exactly the home this feature covers.
-  if (roof && (!roof.num || !num || roof.num === num)) {
-    // The node's number is a free label for the footprint.
-    if (!roof.num && num) roof.num = num;
-    return;
-  }
-  const h: OsmHouse = {
-    id,
-    lat,
-    lng,
-    pos: [lat, lng],
-    num,
-    kind: "addr",
-  };
-  houseCache.set(id, h);
-  gridAdd(h);
-}
 
 /** One Overpass round trip; returns RAW per-class element counts (before
  *  client filters — filtered elements consumed print budget too, and the
@@ -390,9 +203,15 @@ async function fetchHouses(
 // Bubble divIcons cached by look (same rationale as NeonMap's icon cache:
 // stable identity across the GPS-tick re-renders).
 const bubbleIconCache = new Map<string, L.DivIcon>();
-function bubbleIcon(opts: { color: string | null; num: string; showNum: boolean; hit: number }) {
-  const { color, num, showNum, hit } = opts;
-  const key = `${color ?? "none"}|${showNum ? num : ""}|${hit}`;
+function bubbleIcon(opts: {
+  color: string | null;
+  num: string;
+  showNum: boolean;
+  hit: number;
+  noted: boolean;
+}) {
+  const { color, num, showNum, hit, noted } = opts;
+  const key = `${color ?? "none"}|${showNum ? num : ""}|${hit}|${noted ? 1 : 0}`;
   let icon = bubbleIconCache.get(key);
   if (!icon) {
     const ring = color
@@ -402,10 +221,15 @@ function bubbleIcon(opts: { color: string | null; num: string; showNum: boolean;
       showNum && num
         ? `<div style="margin-top:1px;color:#fff;font:700 9px/1 ui-sans-serif,system-ui;text-shadow:0 0 4px #000,0 1px 2px #000;letter-spacing:0.04em;">${num.replace(/[<>&"']/g, "")}</div>`
         : "";
+    // 📝 badge: this house has a saved note (rep ask 2026-09-15) — visible
+    // from the street so "come back at 6" isn't buried behind a tap.
+    const noteBadge = noted
+      ? `<div style="position:absolute;top:-7px;right:-8px;font-size:12px;line-height:1;filter:drop-shadow(0 1px 2px #000);">📝</div>`
+      : "";
     const html = `
     <div style="width:${hit}px;display:flex;flex-direction:column;align-items:center;">
       <div style="width:${hit}px;height:${hit}px;display:flex;align-items:center;justify-content:center;">
-        <div style="width:26px;height:26px;border-radius:9999px;${ring}"></div>
+        <div style="position:relative;width:26px;height:26px;border-radius:9999px;${ring}">${noteBadge}</div>
       </div>
       ${label}
     </div>`;
@@ -516,6 +340,59 @@ export function HouseBubblesLayer({
     return out;
   }, [enabled, view, renderTick]);
 
+  // House notes in view → 📝 badges. Sparse team data on a ~1 km rounded
+  // bbox key: a walking rep's pans reuse one cached fetch instead of firing
+  // per moveend; adds/deletes invalidate the ["house_notes"] prefix.
+  const noteBox = useMemo(() => {
+    if (!enabled || !view || view.zoom < HOUSE_MIN_ZOOM) return null;
+    const b = view.bounds.pad(0.5);
+    return {
+      s: Math.floor(b.getSouth() * 100) / 100,
+      w: Math.floor(b.getWest() * 100) / 100,
+      n: Math.ceil(b.getNorth() * 100) / 100,
+      e: Math.ceil(b.getEast() * 100) / 100,
+    };
+  }, [enabled, view]);
+  const notesQuery = useQuery({
+    enabled: !!noteBox,
+    queryKey: ["house_notes", "bbox", noteBox?.s, noteBox?.w, noteBox?.n, noteBox?.e],
+    staleTime: 60_000,
+    queryFn: async () => {
+      const { data, error } = await rawTable("house_notes")
+        .select("lat, lng")
+        .gte("lat", noteBox!.s)
+        .lte("lat", noteBox!.n)
+        .gte("lng", noteBox!.w)
+        .lte("lng", noteBox!.e)
+        .limit(500);
+      if (error) throw error;
+      return (data ?? []) as Array<{ lat: number; lng: number }>;
+    },
+  });
+
+  // Houses wearing a 📝 — each note badges its nearest house (same radius
+  // as pin matching, so the badge lands where the sheet will find the note).
+  const notedIds = useMemo(() => {
+    const ids = new Set<string>();
+    const notes = notesQuery.data ?? [];
+    if (notes.length === 0 || inFrame.length === 0) return ids;
+    const latWindow = MATCH_METERS / 111_000;
+    for (const nte of notes) {
+      let best: OsmHouse | null = null;
+      let bestD = MATCH_METERS;
+      for (const h of inFrame) {
+        if (Math.abs(h.lat - nte.lat) > latWindow * 1.5) continue;
+        const d = haversineM(h.lat, h.lng, nte.lat, nte.lng);
+        if (d <= bestD) {
+          bestD = d;
+          best = h;
+        }
+      }
+      if (best) ids.add(best.id);
+    }
+    return ids;
+  }, [notesQuery.data, inFrame]);
+
   // Latest valid pin per house — matched against the FULL frame (before the
   // render cap) so a worked house can never lose its bubble to the trim.
   // Remote drops stay off bubbles (stat-dead, already flagged on the map).
@@ -543,9 +420,9 @@ export function HouseBubblesLayer({
     return match;
   }, [inFrame, pins]);
 
-  // Deterministic trim: worked bubbles always render; neutral ones yield
-  // from the frame edge inward (an edge gap reads as "still loading", never
-  // a random mid-block hole).
+  // Deterministic trim: worked and noted bubbles always render; neutral ones
+  // yield from the frame edge inward (an edge gap reads as "still loading",
+  // never a random mid-block hole).
   const visible = useMemo(() => {
     if (inFrame.length <= RENDER_CAP) return inFrame;
     const c = view!.bounds.getCenter();
@@ -557,10 +434,12 @@ export function HouseBubblesLayer({
     };
     const worked: OsmHouse[] = [];
     const neutral: OsmHouse[] = [];
-    for (const h of inFrame) (resultByHouse.has(h.id) ? worked : neutral).push(h);
+    for (const h of inFrame) {
+      (resultByHouse.has(h.id) || notedIds.has(h.id) ? worked : neutral).push(h);
+    }
     neutral.sort((a, b) => d2(a) - d2(b));
     return worked.concat(neutral.slice(0, Math.max(0, RENDER_CAP - worked.length)));
-  }, [inFrame, resultByHouse, view]);
+  }, [inFrame, resultByHouse, notedIds, view]);
 
   // Stable per-house event handlers: fresh objects every render would make
   // react-leaflet re-bind (off/on) every bubble on every GPS tick. Handlers
@@ -610,7 +489,13 @@ export function HouseBubblesLayer({
             position={h.pos}
             // Address-point houses always show their number — with no
             // footprint under them, the number IS the house.
-            icon={bubbleIcon({ color, num: h.num, showNum: showNum || h.kind === "addr", hit })}
+            icon={bubbleIcon({
+              color,
+              num: h.num,
+              showNum: showNum || h.kind === "addr",
+              hit,
+              noted: notedIds.has(h.id),
+            })}
             interactive={tappable}
             // Bubbles sit UNDER result pins/the me-dot — a bubble must never
             // steal the tap meant for a pin correction dead-center on it.

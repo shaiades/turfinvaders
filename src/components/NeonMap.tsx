@@ -16,6 +16,7 @@ import { viewBounds } from "@/lib/map-bounds";
 import { PIN_COLORS, type PinType } from "@/lib/pin-results";
 import { ZipBordersLayer, ZIP_MIN_ZOOM, type ZipTint } from "@/components/ZipBorders";
 import { HouseBubblesLayer, HOUSE_MIN_ZOOM, type OsmHouse } from "@/components/HouseBubbles";
+import { snapTapToHouse } from "@/lib/house-cache";
 import { CustomerHomesLayer } from "@/components/CustomerHomes";
 
 // Canonical copy lives in lib/pin-results (SSR-safe); re-exported here so map
@@ -918,7 +919,23 @@ function NeonMapInner({
   function handleClick(ll: LatLng) {
     if (Date.now() - justDrewRef.current < 400) return;
     if (mode.kind === "draw") setDraft((d) => [...d, ll]);
-    if (mode.kind === "pin" && !mode.disabled) mode.onDrop(ll);
+    if (mode.kind === "pin" && !mode.disabled) {
+      // Near-miss forgiveness (rep feedback 2026-09-15: "if I don't click it
+      // perfectly on the circle it automatically puts not home"): a tap
+      // within the pin↔house match radius of a cached house is a tap AT that
+      // house — open its result sheet instead of insta-dropping the armed
+      // result. A dropped pin inside that radius would have colored this
+      // house's bubble anyway; truly bubble-less spots (rural, new builds)
+      // still get the armed free-roam drop below.
+      if (houseBubbles && onHouseTap) {
+        const snapped = snapTapToHouse(ll.lat, ll.lng, pins);
+        if (snapped) {
+          onHouseTap(snapped);
+          return;
+        }
+      }
+      mode.onDrop(ll);
+    }
   }
 
   function finishDraft() {
