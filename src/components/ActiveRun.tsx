@@ -185,6 +185,14 @@ export function ActiveRun({
   // route SSRs and a render-time window read is a hydration mismatch.
   const piggy = usePiggyBank(user?.id);
   const [piggyDemo, setPiggyDemo] = useState<{ on: boolean; rateMs?: number }>({ on: false });
+  // Lead-submitted coin burst: the pin's own coin plays while the LeadSheet
+  // (z-[2000]) covers the map, so the win is replayed on close where the rep
+  // can SEE it. `dollars` is the measured piggy delta across the sheet —
+  // real, column-traceable, never a fabricated lead value.
+  const [piggyCelebrate, setPiggyCelebrate] = useState<{ seq: number; dollars: number } | null>(
+    null,
+  );
+  const piggyAtLeadOpenRef = useRef<number | null>(null);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("piggy_demo") === "1") {
@@ -305,6 +313,7 @@ export function ActiveRun({
       toast.error("No GPS fix yet — enable Location and try again.");
       return;
     }
+    piggyAtLeadOpenRef.current = piggy.dollars;
     // Form first — the lead is the revenue event; the pin is bookkeeping.
     // The drop (fresh GPS fix + insert, up to ~8s) runs behind the overlay so
     // the doorstep never waits on a spinner; dropAtDevice toasts its own
@@ -451,6 +460,7 @@ export function ActiveRun({
                   source={piggy.source}
                   demo={piggyDemo.on}
                   demoRateMs={piggyDemo.rateMs}
+                  celebrate={piggyCelebrate}
                 />
               </div>
 
@@ -572,6 +582,14 @@ export function ActiveRun({
               } catch {
                 /* unsupported */
               }
+              // Replay the coin win now that the map is visible again. If the
+              // background pin hadn't settled by close, delta is 0 and the
+              // late knock-coin carries the $ instead — no double count.
+              const delta =
+                piggy.dollars !== null && piggyAtLeadOpenRef.current !== null
+                  ? Math.max(0, piggy.dollars - piggyAtLeadOpenRef.current)
+                  : 0;
+              setPiggyCelebrate((c) => ({ seq: (c?.seq ?? 0) + 1, dollars: delta }));
               toast.success("⚡ Lead submitted — it's on the board!");
             }
           }}
