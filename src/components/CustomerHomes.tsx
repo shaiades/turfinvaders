@@ -182,8 +182,12 @@ function customerBadgeIcon(size: number, hit: number): L.DivIcon {
  *  "off-frame", never a random hole. */
 const RENDER_CAP = 350;
 
-/** Below this zoom the DOM logo badges give way to canvas dots. */
-const BADGE_MIN_ZOOM = 13;
+/** Below this zoom the DOM logo badges give way to canvas dots. Street zoom
+ *  only (owner video 2026-09-15): at z13 a fixed 16px logo covered ~250 m of
+ *  ground — whole blocks wore one giant badge, and a mid-zoom frame mounted
+ *  up to RENDER_CAP logo divs (white circle + shadow + img each), which WAS
+ *  the pan/pinch lag. Dots are canvas vectors — thousands cost nothing. */
+const BADGE_MIN_ZOOM = 16;
 /** Badge palette, reused by the far-zoom dots so they read as the same layer. */
 const DOT_STYLE = {
   color: "#12283a",
@@ -240,7 +244,9 @@ export function CustomerHomesLayer({ tappable = true }: { tappable?: boolean }) 
 
   if (dotsMode) {
     if (dotVisible.length === 0) return null;
-    const radius = zoom >= 11 ? 4 : 3;
+    // Slightly larger through the zooms the badges used to own (13-15) so
+    // the layer never reads as "sales disappeared" right below badge zoom.
+    const radius = zoom >= 13 ? 5 : zoom >= 11 ? 4 : 3;
     return (
       <>
         {dotVisible.map((b) => (
@@ -259,9 +265,9 @@ export function CustomerHomesLayer({ tappable = true }: { tappable?: boolean }) 
   if (visible.length === 0) return null;
   // Sized to the house-bubble result circle (26px — owner 2026-09-15:
   // "replace the circle where the results go with that logo, that's the
-  // size"), shrinking further as the map zooms out. The hit box stays
-  // finger-sized regardless.
-  const size = zoom >= 16 ? 26 : zoom >= 13 ? 16 : 11;
+  // size"). One size: badges exist only at street zoom now, where 26px IS
+  // house-scale. The hit box stays finger-sized regardless.
+  const size = 26;
   const hit = tappable ? Math.max(size, 40) : size;
   const icon = customerBadgeIcon(size, hit);
 
