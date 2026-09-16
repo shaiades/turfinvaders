@@ -96,6 +96,7 @@ export function HouseResultSheet({
       return {
         hn: a.house_number ?? "",
         road: a.road ?? a.pedestrian ?? a.residential ?? "",
+        postcode: a.postcode ?? "",
       };
     },
   });
@@ -141,11 +142,18 @@ export function HouseResultSheet({
                     if (hasCurrent && view.currentPinId) {
                       onSwitch(view.currentPinId, r.type);
                     } else {
-                      // Ride the resolved street along (the Lead flow shows
-                      // the address while the rep fills the form) — never
-                      // the reverse-geocoded house NUMBER, which can be
-                      // interpolated onto the neighbor.
-                      onDrop(road && !view.street ? { ...view, street: road } : view, r.type);
+                      // Ride the resolved street + zip along (the Lead flow
+                      // shows a copyable address while the rep fills the
+                      // form) — never the reverse-geocoded house NUMBER,
+                      // which can be interpolated onto the neighbor.
+                      onDrop(
+                        {
+                          ...view,
+                          street: view.street || road,
+                          zip: view.zip || revQuery.data?.postcode || "",
+                        },
+                        r.type,
+                      );
                     }
                     onOpenChange(false);
                   }}

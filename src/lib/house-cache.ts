@@ -25,6 +25,10 @@ export type OsmHouse = {
    *  address the result sheet shows (rep ask 2026-09-15). Same tags payload
    *  we already download; keeping it costs nothing. */
   street: string;
+  /** OSM addr:postcode when mapped; "" otherwise. The office's Address
+   *  question asks for "street address followed by zip code" — the zip
+   *  completes the copy/prefill string in exactly that format. */
+  zip: string;
   kind: "building" | "addr";
   /** Today's latest valid pin on this house (set by the matcher at tap time). */
   currentPinId?: string;
@@ -180,6 +184,7 @@ export function ingestBuilding(el: OverpassElement) {
     pos: [lat, lng],
     num: el.tags?.["addr:housenumber"] ?? "",
     street: el.tags?.["addr:street"] ?? "",
+    zip: el.tags?.["addr:postcode"] ?? "",
     kind: "building",
   };
   // Mixed-tagging double: a minority of multipolygons carry building=* on
@@ -193,12 +198,14 @@ export function ingestBuilding(el: OverpassElement) {
       // Incoming way replaces the cached relation.
       if (!h.num && twinB.num) h.num = twinB.num;
       if (!h.street && twinB.street) h.street = twinB.street;
+      if (!h.zip && twinB.zip) h.zip = twinB.zip;
       houseCache.delete(twinB.id);
       gridDelete(twinB);
     } else {
       // Incoming relation defers to the cached way.
       if (!twinB.num && h.num) twinB.num = h.num;
       if (!twinB.street && h.street) twinB.street = h.street;
+      if (!twinB.zip && h.zip) twinB.zip = h.zip;
       return;
     }
   }
@@ -211,6 +218,7 @@ export function ingestBuilding(el: OverpassElement) {
   if (twin && (!twin.num || !h.num || twin.num === h.num)) {
     if (!h.num && twin.num) h.num = twin.num;
     if (!h.street && twin.street) h.street = twin.street;
+    if (!h.zip && twin.zip) h.zip = twin.zip;
     houseCache.delete(twin.id);
     gridDelete(twin);
   }
@@ -234,13 +242,15 @@ export function ingestAddrNode(el: OverpassElement) {
   const { lat, lon: lng } = el;
   const num = tags["addr:housenumber"] ?? "";
   const street = tags["addr:street"] ?? "";
+  const zip = tags["addr:postcode"] ?? "";
   const roof = nearestWithin(lat, lng, "building", DEDUPE_METERS);
   // Same home unless the numbers disagree — a differing number under 12 m
   // is a real neighbor on a tiny lot, exactly the home this feature covers.
   if (roof && (!roof.num || !num || roof.num === num)) {
-    // The node's number (and street) is a free label for the footprint.
+    // The node's number (and street/zip) is a free label for the footprint.
     if (!roof.num && num) roof.num = num;
     if (!roof.street && street) roof.street = street;
+    if (!roof.zip && zip) roof.zip = zip;
     return;
   }
   const h: OsmHouse = {
@@ -250,6 +260,7 @@ export function ingestAddrNode(el: OverpassElement) {
     pos: [lat, lng],
     num,
     street,
+    zip,
     kind: "addr",
   };
   houseCache.set(id, h);

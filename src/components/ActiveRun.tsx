@@ -30,6 +30,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { rewardToast } from "@/lib/reward-toast";
 import {
+  Copy,
   DoorClosed,
   Sparkles,
   Crosshair,
@@ -42,6 +43,15 @@ import {
   Zap,
   X,
 } from "lucide-react";
+
+/** The office's Address-question format ("5375 Avenida Encinas, 92008") for
+ *  a house-anchored lead. OSM-grade only: no OSM housenumber, no address —
+ *  a reverse-geocoded number can be interpolated onto the neighbor and must
+ *  never reach the lead pipeline. */
+function houseLeadAddress(h: OsmHouse | null): string | null {
+  if (!h?.num || !h.street) return null;
+  return `${h.num} ${h.street}${h.zip ? `, ${h.zip}` : ""}`;
+}
 
 /**
  * ACTIVE RUN — the one canvass screen (owner decision 2026-09-08, merging the
@@ -654,7 +664,7 @@ export function ActiveRun({
           // house's address rides along (header + form prefill); the OSM
           // housenumber gate keeps guessed numbers out of the pipeline.
           if (pin_type === "lead") {
-            setLeadAddress(h.num && h.street ? `${h.num} ${h.street}` : null);
+            setLeadAddress(houseLeadAddress(h));
             setLeadOpen(true);
           }
         }}
@@ -664,11 +674,7 @@ export function ActiveRun({
           // as the tile's drop path above; without this the switch minted a
           // lead pin with no Monday lead behind it.
           if (pin_type === "lead") {
-            setLeadAddress(
-              houseTarget?.num && houseTarget.street
-                ? `${houseTarget.num} ${houseTarget.street}`
-                : null,
-            );
+            setLeadAddress(houseLeadAddress(houseTarget));
             setLeadOpen(true);
           }
         }}
@@ -820,10 +826,30 @@ function LeadSheet({
           <div className="font-display text-xs uppercase tracking-widest text-neon">
             ⚡ New Lead
           </div>
-          {/* The tapped house's address — on screen while the rep fills the
-              form, so it never has to be memorized off the map. */}
+          {/* The tapped house's address, one tap to copy — Monday's Location
+              question can't take a URL prefill (WorkForms limitation,
+              verified 2026-09-15), so copy → paste → pick the suggestion is
+              the fastest honest path into the Address box. */}
           {prefill.address && (
-            <div className="truncate text-[11px] text-muted-foreground">{prefill.address}</div>
+            <button
+              type="button"
+              aria-label={`Copy address ${prefill.address}`}
+              onClick={() => {
+                const cb = navigator.clipboard;
+                if (!cb) {
+                  toast.error("Couldn't copy — type it from here instead");
+                  return;
+                }
+                cb.writeText(prefill.address!).then(
+                  () => toast.success("Address copied — paste it into the form"),
+                  () => toast.error("Couldn't copy — type it from here instead"),
+                );
+              }}
+              className="flex min-w-0 max-w-full items-center gap-1 text-[11px] text-muted-foreground active:text-foreground"
+            >
+              <Copy className="h-3 w-3 shrink-0" />
+              <span className="truncate">{prefill.address}</span>
+            </button>
           )}
         </div>
         <button

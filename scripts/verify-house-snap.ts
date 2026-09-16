@@ -46,7 +46,11 @@ function addrNode(id: number, dxM: number, dyM: number, tags: Record<string, str
 
 // ---- snap: the mis-tap contract -------------------------------------------
 resetHouseCache();
-building(1, 0, 0, { "addr:housenumber": "1234", "addr:street": "Elm Street" });
+building(1, 0, 0, {
+  "addr:housenumber": "1234",
+  "addr:street": "Elm Street",
+  "addr:postcode": "92008",
+});
 
 {
   const tap = at(8, 0); // 8 m off the centroid — a fat-finger miss
@@ -54,7 +58,7 @@ building(1, 0, 0, { "addr:housenumber": "1234", "addr:street": "Elm Street" });
   check("8 m near-miss snaps to the house", hit?.id === "w1", hit?.id);
   check(
     "snapped house carries the address",
-    hit?.num === "1234" && hit?.street === "Elm Street",
+    hit?.num === "1234" && hit?.street === "Elm Street" && hit?.zip === "92008",
     hit,
   );
   check(
@@ -131,11 +135,16 @@ building(11, 16, 0, { "addr:housenumber": "3", "addr:street": "A St" }); // 16 m
 // ---- ingest: street adoption ------------------------------------------------
 resetHouseCache();
 building(20, 0, 0); // bare footprint, no addr tags
-addrNode(21, 5, 0, { "addr:housenumber": "77", "addr:street": "Oak Avenue" }); // county point on the roof
+addrNode(21, 5, 0, {
+  "addr:housenumber": "77",
+  "addr:street": "Oak Avenue",
+  "addr:postcode": "92011",
+}); // county point on the roof
 {
   const h = houseCache.get("w20");
   check("footprint absorbs the county point's number", h?.num === "77", h?.num);
   check("footprint absorbs the county point's street", h?.street === "Oak Avenue", h?.street);
+  check("footprint absorbs the county point's zip", h?.zip === "92011", h?.zip);
   check("absorbed point never becomes its own bubble", !houseCache.has("n21"), [
     ...houseCache.keys(),
   ]);
@@ -173,7 +182,12 @@ ingestBuilding({
   type: "relation",
   id: 50,
   center: { lat: LAT0, lon: LNG0 },
-  tags: { building: "house", "addr:housenumber": "5", "addr:street": "Loop Road" },
+  tags: {
+    building: "house",
+    "addr:housenumber": "5",
+    "addr:street": "Loop Road",
+    "addr:postcode": "92013",
+  },
 });
 ingestBuilding({
   type: "way",
@@ -186,7 +200,11 @@ ingestBuilding({
     ...houseCache.keys(),
   ]);
   const h = houseCache.get("w51");
-  check("way inherited number AND street", h?.num === "5" && h?.street === "Loop Road", h);
+  check(
+    "way inherited number, street AND zip",
+    h?.num === "5" && h?.street === "Loop Road" && h?.zip === "92013",
+    h,
+  );
 }
 
 if (failures > 0) {
