@@ -10,6 +10,7 @@ import {
   type AppRole,
 } from "@/hooks/useAuth";
 import { useSwipeNav } from "@/hooks/useSwipeNav";
+import { AccessRevokedScreen, useLiveAccessRevoked } from "@/components/AccessRevokedScreen";
 import { CanvasserHUD } from "@/components/CanvasserHUD";
 import { CrewBeacon } from "@/components/CrewBeacon";
 import { LeadConfirmedCelebration } from "@/components/LeadConfirmedCelebration";
@@ -69,7 +70,13 @@ const CANVASSER_ALLOWED = [
 const SALES_REP_ALLOWED = ["/close-kombat"];
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { user, role, realRole, displayName } = useAuth();
+  const { user, role, realRole, displayName, accessRevoked } = useAuth();
+  // Removed players lose the app in-session, not just at next login: the DB
+  // trigger (20260916100000) bans their auth account, and this live watch
+  // swaps the shell for the lockout screen the moment a manager archives
+  // them — or lifts it on reactivate. Early return lives just before the
+  // shell's JSX so every hook above it still runs unconditionally.
+  const revoked = useLiveAccessRevoked(user?.id ?? null, accessRevoked);
   const router = useRouter();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   // First-sign-in arcade intro: while it's checking/playing, hold the page
@@ -231,6 +238,13 @@ export function AppShell({ children }: { children: ReactNode }) {
     navItems.slice(0, 5).map((i) => ({ to: i.to, search: i.search })),
     role === "canvasser",
   );
+
+  // The lockout replaces the WHOLE shell (nav, HUD, CrewBeacon, children):
+  // a removed player's session must not keep broadcasting GPS or rendering
+  // team data while their token runs out its last minutes.
+  if (user && revoked) {
+    return <AccessRevokedScreen onSignOut={signOut} />;
+  }
 
   // min-h-dvh (not -screen): iOS Safari's collapsing toolbar makes 100vh
   // overshoot the visible area. px-safe keeps content off the notch in
