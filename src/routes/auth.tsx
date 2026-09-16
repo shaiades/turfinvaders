@@ -107,7 +107,16 @@ function AuthPage() {
         navigate({ to: "/dashboard", search: { tab: "dispatch" } });
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Something went wrong");
+      const msg = err instanceof Error ? err.message : "Something went wrong";
+      // Removed players are BANNED at the auth layer (migration
+      // 20260916100000): GoTrue rejects their sign-in with user_banned.
+      // Say what actually happened instead of a raw API message.
+      const code = (err as { code?: string } | null)?.code;
+      toast.error(
+        code === "user_banned" || /banned/i.test(msg)
+          ? "This account was removed from the roster, so it can't sign in. Your history is safe — ask a manager to reactivate you."
+          : msg,
+      );
     } finally {
       setBusy(false);
     }

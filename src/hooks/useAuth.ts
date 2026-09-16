@@ -14,6 +14,11 @@ export interface AuthState {
   displayName: string | null;
   /** The profile's actual name, untouched by the View As rep picker. */
   realDisplayName: string | null;
+  /** True only when the signed-in user's own profile is explicitly archived
+   *  (is_active === false): they were removed from the roster, so the shell
+   *  swaps the whole app for AccessRevokedScreen. Missing/failed profile
+   *  reads stay false — lockout must never fire on a transient error. */
+  accessRevoked: boolean;
 }
 
 export const DEV_ROLE_STORAGE_KEY = "dev_role_override";
@@ -65,7 +70,7 @@ function getUserShared() {
 
 type HydrateFetch = Promise<{
   roles: Array<{ role: string }> | null;
-  profile: { team_id: string | null; display_name: string | null } | null;
+  profile: { team_id: string | null; display_name: string | null; is_active: boolean | null } | null;
 }>;
 let rolesProfileCache: { uid: string; at: number; promise: HydrateFetch } | null = null;
 const ROLES_PROFILE_TTL_MS = 15_000;
@@ -80,7 +85,7 @@ function fetchRolesProfile(uid: string): HydrateFetch {
   }
   const promise = Promise.all([
     supabase.from("user_roles").select("role").eq("user_id", uid),
-    supabase.from("profiles").select("team_id, display_name").eq("id", uid).maybeSingle(),
+    supabase.from("profiles").select("team_id, display_name, is_active").eq("id", uid).maybeSingle(),
   ]).then(([{ data: roles }, { data: profile }]) => ({ roles, profile }));
   rolesProfileCache = { uid, at: now, promise };
   return promise;
@@ -95,6 +100,7 @@ export function useAuth(): AuthState {
     teamId: null,
     displayName: null,
     realDisplayName: null,
+    accessRevoked: false,
   });
 
   useEffect(() => {
@@ -111,6 +117,7 @@ export function useAuth(): AuthState {
             teamId: null,
             displayName: null,
             realDisplayName: null,
+            accessRevoked: false,
           });
         return;
       }
@@ -135,6 +142,9 @@ export function useAuth(): AuthState {
           teamId: profile?.team_id ?? null,
           displayName: effectiveDevName(realRole, effRole) ?? realDisplayName,
           realDisplayName,
+          // Explicit false only — a null/missing profile (placeholder claim
+          // in flight, transient read failure) must not read as removed.
+          accessRevoked: profile?.is_active === false,
         });
       }
     }
