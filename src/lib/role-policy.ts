@@ -79,33 +79,46 @@ export function primaryRole(roles: ReadonlyArray<AppRole | string>): AppRole | n
   return null;
 }
 
-/** Starting roles a non-owner manager (captain / office_staff) may give a
- *  BRAND-NEW account. Mirrors the createCanvasser/addTeamMember server rule —
- *  keep them in lockstep. Changing an EXISTING account's role is owner-only
- *  (set_user_role RPC, owner decision 2026-08-12). */
+/** Starting roles a CAPTAIN may give a BRAND-NEW account. Mirrors the
+ *  createCanvasser/addTeamMember server rule — keep them in lockstep. */
 export const LIMITED_CREATABLE_ROLES: readonly AppRole[] = ["canvasser", "sales_rep"] as const;
 
+/** Roles a MANAGER (office_staff) may grant — create or change — on
+ *  non-privileged accounts (owner decision 2026-09-16: "managers can create
+ *  captains as well"; Managers run the day-to-day). Minting Owners/Managers
+ *  stays owner-only. Mirrors the set_user_role RPC's office_staff arm. */
+export const MANAGER_GRANTABLE_ROLES: readonly AppRole[] = [
+  "captain",
+  "sales_rep",
+  "confirmer",
+  "canvasser",
+] as const;
+
 /** Roles this actor may offer when CHANGING an existing account's role.
- *  Owner-only (owner decision 2026-08-12) — mirrors the set_user_role RPC;
- *  captains/Admins get an empty list and must never render a role dropdown. */
+ *  Owners: any role. Managers: field tiers only, and canManageTarget still
+ *  blocks them from Owner/Manager accounts (owner decision 2026-09-16 —
+ *  supersedes the owner-only rule of 2026-08-12). Captains: none — they
+ *  must never render a role dropdown. Mirrors the set_user_role RPC. */
 export function assignableRolesFor(actor: AppRole | string | null | undefined): readonly AppRole[] {
   if (actor === "owner") return APP_ROLES;
+  if (actor === "office_staff") return MANAGER_GRANTABLE_ROLES;
   return [];
 }
 
-/** Roles this actor may pick when CREATING a brand-new account (Add Player /
- *  Add Team Member). Owners: any role, including additional Owners. Captains
- *  and Admins: canvasser tier only. */
+/** Roles this actor may pick when CREATING a brand-new account (Add Player).
+ *  Owners: any role, including additional Owners. Managers: up to Captain.
+ *  Captains: canvasser tier only. */
 export function creatableRolesFor(actor: AppRole | string | null | undefined): readonly AppRole[] {
   if (actor === "owner") return APP_ROLES;
-  if (actor === "captain" || actor === "office_staff") return LIMITED_CREATABLE_ROLES;
+  if (actor === "office_staff") return MANAGER_GRANTABLE_ROLES;
+  if (actor === "captain") return LIMITED_CREATABLE_ROLES;
   return [];
 }
 
 /** May `actor` modify/delete an account holding `targetRoles`? Owners:
  *  always. Captains/office_staff: only non-privileged targets (no owner, no
  *  office_staff). Last-owner protection is a separate check. Gates team,
- *  suspension, move, and archive controls — NOT role changes (owner-only). */
+ *  suspension, move, archive, and (for Managers) role controls. */
 export function canManageTarget(
   actor: AppRole | string | null | undefined,
   targetRoles: ReadonlyArray<AppRole | string>,
@@ -125,7 +138,7 @@ export function canUseViewAs(role: AppRole | string | null | undefined): boolean
   return role === "owner";
 }
 
-/** Display labels/badge tones — shared by RosterPanel and Manage Players. */
+/** Display labels/badge tones — shared by every roster surface. */
 // office_staff renders as "Manager" (owner decision 2026-08-14): the chain of
 // command reads Owner → Manager → Captain. The enum value stays office_staff —
 // it's baked into user_roles rows and RLS policies; only the label changed.

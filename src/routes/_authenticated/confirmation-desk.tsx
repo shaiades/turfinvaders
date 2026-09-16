@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { Check, X, Inbox } from "lucide-react";
 import { ObjectionReviewPanel } from "@/components/ObjectionReviewPanel";
+import { PushAlertsCard } from "@/components/PushAlertsCard";
 
 export const Route = createFileRoute("/_authenticated/confirmation-desk")({
   head: () => ({ meta: [{ title: "Confirmation Desk — Turf Invaders" }] }),
@@ -156,6 +157,13 @@ function ConfirmationDesk() {
       </ArcadePanel>
 
       <ObjectionReviewPanel />
+
+      {/* Per-device push opt-in, right where the work lands — notify-dojo
+          (and every other notify-*) only reaches devices that enabled it. */}
+      <PushAlertsCard
+        title="Desk alerts"
+        description="Get pinged on this device when a player submits an Objection Dojo attempt."
+      />
     </div>
   );
 }

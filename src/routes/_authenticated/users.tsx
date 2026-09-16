@@ -1,465 +1,541 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
-import { OFFICE_LOCATIONS, type OfficeLocation } from "@/lib/offices";
 import { ArcadePanel } from "@/components/arcade";
-import { DatabaseCleanup } from "@/components/DatabaseCleanup";
-import { createCanvasser } from "@/lib/users.functions";
-import { toast } from "sonner";
-import { ADMIN_ROLES, primaryRole, requireRoleBeforeLoad, type AppRole } from "@/lib/roles";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
-  assignableRolesFor,
-  canManageTarget,
-  creatableRolesFor,
-  ROLE_LABEL,
-  ROLE_TONE,
-} from "@/lib/role-policy";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { ChevronDown, ChevronRight, ChevronUp, Send, ArrowRightLeft, UserPlus } from "lucide-react";
+import { DatabaseCleanup } from "@/components/DatabaseCleanup";
+import { InviteDialog } from "@/components/InviteDialog";
+import { InvitePlayerSheet } from "@/components/InvitePlayerSheet";
+import { MovePlayersSheet } from "@/components/MovePlayersSheet";
+import { AddPlayerDialog } from "@/components/AddPlayerDialog";
+import { PlayerSheet, type PlayerGroup } from "@/components/PlayerSheet";
+import { VansPanel } from "@/components/VansPanel";
+import { RenameCanvasserDialog, type NameGroupRef } from "@/components/RenameCanvasserDialog";
+import { MergeCanvasserDialog } from "@/components/MergeCanvasserDialog";
+import { useDispatchRoster, useDispatchVans, type RosterProfile } from "@/hooks/useFleetRoster";
+import { useMoveAgents } from "@/hooks/useRosterActions";
 import { useSetUserRole } from "@/hooks/useSetUserRole";
 import { useAuth } from "@/hooks/useAuth";
-import { InviteDialog } from "@/components/InviteDialog";
-import { MovePlayersSheet } from "@/components/MovePlayersSheet";
-import { useMoveAgents } from "@/hooks/useRosterActions";
-import { Button } from "@/components/ui/button";
-import { isLeadSourceName } from "@/lib/lead-sources";
-import { ArrowRightLeft, Send } from "lucide-react";
+import { listSignupRequests } from "@/lib/users.functions";
+import {
+  ADMIN_ROLES,
+  APP_ROLES,
+  assignableRolesFor,
+  canManageTarget,
+  primaryRole,
+  requireRoleBeforeLoad,
+  ROLE_LABEL,
+  ROLE_TONE,
+  type AppRole,
+} from "@/lib/roles";
+import { isLeadSourceKey } from "@/lib/lead-sources";
+import { DEFAULT_OFFICE, OFFICE_FILTER_OPTIONS, type OfficeFilter } from "@/lib/offices";
+import { normalizeName } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/users")({
-  head: () => ({ meta: [{ title: "Manage Users — Turf Invaders" }] }),
-  // Owners + Admins only (owner decision 2026-08-12) — captains manage their
-  // rosters from the Fleet Dispatch board instead.
+  head: () => ({ meta: [{ title: "Manage Players — Turf Invaders" }] }),
+  // Owners + Managers (captains manage their rosters from the Fleet
+  // Dispatch board instead — owner decision 2026-08-12, unchanged).
   beforeLoad: requireRoleBeforeLoad(ADMIN_ROLES),
   component: UsersPage,
   errorComponent: ({ error }) => (
-    <div className="text-sm text-destructive">Failed to load users: {error.message}</div>
+    <div className="text-sm text-destructive">Failed to load players: {error.message}</div>
   ),
   notFoundComponent: () => <div className="text-sm text-muted-foreground">Not found.</div>,
 });
 
+const STATUS_CHIPS = ["Active", "Archived", "All"] as const;
+type StatusChip = (typeof STATUS_CHIPS)[number];
+
+const NEW_DAYS = 30;
+
+/**
+ * THE player admin page (2026-09-16 consolidation): one searchable roster —
+ * every action on a player lives in their sheet — plus new-signup triage,
+ * van management, and cleanup. Absorbed the old flat table + Add New Player
+ * form, the dashboard Settings tab's New Signups and Company Roster panels,
+ * and Manage Fleet's van CRUD.
+ */
 function UsersPage() {
-  const qc = useQueryClient();
   const { realRole } = useAuth();
-  const isOwner = realRole === "owner";
+  const roster = useDispatchRoster();
+  const { data: vans = [] } = useDispatchVans();
+  const moveAgents = useMoveAgents(vans);
+  const setUserRole = useSetUserRole();
 
-  const { data, isLoading } = useQuery({
-    queryKey: ["manage_users"],
-    queryFn: async () => {
-      const [profilesRes, rolesRes, teamsRes] = await Promise.all([
-        supabase
-          .from("profiles")
-          .select(
-            "id, display_name, team_id, suspension_tracked, created_at, is_placeholder",
-          )
-          .order("created_at", { ascending: false }),
-        supabase.from("user_roles").select("user_id, role"),
-        // color + office_location feed useMoveAgents' office cascade.
-        supabase.from("teams").select("id, name, color, office_location").order("name"),
-      ]);
-      if (profilesRes.error) throw profilesRes.error;
-      if (rolesRes.error) throw rolesRes.error;
-      if (teamsRes.error) throw teamsRes.error;
-      const rolesByUser = new Map<string, AppRole[]>();
-      for (const r of rolesRes.data ?? []) {
-        const arr = rolesByUser.get(r.user_id) ?? [];
-        arr.push(r.role as AppRole);
-        rolesByUser.set(r.user_id, arr);
-      }
-      return {
-        profiles: profilesRes.data ?? [],
-        rolesByUser,
-        teams: teamsRes.data ?? [],
-      };
-    },
-  });
-
-  // Atomic role swap via the set_user_role RPC — the old client-side
-  // delete-then-insert only worked for Owners under RLS and could strand a
-  // user role-less on partial failure.
-  const setRole = useSetUserRole();
-
-  const setSuspensionTracked = useMutation({
-    mutationFn: async ({ userId, tracked }: { userId: string; tracked: boolean }) => {
-      // .select() so an RLS-blocked update (0 rows) errors instead of
-      // silently toasting success.
-      const { data: rows, error } = await supabase
-        .from("profiles")
-        .update({ suspension_tracked: tracked })
-        .eq("id", userId)
-        .select("id");
-      if (error) throw error;
-      if (!rows?.length) throw new Error("Update failed — you don't have permission for this user");
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["manage_users"] });
-      toast.success("Suspension tracking updated");
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  // Canonical move hook: cascades the van's office onto the profile and
-  // invalidates every roster surface (the old local mutation did neither).
-  // This table lists duplicate profiles as separate rows on purpose, so the
-  // select moves just the one account (ids: [p.id]); Move Players is the
-  // group-level bulk tool.
-  const moveAgents = useMoveAgents(data?.teams ?? []);
-  const [movePlayersOpen, setMovePlayersOpen] = useState(false);
-
-  const createFn = useServerFn(createCanvasser);
+  const [search, setSearch] = useState("");
+  const [officeChip, setOfficeChip] = useState<OfficeFilter>("All");
+  const [statusChip, setStatusChip] = useState<StatusChip>("Active");
+  const [roleFilter, setRoleFilter] = useState<"all" | AppRole>("all");
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [invitePickerOpen, setInvitePickerOpen] = useState(false);
+  const [cleanupOpen, setCleanupOpen] = useState(false);
   const [inviteTarget, setInviteTarget] = useState<{
     id: string;
     name: string;
     role: AppRole;
   } | null>(null);
-  const [form, setForm] = useState({
-    email: "",
-    password: "",
-    display_name: "",
-    role: "canvasser" as AppRole,
-    office_location: "" as "" | OfficeLocation,
-    team_id: "",
+  const [renameTarget, setRenameTarget] = useState<NameGroupRef | null>(null);
+  const [mergeSource, setMergeSource] = useState<NameGroupRef | null>(null);
+  const [mergePreset, setMergePreset] = useState<string | null>(null);
+
+  const profiles = useMemo(() => roster.data?.profiles ?? [], [roster.data]);
+  const rolesByUser = useMemo(
+    () => roster.data?.rolesByUser ?? new Map<string, string[]>(),
+    [roster.data],
+  );
+  const vanById = useMemo(() => new Map(vans.map((v) => [v.id, v])), [vans]);
+
+  // ---- Name groups: one row per person, all duplicates riding together ----
+  const groups = useMemo<PlayerGroup[]>(() => {
+    const byKey = new Map<string, RosterProfile[]>();
+    for (const p of profiles) {
+      const key = normalizeName(p.display_name) || `id:${p.id}`;
+      // Pseudo lead-source channels (Self Gen, Upsell, …) aren't people —
+      // they live on the dispatch board and must never be edited here.
+      if (isLeadSourceKey(key)) continue;
+      const arr = byKey.get(key);
+      if (arr) arr.push(p);
+      else byKey.set(key, [p]);
+    }
+    const out: PlayerGroup[] = [];
+    for (const [key, members] of byKey) {
+      const active = members.filter((m) => m.is_active !== false);
+      const archivedOnly = active.length === 0;
+      const roleSet = new Set<string>();
+      for (const m of members) for (const r of rolesByUser.get(m.id) ?? []) roleSet.add(r);
+      const roles = [...roleSet] as AppRole[];
+      // Auth-backed profile is the representative (role/invite/history
+      // target) — an existing login must never be shadowed by a duplicate
+      // placeholder (InvitePlayerSheet precedent).
+      const rep =
+        active.find((m) => m.is_placeholder !== true) ??
+        members.find((m) => m.is_placeholder !== true) ??
+        active.find((m) => m.team_id) ??
+        members[0];
+      const vanRep =
+        active.find((m) => m.is_active === true && m.team_id) ??
+        active.find((m) => m.team_id) ??
+        active[0];
+      const vanId = archivedOnly ? null : (vanRep?.team_id ?? null);
+      const van = vanId ? vanById.get(vanId) : null;
+      out.push({
+        key,
+        display_name: rep.display_name,
+        members,
+        activeIds: active.map((m) => m.id),
+        roles,
+        primary: (primaryRole(roles) ?? "canvasser") as AppRole,
+        repId: rep.id,
+        vanId,
+        office:
+          van?.office_location ?? vanRep?.office_location ?? rep.office_location ?? DEFAULT_OFFICE,
+        archivedOnly,
+        noLogin: members.every((m) => m.is_placeholder === true),
+        suspensionTracked: active.some((m) => m.suspension_tracked !== false),
+        createdAt: rep.created_at ?? null,
+        canModify: canManageTarget(realRole, roles),
+      });
+    }
+    return out.sort((a, b) => (a.display_name ?? "").localeCompare(b.display_name ?? ""));
+  }, [profiles, rolesByUser, vanById, realRole]);
+
+  const ownerCount = useMemo(() => {
+    let n = 0;
+    for (const g of groups) if (g.roles.includes("owner")) n++;
+    return n;
+  }, [groups]);
+
+  // ---- New signups needing activation (absorbed New Signups panel) ----
+  const now = Date.now();
+  const needsAttention = useMemo(
+    () =>
+      profiles
+        .filter((p) => {
+          if (p.is_placeholder !== false || p.is_active === false) return false;
+          if (!p.created_at || now - new Date(p.created_at).getTime() > NEW_DAYS * 86400_000)
+            return false;
+          const roles = rolesByUser.get(p.id) ?? [];
+          // Waiting on a role, or activated but still vanless (owners/reps
+          // never need vans — Free Agents pen rule).
+          if (roles.length === 0) return true;
+          const r = primaryRole(roles as AppRole[]);
+          return !p.team_id && r !== "owner" && r !== "sales_rep" && r !== "office_staff";
+        })
+        .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? "")),
+    [profiles, rolesByUser, now],
+  );
+
+  const listRequests = useServerFn(listSignupRequests);
+  const signupIds = needsAttention.filter((p) => (rolesByUser.get(p.id) ?? []).length === 0);
+  const { data: requestedByUser } = useQuery({
+    enabled: signupIds.length > 0,
+    queryKey: ["signup_requests", signupIds.map((p) => p.id).join("|")],
+    queryFn: async () => listRequests({ data: { ids: signupIds.map((p) => p.id).slice(0, 20) } }),
   });
 
-  const createUser = useMutation({
-    mutationFn: async () => {
-      return createFn({
-        data: {
-          email: form.email,
-          password: form.password,
-          display_name: form.display_name,
-          role: form.role,
-          office_location: form.office_location || undefined,
-          team_id: form.team_id || undefined,
-        },
-      });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["manage_users"] });
-      toast.success(`Added ${form.display_name}`);
-      setForm({
-        email: "",
-        password: "",
-        display_name: "",
-        role: "canvasser",
-        office_location: "",
-        team_id: "",
-      });
-    },
-    onError: (e: Error) => toast.error(e.message),
+  // ---- Filters ----
+  const q = normalizeName(search);
+  const visible = groups.filter((g) => {
+    if (q && !g.key.includes(q)) return false;
+    if (officeChip !== "All" && g.office !== officeChip) return false;
+    if (statusChip === "Active" && g.archivedOnly) return false;
+    if (statusChip === "Archived" && !g.archivedOnly) return false;
+    if (roleFilter !== "all" && g.primary !== roleFilter) return false;
+    return true;
   });
 
-  if (isLoading || !data) return <div className="text-sm text-muted-foreground">Loading…</div>;
+  const selectedGroup = selectedKey ? (groups.find((g) => g.key === selectedKey) ?? null) : null;
+  const assignable = assignableRolesFor(realRole);
 
-  const ownerCount = Array.from(data.rolesByUser.values()).filter((r) =>
-    r.includes("owner"),
-  ).length;
+  const openRename = (g: PlayerGroup) => {
+    setSelectedKey(null);
+    setRenameTarget({ key: g.key, display_name: g.display_name });
+  };
+  const openMerge = (g: PlayerGroup) => {
+    setSelectedKey(null);
+    setMergePreset(null);
+    setMergeSource({ key: g.key, display_name: g.display_name });
+  };
+
+  if (roster.isLoading) return <div className="text-sm text-muted-foreground">Loading…</div>;
 
   return (
-    <div className="space-y-8">
-      <div>
-        <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-          Managers
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            Everyone · one place
+          </div>
+          <h1 className="font-display text-2xl text-neon mt-1">MANAGE PLAYERS</h1>
         </div>
-        <h1 className="font-display text-2xl text-neon mt-1">MANAGE PLAYERS</h1>
-        <p className="text-sm text-muted-foreground mt-2">
-          Newest accounts first. Multiple Owners are allowed — all Owners have equal, full access.
-          Role changes are owner-only; Admins manage teams and suspension tracking, and can add new
-          players as Canvasser or Sales Rep. Use Move Players to search the roster and move people
-          between vans in bulk; the Team column moves one account at a time.
-        </p>
-      </div>
-
-      <ArcadePanel
-        title={`Players (${data.profiles.length})`}
-        action={
+        <div className="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            onClick={() => setAddOpen(true)}
+            className="gap-1.5 font-display uppercase tracking-widest text-[10px] bg-neon text-background hover:bg-neon/90"
+          >
+            <UserPlus className="w-3.5 h-3.5" /> Add Player
+          </Button>
           <Button
             size="sm"
             variant="outline"
-            onClick={() => setMovePlayersOpen(true)}
+            onClick={() => setInvitePickerOpen(true)}
+            className="gap-1.5 font-display uppercase tracking-widest text-[10px] border-neon/60 text-neon hover:border-neon hover:text-neon"
+          >
+            <Send className="w-3.5 h-3.5" /> Invite
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setMoveOpen(true)}
             className="gap-1.5 font-display uppercase tracking-widest text-[10px] border-[color:var(--neon-blue)]/60 text-[color:var(--neon-blue)] hover:border-[color:var(--neon-blue)] hover:text-[color:var(--neon-blue)]"
           >
             <ArrowRightLeft className="w-3.5 h-3.5" /> Move Players
           </Button>
-        }
-      >
-        <div className="overflow-x-auto -mx-4 sm:mx-0">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-                <th className="px-4 py-2">Name</th>
-                <th className="px-4 py-2">Joined</th>
-                <th className="px-4 py-2">Role</th>
-                <th className="px-4 py-2">Team</th>
-                <th
-                  className="px-4 py-2"
-                  title="Counted on the Live Dispatch suspension (donut) list"
+        </div>
+      </div>
+      <p className="text-sm text-muted-foreground -mt-2">
+        Tap a player for everything about them — role, van, invite &amp; login, rename, combine,
+        remove. Roles: Owners grant anything; Managers grant up to Captain.
+      </p>
+
+      {/* ---- Needs attention: new signups waiting on a role or a van ---- */}
+      {needsAttention.length > 0 && (
+        <ArcadePanel title={`⚠ Needs Attention (${needsAttention.length})`}>
+          <div className="space-y-1.5">
+            {needsAttention.map((p) => {
+              const targetRoles = (rolesByUser.get(p.id) ?? []) as AppRole[];
+              const canModify = canManageTarget(realRole, targetRoles);
+              const current = primaryRole(targetRoles);
+              const wants = requestedByUser?.[p.id];
+              return (
+                <div
+                  key={p.id}
+                  className="flex flex-wrap sm:flex-nowrap items-center gap-2 px-2 py-1.5 rounded border border-border bg-surface hover:border-neon/60 min-w-0"
                 >
-                  Suspension
-                </th>
-                <th
-                  className="px-4 py-2"
-                  title="One-time sign-in link you text/email yourself — rows with no login yet get one created on the spot"
-                >
-                  Invite
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.profiles.map((p) => {
-                const roles = data.rolesByUser.get(p.id) ?? [];
-                const currentRole: AppRole = primaryRole(roles) ?? "canvasser";
-                const lastOwner = currentRole === "owner" && ownerCount <= 1;
-                const canModify = canManageTarget(realRole, roles);
-                const createdAt = (p as { created_at?: string }).created_at;
-                const isNew =
-                  !(p as { is_placeholder?: boolean }).is_placeholder &&
-                  !!createdAt &&
-                  Date.now() - new Date(createdAt).getTime() < 30 * 86400_000;
-                return (
-                  <tr key={p.id} className="border-t border-border">
-                    <td className="px-4 py-3 font-medium">
-                      <span className="inline-flex items-center gap-2">
-                        {p.display_name ?? "—"}
-                        {isNew && (
-                          <span className="text-[9px] font-display uppercase tracking-widest px-1.5 py-0.5 rounded border border-neon/60 text-neon bg-neon/10">
-                            New
-                          </span>
-                        )}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground text-xs whitespace-nowrap">
-                      {createdAt
-                        ? new Date(createdAt).toLocaleDateString("en-US", {
+                  <span className="text-sm truncate flex-1 flex items-center gap-2 min-w-0 basis-full sm:basis-auto">
+                    <UserPlus className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+                    <span className="truncate font-medium">{p.display_name ?? "Unknown"}</span>
+                    <span className="shrink-0 text-[10px] text-muted-foreground">
+                      joined{" "}
+                      {p.created_at
+                        ? new Date(p.created_at).toLocaleDateString("en-US", {
                             timeZone: "America/Los_Angeles",
                             month: "short",
                             day: "numeric",
                           })
                         : "—"}
-                    </td>
-                    <td className="px-4 py-3">
-                      {isOwner ? (
-                        <select
-                          value={currentRole}
-                          disabled={setRole.isPending || lastOwner}
-                          onChange={(e) =>
-                            setRole.mutate({ userId: p.id, role: e.target.value as AppRole })
-                          }
-                          className="bg-input border border-border rounded-md px-2 py-2 text-base md:text-sm disabled:opacity-50"
-                          title={lastOwner ? "Cannot demote the last Owner" : undefined}
-                        >
-                          {assignableRolesFor(realRole).map((r) => (
-                            <option key={r} value={r}>
-                              {ROLE_LABEL[r] ?? r}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <span
-                          className={`inline-flex items-center px-2 py-1 rounded border text-[10px] font-display uppercase tracking-widest ${ROLE_TONE[currentRole]}`}
-                          title="Role changes are owner-only"
-                        >
-                          {ROLE_LABEL[currentRole]}
+                    </span>
+                    {targetRoles.length === 0 && wants && (
+                      <span className="shrink-0 text-[9px] font-display uppercase tracking-widest px-1.5 py-0.5 rounded border border-turf-cyan/50 text-turf-cyan bg-turf-cyan/10">
+                        wants {ROLE_LABEL[wants as AppRole] ?? wants}
+                      </span>
+                    )}
+                  </span>
+                  {assignable.length === 0 ? (
+                    <span
+                      className="inline-flex items-center justify-center h-9 md:h-7 px-2.5 rounded border border-border bg-background text-[11px] font-display uppercase tracking-wider text-muted-foreground w-full sm:w-auto sm:min-w-[110px]"
+                      title="You can't change this account's role"
+                    >
+                      {current ? ROLE_LABEL[current] : "No role yet"}
+                    </span>
+                  ) : (
+                    <Select
+                      value={current ?? "none"}
+                      disabled={!canModify || setUserRole.isPending}
+                      onValueChange={(val) => {
+                        if (val !== "none" && val !== current) {
+                          setUserRole.mutate({ userId: p.id, role: val as AppRole });
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="h-9 md:h-7 w-full sm:w-auto sm:min-w-[110px] text-[11px] font-display uppercase tracking-wider bg-background">
+                        <SelectValue placeholder="No role yet" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-background">
+                        <SelectItem value="none" disabled>
+                          — Role —
+                        </SelectItem>
+                        {assignable.map((r) => (
+                          <SelectItem key={r} value={r}>
+                            {ROLE_LABEL[r]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  <Select
+                    value={p.team_id ?? "free"}
+                    disabled={!canModify || moveAgents.isPending}
+                    onValueChange={(val) => {
+                      const vanId = val === "free" ? null : val;
+                      if (vanId !== p.team_id)
+                        moveAgents.mutate({
+                          ids: [p.id],
+                          vanId,
+                          name: p.display_name ?? "Player",
+                        });
+                    }}
+                  >
+                    <SelectTrigger className="h-9 md:h-7 w-full sm:w-auto sm:min-w-[120px] text-[11px] font-display uppercase tracking-wider bg-background border-[color:var(--neon-blue)]/50 hover:border-[color:var(--neon-blue)]">
+                      <SelectValue placeholder="Assign Van…" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-background border-[color:var(--neon-blue)]/50">
+                      <SelectItem value="free">Free Agents</SelectItem>
+                      {vans.map((v) => (
+                        <SelectItem key={v.id} value={v.id}>
+                          <span className="inline-flex items-center gap-2">
+                            <span
+                              className="w-2 h-2 rounded-full"
+                              style={{ background: v.color ?? "#888" }}
+                            />
+                            {v.name}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-[10px] text-muted-foreground mt-3">
+            Login-capable accounts from the last {NEW_DAYS} days still waiting on a role or a van.
+            Give them both and they spawn straight into their screen — nothing to refresh.
+          </p>
+        </ArcadePanel>
+      )}
+
+      {/* ---- The roster ---- */}
+      <ArcadePanel title={`Players (${visible.length})`}>
+        <div className="space-y-2">
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search players…"
+            aria-label="Search players"
+          />
+          <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide">
+            {OFFICE_FILTER_OPTIONS.map((o) => (
+              <button
+                key={o}
+                type="button"
+                onClick={() => setOfficeChip(o)}
+                className={`min-h-9 px-3 rounded-full border text-[10px] font-display uppercase tracking-widest whitespace-nowrap ${
+                  officeChip === o
+                    ? "border-neon text-neon bg-neon/10"
+                    : "border-border text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {o}
+              </button>
+            ))}
+            <span className="w-px h-5 bg-border shrink-0" aria-hidden />
+            {STATUS_CHIPS.map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setStatusChip(s)}
+                className={`min-h-9 px-3 rounded-full border text-[10px] font-display uppercase tracking-widest whitespace-nowrap ${
+                  statusChip === s
+                    ? "border-neon text-neon bg-neon/10"
+                    : "border-border text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {s}
+              </button>
+            ))}
+            <Select value={roleFilter} onValueChange={(v) => setRoleFilter(v as "all" | AppRole)}>
+              <SelectTrigger className="ml-auto h-9 w-auto min-w-[120px] shrink-0 text-[10px] font-display uppercase tracking-widest bg-background">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-background">
+                <SelectItem value="all">All roles</SelectItem>
+                {APP_ROLES.map((r) => (
+                  <SelectItem key={r} value={r}>
+                    {ROLE_LABEL[r]}s
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1.5 pt-1">
+            {visible.length === 0 ? (
+              <div className="text-sm text-muted-foreground italic py-8 text-center">
+                No players match.
+              </div>
+            ) : (
+              visible.map((g) => {
+                const van = g.vanId ? vanById.get(g.vanId) : null;
+                const isNew =
+                  !g.noLogin &&
+                  !!g.createdAt &&
+                  now - new Date(g.createdAt).getTime() < NEW_DAYS * 86400_000;
+                return (
+                  <button
+                    key={g.key}
+                    type="button"
+                    onClick={() => setSelectedKey(g.key)}
+                    className="w-full min-h-12 flex items-center gap-2 px-3 py-2 rounded border border-border bg-surface text-left hover:border-neon/60 transition-colors min-w-0"
+                  >
+                    <span className="min-w-0 flex-1 flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-medium truncate max-w-full">
+                        {g.display_name ?? "Unknown"}
+                      </span>
+                      {isNew && (
+                        <span className="shrink-0 text-[9px] font-display uppercase tracking-widest px-1.5 py-0.5 rounded border border-neon/60 text-neon bg-neon/10">
+                          New
                         </span>
                       )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <select
-                        value={p.team_id ?? ""}
-                        disabled={moveAgents.isPending || !canModify}
-                        onChange={(e) =>
-                          moveAgents.mutate({
-                            ids: [p.id],
-                            vanId: e.target.value || null,
-                            name: p.display_name ?? "Player",
-                          })
-                        }
-                        className="bg-input border border-border rounded-md px-2 py-2 text-base md:text-sm disabled:opacity-50"
-                      >
-                        <option value="">— unassigned —</option>
-                        {data.teams.map((t) => (
-                          <option key={t.id} value={t.id}>
-                            {t.name}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="px-4 py-3">
-                      <label className="inline-flex items-center gap-2 cursor-pointer select-none">
-                        <input
-                          type="checkbox"
-                          checked={
-                            (p as { suspension_tracked?: boolean }).suspension_tracked ?? true
-                          }
-                          disabled={setSuspensionTracked.isPending || !canModify}
-                          onChange={(e) =>
-                            setSuspensionTracked.mutate({ userId: p.id, tracked: e.target.checked })
-                          }
-                          className="h-4 w-4 accent-[var(--neon)]"
-                        />
-                        <span className="text-xs text-muted-foreground">
-                          {((p as { suspension_tracked?: boolean }).suspension_tracked ?? true)
-                            ? "tracked"
-                            : "off"}
+                      {g.noLogin && !g.archivedOnly && (
+                        <span className="shrink-0 text-[9px] font-display uppercase tracking-widest px-1.5 py-0.5 rounded border border-[color:var(--neon-blue)]/50 text-[color:var(--neon-blue)]">
+                          No login
                         </span>
-                      </label>
-                    </td>
-                    <td className="px-4 py-3">
-                      {(() => {
-                        const isPlaceholder = (p as { is_placeholder?: boolean }).is_placeholder;
-                        const isChannel = isLeadSourceName(p.display_name);
-                        const disabledWhy = isChannel
-                          ? "Lead-source channel — not a person"
-                          : !canModify
-                            ? "Only Owners can invite Admin accounts"
-                            : undefined;
-                        return (
-                          <button
-                            type="button"
-                            disabled={!!disabledWhy}
-                            title={
-                              disabledWhy ??
-                              (isPlaceholder
-                                ? "No login yet — Invite creates one and hands you the link, history attached"
-                                : "Generate a sign-in link to text or email them")
-                            }
-                            onClick={() =>
-                              setInviteTarget({
-                                id: p.id,
-                                name: p.display_name ?? "player",
-                                role: currentRole,
-                              })
-                            }
-                            className="inline-flex items-center gap-1.5 rounded border border-neon/50 text-neon hover:bg-neon/10 px-2.5 py-1.5 text-[11px] font-display uppercase tracking-wider disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                          >
-                            <Send className="w-3.5 h-3.5" /> Invite
-                          </button>
-                        );
-                      })()}
-                    </td>
-                  </tr>
+                      )}
+                      {g.archivedOnly && (
+                        <span className="shrink-0 text-[9px] font-display uppercase tracking-widest px-1.5 py-0.5 rounded border border-border text-muted-foreground">
+                          Archived
+                        </span>
+                      )}
+                      {g.members.length > 1 && (
+                        <span
+                          className="shrink-0 text-[9px] font-display uppercase tracking-widest px-1.5 py-0.5 rounded border border-warning/50 text-warning"
+                          title={`${g.members.length} profiles share this name — Combine merges them`}
+                        >
+                          ×{g.members.length}
+                        </span>
+                      )}
+                    </span>
+                    <span
+                      className={`shrink-0 text-[9px] font-display uppercase tracking-widest px-1.5 py-0.5 rounded border ${ROLE_TONE[g.primary]}`}
+                    >
+                      {ROLE_LABEL[g.primary]}
+                    </span>
+                    {!g.archivedOnly && (
+                      <span className="shrink-0 hidden sm:flex items-center gap-1.5 text-[10px] font-display uppercase tracking-wider text-muted-foreground">
+                        <span
+                          className="w-2 h-2 rounded-full"
+                          style={{ background: van?.color ?? "#555" }}
+                        />
+                        <span className="max-w-[90px] truncate">{van?.name ?? "Free Agent"}</span>
+                      </span>
+                    )}
+                    <ChevronRight className="w-4 h-4 shrink-0 text-muted-foreground" />
+                  </button>
                 );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </ArcadePanel>
-
-      <ArcadePanel title="Add New Player">
-        <form
-          className="grid gap-3 sm:grid-cols-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            createUser.mutate();
-          }}
-        >
-          <label className="flex flex-col gap-1 text-xs">
-            <span className="font-display uppercase tracking-widest text-muted-foreground">
-              Display Name
-            </span>
-            <input
-              required
-              value={form.display_name}
-              onChange={(e) => setForm({ ...form, display_name: e.target.value })}
-              className="bg-input border border-border rounded-md px-2 py-2 text-base md:text-sm"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs">
-            <span className="font-display uppercase tracking-widest text-muted-foreground">
-              Email
-            </span>
-            <input
-              required
-              type="email"
-              value={form.email}
-              onChange={(e) => setForm({ ...form, email: e.target.value })}
-              className="bg-input border border-border rounded-md px-2 py-2 text-base md:text-sm"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs">
-            <span className="font-display uppercase tracking-widest text-muted-foreground">
-              Temp Password
-            </span>
-            <input
-              required
-              type="text"
-              minLength={8}
-              value={form.password}
-              onChange={(e) => setForm({ ...form, password: e.target.value })}
-              className="bg-input border border-border rounded-md px-2 py-2 text-base md:text-sm"
-              placeholder="min 8 characters"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs">
-            <span className="font-display uppercase tracking-widest text-muted-foreground">
-              Role
-            </span>
-            <select
-              value={form.role}
-              onChange={(e) => setForm({ ...form, role: e.target.value as AppRole })}
-              className="bg-input border border-border rounded-md px-2 py-2 text-base md:text-sm"
-            >
-              {creatableRolesFor(realRole).map((r) => (
-                <option key={r} value={r}>
-                  {ROLE_LABEL[r] ?? r}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-xs">
-            <span className="font-display uppercase tracking-widest text-muted-foreground">
-              Office
-            </span>
-            <select
-              value={form.office_location}
-              onChange={(e) =>
-                setForm({ ...form, office_location: e.target.value as typeof form.office_location })
-              }
-              className="bg-input border border-border rounded-md px-2 py-2 text-base md:text-sm"
-            >
-              <option value="">— none —</option>
-              {OFFICE_LOCATIONS.map((o) => (
-                <option key={o} value={o}>
-                  {o}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-xs">
-            <span className="font-display uppercase tracking-widest text-muted-foreground">
-              Team / Van
-            </span>
-            <select
-              value={form.team_id}
-              onChange={(e) => setForm({ ...form, team_id: e.target.value })}
-              className="bg-input border border-border rounded-md px-2 py-2 text-base md:text-sm"
-            >
-              <option value="">— unassigned —</option>
-              {data.teams.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="sm:col-span-2 flex justify-end">
-            <button
-              type="submit"
-              disabled={createUser.isPending}
-              className="bg-primary text-primary-foreground font-display uppercase tracking-widest text-xs px-4 py-2 rounded-md disabled:opacity-50"
-            >
-              {createUser.isPending ? "Adding…" : "Add Player"}
-            </button>
+              })
+            )}
           </div>
-        </form>
-        <p className="text-xs text-muted-foreground mt-3">
-          The player can sign in immediately with the email + temp password. Ask them to change it
-          after first login.
+        </div>
+        <p className="text-[10px] text-muted-foreground mt-3">
+          Lead-source channels (Self Gen, Upsell, …) aren't people, so they don't appear here —
+          their production stays on the dispatch board. Monday.com's Van column keeps final say on
+          van rides.
         </p>
       </ArcadePanel>
 
-      {/* Bulk deletion tools — owner-only (server-side deleteProfile is
-          owner-gated anyway; don't render controls that can only error). */}
-      {isOwner && <DatabaseCleanup />}
+      {/* ---- Vans ---- */}
+      <VansPanel vans={vans} profiles={profiles} rolesByUser={rolesByUser} />
+
+      {/* ---- Cleanup (collapsed; deletes are target-guarded server-side) ---- */}
+      <div>
+        <button
+          type="button"
+          onClick={() => setCleanupOpen((o) => !o)}
+          className="w-full flex items-center justify-between px-4 py-3 rounded-lg border border-border bg-surface text-left hover:bg-surface-elevated"
+        >
+          <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            Advanced · Database Cleanup
+          </span>
+          {cleanupOpen ? (
+            <ChevronUp className="w-4 h-4 text-muted-foreground" />
+          ) : (
+            <ChevronDown className="w-4 h-4 text-muted-foreground" />
+          )}
+        </button>
+        {cleanupOpen && (
+          <div className="mt-3">
+            <DatabaseCleanup />
+          </div>
+        )}
+      </div>
+
+      {/* ---- Sheets & dialogs ---- */}
+      <PlayerSheet
+        group={selectedGroup}
+        onOpenChange={(o) => {
+          if (!o) setSelectedKey(null);
+        }}
+        vans={vans}
+        ownerCount={ownerCount}
+        onInvite={(t) => {
+          setSelectedKey(null);
+          setInviteTarget(t);
+        }}
+        onRename={openRename}
+        onMerge={openMerge}
+      />
+
+      <AddPlayerDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        vans={vans}
+        onInvite={(t) => setInviteTarget(t)}
+      />
 
       <InviteDialog
         open={!!inviteTarget}
@@ -469,7 +545,33 @@ function UsersPage() {
         target={inviteTarget}
       />
 
-      <MovePlayersSheet open={movePlayersOpen} onOpenChange={setMovePlayersOpen} />
+      <MovePlayersSheet open={moveOpen} onOpenChange={setMoveOpen} />
+      <InvitePlayerSheet open={invitePickerOpen} onOpenChange={setInvitePickerOpen} />
+
+      <RenameCanvasserDialog
+        open={!!renameTarget}
+        onOpenChange={(o) => {
+          if (!o) setRenameTarget(null);
+        }}
+        group={renameTarget}
+        profiles={profiles}
+        rolesByUser={rolesByUser}
+        onSwitchToMerge={(targetKey) => {
+          setMergeSource(renameTarget);
+          setMergePreset(targetKey);
+          setRenameTarget(null);
+        }}
+      />
+      <MergeCanvasserDialog
+        open={!!mergeSource}
+        onOpenChange={(o) => {
+          if (!o) setMergeSource(null);
+        }}
+        source={mergeSource}
+        profiles={profiles}
+        rolesByUser={rolesByUser}
+        presetTargetKey={mergePreset}
+      />
     </div>
   );
 }

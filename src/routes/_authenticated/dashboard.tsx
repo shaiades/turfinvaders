@@ -27,9 +27,8 @@ import { TimesheetEditor } from "@/components/TimesheetEditor";
 import { FleetDispatch } from "@/components/FleetDispatch";
 import { WeeklyScheduleSettings } from "@/components/WeeklyScheduleSettings";
 import { CompanySettingsPanel } from "@/components/CompanySettingsPanel";
-import { AddTeamMemberDialog } from "@/components/AddTeamMemberDialog";
-import { RosterPanel } from "@/components/RosterPanel";
-import { NewSignupsPanel } from "@/components/NewSignupsPanel";
+import { AddPlayerDialog } from "@/components/AddPlayerDialog";
+import { useDispatchVans } from "@/hooks/useFleetRoster";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Dialog,
@@ -49,7 +48,7 @@ import { useTodayLeads } from "@/hooks/useTodayLeads";
 import { useDateRange } from "@/hooks/useDateRange";
 import { RangeTabs } from "@/components/RangeTabs";
 import { formatCurrency } from "@/lib/utils";
-import { Zap, Truck, FileSpreadsheet } from "lucide-react";
+import { Zap, Truck, FileSpreadsheet, UserPlus } from "lucide-react";
 
 // The one ?tab= param serves both audiences: leadership tabs on the left,
 // canvasser Mission tabs on the right. validateSearch is role-blind — each
@@ -332,18 +331,23 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
           <PayrollLedger />
         </TabsContent>
         <TabsContent value="settings" className="mt-0 space-y-6">
-          <WeeklyScheduleSettings />
-          <NewSignupsPanel />
-          <RosterPanel />
-          <CompanySettingsPanel />
+          {/* Player admin consolidated onto Manage Players (2026-09-16) —
+              this tab keeps company-wide settings only. */}
           <ArcadeCard faction="turf" className="flex items-center justify-between gap-3 flex-wrap">
             <div className="text-sm text-muted-foreground">
-              Roles, teams, and account cleanup live on the Manage Players screen.
+              Every player — roles, vans, invites &amp; logins, new signups, cleanup — lives on
+              Manage Players.
             </div>
             <NeonButton asChild tone="turf-pink">
               <Link to="/users">Manage Players</Link>
             </NeonButton>
           </ArcadeCard>
+          <PushAlertsCard
+            title="Alerts on this device"
+            description="One switch per device: flagged punches, Objection Dojo submissions, and sale KA-CHINGs all ping you here once it's on."
+          />
+          <WeeklyScheduleSettings />
+          <CompanySettingsPanel />
         </TabsContent>
       </Tabs>
     </div>
@@ -353,6 +357,10 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
 function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visibility: boolean }) {
   const { user } = useAuth();
   const { data: leads } = useTodayLeads();
+  // The one Add Player dialog (2026-09-16) — defaults new players onto the
+  // captain's own van.
+  const [addOpen, setAddOpen] = useState(false);
+  const { data: dispatchVans = [] } = useDispatchVans({ enabled: addOpen });
   // Day / Week / Month selector — defaults to the pay week, matching the old
   // week-to-date board, and drives every panel below the live counter.
   const rangeControls = useDateRange({ initialTab: "week" });
@@ -485,7 +493,15 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
         </div>
         <div className="flex items-center gap-3">
           <VisibilityChip on={visibility} />
-          <AddTeamMemberDialog />
+          <Button variant="outline" className="gap-2" onClick={() => setAddOpen(true)}>
+            <UserPlus className="h-4 w-4" />+ Add Team Member
+          </Button>
+          <AddPlayerDialog
+            open={addOpen}
+            onOpenChange={setAddOpen}
+            vans={dispatchVans}
+            initialVanId={teamId}
+          />
         </div>
       </div>
 
@@ -539,7 +555,6 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
               its own Day/Week/Month range; the page RangeTabs above govern
               only the Command Center, stat cards, and roster. */}
           <FleetDispatch readOnly focusTeamId={teamId} />
-
         </>
       )}
 
@@ -606,4 +621,3 @@ function Mini({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
-

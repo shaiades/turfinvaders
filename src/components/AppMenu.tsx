@@ -123,7 +123,7 @@ export function AppMenu({
                 <span className="flex-1">
                   Manage Players
                   <span className="block normal-case font-sans tracking-normal text-[11px] text-muted-foreground mt-0.5">
-                    Roles, vans, invites, account cleanup
+                    Everyone in one place — roles, vans, invites &amp; logins, cleanup
                   </span>
                 </span>
               </Link>
