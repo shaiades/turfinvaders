@@ -3,9 +3,10 @@ import { DEFAULT_OFFICE } from "@/lib/offices";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 /**
- * Owner-only profile deletion. Removes the auth user (cascades to profile,
- * user_roles, daily_logs FK, etc.) so ghost CSV-imported profiles can be
- * cleared from Fleet Manager.
+ * Admin-tier profile deletion (Owner + Manager since 2026-09-16; Managers
+ * may not touch Owner/Manager accounts). Removes the auth user (cascades to
+ * profile, user_roles, daily_logs FK, etc.) so ghost CSV-imported profiles
+ * can be cleared; anyone with history is archived instead.
  */
 export const deleteProfile = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -16,16 +17,32 @@ export const deleteProfile = createServerFn({ method: "POST" })
     return { id };
   })
   .handler(async ({ data, context }) => {
-    // Verify caller is an owner
     const { data: roles, error: rolesErr } = await context.supabase
       .from("user_roles")
       .select("role")
       .eq("user_id", context.userId);
     if (rolesErr) throw rolesErr;
-    const isOwner = (roles ?? []).some((r) => r.role === "owner");
-    if (!isOwner) throw new Error("Only owners can delete profiles");
+    const callerRoles = (roles ?? []).map((r) => r.role as string);
+    const isOwner = callerRoles.includes("owner");
+    if (!isOwner && !callerRoles.includes("office_staff")) {
+      throw new Error("Only Owners and Managers can delete profiles");
+    }
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    // Managers may not delete/archive privileged accounts — mirrors
+    // canManageTarget and the archive_agent target rule.
+    if (!isOwner) {
+      const { data: targetRoles, error: tErr } = await supabaseAdmin
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", data.id);
+      if (tErr) throw new Error(tErr.message);
+      const privileged = (targetRoles ?? []).some(
+        (r) => r.role === "owner" || r.role === "office_staff",
+      );
+      if (privileged) throw new Error("Only Owners can delete Owner or Manager accounts");
+    }
 
     // Anyone with production history is ARCHIVED, never hard-deleted —
     // deleting them would orphan payroll/lead rows behind FK constraints
@@ -97,8 +114,10 @@ export const deleteVan = createServerFn({ method: "POST" })
       .select("role")
       .eq("user_id", context.userId);
     if (rolesErr) throw rolesErr;
-    const isOwner = (roles ?? []).some((r) => r.role === "owner");
-    if (!isOwner) throw new Error("Only owners can delete vans");
+    // Admin tier (owner decision 2026-09-16) — matches the "Admins manage
+    // teams" RLS that now governs van create/edit.
+    const canDelete = (roles ?? []).some((r) => r.role === "owner" || r.role === "office_staff");
+    if (!canDelete) throw new Error("Only Owners and Managers can delete vans");
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const [logsN, leadsN, metricsN] = await Promise.all([
@@ -204,18 +223,20 @@ export const getWeeklyPaycheck = createServerFn({ method: "POST" })
     return { canvasser_id, week_start };
   })
   .handler(async ({ data, context }) => {
-    // Caller must be the canvasser themselves, an owner, or a captain of their team.
+    // Caller must be the canvasser themselves, Admin-tier (owner/Manager —
+    // Managers were omitted by oversight; every sibling payroll read admits
+    // them), or a captain of their team.
     const [rolesR, meProfR, targetProfR] = await Promise.all([
       context.supabase.from("user_roles").select("role").eq("user_id", context.userId),
       context.supabase.from("profiles").select("team_id").eq("id", context.userId).maybeSingle(),
       context.supabase.from("profiles").select("team_id").eq("id", data.canvasser_id).maybeSingle(),
     ]);
     const roles = (rolesR.data ?? []).map((r) => r.role);
-    const isOwner = roles.includes("owner");
+    const isAdmin = roles.includes("owner") || roles.includes("office_staff");
     const isCaptain = roles.includes("captain");
     const isSelf = context.userId === data.canvasser_id;
     const sameTeam = !!meProfR.data?.team_id && meProfR.data.team_id === targetProfR.data?.team_id;
-    if (!isSelf && !isOwner && !(isCaptain && sameTeam)) {
+    if (!isSelf && !isAdmin && !(isCaptain && sameTeam)) {
       throw new Error("Not authorized");
     }
 

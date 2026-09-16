@@ -165,6 +165,32 @@ function ManagerTerritoryView({
     bounds: [[number, number], [number, number]];
     key: number;
   } | null>(null);
+  // Anchors the map frame so list taps below can bring it back on screen.
+  const mapAnchorRef = useRef<HTMLDivElement | null>(null);
+
+  /** Assigned Areas row tap: fly the live map to that turf and scroll it
+   *  into view (owner ask 2026-09-16 — "take me to it on the map"). */
+  function flyToTurf(polygon: LatLng[] | null | undefined) {
+    if (!polygon || polygon.length === 0) return;
+    let s = 90,
+      n = -90,
+      w = 180,
+      e = -180;
+    for (const p of polygon) {
+      if (p.lat < s) s = p.lat;
+      if (p.lat > n) n = p.lat;
+      if (p.lng < w) w = p.lng;
+      if (p.lng > e) e = p.lng;
+    }
+    setFlyTo((prev) => ({
+      bounds: [
+        [s, w],
+        [n, e],
+      ],
+      key: (prev?.key ?? 0) + 1,
+    }));
+    mapAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   // Crash insurance for a drawn-but-unsaved area: the polygon is stashed in
   // localStorage the moment the finger lifts, restored on the next visit, and
@@ -496,9 +522,11 @@ function ManagerTerritoryView({
   const repcardTerritories: Territory[] = useMemo(() => {
     const fmt = (iso: string | null) =>
       iso
-        ? new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(
-            new Date(iso),
-          )
+        ? new Intl.DateTimeFormat("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+          }).format(new Date(iso))
         : "";
     return (repcardTerritoryQuery.data ?? [])
       .map((r): Territory => {
@@ -797,7 +825,7 @@ function ManagerTerritoryView({
           )}
         </div>
 
-        <div className="relative">
+        <div className="relative scroll-mt-20" ref={mapAnchorRef}>
           {/* No `follow`: managers open framing ALL turfs (FitBounds) instead
               of zoom-18 on their own position — with GPS granted, FollowMe's
               2 km self-cage made cross-county turf hunting impossible. The
@@ -954,12 +982,13 @@ function ManagerTerritoryView({
                     key={t.id}
                     className="flex items-center justify-between gap-3 rounded border border-border bg-surface/60 p-3"
                   >
+                    {/* Row tap = see it on the live map (fly + scroll up);
+                        the pencil keeps the edit sheet one tap away, and the
+                        turf's on-map popup has an edit button too. */}
                     <button
                       type="button"
-                      onClick={() => {
-                        setEditingTurfId(t.id);
-                        setIsModalOpen(true);
-                      }}
+                      title="Show this area on the map"
+                      onClick={() => flyToTurf(t.polygon_coordinates)}
                       className="flex items-center gap-3 min-w-0 flex-1 text-left"
                     >
                       <span
@@ -980,6 +1009,18 @@ function ManagerTerritoryView({
                         </div>
                       </div>
                     </button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      title="Edit area (assignee, name)"
+                      onClick={() => {
+                        setEditingTurfId(t.id);
+                        setIsModalOpen(true);
+                      }}
+                      className="text-muted-foreground hover:text-foreground"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </Button>
                     <Button
                       size="icon"
                       variant="ghost"

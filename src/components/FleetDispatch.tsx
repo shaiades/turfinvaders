@@ -72,7 +72,7 @@ import { FleetDispatchManage } from "@/components/FleetDispatchManage";
 import { GlossarySheet } from "@/components/GlossarySheet";
 import { RepcardSeasonBoard } from "@/components/RepcardSeasonBoard";
 import { FormerBadge } from "@/components/FormerBadge";
-import { AddAgentDialog } from "@/components/AddAgentDialog";
+import { AddPlayerDialog } from "@/components/AddPlayerDialog";
 import { RenameCanvasserDialog, type NameGroupRef } from "@/components/RenameCanvasserDialog";
 import { MergeCanvasserDialog } from "@/components/MergeCanvasserDialog";
 import { useMoveAgents, useArchiveAgents } from "@/hooks/useRosterActions";
@@ -2063,7 +2063,7 @@ function DispatchFleet({
       )}
 
       {canManage && (
-        <AddAgentDialog
+        <AddPlayerDialog
           open={addOpen}
           onOpenChange={(o) => {
             setAddOpen(o);

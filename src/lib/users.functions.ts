@@ -1,8 +1,22 @@
 import { createServerFn } from "@tanstack/react-start";
 import { OFFICE_LOCATIONS } from "@/lib/offices";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { LIMITED_CREATABLE_ROLES } from "@/lib/role-policy";
+import {
+  LIMITED_CREATABLE_ROLES,
+  MANAGER_GRANTABLE_ROLES,
+  type AppRole,
+} from "@/lib/role-policy";
 import { z } from "zod";
+
+/** Server twin of creatableRolesFor: which starting roles this caller may
+ *  hand a brand-new account. Owners: any. Managers: up to Captain (owner
+ *  decision 2026-09-16). Captains: canvasser tier. */
+function roleCreatable(callerRoles: string[], role: AppRole): boolean {
+  if (callerRoles.includes("owner")) return true;
+  if (callerRoles.includes("office_staff")) return MANAGER_GRANTABLE_ROLES.includes(role);
+  if (callerRoles.includes("captain")) return LIMITED_CREATABLE_ROLES.includes(role);
+  return false;
+}
 
 const ROLES = ["owner", "office_staff", "captain", "sales_rep", "confirmer", "canvasser"] as const;
 
@@ -19,23 +33,22 @@ export const createCanvasser = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => createCanvasserSchema.parse(data))
   .handler(async ({ data, context }) => {
-    // Owners, Captains, and Office Staff (Admin) can add new players, but
-    // non-owners only at the canvasser tier — creating Captain/Admin/Owner
-    // accounts is owner-only (owner decision 2026-08-12, matching the
-    // owner-only set_user_role RPC).
+    // Owners, Managers, and Captains can add new players; the starting role
+    // is tier-capped (Managers up to Captain, Captains canvasser-tier —
+    // owner decision 2026-09-16, matching set_user_role's Manager arm).
     const { data: roleRows, error: roleErr } = await context.supabase
       .from("user_roles")
       .select("role")
       .eq("user_id", context.userId);
     if (roleErr) throw new Error(roleErr.message);
     const roles = (roleRows ?? []).map((r) => r.role as string);
-    const isOwner = roles.includes("owner");
-    const isManager = isOwner || roles.includes("captain") || roles.includes("office_staff");
+    const isManager =
+      roles.includes("owner") || roles.includes("captain") || roles.includes("office_staff");
     if (!isManager) {
-      throw new Error("Only Owners, Captains, or Admins can add new users.");
+      throw new Error("Only Owners, Managers, or Captains can add new users.");
     }
-    if (!isOwner && !LIMITED_CREATABLE_ROLES.includes(data.role)) {
-      throw new Error("Only Owners can create Captain, Admin, or Owner accounts.");
+    if (!roleCreatable(roles, data.role)) {
+      throw new Error("Your role can't create accounts at that tier.");
     }
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -98,16 +111,16 @@ async function assertManager(context: { supabase: any; userId: string }) {
   return { roles, isOwner, isManager };
 }
 
-/** Managers (Owner / Captain / Admin) can add a placeholder profile with a
- *  generated UUID — non-owners only as Canvasser or Sales Rep. */
+/** Owner / Manager / Captain can add a placeholder profile with a generated
+ *  UUID — the starting role is tier-capped like createCanvasser. */
 export const addTeamMember = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => addTeamMemberSchema.parse(data))
   .handler(async ({ data, context }) => {
-    const { isOwner, isManager } = await assertManager(context);
-    if (!isManager) throw new Error("Only Owners, Captains, or Admins can add team members.");
-    if (!isOwner && !LIMITED_CREATABLE_ROLES.includes(data.role)) {
-      throw new Error("Only Owners can add Captain, Admin, or Owner accounts.");
+    const { roles, isManager } = await assertManager(context);
+    if (!isManager) throw new Error("Only Owners, Managers, or Captains can add team members.");
+    if (!roleCreatable(roles, data.role)) {
+      throw new Error("Your role can't create accounts at that tier.");
     }
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -128,62 +141,6 @@ export const addTeamMember = createServerFn({ method: "POST" })
     if (insRoleErr) throw new Error(insRoleErr.message);
 
     return { id: newId };
-  });
-
-export type RosterRow = {
-  id: string;
-  display_name: string;
-  office_location: string;
-  role: string;
-  team_name: string | null;
-  is_placeholder: boolean;
-};
-
-/** Manager-only roster fetch that uses the admin client to bypass RLS. */
-export const listRoster = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<RosterRow[]> => {
-    const { isManager } = await assertManager(context);
-    if (!isManager) throw new Error("Only managers can view the roster.");
-
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const [{ data: profiles, error: pErr }, { data: roleRows, error: rErr }, { data: teams, error: tErr }] =
-      await Promise.all([
-        supabaseAdmin.from("profiles").select("id, display_name, office_location, team_id, is_placeholder"),
-        supabaseAdmin.from("user_roles").select("user_id, role"),
-        supabaseAdmin.from("teams").select("id, name"),
-      ]);
-    if (pErr) throw new Error(pErr.message);
-    if (rErr) throw new Error(rErr.message);
-    if (tErr) throw new Error(tErr.message);
-
-    const rolePriority: Record<string, number> = {
-      owner: 0,
-      office_staff: 1,
-      captain: 2,
-      sales_rep: 3,
-      confirmer: 4,
-      canvasser: 5,
-    };
-    const roleByUser = new Map<string, string>();
-    for (const r of roleRows ?? []) {
-      const prev = roleByUser.get(r.user_id);
-      if (!prev || (rolePriority[r.role] ?? 9) < (rolePriority[prev] ?? 9)) {
-        roleByUser.set(r.user_id, r.role);
-      }
-    }
-    const teamById = new Map((teams ?? []).map((t) => [t.id, t.name]));
-
-    return (profiles ?? [])
-      .map((p) => ({
-        id: p.id,
-        display_name: p.display_name,
-        office_location: p.office_location,
-        role: roleByUser.get(p.id) ?? "canvasser",
-        team_name: p.team_id ? teamById.get(p.team_id) ?? null : null,
-        is_placeholder: p.is_placeholder,
-      }))
-      .sort((a, b) => a.display_name.localeCompare(b.display_name));
   });
 
 const signupRequestsSchema = z.object({

@@ -10,6 +10,7 @@ import {
   type AppRole,
 } from "@/hooks/useAuth";
 import { useSwipeNav } from "@/hooks/useSwipeNav";
+import { usePendingDojoCount } from "@/hooks/usePendingDojoCount";
 import { AccessRevokedScreen, useLiveAccessRevoked } from "@/components/AccessRevokedScreen";
 import { CanvasserHUD } from "@/components/CanvasserHUD";
 import { CrewBeacon } from "@/components/CrewBeacon";
@@ -42,7 +43,23 @@ type NavItem = {
   label: string;
   icon: typeof LayoutDashboard;
   search?: Record<string, string>;
+  /** Small count pill on the item (e.g. Dojo submissions waiting on Desk). */
+  badge?: number;
 };
+
+/** Count pill riding a nav icon. */
+function NavBadge({ count }: { count?: number }) {
+  if (!count) return null;
+  return (
+    <span
+      aria-label={`${count} waiting`}
+      className="absolute -top-1.5 -right-2 min-w-4 h-4 px-1 rounded-full text-background text-[9px] font-display leading-4 text-center"
+      style={{ background: "var(--neon)" }}
+    >
+      {count > 9 ? "9+" : count}
+    </span>
+  );
+}
 
 // Routes a Canvasser is allowed to visit. Anything else → redirect to /field.
 // /dashboard is the Mission page (Plan/Log/Stats merged, 2026-08-14).
@@ -71,6 +88,8 @@ const SALES_REP_ALLOWED = ["/close-kombat"];
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, role, realRole, displayName, accessRevoked } = useAuth();
+  // Dojo submissions awaiting review — 0 for everyone outside the Admin tier.
+  const pendingDojo = usePendingDojoCount();
   // Removed players lose the app in-session, not just at next login: the DB
   // trigger (20260916100000) bans their auth account, and this live watch
   // swaps the shell for the lockout screen the moment a manager archives
@@ -208,7 +227,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       { to: "/dashboard", search: { tab: "dispatch" }, label: "Command", icon: LayoutDashboard },
       { to: "/my-territory", label: "Territory", icon: MapPin },
       { to: "/dashboard", search: { tab: "payroll" }, label: "Payroll", icon: DollarSign },
-      { to: "/confirmation-desk", label: "Desk", icon: PhoneCall },
+      // Badge = Dojo submissions waiting for review — the in-app companion
+      // to the notify-dojo push, so work waiting is visible even with push
+      // alerts off on this device.
+      { to: "/confirmation-desk", label: "Desk", icon: PhoneCall, badge: pendingDojo },
       ...(role && CLOSE_KOMBAT_ROLES.includes(role)
         ? [{ to: "/close-kombat", label: "Close Kombat", icon: Swords } as NavItem]
         : []),
@@ -385,7 +407,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                     "flex items-center gap-2 px-2 py-2 min-h-11 rounded-md text-sm text-primary bg-surface-elevated ring-1 ring-primary/40",
                 }}
               >
-                <item.icon className="w-4 h-4" />
+                <span className="relative inline-flex">
+                  <item.icon className="w-4 h-4" />
+                  <NavBadge count={item.badge} />
+                </span>
                 <span>{item.label}</span>
               </Link>
             ))}
@@ -495,7 +520,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                       "flex flex-col items-center justify-center gap-1 py-2.5 text-[10px] font-display uppercase tracking-wider text-primary min-h-14",
                   }}
                 >
-                  <item.icon className="w-5 h-5" />
+                  <span className="relative inline-flex">
+                    <item.icon className="w-5 h-5" />
+                    <NavBadge count={item.badge} />
+                  </span>
                   <span className="truncate max-w-full px-1">{item.label}</span>
                 </Link>
               </li>

@@ -5,7 +5,6 @@ import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel, TeamBadge, ArcadeCard } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -25,47 +24,37 @@ import {
 import { toast } from "sonner";
 import {
   Truck,
-  Plus,
   Building2,
   Trash2,
   Archive,
   Pencil,
-  Check,
-  X,
   UserPlus,
   Lock,
   Merge,
   ArrowRightLeft,
+  Users,
 } from "lucide-react";
-import { deleteProfile, deleteVan } from "@/lib/fleet.functions";
-import { AddAgentDialog } from "@/components/AddAgentDialog";
+import { deleteProfile } from "@/lib/fleet.functions";
+import { AddPlayerDialog } from "@/components/AddPlayerDialog";
 import { RenameCanvasserDialog, type NameGroupRef } from "@/components/RenameCanvasserDialog";
 import { MergeCanvasserDialog } from "@/components/MergeCanvasserDialog";
 import { isLeadSourceName } from "@/lib/lead-sources";
 import { useAuth } from "@/hooks/useAuth";
 import { useMoveAgents } from "@/hooks/useRosterActions";
-import { isManagerRole } from "@/lib/roles";
+import { isAdminRole, isManagerRole } from "@/lib/roles";
 import { canManageTarget } from "@/lib/role-policy";
 import { normalizeName } from "@/lib/utils";
-import { DEFAULT_OFFICE, OFFICE_LOCATIONS, type OfficeLocation } from "@/lib/offices";
+import { DEFAULT_OFFICE, OFFICE_LOCATIONS } from "@/lib/offices";
 import type { RosterProfile, Van } from "@/components/FleetDispatch";
 
-const VAN_COLORS = [
-  "#ff007a",
-  "#00f0ff",
-  "#a855f7",
-  "#f59e0b",
-  "#22c55e",
-  "#ef4444",
-  "#3b82f6",
-  "#eab308",
-];
-
 /**
- * The Manage Fleet section of the Fleet Dispatch board — vans, rosters,
- * free agents, and the archive. Receives all data as props from the board's
- * queries (one roster fetch serves both views); mutations invalidate the
- * shared ["fleet_dispatch"] key family.
+ * The Manage Fleet section of the Fleet Dispatch board — per-van rosters,
+ * free agents, and the archive, primarily for CAPTAINS (Owners/Managers have
+ * the full Manage Players page; a pointer card sends them there). Van
+ * create/edit/delete moved to Manage Players' Vans panel (2026-09-16).
+ * Receives all data as props from the board's queries (one roster fetch
+ * serves both views); mutations invalidate the shared ["fleet_dispatch"]
+ * key family.
  *
  * Membership here deliberately differs from the board: null is_active counts
  * as active (legacy Fleet Manager semantics), archived profiles get the
@@ -90,16 +79,8 @@ export function FleetDispatchManage({
   const qc = useQueryClient();
   const { realRole } = useAuth();
   const canManage = isManagerRole(realRole);
-  const isOwnerRole = realRole === "owner";
-  const [newVanName, setNewVanName] = useState("");
-  const [newVanLoc, setNewVanLoc] = useState<OfficeLocation>(DEFAULT_OFFICE);
-  const [newVanColor, setNewVanColor] = useState(VAN_COLORS[0]);
+  const isAdmin = isAdminRole(realRole);
   const deleteProfileFn = useServerFn(deleteProfile);
-  const deleteVanFn = useServerFn(deleteVan);
-  const [editingVanId, setEditingVanId] = useState<string | null>(null);
-  const [editVanName, setEditVanName] = useState("");
-  const [editVanColor, setEditVanColor] = useState(VAN_COLORS[0]);
-  const [editVanLoc, setEditVanLoc] = useState<OfficeLocation>(DEFAULT_OFFICE);
   const [addAgentOpen, setAddAgentOpen] = useState(false);
   const [addAgentVanId, setAddAgentVanId] = useState<string | null>(null);
   const [archivedOpen, setArchivedOpen] = useState(false);
@@ -117,24 +98,6 @@ export function FleetDispatchManage({
       qc.invalidateQueries({ queryKey: ["fleet_dispatch"] });
     },
     onError: (e: Error) => toast.error(e.message ?? "Failed to reactivate"),
-  });
-
-  const createVan = useMutation({
-    mutationFn: async () => {
-      if (!newVanName.trim()) throw new Error("Van name required");
-      const { error } = await supabase.from("teams").insert({
-        name: newVanName.trim(),
-        color: newVanColor,
-        office_location: newVanLoc,
-      });
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      toast.success("Van created");
-      setNewVanName("");
-      qc.invalidateQueries({ queryKey: ["fleet_dispatch"] });
-    },
-    onError: (e: Error) => toast.error(e.message),
   });
 
   const moveAgents = useMoveAgents(vans);
@@ -183,55 +146,6 @@ export function FleetDispatchManage({
     onError: (e: Error) => toast.error(e.message ?? "Failed to delete"),
   });
 
-  const updateVan = useMutation({
-    mutationFn: async ({
-      id,
-      name,
-      color,
-      office_location,
-    }: {
-      id: string;
-      name: string;
-      color: string;
-      office_location: OfficeLocation;
-    }) => {
-      if (!name.trim()) throw new Error("Van name required");
-      const { error } = await supabase
-        .from("teams")
-        .update({ name: name.trim(), color, office_location })
-        .eq("id", id);
-      if (error) throw error;
-      // Cascade office to roster.
-      await supabase.from("profiles").update({ office_location }).eq("team_id", id);
-    },
-    onSuccess: () => {
-      toast.success("Van updated");
-      setEditingVanId(null);
-      qc.invalidateQueries({ queryKey: ["fleet_dispatch"] });
-      qc.invalidateQueries({ queryKey: ["weekly_results"] });
-      qc.invalidateQueries({ queryKey: ["payroll-ledger"] });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  const removeVan = useMutation({
-    mutationFn: async (id: string) => {
-      await deleteVanFn({ data: { id } });
-    },
-    onSuccess: () => {
-      toast.success("Van deleted — members moved to Unassigned");
-      qc.invalidateQueries({ queryKey: ["fleet_dispatch"] });
-    },
-    onError: (e: Error) => toast.error(e.message ?? "Failed to delete van"),
-  });
-
-  function startEditVan(v: Van) {
-    setEditingVanId(v.id);
-    setEditVanName(v.name);
-    setEditVanColor(v.color ?? VAN_COLORS[0]);
-    setEditVanLoc((v.office_location as OfficeLocation) ?? DEFAULT_OFFICE);
-  }
-
   // Legacy Fleet Manager semantics: null is_active counts as active here.
   const profiles = allProfiles.filter((p) => p.is_active !== false);
   const archivedProfiles = allProfiles.filter((p) => p.is_active === false);
@@ -260,67 +174,26 @@ export function FleetDispatchManage({
       {!canManage && (
         <ArcadeCard className="p-3 flex items-center gap-2 text-xs text-muted-foreground border border-border">
           <Lock className="w-3.5 h-3.5" /> Read-only view. Van assignments and roster edits are
-          limited to Captains, Admins, and Owners.
+          limited to Captains, Managers, and Owners.
         </ArcadeCard>
       )}
 
-      {/* Create New Van — owners only (teams RLS is owner-write; showing
-          this to captains would silently no-op) */}
-      {isOwnerRole && (
-        <ArcadePanel title="Create New Van">
-          <div className="grid gap-3 md:grid-cols-[1fr_180px_140px_auto] items-end">
-            <div>
-              <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-                Van Name
-              </label>
-              <Input
-                value={newVanName}
-                onChange={(e) => setNewVanName(e.target.value)}
-                placeholder="e.g. Phoenix Strike"
-              />
-            </div>
-            <div>
-              <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-                Office Location
-              </label>
-              <Select value={newVanLoc} onValueChange={(v) => setNewVanLoc(v as OfficeLocation)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {OFFICE_LOCATIONS.map((o) => (
-                    <SelectItem key={o} value={o}>
-                      {o}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-                Color
-              </label>
-              <div className="flex gap-1.5 md:gap-1 mt-1">
-                {VAN_COLORS.map((c) => (
-                  <button
-                    key={c}
-                    onClick={() => setNewVanColor(c)}
-                    className={`w-9 h-9 md:w-6 md:h-6 rounded ${newVanColor === c ? "ring-2 ring-offset-1 ring-offset-background ring-foreground" : ""}`}
-                    style={{ background: c }}
-                    aria-label={`color ${c}`}
-                  />
-                ))}
-              </div>
-            </div>
-            <Button
-              onClick={() => createVan.mutate()}
-              disabled={createVan.isPending}
-              className="bg-neon text-background hover:bg-neon/90"
-            >
-              <Plus className="w-4 h-4 mr-1" /> Create Van
-            </Button>
-          </div>
-        </ArcadePanel>
+      {/* Owners/Managers: the full player admin lives on Manage Players. */}
+      {isAdmin && (
+        <ArcadeCard className="p-3 flex items-center justify-between gap-3 flex-wrap">
+          <span className="text-xs text-muted-foreground flex items-center gap-2">
+            <Users className="w-3.5 h-3.5" /> Roles, invites &amp; logins, new signups, van
+            create/edit, and cleanup all live on Manage Players.
+          </span>
+          <Button
+            asChild
+            size="sm"
+            variant="outline"
+            className="font-display uppercase tracking-widest text-[10px]"
+          >
+            <Link to="/users">Manage Players</Link>
+          </Button>
+        </ArcadeCard>
       )}
 
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
@@ -356,164 +229,59 @@ export function FleetDispatchManage({
 
                     return (
                       <div key={v.id} className="van-card p-4 space-y-3">
-                        {editingVanId === v.id ? (
-                          <div className="space-y-2 p-2 rounded border border-neon/40 bg-neon/5">
-                            <div className="grid gap-2 md:grid-cols-[1fr_160px]">
-                              <div>
-                                <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-                                  Van Name
-                                </label>
-                                <Input
-                                  value={editVanName}
-                                  onChange={(e) => setEditVanName(e.target.value)}
-                                />
-                              </div>
-                              <div>
-                                <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-                                  Office Location
-                                </label>
-                                <Select
-                                  value={editVanLoc}
-                                  onValueChange={(val) => setEditVanLoc(val as OfficeLocation)}
-                                >
-                                  <SelectTrigger>
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {OFFICE_LOCATIONS.map((o) => (
-                                      <SelectItem key={o} value={o}>
-                                        {o}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                            </div>
-                            <div>
-                              <label className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-                                Color
-                              </label>
-                              <div className="flex gap-1.5 md:gap-1 mt-1">
-                                {VAN_COLORS.map((c) => (
-                                  <button
-                                    key={c}
-                                    onClick={() => setEditVanColor(c)}
-                                    className={`w-9 h-9 md:w-6 md:h-6 rounded ${editVanColor === c ? "ring-2 ring-offset-1 ring-offset-background ring-foreground" : ""}`}
-                                    style={{ background: c }}
-                                    aria-label={`color ${c}`}
-                                  />
-                                ))}
-                              </div>
-                            </div>
-                            <div className="flex gap-2 justify-end">
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => setEditingVanId(null)}
-                              >
-                                <X className="w-3.5 h-3.5 mr-1" /> Cancel
-                              </Button>
-                              <Button
-                                size="sm"
-                                disabled={updateVan.isPending}
-                                onClick={() =>
-                                  updateVan.mutate({
-                                    id: v.id,
-                                    name: editVanName,
-                                    color: editVanColor,
-                                    office_location: editVanLoc,
-                                  })
-                                }
-                                className="bg-neon text-background hover:bg-neon/90"
-                              >
-                                <Check className="w-3.5 h-3.5 mr-1" /> Save
-                              </Button>
-                            </div>
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <div className="flex items-center gap-2 min-w-0 flex-1">
+                            <Truck
+                              className="w-4 h-4 shrink-0"
+                              style={{ color: v.color ?? "#888" }}
+                            />
+                            <span className="min-w-0 truncate">
+                              <TeamBadge name={v.name} color={v.color ?? "#888"} />
+                            </span>
+                            {(() => {
+                              // Caption = roster members holding the captain
+                              // role (teams.captain_id is seed-era data with
+                              // no UI writer — never label from it). Deduped
+                              // by normalizeName — same-name duplicate
+                              // profiles are normal on this board.
+                              const seen = new Set<string>();
+                              const capNames = captains
+                                .filter((c) => c.team_id === v.id)
+                                .map((c) => c.display_name)
+                                .filter((n): n is string => {
+                                  if (!n) return false;
+                                  const key = normalizeName(n);
+                                  if (seen.has(key)) return false;
+                                  seen.add(key);
+                                  return true;
+                                });
+                              return capNames.length > 0 ? (
+                                <span className="hidden sm:inline text-[10px] text-muted-foreground truncate min-w-0">
+                                  · {capNames.join(" · ")}
+                                </span>
+                              ) : null;
+                            })()}
                           </div>
-                        ) : (
-                          <div className="flex items-center justify-between gap-2 flex-wrap">
-                            <div className="flex items-center gap-2 min-w-0 flex-1">
-                              <Truck
-                                className="w-4 h-4 shrink-0"
-                                style={{ color: v.color ?? "#888" }}
-                              />
-                              <span className="min-w-0 truncate">
-                                <TeamBadge name={v.name} color={v.color ?? "#888"} />
-                              </span>
-                              {(() => {
-                                // Caption = roster members holding the captain
-                                // role (teams.captain_id is seed-era data with
-                                // no UI writer — never label from it). Deduped
-                                // by normalizeName — same-name duplicate
-                                // profiles are normal on this board.
-                                const seen = new Set<string>();
-                                const capNames = captains
-                                  .filter((c) => c.team_id === v.id)
-                                  .map((c) => c.display_name)
-                                  .filter((n): n is string => {
-                                    if (!n) return false;
-                                    const key = normalizeName(n);
-                                    if (seen.has(key)) return false;
-                                    seen.add(key);
-                                    return true;
-                                  });
-                                return capNames.length > 0 ? (
-                                  <span className="hidden sm:inline text-[10px] text-muted-foreground truncate min-w-0">
-                                    · {capNames.join(" · ")}
-                                  </span>
-                                ) : null;
-                              })()}
-                            </div>
 
-                            <div className="flex items-center gap-1">
-                              <span className="text-[10px] font-display uppercase tracking-widest hidden sm:flex items-center gap-1 mr-1 text-muted-foreground">
-                                <Building2 className="w-3 h-3" />{" "}
-                                {v.office_location ?? DEFAULT_OFFICE}
-                              </span>
-                              {canManage && (
-                                <button
-                                  onClick={() => {
-                                    setAddAgentVanId(v.id);
-                                    setAddAgentOpen(true);
-                                  }}
-                                  className="p-2 md:p-1 min-h-9 min-w-9 md:min-h-0 md:min-w-0 inline-flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-                                  title="Add agent to this van"
-                                >
-                                  <UserPlus className="w-3.5 h-3.5" />
-                                </button>
-                              )}
-                              {/* Van edit is owner-only: teams RLS is owner-write, and a
-                                  captain's edit would no-op on the van yet still cascade
-                                  office_location onto the roster. */}
-                              {isOwnerRole && (
-                                <button
-                                  onClick={() => startEditVan(v)}
-                                  className="p-2 md:p-1 min-h-9 min-w-9 md:min-h-0 md:min-w-0 inline-flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-                                  title="Edit van (Owner only)"
-                                >
-                                  <Pencil className="w-3.5 h-3.5" />
-                                </button>
-                              )}
-                              {isOwnerRole && (
-                                <button
-                                  onClick={() => {
-                                    if (
-                                      confirm(
-                                        `Delete van "${v.name}"? Members will be moved to Unassigned. This cannot be undone.`,
-                                      )
-                                    ) {
-                                      removeVan.mutate(v.id);
-                                    }
-                                  }}
-                                  className="p-2 md:p-1 min-h-9 min-w-9 md:min-h-0 md:min-w-0 inline-flex items-center justify-center rounded hover:bg-destructive/20 text-destructive"
-                                  title="Delete van (Owner only)"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              )}
-                            </div>
+                          <div className="flex items-center gap-1">
+                            <span className="text-[10px] font-display uppercase tracking-widest hidden sm:flex items-center gap-1 mr-1 text-muted-foreground">
+                              <Building2 className="w-3 h-3" />{" "}
+                              {v.office_location ?? DEFAULT_OFFICE}
+                            </span>
+                            {canManage && (
+                              <button
+                                onClick={() => {
+                                  setAddAgentVanId(v.id);
+                                  setAddAgentOpen(true);
+                                }}
+                                className="p-2 md:p-1 min-h-9 min-w-9 md:min-h-0 md:min-w-0 inline-flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                                title="Add player to this van"
+                              >
+                                <UserPlus className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                           </div>
-                        )}
+                        </div>
 
                         <div>
                           <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground mb-1">
@@ -569,7 +337,7 @@ export function FleetDispatchManage({
                                       : undefined
                                   }
                                   onDelete={
-                                    isOwnerRole
+                                    isAdmin && canModify
                                       ? () => {
                                           if (
                                             confirm(
@@ -710,7 +478,7 @@ export function FleetDispatchManage({
                         : undefined
                     }
                     onDelete={
-                      isOwnerRole
+                      isAdmin && canModify
                         ? () => {
                             if (
                               confirm(
@@ -786,8 +554,8 @@ export function FleetDispatchManage({
               </div>
             ) : (
               archivedProfiles.map((p) => {
-                // Mirrors the reactivate_agent RPC: captains/Admins may not
-                // touch archived Owner/Admin accounts.
+                // Mirrors the reactivate_agent RPC: captains/Managers may not
+                // touch archived Owner/Manager accounts.
                 const canReactivate = canManageTarget(realRole, rolesByUser.get(p.id) ?? []);
                 return (
                   <div
@@ -832,8 +600,8 @@ export function FleetDispatchManage({
         </DialogContent>
       </Dialog>
 
-      {/* Add Agent modal — shared with the dispatch board's per-van "+". */}
-      <AddAgentDialog
+      {/* Add Player modal — shared with the dispatch board's per-van "+". */}
+      <AddPlayerDialog
         open={addAgentOpen}
         onOpenChange={(o) => {
           setAddAgentOpen(o);
@@ -977,9 +745,7 @@ function RosterRow({
           onClick={onDelete}
           className="p-2 md:p-1 min-h-9 min-w-9 md:min-h-0 md:min-w-0 inline-flex items-center justify-center rounded hover:bg-destructive/20 text-destructive"
           title={
-            isGhost
-              ? "Delete ghost profile permanently (Owner only)"
-              : "Delete profile — has data, will archive (Owner only)"
+            isGhost ? "Delete ghost profile permanently" : "Delete profile — has data, will archive"
           }
         >
           <Trash2 className="w-3.5 h-3.5" />
