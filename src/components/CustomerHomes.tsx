@@ -162,11 +162,16 @@ function customerBadgeIcon(size: number, hit: number): L.DivIcon {
     // 0.68: the PNG also carried ~20% transparent padding, since trimmed).
     // 0.8 of the 26px badge ≈ 21px glyph inside the 23px interior (border
     // is inside via border-box) — bold, with a whisker of white left.
+    // Size via INLINE STYLE, not width/height attributes: leaflet.css
+    // resets img max-width/max-height (!important) and Tailwind preflight
+    // sets img{height:auto}, which together beat the attributes and let
+    // the PNG render at natural size — the giant glyph spilling out of the
+    // badge (owner screenshot 2026-09-16). overflow:hidden is the backstop.
     const img = Math.round(size * 0.8);
     const html = `
     <div style="width:${hit}px;height:${hit}px;display:flex;align-items:center;justify-content:center;">
-      <div style="width:${size}px;height:${size}px;border-radius:9999px;background:#f5f7fa;border:1.5px solid #12283a;box-shadow:0 0 6px rgba(18,40,58,0.7);display:flex;align-items:center;justify-content:center;">
-        <img src="/tidal-mark.png" alt="" width="${img}" height="${img}" style="display:block;" />
+      <div style="width:${size}px;height:${size}px;border-radius:9999px;background:#f5f7fa;border:1.5px solid #12283a;box-shadow:0 0 6px rgba(18,40,58,0.7);display:flex;align-items:center;justify-content:center;overflow:hidden;">
+        <img src="/tidal-mark.png" alt="" style="display:block;width:${img}px;height:${img}px;max-width:none;" />
       </div>
     </div>`;
     icon = L.divIcon({
