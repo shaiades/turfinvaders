@@ -10,6 +10,7 @@ import {
   type AppRole,
 } from "@/hooks/useAuth";
 import { useSwipeNav } from "@/hooks/useSwipeNav";
+import { useTheme } from "@/hooks/useTheme";
 import { usePendingDojoCount } from "@/hooks/usePendingDojoCount";
 import { AccessRevokedScreen, useLiveAccessRevoked } from "@/components/AccessRevokedScreen";
 import { CanvasserHUD } from "@/components/CanvasserHUD";
@@ -35,6 +36,8 @@ import {
   GraduationCap,
   CircleHelp,
   Menu,
+  Sun,
+  Moon,
 } from "lucide-react";
 const turfInvadersWordmark = { url: "/turf-invaders-wordmark.png" };
 
@@ -88,6 +91,7 @@ const SALES_REP_ALLOWED = ["/close-kombat"];
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, role, realRole, displayName, accessRevoked } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   // Dojo submissions awaiting review — 0 for everyone outside the Admin tier.
   const pendingDojo = usePendingDojoCount();
   // Removed players lose the app in-session, not just at next login: the DB
@@ -338,28 +342,44 @@ export function AppShell({ children }: { children: ReactNode }) {
       {/* pt-safe: in the installed (standalone) PWA the sticky header owns
           the status-bar strip; zero everywhere else. */}
       <header className="border-b border-border bg-background/95 backdrop-blur sticky top-0 z-20 pt-safe">
-        {/* Mobile header: centered logo only. Side slots are 44px twins so
-            the wordmark stays optically centered. Canvassers get the tutorial
-            replay in the left slot, the management tier gets the hamburger,
-            everyone else keeps the spacer. */}
+        {/* Mobile header: centered logo only. Side slots are equal-width
+            twins so the wordmark stays optically centered — signed-out is
+            44px each, signed-in is 88px each (theme toggle joins the left
+            slot's help/hamburger/spacer; a matching spacer joins sign-out
+            on the right). Canvassers get the tutorial replay in the left
+            slot, the management tier gets the hamburger, everyone else
+            keeps the spacer. */}
         <div className="md:hidden flex items-center justify-between px-4 py-2">
-          {user && (role === "canvasser" || role === "sales_rep") ? (
-            <button
-              onClick={startCanvasserTutorial}
-              data-tour="help"
-              className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
-              aria-label="Replay the app tutorial"
-            >
-              <CircleHelp className="w-5 h-5" />
-            </button>
-          ) : user && hasMenu ? (
-            <button
-              onClick={() => setMenuOpen(true)}
-              className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
-              aria-label="Open menu"
-            >
-              <Menu className="w-5 h-5" />
-            </button>
+          {user ? (
+            <div className="flex items-center">
+              <button
+                onClick={toggleTheme}
+                className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
+                aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+              >
+                {theme === "dark" ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+              </button>
+              {role === "canvasser" || role === "sales_rep" ? (
+                <button
+                  onClick={startCanvasserTutorial}
+                  data-tour="help"
+                  className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
+                  aria-label="Replay the app tutorial"
+                >
+                  <CircleHelp className="w-5 h-5" />
+                </button>
+              ) : hasMenu ? (
+                <button
+                  onClick={() => setMenuOpen(true)}
+                  className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
+                  aria-label="Open menu"
+                >
+                  <Menu className="w-5 h-5" />
+                </button>
+              ) : (
+                <div className="w-11" />
+              )}
+            </div>
           ) : (
             <div className="w-11" />
           )}
@@ -380,13 +400,16 @@ export function AppShell({ children }: { children: ReactNode }) {
             />
           </Link>
           {user ? (
-            <button
-              onClick={signOut}
-              className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
-              aria-label="Sign out"
-            >
-              <LogOut className="w-5 h-5" />
-            </button>
+            <div className="flex items-center">
+              <div className="w-11" />
+              <button
+                onClick={signOut}
+                className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
+                aria-label="Sign out"
+              >
+                <LogOut className="w-5 h-5" />
+              </button>
+            </div>
           ) : (
             <div className="w-11" />
           )}
@@ -458,6 +481,13 @@ export function AppShell({ children }: { children: ReactNode }) {
                   </div>
                   <div className="text-sm font-medium">{displayName}</div>
                 </div>
+                <button
+                  onClick={toggleTheme}
+                  className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
+                  aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+                >
+                  {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                </button>
                 <button
                   onClick={signOut}
                   className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
