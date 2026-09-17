@@ -24,6 +24,7 @@ export type AssignableUser = {
   role: string;
   office_location: string | null;
   team_name: string | null;
+  team_id: string | null;
 };
 
 export type AreaDetailsTurf = {
@@ -85,7 +86,7 @@ export function DeleteAreaConfirmDialog({
 
 export function AreaDetailsSheet({
   open, onOpenChange, mode, turf, vertexCount, users, lastWorked, history = [],
-  saving, deleting, onSave, onDelete,
+  saving, deleting, onSave, onDelete, myTeamId,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -100,6 +101,11 @@ export function AreaDetailsSheet({
   deleting: boolean;
   onSave: (assigneeId: string | null, name: string) => void;
   onDelete: () => void;
+  /** The signed-in captain's own team (owner/office_staff have none) — when
+   *  set, the picker defaults to that team so a captain isn't hunting for
+   *  their people in the whole company roster (owner ask 2026-09-17,
+   *  Eric's "hard to assign area" report). One tap reveals everyone. */
+  myTeamId?: string | null;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [touched, setTouched] = useState(false);
@@ -107,6 +113,7 @@ export function AreaDetailsSheet({
   const [name, setName] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showEveryone, setShowEveryone] = useState(false);
   // Latched copy of what the sheet displays: while the close animation plays,
   // the parent clears editingTurfId and the live props flip edit→create —
   // rendering from `view` keeps the closing sheet from visibly morphing.
@@ -125,20 +132,24 @@ export function AreaDetailsSheet({
       setQuery("");
       setConfirmingDelete(false);
       setShowHistory(false);
+      setShowEveryone(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, mode, vertexCount, turf?.id, turf?.assigned_user_id, turf?.assigned_at, turf?.name]);
 
+  const teamScoped = !!myTeamId && !showEveryone;
+
   const filtered = useMemo(() => {
+    const scoped = myTeamId && !showEveryone ? users.filter((u) => u.team_id === myTeamId) : users;
     const q = query.trim().toLowerCase();
-    if (!q) return users;
-    return users.filter(
+    if (!q) return scoped;
+    return scoped.filter(
       (u) =>
         u.display_name.toLowerCase().includes(q) ||
         (u.office_location ?? "").toLowerCase().includes(q) ||
         (u.team_name ?? "").toLowerCase().includes(q),
     );
-  }, [users, query]);
+  }, [users, query, myTeamId, showEveryone]);
 
   const isEdit = view.mode === "edit";
   const shownTurf = view.turf;
@@ -262,11 +273,22 @@ export function AreaDetailsSheet({
             />
 
             <div className="space-y-2">
-              <div className="text-sm font-medium">Assign area to?</div>
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-sm font-medium">Assign area to?</div>
+                {!!myTeamId && (
+                  <button
+                    type="button"
+                    onClick={() => setShowEveryone((v) => !v)}
+                    className="shrink-0 text-[11px] font-medium text-neon underline underline-offset-2"
+                  >
+                    {showEveryone ? "Show my team only" : "Search everyone instead"}
+                  </button>
+                )}
+              </div>
               <Input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search users"
+                placeholder={teamScoped ? "Search your team" : "Search users"}
                 aria-label="Search users"
               />
             </div>
@@ -327,8 +349,12 @@ export function AreaDetailsSheet({
                   </li>
                 );
               })}
-              {filtered.length === 0 && query.trim() !== "" && (
-                <li className="p-3 text-xs text-muted-foreground">No users match “{query}”.</li>
+              {filtered.length === 0 && (
+                <li className="p-3 text-xs text-muted-foreground">
+                  {query.trim() !== ""
+                    ? `No users match “${query}”.`
+                    : "No teammates found on your team — try Search everyone."}
+                </li>
               )}
             </ul>
           </div>
