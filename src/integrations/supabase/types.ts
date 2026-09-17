@@ -619,6 +619,7 @@ export type Database = {
           team_id: string | null
           updated_at: string
           weekly_income_goal: number
+          weekly_sales_goal: number | null
           xp: number
         }
         Insert: {
@@ -649,6 +650,7 @@ export type Database = {
           team_id?: string | null
           updated_at?: string
           weekly_income_goal?: number
+          weekly_sales_goal?: number | null
           xp?: number
         }
         Update: {
@@ -679,6 +681,7 @@ export type Database = {
           team_id?: string | null
           updated_at?: string
           weekly_income_goal?: number
+          weekly_sales_goal?: number | null
           xp?: number
         }
         Relationships: [
@@ -687,6 +690,50 @@ export type Database = {
             columns: ["team_id"]
             isOneToOne: false
             referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      rep_commission_notes: {
+        Row: {
+          actual_amount: number | null
+          created_at: string
+          estimated_amount: number | null
+          id: string
+          monday_item_id: string
+          next_payroll: boolean
+          paid_at: string | null
+          rep_id: string
+          updated_at: string
+        }
+        Insert: {
+          actual_amount?: number | null
+          created_at?: string
+          estimated_amount?: number | null
+          id?: string
+          monday_item_id: string
+          next_payroll?: boolean
+          paid_at?: string | null
+          rep_id: string
+          updated_at?: string
+        }
+        Update: {
+          actual_amount?: number | null
+          created_at?: string
+          estimated_amount?: number | null
+          id?: string
+          monday_item_id?: string
+          next_payroll?: boolean
+          paid_at?: string | null
+          rep_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rep_commission_notes_rep_id_fkey"
+            columns: ["rep_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
