@@ -51,6 +51,10 @@ import {
 import { getKombatSyncInfo, syncBlockCards } from "@/lib/close-kombat.functions";
 import { GlossarySheet, type GlossarySections } from "@/components/GlossarySheet";
 import { PushAlertsCard } from "@/components/PushAlertsCard";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { CloseKombatMoneyTab } from "@/components/CloseKombatMoneyTab";
+import { CloseKombatGoalsTab } from "@/components/CloseKombatGoalsTab";
+import { CloseKombatLearnTab } from "@/components/CloseKombatLearnTab";
 import { toast } from "sonner";
 import { rewardToast } from "@/lib/reward-toast";
 import { useCountUp } from "@/hooks/useCountUp";
@@ -78,12 +82,29 @@ import {
  * 2026-07-29 — upsale money still counts in Revenue). The totals row counts
  * each card exactly once.
  */
-export function CloseKombat() {
+// Page-level tabs (owner request 2026-09-17: Money/Goals/Learn added
+// alongside the existing stats screen). Separate from RangeTab below — that
+// one picks the day/week/month/year window, this one picks which SECTION of
+// the page is showing.
+export const CLOSE_KOMBAT_PAGE_TABS = ["stats", "money", "goals", "learn"] as const;
+export type CloseKombatPageTab = (typeof CLOSE_KOMBAT_PAGE_TABS)[number];
+export const isCloseKombatPageTab = (t: unknown): t is CloseKombatPageTab =>
+  (CLOSE_KOMBAT_PAGE_TABS as readonly unknown[]).includes(t);
+
+export function CloseKombat({
+  rawTab,
+  setTab: setPageTab,
+}: {
+  /** The host route's raw ?tab value (any type — coerced below). */
+  rawTab: unknown;
+  /** Writes the host route's ?tab (close-kombat.tsx navigate, replace). */
+  setTab: (t: CloseKombatPageTab) => void;
+}) {
   return (
     // Sticky per device: most reps work one office, and this page is their
     // whole app — resetting to All Offices cost a tap every open (R-13).
     <OfficeFilterProvider storageKey="ti_kombat_office">
-      <CloseKombatInner />
+      <CloseKombatInner rawTab={rawTab} setPageTab={setPageTab} />
     </OfficeFilterProvider>
   );
 }
@@ -185,7 +206,13 @@ const COMPANY_TILES: TileDef[] = [
  *  covers any month/week edge with room for a slow save. */
 const SAVE_LINK_PAD_DAYS = 42;
 
-function CloseKombatInner() {
+function CloseKombatInner({
+  rawTab,
+  setPageTab,
+}: {
+  rawTab: unknown;
+  setPageTab: (t: CloseKombatPageTab) => void;
+}) {
   const qc = useQueryClient();
   const { user, realRole, role, displayName, realDisplayName } = useAuth();
   const { matches, office } = useOfficeFilter();
@@ -194,6 +221,13 @@ function CloseKombatInner() {
   // the admin controls above keep keying off realRole (the sync buttons must
   // not vanish from the owner mid-preview).
   const isRep = role === "sales_rep";
+  // Money/Goals are personal — foreign values (a stray bookmark, a link from
+  // a non-rep session) coerce to Stats rather than 404ing.
+  const pageTab: CloseKombatPageTab = isCloseKombatPageTab(rawTab) ? rawTab : "stats";
+  // View As doesn't swap user.id (useAuth.ts) — only role/displayName are
+  // overridden — so a preview must never let Goals write to the admin's own
+  // profile row believing it's the previewed rep's.
+  const isPreview = role !== realRole;
 
   // --- Range engine: Day / Week (Mon–Sun) / Month / Year, all LA-calendar ---
   const [tab, setTab] = useState<RangeTab>("day");
@@ -376,6 +410,52 @@ function CloseKombatInner() {
   const myIdx = useMemo(() => reps.findIndex((r) => matcher.isMe(r.rep)), [reps, matcher]);
   const myRow = myIdx >= 0 ? reps[myIdx] : null;
   const ahead = myIdx > 0 ? reps[myIdx - 1] : null;
+
+  // --- Goals tab: a WEEK-PINNED row, independent of the Stats tab's range
+  // (owner, 2026-09-17). Goals are inherently weekly, so browsing Stats to a
+  // past month must never change what the Goals tab is measuring against.
+  // Never shifted (no shiftWeek/goToWeek exposed) so this instance always
+  // reads "the current Mon–Sun week" for the life of the mount — same
+  // convention as the read-only `week` state elsewhere on this page.
+  const goalsWeek = useWeekSelector({ endOffsetDays: 6 });
+  const goalsFetchStart = addDaysISO(goalsWeek.weekStartISO, -SAVE_LINK_PAD_DAYS);
+  const goalsFetchEnd = addDaysISO(goalsWeek.weekEndISO, SAVE_LINK_PAD_DAYS);
+  const goalsCardsQuery = useQuery({
+    queryKey: ["block_cards", goalsFetchStart, goalsFetchEnd],
+    enabled: isRep && pageTab === "goals",
+    queryFn: async ({ signal }) => {
+      const PAGE = 1000;
+      const all: BlockCard[] = [];
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await supabase
+          .from("block_cards")
+          .select(CARD_COLUMNS)
+          .gte("card_date", goalsFetchStart)
+          .lte("card_date", goalsFetchEnd)
+          .order("monday_item_id")
+          .range(from, from + PAGE - 1)
+          .abortSignal(signal);
+        if (error) throw error;
+        all.push(...((data ?? []) as unknown as BlockCard[]));
+        if (!data || data.length < PAGE) break;
+      }
+      return all;
+    },
+    staleTime: 15_000,
+  });
+  const goalsOfficeCards = useMemo(
+    () => (goalsCardsQuery.data ?? []).filter((c) => matches(c.office_location)),
+    [goalsCardsQuery.data, matches],
+  );
+  const weekRow = useMemo(() => {
+    if (!isRep || !matcher.matched) return null;
+    const { reps: weekReps } = aggregateCloseKombat(goalsOfficeCards, {
+      start: goalsWeek.weekStartISO,
+      end: goalsWeek.weekEndISO,
+    });
+    const idx = weekReps.findIndex((r) => matcher.isMe(r.rep));
+    return idx >= 0 ? weekReps[idx] : null;
+  }, [isRep, matcher, goalsOfficeCards, goalsWeek.weekStartISO, goalsWeek.weekEndISO]);
 
   const cardById = useMemo(() => {
     const m = new Map<string, BlockCard>();
@@ -639,237 +719,264 @@ function CloseKombatInner() {
         </div>
       </div>
 
-      {/* Range tabs: Day / Week / Month / Year, plus each range's own controls */}
-      <div
-        data-tour="kombat-range"
-        className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide"
-      >
-        {(
-          [
-            { id: "day", label: "Day" },
-            { id: "week", label: "Week" },
-            { id: "month", label: "Month" },
-            { id: "year", label: "Year" },
-          ] as Array<{ id: RangeTab; label: string }>
-        ).map((p) => (
-          <ArcadePill
-            key={p.id}
-            tone="kombat-gold"
-            active={tab === p.id}
-            onClick={() => setTab(p.id)}
+      {/* Page tabs (owner, 2026-09-17): Money/Goals are personal, Stats/Learn
+          are visible to anyone who reaches this route. */}
+      <Tabs value={pageTab} onValueChange={(v) => setPageTab(v as CloseKombatPageTab)}>
+        <div className="-mx-4 px-4 sm:mx-0 sm:px-0 overflow-x-auto scrollbar-hide">
+          <TabsList className="flex w-max min-w-full flex-nowrap whitespace-nowrap bg-surface border border-border p-1 h-auto">
+            <KombatTab value="stats">Stats</KombatTab>
+            {isRep && <KombatTab value="money">Money</KombatTab>}
+            {isRep && <KombatTab value="goals">Goals</KombatTab>}
+            <KombatTab value="learn">Learn</KombatTab>
+          </TabsList>
+        </div>
+
+        <TabsContent value="stats" className="mt-4 space-y-4 md:space-y-6">
+          {/* Range tabs: Day / Week / Month / Year, plus each range's own controls */}
+          <div
+            data-tour="kombat-range"
+            className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide"
           >
-            {p.label}
-          </ArcadePill>
-        ))}
-
-        <span className="mx-1 h-5 w-px bg-border shrink-0" aria-hidden />
-
-        {tab === "day" && (
-          <>
             {(
               [
-                { id: "today", label: "Today" },
-                { id: "yesterday", label: "Yesterday" },
-              ] as Array<{ id: DayPreset; label: string }>
+                { id: "day", label: "Day" },
+                { id: "week", label: "Week" },
+                { id: "month", label: "Month" },
+                { id: "year", label: "Year" },
+              ] as Array<{ id: RangeTab; label: string }>
             ).map((p) => (
               <ArcadePill
                 key={p.id}
                 tone="kombat-gold"
-                size="sm"
-                active={dayPreset === p.id}
-                onClick={() => setDayPreset(p.id)}
+                active={tab === p.id}
+                onClick={() => setTab(p.id)}
               >
                 {p.label}
               </ArcadePill>
             ))}
-          </>
-        )}
 
-        {tab === "week" && (
-          <>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => week.shiftWeek(-1)}
-              title="Previous week"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </Button>
-            <RangeChip>{range.label}</RangeChip>
-            <Button size="sm" variant="outline" onClick={() => week.shiftWeek(1)} title="Next week">
-              <ChevronRight className="w-4 h-4" />
-            </Button>
-            {!week.isCurrentWeek && (
-              <Button size="sm" variant="ghost" onClick={() => week.goToWeek()}>
-                Jump to current week
-              </Button>
+            <span className="mx-1 h-5 w-px bg-border shrink-0" aria-hidden />
+
+            {tab === "day" && (
+              <>
+                {(
+                  [
+                    { id: "today", label: "Today" },
+                    { id: "yesterday", label: "Yesterday" },
+                  ] as Array<{ id: DayPreset; label: string }>
+                ).map((p) => (
+                  <ArcadePill
+                    key={p.id}
+                    tone="kombat-gold"
+                    size="sm"
+                    active={dayPreset === p.id}
+                    onClick={() => setDayPreset(p.id)}
+                  >
+                    {p.label}
+                  </ArcadePill>
+                ))}
+              </>
             )}
-          </>
-        )}
 
-        {tab === "month" && (
-          <>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => shiftMonth(-1)}
-              title="Previous month"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </Button>
-            <RangeChip>{range.label}</RangeChip>
-            <Button size="sm" variant="outline" onClick={() => shiftMonth(1)} title="Next month">
-              <ChevronRight className="w-4 h-4" />
-            </Button>
-            {!isCurrentMonth && (
-              <Button size="sm" variant="ghost" onClick={() => setMonthStart(laMonthStartISO())}>
-                Jump to current month
-              </Button>
+            {tab === "week" && (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => week.shiftWeek(-1)}
+                  title="Previous week"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </Button>
+                <RangeChip>{range.label}</RangeChip>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => week.shiftWeek(1)}
+                  title="Next week"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </Button>
+                {!week.isCurrentWeek && (
+                  <Button size="sm" variant="ghost" onClick={() => week.goToWeek()}>
+                    Jump to current week
+                  </Button>
+                )}
+              </>
             )}
-          </>
-        )}
 
-        {tab === "year" && (
-          <>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setYear((y) => y - 1)}
-              title="Previous year"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </Button>
-            <RangeChip>{range.label}</RangeChip>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setYear((y) => y + 1)}
-              title="Next year"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </Button>
-            {!isCurrentYear && (
-              <Button size="sm" variant="ghost" onClick={() => setYear(currentYear)}>
-                Jump to current year
-              </Button>
+            {tab === "month" && (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => shiftMonth(-1)}
+                  title="Previous month"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </Button>
+                <RangeChip>{range.label}</RangeChip>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => shiftMonth(1)}
+                  title="Next month"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </Button>
+                {!isCurrentMonth && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setMonthStart(laMonthStartISO())}
+                  >
+                    Jump to current month
+                  </Button>
+                )}
+              </>
             )}
-          </>
-        )}
 
-        <span className="ml-2 text-[10px] text-muted-foreground font-mono whitespace-nowrap">
-          {range.sub}
-        </span>
-      </div>
+            {tab === "year" && (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setYear((y) => y - 1)}
+                  title="Previous year"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </Button>
+                <RangeChip>{range.label}</RangeChip>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setYear((y) => y + 1)}
+                  title="Next year"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </Button>
+                {!isCurrentYear && (
+                  <Button size="sm" variant="ghost" onClick={() => setYear(currentYear)}>
+                    Jump to current year
+                  </Button>
+                )}
+              </>
+            )}
 
-      {/* Rep-first ordering (R-1): the closer's own range leads their one
+            <span className="ml-2 text-[10px] text-muted-foreground font-mono whitespace-nowrap">
+              {range.sub}
+            </span>
+          </div>
+
+          {/* Rep-first ordering (R-1): the closer's own range leads their one
           screen; the company tile wall moves below the standings for them.
           Admins keep the office pulse on top. */}
-      {isRep && (
-        <RepHero
-          row={myRow}
-          rank={myIdx}
-          repCount={reps.length}
-          ahead={ahead}
-          rangeLabel={range.label}
-          matched={matcher.matched}
-          hasNames={allBoardNames.length > 0}
-          flash={heroFlash}
-          dim={cardsQuery.isPlaceholderData}
-        />
-      )}
+          {isRep && (
+            <RepHero
+              row={myRow}
+              rank={myIdx}
+              repCount={reps.length}
+              ahead={ahead}
+              rangeLabel={range.label}
+              matched={matcher.matched}
+              hasNames={allBoardNames.length > 0}
+              flash={heroFlash}
+              dim={cardsQuery.isPlaceholderData}
+            />
+          )}
 
-      {/* Belt Drop ceremony — real detection (reps) or forced demo (any role) */}
-      {(victoryFx || victoryDemo) && (
-        <SaleVictoryOverlay
-          fx={(victoryFx ?? victoryDemo)!}
-          onDone={() => {
-            dismissVictory();
-            setVictoryDemo(null);
-          }}
-        />
-      )}
+          {/* Belt Drop ceremony — real detection (reps) or forced demo (any role) */}
+          {(victoryFx || victoryDemo) && (
+            <SaleVictoryOverlay
+              fx={(victoryFx ?? victoryDemo)!}
+              onDone={() => {
+                dismissVictory();
+                setVictoryDemo(null);
+              }}
+            />
+          )}
 
-      {isRep && myAttention.length > 0 && (
-        <ArcadePanel
-          faction="kombat"
-          title={`Your cards need office attention · ${myAttention.length}`}
-          action={
-            <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-              The office fixes these, then syncs
-            </span>
-          }
-        >
-          {/* Read-only by design: the rep can't fix Monday, but they're the
+          {isRep && myAttention.length > 0 && (
+            <ArcadePanel
+              faction="kombat"
+              title={`Your cards need office attention · ${myAttention.length}`}
+              action={
+                <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                  The office fixes these, then syncs
+                </span>
+              }
+            >
+              {/* Read-only by design: the rep can't fix Monday, but they're the
               most motivated auditor of their own money — a blank price means
               THEIR sale counts $0 until the office moves (R-3). */}
-          <ul className="space-y-2">
-            {myAttention.slice(0, ATTENTION_CAP).map((it) => (
-              <AttentionRow key={it.monday_item_id} it={it} />
-            ))}
-          </ul>
-          <p className="mt-2 text-[10px] text-muted-foreground">
-            These can shift your numbers — a blank price counts as $0 and an unlinked save counts
-            nowhere until the boards are fixed and synced.
-          </p>
-        </ArcadePanel>
-      )}
-
-      {isRep && myDeals.length > 0 && (
-        <ArcadePanel
-          faction="kombat"
-          title={`My Deals · ${range.label}`}
-          action={
-            <button
-              onClick={() => setDealsOpen((v) => !v)}
-              className="inline-flex items-center gap-1 text-[10px] font-display uppercase tracking-widest text-kombat-gold min-h-11 px-2"
-            >
-              {dealsOpen ? "Hide" : `Show ${myDeals.length}`}
-              {dealsOpen ? (
-                <ChevronUp className="w-3.5 h-3.5" />
-              ) : (
-                <ChevronDown className="w-3.5 h-3.5" />
-              )}
-            </button>
-          }
-        >
-          {dealsOpen ? (
-            <ul className="space-y-2">
-              {myDeals.slice(0, 60).map((d) => (
-                <MyDealRow key={d.id} d={d} />
-              ))}
-              {myDeals.length > 60 && (
-                <li className="text-[10px] text-muted-foreground">
-                  Showing the latest 60 of {myDeals.length}.
-                </li>
-              )}
-            </ul>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              Every one of your cards in this range — customer, result, and the dollars — so
-              &quot;which cancel took the money&quot; is never a mystery.
-            </p>
+              <ul className="space-y-2">
+                {myAttention.slice(0, ATTENTION_CAP).map((it) => (
+                  <AttentionRow key={it.monday_item_id} it={it} />
+                ))}
+              </ul>
+              <p className="mt-2 text-[10px] text-muted-foreground">
+                These can shift your numbers — a blank price counts as $0 and an unlinked save
+                counts nowhere until the boards are fixed and synced.
+              </p>
+            </ArcadePanel>
           )}
-        </ArcadePanel>
-      )}
 
-      {todaysClosers.length > 0 && (
-        <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide">
-          <span className="shrink-0 text-[10px] font-display uppercase tracking-widest text-kombat-gold">
-            🎉 Today&apos;s closers
-          </span>
-          {todaysClosers.map(([name, n]) => (
-            <span
-              key={name}
-              className="shrink-0 inline-flex items-center gap-1.5 rounded-full border border-kombat-gold/40 bg-kombat-gold/5 px-3 py-1 text-[10px] font-display uppercase tracking-widest"
+          {isRep && myDeals.length > 0 && (
+            <ArcadePanel
+              faction="kombat"
+              title={`My Deals · ${range.label}`}
+              action={
+                <button
+                  onClick={() => setDealsOpen((v) => !v)}
+                  className="inline-flex items-center gap-1 text-[10px] font-display uppercase tracking-widest text-kombat-gold min-h-11 px-2"
+                >
+                  {dealsOpen ? "Hide" : `Show ${myDeals.length}`}
+                  {dealsOpen ? (
+                    <ChevronUp className="w-3.5 h-3.5" />
+                  ) : (
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  )}
+                </button>
+              }
             >
-              {name}
-              <span className="text-kombat-gold tabular-nums">{n} sold</span>
-            </span>
-          ))}
-        </div>
-      )}
+              {dealsOpen ? (
+                <ul className="space-y-2">
+                  {myDeals.slice(0, 60).map((d) => (
+                    <MyDealRow key={d.id} d={d} />
+                  ))}
+                  {myDeals.length > 60 && (
+                    <li className="text-[10px] text-muted-foreground">
+                      Showing the latest 60 of {myDeals.length}.
+                    </li>
+                  )}
+                </ul>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Every one of your cards in this range — customer, result, and the dollars — so
+                  &quot;which cancel took the money&quot; is never a mystery.
+                </p>
+              )}
+            </ArcadePanel>
+          )}
 
-      {/* Company totals — computed from cards, never from summed rep rows.
+          {todaysClosers.length > 0 && (
+            <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide">
+              <span className="shrink-0 text-[10px] font-display uppercase tracking-widest text-kombat-gold">
+                🎉 Today&apos;s closers
+              </span>
+              {todaysClosers.map(([name, n]) => (
+                <span
+                  key={name}
+                  className="shrink-0 inline-flex items-center gap-1.5 rounded-full border border-kombat-gold/40 bg-kombat-gold/5 px-3 py-1 text-[10px] font-display uppercase tracking-widest"
+                >
+                  {name}
+                  <span className="text-kombat-gold tabular-nums">{n} sold</span>
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* Company totals — computed from cards, never from summed rep rows.
           Appts = resulted cards only (owner, 2026-07-30 — unresulted cards
           don't count anywhere), so No Show + No Demo + Reset + PM + Sold
           always equals Appts. Cancels sit inside PM and Reloads sit outside
@@ -879,420 +986,471 @@ function CloseKombatInner() {
           (placeholderData) but dimmed — the Year fetch pages ~15 months of
           cards and can take seconds, and full-brightness stale numbers under
           a new label read as the new range's truth. */}
-      {!isRep && <CompanyTiles totals={totals} dim={cardsQuery.isPlaceholderData} />}
+          {!isRep && <CompanyTiles totals={totals} dim={cardsQuery.isPlaceholderData} />}
 
-      {attention.length > 0 && (
-        <ArcadePanel
-          faction="kombat"
-          title={`Needs Attention · ${attention.length}`}
-          action={
-            <span className="text-[10px] font-display uppercase tracking-widest text-warning">
-              Fix on Monday, then sync
-            </span>
-          }
-        >
-          {/* Capped so a backfilled past month can't bury the standings —
-              items are sorted worst-first, so the cut only hides the tail. */}
-          <ul className="space-y-2">
-            {(showAllAttention ? attention : attention.slice(0, ATTENTION_CAP)).map((it) => (
-              <AttentionRow key={it.monday_item_id} it={it} />
-            ))}
-          </ul>
-          {attention.length > ATTENTION_CAP && (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="mt-2"
-              onClick={() => setShowAllAttention((v) => !v)}
+          {attention.length > 0 && (
+            <ArcadePanel
+              faction="kombat"
+              title={`Needs Attention · ${attention.length}`}
+              action={
+                <span className="text-[10px] font-display uppercase tracking-widest text-warning">
+                  Fix on Monday, then sync
+                </span>
+              }
             >
-              {showAllAttention
-                ? "Show fewer"
-                : `Show all ${attention.length} (${attention.length - ATTENTION_CAP} more)`}
-            </Button>
-          )}
-        </ArcadePanel>
-      )}
-
-      <div data-tour="kombat-standings">
-        <ArcadePanel
-          faction="kombat"
-          title={`Kombat Standings · ${range.label}`}
-          action={
-            cardsQuery.isPlaceholderData ? (
-              <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground animate-pulse">
-                Counting…
-              </span>
-            ) : range.isLive ? (
-              <span className="text-[10px] font-display uppercase tracking-widest text-victory">
-                Live
-              </span>
-            ) : undefined
-          }
-        >
-          {/* Stamp freshness (R-5): the Live chip is about the RANGE — cancels
-            and report splits only move when the office runs a sync. */}
-          <p className="mb-3 text-[10px] text-muted-foreground">
-            Results land live from the boards · cancels &amp; rep splits update when the office
-            syncs
-            {syncInfo.data ? ` — last sync ${relTime(syncInfo.data.lastSyncedAt)}` : ""}.
-          </p>
-          {cardsQuery.isLoading ? (
-            <p className="text-sm text-muted-foreground">Loading the bracket…</p>
-          ) : reps.length === 0 ? (
-            <div className="text-sm text-muted-foreground space-y-1">
-              <p>No Block cards with reps in this range yet.</p>
-              {isAdmin && (
-                <p className="text-xs">
-                  Hit <span className="text-foreground">Sync from Monday</span> to pull the active
-                  boards, or <span className="text-foreground">Full history</span> to backfill past
-                  weeks.
-                </p>
-              )}
-            </div>
-          ) : (
-            <div className={cn("transition-opacity", cardsQuery.isPlaceholderData && "opacity-50")}>
-              {/* Desktop table (Monday's column language) */}
-              <div className="hidden md:block overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border">
-                      <th className="text-left py-2 pr-2 font-normal">#</th>
-                      <th className="text-left py-2 pr-2 font-normal">Rep</th>
-                      <th className="text-right py-2 px-2 font-normal">Appts</th>
-                      <th className="text-right py-2 px-2 font-normal">No Show</th>
-                      <th className="text-right py-2 px-2 font-normal">No Demo</th>
-                      <th className="text-right py-2 px-2 font-normal">OL</th>
-                      <th className="text-right py-2 px-2 font-normal">Reset</th>
-                      <th className="text-right py-2 px-2 font-normal">PM</th>
-                      <th className="text-right py-2 px-2 font-normal">Sold</th>
-                      <th className="text-right py-2 px-2 font-normal">Reload</th>
-                      <th className="text-right py-2 px-2 font-normal">Cancels</th>
-                      <th className="text-right py-2 px-2 font-normal border-l border-border/60">
-                        Sit %
-                      </th>
-                      <th className="text-right py-2 px-2 font-normal">NS %</th>
-                      <th className="text-right py-2 px-2 font-normal">ND %</th>
-                      <th className="text-right py-2 px-2 font-normal">OL %</th>
-                      <th className="text-right py-2 px-2 font-normal">Reset %</th>
-                      <th className="text-right py-2 px-2 font-normal">Close %</th>
-                      <th className="text-right py-2 px-2 font-normal">Reload %</th>
-                      <th className="text-right py-2 px-2 font-normal">Cancel %</th>
-                      <th className="text-right py-2 px-2 font-normal">Leads / Sale</th>
-                      <th
-                        className="text-right py-2 pl-2 font-normal"
-                        title="Sale volume over the range on screen — Today shows today's money only"
-                      >
-                        Volume
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {reps.map((r, i) => (
-                      <tr
-                        key={r.rep}
-                        className={`border-b border-border/40 transition-colors duration-200 hover:bg-surface-elevated ${
-                          isMe(r.rep)
-                            ? "bg-kombat-gold/5 ring-1 ring-inset ring-kombat-gold/30"
-                            : ""
-                        }`}
-                      >
-                        <td className="py-2.5 pr-2 text-muted-foreground tabular-nums">
-                          {i === 0 && r.revenue > 0 ? (
-                            <Crown
-                              className="w-4 h-4 text-kombat-gold inline"
-                              aria-label="Champion"
-                            />
-                          ) : (
-                            i + 1
-                          )}
-                        </td>
-                        <td className="py-2.5 pr-2 font-medium">
-                          {r.rep}
-                          {isMe(r.rep) && <YouTag />}
-                          <FlawlessBadge r={r} />
-                        </td>
-                        <td className={cn(kbCell, metricText(r.appts, "text-foreground"))}>
-                          {fmtCount(r.appts)}
-                        </td>
-                        <td className={cn(kbCell, metricText(r.noShow, "text-destructive"))}>
-                          {fmtCount(r.noShow)}
-                        </td>
-                        <td className={cn(kbCell, metricText(r.noDemo, "text-destructive"))}>
-                          {fmtCount(r.noDemo)}
-                        </td>
-                        <td className={cn(kbCell, metricText(r.ol, "text-warning"))}>
-                          {fmtCount(r.ol)}
-                        </td>
-                        <td className={cn(kbCell, metricText(r.reset, "text-accent"))}>
-                          {fmtCount(r.reset)}
-                        </td>
-                        <td className={cn(kbCell, metricText(r.pm, "text-warning"))}>
-                          {fmtCount(r.pm)}
-                        </td>
-                        <td
-                          className={cn(
-                            kbCell,
-                            "font-medium",
-                            metricText(r.sold, "text-kombat-gold"),
-                          )}
-                        >
-                          {fmtCount(r.sold)}
-                        </td>
-                        <td className={cn(kbCell, metricText(r.reloads, "text-kombat-gold"))}>
-                          {fmtCount(r.reloads)}
-                        </td>
-                        <td className={cn(kbCell, metricText(r.cancels, "text-destructive"))}>
-                          {fmtCount(r.cancels)}
-                        </td>
-                        <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs border-l border-border/60">
-                          {fmtPct(r.sitPct)}
-                        </td>
-                        <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-destructive">
-                          {fmtPct(r.noShowPct)}
-                        </td>
-                        <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-destructive">
-                          {fmtPct(r.noDemoPct)}
-                        </td>
-                        <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-warning">
-                          {fmtPct(r.olPct)}
-                        </td>
-                        <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-accent">
-                          {fmtPct(r.resetPct)}
-                        </td>
-                        <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
-                          {fmtPct(r.closePct)}
-                        </td>
-                        <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-victory">
-                          {fmtPct(r.reloadPct)}
-                        </td>
-                        <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-destructive">
-                          {fmtPct(r.cancelPct)}
-                        </td>
-                        <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
-                          {fmtRatio(r.leadsToSale)}
-                        </td>
-                        <td
-                          className={cn(
-                            "py-2.5 pl-2 text-right tabular-nums",
-                            metricText(r.revenue, "text-kombat-gold"),
-                          )}
-                        >
-                          {fmtMoney(r.revenue)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr className="border-t border-neon/40 text-foreground">
-                      <td className="py-2.5 pr-2" />
-                      <td className="py-2.5 pr-2 font-display text-[10px] uppercase tracking-widest">
-                        All cards
-                      </td>
-                      <td className="py-2.5 px-2 text-right tabular-nums">
-                        {fmtCount(totals.appts)}
-                      </td>
-                      <td className="py-2.5 px-2 text-right tabular-nums">
-                        {fmtCount(totals.noShow)}
-                      </td>
-                      <td className="py-2.5 px-2 text-right tabular-nums">
-                        {fmtCount(totals.noDemo)}
-                      </td>
-                      <td className="py-2.5 px-2 text-right tabular-nums">{fmtCount(totals.ol)}</td>
-                      <td className="py-2.5 px-2 text-right tabular-nums">
-                        {fmtCount(totals.reset)}
-                      </td>
-                      <td className="py-2.5 px-2 text-right tabular-nums">{fmtCount(totals.pm)}</td>
-                      <td className="py-2.5 px-2 text-right tabular-nums">
-                        {fmtCount(totals.sold)}
-                      </td>
-                      <td className="py-2.5 px-2 text-right tabular-nums">
-                        {fmtCount(totals.reloads)}
-                      </td>
-                      <td className="py-2.5 px-2 text-right tabular-nums">
-                        {fmtCount(totals.cancels)}
-                      </td>
-                      <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs border-l border-border/60">
-                        {fmtPct(totals.sitPct)}
-                      </td>
-                      <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
-                        {fmtPct(totals.noShowPct)}
-                      </td>
-                      <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
-                        {fmtPct(totals.noDemoPct)}
-                      </td>
-                      <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
-                        {fmtPct(totals.olPct)}
-                      </td>
-                      <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
-                        {fmtPct(totals.resetPct)}
-                      </td>
-                      <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
-                        {fmtPct(totals.closePct)}
-                      </td>
-                      <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
-                        {fmtPct(totals.reloadPct)}
-                      </td>
-                      <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
-                        {fmtPct(totals.cancelPct)}
-                      </td>
-                      <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
-                        {fmtRatio(totals.leadsToSale)}
-                      </td>
-                      <td className="py-2.5 pl-2 text-right tabular-nums">
-                        {fmtMoney(totals.revenue)}
-                      </td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-
-              {/* Mobile cards — same precomputed rows */}
-              <MobileCardList>
-                {reps.map((r, i) => (
-                  <MobileCard
-                    key={r.rep}
-                    className={isMe(r.rep) ? "border-kombat-gold/40 bg-kombat-gold/5" : undefined}
-                  >
-                    <MobileCardHeader
-                      left={
-                        <span className="flex items-center gap-1.5">
-                          {i === 0 && r.revenue > 0 ? (
-                            <Crown className="w-3.5 h-3.5 text-kombat-gold shrink-0" />
-                          ) : (
-                            <span className="text-muted-foreground tabular-nums">{i + 1}.</span>
-                          )}
-                          {r.rep}
-                          {isMe(r.rep) && <YouTag />}
-                          <FlawlessBadge r={r} />
-                        </span>
-                      }
-                      right={
-                        <span className={metricText(r.revenue, "text-kombat-gold")}>
-                          {fmtMoney(r.revenue)}
-                        </span>
-                      }
-                    />
-                    <MobileStatBlock s={r} />
-                  </MobileCard>
+              {/* Capped so a backfilled past month can't bury the standings —
+              items are sorted worst-first, so the cut only hides the tail. */}
+              <ul className="space-y-2">
+                {(showAllAttention ? attention : attention.slice(0, ATTENTION_CAP)).map((it) => (
+                  <AttentionRow key={it.monday_item_id} it={it} />
                 ))}
-                <MobileCard className="border-neon/40">
-                  <MobileCardHeader
-                    left={
-                      <span className="font-display text-[10px] uppercase tracking-widest">
-                        All cards
-                      </span>
-                    }
-                    right={<span className="text-victory">{fmtMoney(totals.revenue)}</span>}
-                  />
-                  <MobileStatBlock s={totals} />
-                </MobileCard>
-              </MobileCardList>
+              </ul>
+              {attention.length > ATTENTION_CAP && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="mt-2"
+                  onClick={() => setShowAllAttention((v) => !v)}
+                >
+                  {showAllAttention
+                    ? "Show fewer"
+                    : `Show all ${attention.length} (${attention.length - ATTENTION_CAP} more)`}
+                </Button>
+              )}
+            </ArcadePanel>
+          )}
+
+          <div data-tour="kombat-standings">
+            <ArcadePanel
+              faction="kombat"
+              title={`Kombat Standings · ${range.label}`}
+              action={
+                cardsQuery.isPlaceholderData ? (
+                  <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground animate-pulse">
+                    Counting…
+                  </span>
+                ) : range.isLive ? (
+                  <span className="text-[10px] font-display uppercase tracking-widest text-victory">
+                    Live
+                  </span>
+                ) : undefined
+              }
+            >
+              {/* Stamp freshness (R-5): the Live chip is about the RANGE — cancels
+            and report splits only move when the office runs a sync. */}
+              <p className="mb-3 text-[10px] text-muted-foreground">
+                Results land live from the boards · cancels &amp; rep splits update when the office
+                syncs
+                {syncInfo.data ? ` — last sync ${relTime(syncInfo.data.lastSyncedAt)}` : ""}.
+              </p>
+              {cardsQuery.isLoading ? (
+                <p className="text-sm text-muted-foreground">Loading the bracket…</p>
+              ) : reps.length === 0 ? (
+                <div className="text-sm text-muted-foreground space-y-1">
+                  <p>No Block cards with reps in this range yet.</p>
+                  {isAdmin && (
+                    <p className="text-xs">
+                      Hit <span className="text-foreground">Sync from Monday</span> to pull the
+                      active boards, or <span className="text-foreground">Full history</span> to
+                      backfill past weeks.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div
+                  className={cn("transition-opacity", cardsQuery.isPlaceholderData && "opacity-50")}
+                >
+                  {/* Desktop table (Monday's column language) */}
+                  <div className="hidden md:block overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border">
+                          <th className="text-left py-2 pr-2 font-normal">#</th>
+                          <th className="text-left py-2 pr-2 font-normal">Rep</th>
+                          <th className="text-right py-2 px-2 font-normal">Appts</th>
+                          <th className="text-right py-2 px-2 font-normal">No Show</th>
+                          <th className="text-right py-2 px-2 font-normal">No Demo</th>
+                          <th className="text-right py-2 px-2 font-normal">OL</th>
+                          <th className="text-right py-2 px-2 font-normal">Reset</th>
+                          <th className="text-right py-2 px-2 font-normal">PM</th>
+                          <th className="text-right py-2 px-2 font-normal">Sold</th>
+                          <th className="text-right py-2 px-2 font-normal">Reload</th>
+                          <th className="text-right py-2 px-2 font-normal">Cancels</th>
+                          <th className="text-right py-2 px-2 font-normal border-l border-border/60">
+                            Sit %
+                          </th>
+                          <th className="text-right py-2 px-2 font-normal">NS %</th>
+                          <th className="text-right py-2 px-2 font-normal">ND %</th>
+                          <th className="text-right py-2 px-2 font-normal">OL %</th>
+                          <th className="text-right py-2 px-2 font-normal">Reset %</th>
+                          <th className="text-right py-2 px-2 font-normal">Close %</th>
+                          <th className="text-right py-2 px-2 font-normal">Reload %</th>
+                          <th className="text-right py-2 px-2 font-normal">Cancel %</th>
+                          <th className="text-right py-2 px-2 font-normal">Leads / Sale</th>
+                          <th
+                            className="text-right py-2 pl-2 font-normal"
+                            title="Sale volume over the range on screen — Today shows today's money only"
+                          >
+                            Volume
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reps.map((r, i) => (
+                          <tr
+                            key={r.rep}
+                            className={`border-b border-border/40 transition-colors duration-200 hover:bg-surface-elevated ${
+                              isMe(r.rep)
+                                ? "bg-kombat-gold/5 ring-1 ring-inset ring-kombat-gold/30"
+                                : ""
+                            }`}
+                          >
+                            <td className="py-2.5 pr-2 text-muted-foreground tabular-nums">
+                              {i === 0 && r.revenue > 0 ? (
+                                <Crown
+                                  className="w-4 h-4 text-kombat-gold inline"
+                                  aria-label="Champion"
+                                />
+                              ) : (
+                                i + 1
+                              )}
+                            </td>
+                            <td className="py-2.5 pr-2 font-medium">
+                              {r.rep}
+                              {isMe(r.rep) && <YouTag />}
+                              <FlawlessBadge r={r} />
+                            </td>
+                            <td className={cn(kbCell, metricText(r.appts, "text-foreground"))}>
+                              {fmtCount(r.appts)}
+                            </td>
+                            <td className={cn(kbCell, metricText(r.noShow, "text-destructive"))}>
+                              {fmtCount(r.noShow)}
+                            </td>
+                            <td className={cn(kbCell, metricText(r.noDemo, "text-destructive"))}>
+                              {fmtCount(r.noDemo)}
+                            </td>
+                            <td className={cn(kbCell, metricText(r.ol, "text-warning"))}>
+                              {fmtCount(r.ol)}
+                            </td>
+                            <td className={cn(kbCell, metricText(r.reset, "text-accent"))}>
+                              {fmtCount(r.reset)}
+                            </td>
+                            <td className={cn(kbCell, metricText(r.pm, "text-warning"))}>
+                              {fmtCount(r.pm)}
+                            </td>
+                            <td
+                              className={cn(
+                                kbCell,
+                                "font-medium",
+                                metricText(r.sold, "text-kombat-gold"),
+                              )}
+                            >
+                              {fmtCount(r.sold)}
+                            </td>
+                            <td className={cn(kbCell, metricText(r.reloads, "text-kombat-gold"))}>
+                              {fmtCount(r.reloads)}
+                            </td>
+                            <td className={cn(kbCell, metricText(r.cancels, "text-destructive"))}>
+                              {fmtCount(r.cancels)}
+                            </td>
+                            <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs border-l border-border/60">
+                              {fmtPct(r.sitPct)}
+                            </td>
+                            <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-destructive">
+                              {fmtPct(r.noShowPct)}
+                            </td>
+                            <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-destructive">
+                              {fmtPct(r.noDemoPct)}
+                            </td>
+                            <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-warning">
+                              {fmtPct(r.olPct)}
+                            </td>
+                            <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-accent">
+                              {fmtPct(r.resetPct)}
+                            </td>
+                            <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                              {fmtPct(r.closePct)}
+                            </td>
+                            <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-victory">
+                              {fmtPct(r.reloadPct)}
+                            </td>
+                            <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-destructive">
+                              {fmtPct(r.cancelPct)}
+                            </td>
+                            <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                              {fmtRatio(r.leadsToSale)}
+                            </td>
+                            <td
+                              className={cn(
+                                "py-2.5 pl-2 text-right tabular-nums",
+                                metricText(r.revenue, "text-kombat-gold"),
+                              )}
+                            >
+                              {fmtMoney(r.revenue)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr className="border-t border-neon/40 text-foreground">
+                          <td className="py-2.5 pr-2" />
+                          <td className="py-2.5 pr-2 font-display text-[10px] uppercase tracking-widest">
+                            All cards
+                          </td>
+                          <td className="py-2.5 px-2 text-right tabular-nums">
+                            {fmtCount(totals.appts)}
+                          </td>
+                          <td className="py-2.5 px-2 text-right tabular-nums">
+                            {fmtCount(totals.noShow)}
+                          </td>
+                          <td className="py-2.5 px-2 text-right tabular-nums">
+                            {fmtCount(totals.noDemo)}
+                          </td>
+                          <td className="py-2.5 px-2 text-right tabular-nums">
+                            {fmtCount(totals.ol)}
+                          </td>
+                          <td className="py-2.5 px-2 text-right tabular-nums">
+                            {fmtCount(totals.reset)}
+                          </td>
+                          <td className="py-2.5 px-2 text-right tabular-nums">
+                            {fmtCount(totals.pm)}
+                          </td>
+                          <td className="py-2.5 px-2 text-right tabular-nums">
+                            {fmtCount(totals.sold)}
+                          </td>
+                          <td className="py-2.5 px-2 text-right tabular-nums">
+                            {fmtCount(totals.reloads)}
+                          </td>
+                          <td className="py-2.5 px-2 text-right tabular-nums">
+                            {fmtCount(totals.cancels)}
+                          </td>
+                          <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs border-l border-border/60">
+                            {fmtPct(totals.sitPct)}
+                          </td>
+                          <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                            {fmtPct(totals.noShowPct)}
+                          </td>
+                          <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                            {fmtPct(totals.noDemoPct)}
+                          </td>
+                          <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                            {fmtPct(totals.olPct)}
+                          </td>
+                          <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                            {fmtPct(totals.resetPct)}
+                          </td>
+                          <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                            {fmtPct(totals.closePct)}
+                          </td>
+                          <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                            {fmtPct(totals.reloadPct)}
+                          </td>
+                          <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                            {fmtPct(totals.cancelPct)}
+                          </td>
+                          <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                            {fmtRatio(totals.leadsToSale)}
+                          </td>
+                          <td className="py-2.5 pl-2 text-right tabular-nums">
+                            {fmtMoney(totals.revenue)}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+
+                  {/* Mobile cards — same precomputed rows */}
+                  <MobileCardList>
+                    {reps.map((r, i) => (
+                      <MobileCard
+                        key={r.rep}
+                        className={
+                          isMe(r.rep) ? "border-kombat-gold/40 bg-kombat-gold/5" : undefined
+                        }
+                      >
+                        <MobileCardHeader
+                          left={
+                            <span className="flex items-center gap-1.5">
+                              {i === 0 && r.revenue > 0 ? (
+                                <Crown className="w-3.5 h-3.5 text-kombat-gold shrink-0" />
+                              ) : (
+                                <span className="text-muted-foreground tabular-nums">{i + 1}.</span>
+                              )}
+                              {r.rep}
+                              {isMe(r.rep) && <YouTag />}
+                              <FlawlessBadge r={r} />
+                            </span>
+                          }
+                          right={
+                            <span className={metricText(r.revenue, "text-kombat-gold")}>
+                              {fmtMoney(r.revenue)}
+                            </span>
+                          }
+                        />
+                        <MobileStatBlock s={r} />
+                      </MobileCard>
+                    ))}
+                    <MobileCard className="border-neon/40">
+                      <MobileCardHeader
+                        left={
+                          <span className="font-display text-[10px] uppercase tracking-widest">
+                            All cards
+                          </span>
+                        }
+                        right={<span className="text-victory">{fmtMoney(totals.revenue)}</span>}
+                      />
+                      <MobileStatBlock s={totals} />
+                    </MobileCard>
+                  </MobileCardList>
+                </div>
+              )}
+            </ArcadePanel>
+          </div>
+
+          {/* Office war (R-15): SD vs OC over the range on screen. Ignores the
+          office filter on purpose — a race needs both lanes. */}
+          <ArcadePanel
+            faction="kombat"
+            title={`Office War · ${range.label}`}
+            action={
+              cardsQuery.isPlaceholderData ? (
+                <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground animate-pulse">
+                  Counting…
+                </span>
+              ) : undefined
+            }
+          >
+            <div
+              className={cn(
+                "space-y-3 transition-opacity",
+                cardsQuery.isPlaceholderData && "opacity-50",
+              )}
+            >
+              {(() => {
+                const max = Math.max(1, ...officeRace.map((o) => o.revenue));
+                const top = Math.max(...officeRace.map((o) => o.revenue));
+                return officeRace.map((o) => {
+                  const leads = o.revenue === top && o.revenue > 0;
+                  return (
+                    <div key={o.office} className="min-w-0">
+                      <div className="flex items-baseline justify-between gap-2 text-[10px] font-display uppercase tracking-widest">
+                        <span className={leads ? "text-kombat-gold" : "text-muted-foreground"}>
+                          {o.office}
+                          {leads ? " 👑" : ""}
+                        </span>
+                        <span
+                          className={cn(
+                            "tabular-nums",
+                            leads ? "text-kombat-gold" : "text-muted-foreground",
+                          )}
+                        >
+                          {fmtMoney(o.revenue)}
+                        </span>
+                      </div>
+                      <div className="mt-1 h-2 rounded-full bg-surface-elevated overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all"
+                          style={{
+                            width: `${Math.round((o.revenue / max) * 100)}%`,
+                            background: leads ? "var(--kombat-gold)" : "var(--kombat-red)",
+                            boxShadow: leads ? "0 0 10px var(--kombat-gold)" : undefined,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+          </ArcadePanel>
+
+          {/* Reps still get the company pulse — just after their own story. */}
+          {isRep && (
+            <div>
+              <div className="mb-2 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                Company · {range.label}
+              </div>
+              <CompanyTiles totals={totals} dim={cardsQuery.isPlaceholderData} />
             </div>
           )}
-        </ArcadePanel>
-      </div>
 
-      {/* Office war (R-15): SD vs OC over the range on screen. Ignores the
-          office filter on purpose — a race needs both lanes. */}
-      <ArcadePanel
-        faction="kombat"
-        title={`Office War · ${range.label}`}
-        action={
-          cardsQuery.isPlaceholderData ? (
-            <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground animate-pulse">
-              Counting…
-            </span>
-          ) : undefined
-        }
-      >
-        <div
-          className={cn(
-            "space-y-3 transition-opacity",
-            cardsQuery.isPlaceholderData && "opacity-50",
-          )}
-        >
-          {(() => {
-            const max = Math.max(1, ...officeRace.map((o) => o.revenue));
-            const top = Math.max(...officeRace.map((o) => o.revenue));
-            return officeRace.map((o) => {
-              const leads = o.revenue === top && o.revenue > 0;
-              return (
-                <div key={o.office} className="min-w-0">
-                  <div className="flex items-baseline justify-between gap-2 text-[10px] font-display uppercase tracking-widest">
-                    <span className={leads ? "text-kombat-gold" : "text-muted-foreground"}>
-                      {o.office}
-                      {leads ? " 👑" : ""}
-                    </span>
-                    <span
-                      className={cn(
-                        "tabular-nums",
-                        leads ? "text-kombat-gold" : "text-muted-foreground",
-                      )}
-                    >
-                      {fmtMoney(o.revenue)}
-                    </span>
-                  </div>
-                  <div className="mt-1 h-2 rounded-full bg-surface-elevated overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all"
-                      style={{
-                        width: `${Math.round((o.revenue / max) * 100)}%`,
-                        background: leads ? "var(--kombat-gold)" : "var(--kombat-red)",
-                        boxShadow: leads ? "0 0 10px var(--kombat-gold)" : undefined,
-                      }}
-                    />
-                  </div>
-                </div>
-              );
-            });
-          })()}
-        </div>
-      </ArcadePanel>
-
-      {/* Reps still get the company pulse — just after their own story. */}
-      {isRep && (
-        <div>
-          <div className="mb-2 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-            Company · {range.label}
-          </div>
-          <CompanyTiles totals={totals} dim={cardsQuery.isPlaceholderData} />
-        </div>
-      )}
-
-      {/* The old ~600-word 10px legend paragraph carried pay-critical rules
+          {/* The old ~600-word 10px legend paragraph carried pay-critical rules
           as one unreadable wall (rep audit R-7) — the same content lives in
           the structured glossary sheet now, phone-usable. */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <button
-          data-tour="kombat-legend"
-          onClick={() => setGlossaryOpen(true)}
-          className="inline-flex items-center gap-1.5 min-h-11 px-3 rounded-md border border-kombat-gold/40 text-[10px] font-display uppercase tracking-widest text-kombat-gold hover:bg-surface-elevated"
-        >
-          <CircleHelp className="w-3.5 h-3.5" /> What the columns mean
-        </button>
-        <span className="text-[10px] text-muted-foreground">
-          Columns mirror the Monday.com Block boards · one result per card · ranked by volume in
-          every range.
-        </span>
-      </div>
-      <GlossarySheet
-        open={glossaryOpen}
-        onOpenChange={setGlossaryOpen}
-        sections={KOMBAT_GLOSSARY}
-        title="What the columns mean"
-        accentClass="text-kombat-gold"
-      />
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <button
+              data-tour="kombat-legend"
+              onClick={() => setGlossaryOpen(true)}
+              className="inline-flex items-center gap-1.5 min-h-11 px-3 rounded-md border border-kombat-gold/40 text-[10px] font-display uppercase tracking-widest text-kombat-gold hover:bg-surface-elevated"
+            >
+              <CircleHelp className="w-3.5 h-3.5" /> What the columns mean
+            </button>
+            <span className="text-[10px] text-muted-foreground">
+              Columns mirror the Monday.com Block boards · one result per card · ranked by volume in
+              every range.
+            </span>
+          </div>
+          <GlossarySheet
+            open={glossaryOpen}
+            onOpenChange={setGlossaryOpen}
+            sections={KOMBAT_GLOSSARY}
+            title="What the columns mean"
+            accentClass="text-kombat-gold"
+          />
 
-      {/* Sale alerts (R-11): reps could never even SUBSCRIBE to push — the
+          {/* Sale alerts (R-11): reps could never even SUBSCRIBE to push — the
           alerts card only lived on pages the cage blocks. The KA-CHING push
           fires from the block_cards trigger the moment their sale lands. */}
-      {isRep && (
-        <PushAlertsCard
-          title="Sale alerts"
-          description="Get a KA-CHING on this phone the moment one of your sales hits the board."
-        />
-      )}
+          {isRep && (
+            <PushAlertsCard
+              title="Sale alerts"
+              description="Get a KA-CHING on this phone the moment one of your sales hits the board."
+            />
+          )}
+        </TabsContent>
+
+        {isRep && (
+          <TabsContent value="money" className="mt-4">
+            <CloseKombatMoneyTab
+              repId={user?.id}
+              deals={myDeals}
+              rangeLabel={range.label}
+              rangeStart={range.start}
+              rangeEnd={range.end}
+            />
+          </TabsContent>
+        )}
+
+        {isRep && (
+          <TabsContent value="goals" className="mt-4">
+            <CloseKombatGoalsTab
+              userId={user?.id}
+              weekLabel={formatWeekRange(goalsWeek.weekStart, goalsWeek.weekEnd)}
+              weekLoading={goalsCardsQuery.isLoading}
+              weekRow={weekRow}
+              isPreview={isPreview}
+              previewName={isPreview ? displayName : null}
+            />
+          </TabsContent>
+        )}
+
+        <TabsContent value="learn" className="mt-4">
+          <CloseKombatLearnTab userId={user?.id ?? null} />
+        </TabsContent>
+      </Tabs>
     </div>
+  );
+}
+
+function KombatTab({ value, children }: { value: string; children: React.ReactNode }) {
+  return (
+    <TabsTrigger
+      value={value}
+      data-tour={`kombat-tab-${value}`}
+      className="font-display text-[10px] uppercase tracking-widest data-[state=active]:bg-[color-mix(in_oklab,var(--kombat-gold)_15%,transparent)] data-[state=active]:text-kombat-gold data-[state=active]:shadow-[0_0_18px_-4px_var(--kombat-gold)] py-2.5 px-4"
+    >
+      {children}
+    </TabsTrigger>
   );
 }
 
@@ -1617,7 +1775,7 @@ function RepHero({
  *  Rows come pre-resolved through resolveCards, so a saved deal, an
  *  excluded card, or a re-priced sale reads EXACTLY the way the standings
  *  count it (review 2026-09-12). */
-type MyDeal = {
+export type MyDeal = {
   id: string;
   name: string | null;
   date: string | null;
