@@ -145,7 +145,7 @@ function ManagerTerritoryView({
   onBackToCanvassing?: () => void;
   onOpenCrewMap?: () => void;
 }) {
-  const { user, role } = useAuth();
+  const { user, role, teamId } = useAuth();
   const qc = useQueryClient();
   const { me, geoStatus } = useGeoWatch();
   const [drawing, setDrawing] = useState(false);
@@ -374,7 +374,9 @@ function ManagerTerritoryView({
         .from("profiles")
         // teams must be disambiguated: profiles↔teams also relate via
         // teams.captain_id, so a bare teams(name) is ambiguous (PGRST201).
-        .select("id, display_name, office_location, is_placeholder, teams!profiles_team_fk(name)")
+        .select(
+          "id, display_name, office_location, is_placeholder, team_id, teams!profiles_team_fk(name)",
+        )
         .in("id", ids)
         .order("display_name", { ascending: true });
       if (pErr) throw pErr;
@@ -385,6 +387,7 @@ function ManagerTerritoryView({
             display_name: (p.display_name as string | null) ?? (p.id as string),
             office_location: (p.office_location as string | null) ?? null,
             team_name: ((p.teams as { name: string | null } | null)?.name as string | null) ?? null,
+            team_id: (p.team_id as string | null) ?? null,
             is_placeholder: (p.is_placeholder as boolean | null) === true,
           },
         ]),
@@ -418,6 +421,7 @@ function ManagerTerritoryView({
           role: r.role as string,
           office_location: p.office_location,
           team_name: p.team_name,
+          team_id: p.team_id,
         } satisfies AssignableUser);
       }
       return [...byId.values()].sort((a, b) => a.display_name.localeCompare(b.display_name));
@@ -1052,6 +1056,7 @@ function ManagerTerritoryView({
           editingTurf ? (editing?.polygon_coordinates ?? []).length : (pendingPolygon?.length ?? 0)
         }
         users={canvassersQuery.data ?? []}
+        myTeamId={teamId}
         lastWorked={editingTurf ? lastWorked : null}
         history={editingTurf ? assignmentHistory : []}
         saving={saveTurf.isPending || updateTurf.isPending}
