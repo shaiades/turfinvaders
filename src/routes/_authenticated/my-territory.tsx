@@ -549,6 +549,7 @@ function ManagerTerritoryView({
           assignmentLabel: label,
           currentAssignee: r.rep_name ?? null,
           history: r.assigned_at ? [{ name: "RepCard 2026", when: fmt(r.assigned_at) }] : [],
+          readOnly: true,
         };
       })
       .filter((t) => t.polygon.length >= 3);
@@ -1072,9 +1073,14 @@ function ManagerTerritoryView({
         onSave={(assigneeId, name) => {
           if (editingTurf) {
             updateTurf.mutate({ id: editingTurf.id, name, assigned_user_id: assigneeId });
-          } else {
-            if (!pendingPolygon) return;
+          } else if (pendingPolygon) {
             saveTurf.mutate({ name, assigned_user_id: assigneeId, polygon: pendingPolygon });
+          } else {
+            // Shouldn't happen — the "deleted elsewhere" effect above closes
+            // the sheet first — but a silent no-op here reads as "the button
+            // did nothing," so say so instead of just returning.
+            toast.error("Couldn't save — this area is no longer available. Try again.");
+            setIsModalOpen(false);
           }
         }}
         onDelete={() => {
