@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { ArcadePanel } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -29,8 +28,16 @@ const FIELD_LABEL = "text-[10px] font-display uppercase tracking-widest text-mut
  *  login. Reason required; the entry lands as manager_created on the audit
  *  trail. Clock Out may stay empty to open a LIVE shift (the worker punches
  *  out normally); an optional lunch prices the meal deduction in the same
- *  save. */
-export function TimeClockBackfill({ profiles }: { profiles: Profile[] }) {
+ *  save. Bare content (no panel chrome) — the caller hosts it, typically
+ *  inside a dialog. */
+export function TimeClockBackfill({
+  profiles,
+  onDone,
+}: {
+  profiles: Profile[];
+  /** Fires after a successful create so a dialog host can close itself. */
+  onDone?: () => void;
+}) {
   const qc = useQueryClient();
   const [userId, setUserId] = useState("");
   const [clockIn, setClockIn] = useState("");
@@ -97,82 +104,78 @@ export function TimeClockBackfill({ profiles }: { profiles: Profile[] }) {
       qc.invalidateQueries({ queryKey: ["time-review-queue"] });
       qc.invalidateQueries({ queryKey: ["time-clock-open"] });
       qc.invalidateQueries({ queryKey: ["time-clock-today"] });
+      onDone?.();
     },
     onError: (e: Error) => toast.error("Backfill failed", { description: e.message }),
   });
 
   return (
-    <ArcadePanel
-      title="Backfill · Add Entry"
-      action={<CalendarPlus className="w-4 h-4 text-neon" />}
-    >
-      <div className="space-y-3">
-        <div className="grid sm:grid-cols-2 gap-3">
-          <label className="block space-y-1 sm:col-span-2">
-            <span className={FIELD_LABEL}>Player</span>
-            <Select value={userId} onValueChange={setUserId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Pick a player…" />
-              </SelectTrigger>
-              <SelectContent>
-                {sorted.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.display_name ?? "Unknown"}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </label>
-          <label className="block space-y-1">
-            <span className={FIELD_LABEL}>Clock In</span>
-            <Input
-              type="datetime-local"
-              value={clockIn}
-              onChange={(e) => setClockIn(e.target.value)}
-            />
-          </label>
-          <label className="block space-y-1">
-            <span className={FIELD_LABEL}>Clock Out · empty = leave shift live</span>
-            <Input
-              type="datetime-local"
-              value={clockOut}
-              onChange={(e) => setClockOut(e.target.value)}
-            />
-          </label>
-          <label className="block space-y-1">
-            <span className={FIELD_LABEL}>Lunch Start · optional</span>
-            <Input
-              type="datetime-local"
-              value={lunchStart}
-              onChange={(e) => setLunchStart(e.target.value)}
-            />
-          </label>
-          <label className="block space-y-1">
-            <span className={FIELD_LABEL}>Lunch End · optional</span>
-            <Input
-              type="datetime-local"
-              value={lunchEnd}
-              onChange={(e) => setLunchEnd(e.target.value)}
-            />
-          </label>
-          <label className="block space-y-1 sm:col-span-2">
-            <span className={FIELD_LABEL}>Reason · required, lands on the audit trail</span>
-            <Input
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder='e.g. "forgot to punch in — captain confirmed 8 AM start"'
-            />
-          </label>
-        </div>
-        <Button
-          onClick={() => createMut.mutate()}
-          disabled={createMut.isPending}
-          className="w-full sm:w-auto bg-victory text-background hover:bg-victory/90 font-display text-[10px] uppercase tracking-widest"
-        >
-          <CalendarPlus className="w-3.5 h-3.5 mr-1" />
-          Add Entry
-        </Button>
+    <div className="space-y-3">
+      <div className="grid sm:grid-cols-2 gap-3">
+        <label className="block space-y-1 sm:col-span-2">
+          <span className={FIELD_LABEL}>Player</span>
+          <Select value={userId} onValueChange={setUserId}>
+            <SelectTrigger>
+              <SelectValue placeholder="Pick a player…" />
+            </SelectTrigger>
+            <SelectContent>
+              {sorted.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.display_name ?? "Unknown"}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </label>
+        <label className="block space-y-1">
+          <span className={FIELD_LABEL}>Clock In</span>
+          <Input
+            type="datetime-local"
+            value={clockIn}
+            onChange={(e) => setClockIn(e.target.value)}
+          />
+        </label>
+        <label className="block space-y-1">
+          <span className={FIELD_LABEL}>Clock Out · empty = leave shift live</span>
+          <Input
+            type="datetime-local"
+            value={clockOut}
+            onChange={(e) => setClockOut(e.target.value)}
+          />
+        </label>
+        <label className="block space-y-1">
+          <span className={FIELD_LABEL}>Lunch Start · optional</span>
+          <Input
+            type="datetime-local"
+            value={lunchStart}
+            onChange={(e) => setLunchStart(e.target.value)}
+          />
+        </label>
+        <label className="block space-y-1">
+          <span className={FIELD_LABEL}>Lunch End · optional</span>
+          <Input
+            type="datetime-local"
+            value={lunchEnd}
+            onChange={(e) => setLunchEnd(e.target.value)}
+          />
+        </label>
+        <label className="block space-y-1 sm:col-span-2">
+          <span className={FIELD_LABEL}>Reason · required, lands on the audit trail</span>
+          <Input
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder='e.g. "forgot to punch in — captain confirmed 8 AM start"'
+          />
+        </label>
       </div>
-    </ArcadePanel>
+      <Button
+        onClick={() => createMut.mutate()}
+        disabled={createMut.isPending}
+        className="w-full sm:w-auto bg-victory text-background hover:bg-victory/90 font-display text-[10px] uppercase tracking-widest"
+      >
+        <CalendarPlus className="w-3.5 h-3.5 mr-1" />
+        Add Entry
+      </Button>
+    </div>
   );
 }

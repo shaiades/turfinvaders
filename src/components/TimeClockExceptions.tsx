@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { ArcadePanel } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -33,7 +32,8 @@ const FIELD_LABEL = "text-[10px] font-display uppercase tracking-widest text-mut
  *  clock in before 7 AM (no review-queue flag) and/or work past the auto-
  *  close cutoff (6 PM weekdays / 5 PM Saturday — the pass extends it).
  *  Times are Pacific wall clock. One active pass per person per day;
- *  granting again replaces it, revoking keeps the row as history. */
+ *  granting again replaces it, revoking keeps the row as history. Bare
+ *  content (no panel chrome) — the caller hosts it, typically in a dialog. */
 export function TimeClockExceptions({ profiles }: { profiles: Profile[] }) {
   const qc = useQueryClient();
   const today = laTodayISO();
@@ -112,110 +112,107 @@ export function TimeClockExceptions({ profiles }: { profiles: Profile[] }) {
   const passes = passesQuery.data ?? [];
 
   return (
-    <ArcadePanel title="Early / Late Passes" action={<KeyRound className="w-4 h-4 text-warning" />}>
-      <div className="space-y-3">
-        <div className="text-[11px] text-muted-foreground">
-          Pre-approve someone to clock in before 7 AM (no review flag) or work past the auto-close
-          cutoff (6 PM weekdays · 5 PM Saturday). Times are Pacific. Granting again for the same day
-          replaces the pass.
-        </div>
-        <div className="grid sm:grid-cols-2 gap-3">
-          <label className="block space-y-1">
-            <span className={FIELD_LABEL}>Player</span>
-            <Select value={userId} onValueChange={setUserId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Pick a player…" />
-              </SelectTrigger>
-              <SelectContent>
-                {sorted.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.display_name ?? "Unknown"}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </label>
-          <label className="block space-y-1">
-            <span className={FIELD_LABEL}>Day</span>
-            <Input type="date" value={date} min={today} onChange={(e) => setDate(e.target.value)} />
-          </label>
-          <label className="block space-y-1">
-            <span className={FIELD_LABEL}>Clock-in OK from · PT, optional</span>
-            <Input type="time" value={earlyFrom} onChange={(e) => setEarlyFrom(e.target.value)} />
-          </label>
-          <label className="block space-y-1">
-            <span className={FIELD_LABEL}>Work until · PT, optional</span>
-            <Input type="time" value={lateUntil} onChange={(e) => setLateUntil(e.target.value)} />
-          </label>
-          <label className="block space-y-1 sm:col-span-2">
-            <span className={FIELD_LABEL}>Reason · required</span>
-            <Input
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder='e.g. "early neighborhood blitz — owner approved"'
-            />
-          </label>
-        </div>
-        <Button
-          onClick={() => grantMut.mutate()}
-          disabled={grantMut.isPending}
-          className="w-full sm:w-auto bg-warning text-background hover:bg-warning/90 font-display text-[10px] uppercase tracking-widest"
-        >
-          <KeyRound className="w-3.5 h-3.5 mr-1" />
-          Grant Pass
-        </Button>
-
-        {passesQuery.isError ? (
-          <div className="text-[11px] text-muted-foreground">
-            Passes unavailable — {(passesQuery.error as Error).message}
-          </div>
-        ) : passes.length > 0 ? (
-          <div className="space-y-2 pt-1">
-            {passes.map((p) => (
-              <div
-                key={p.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded border border-border bg-surface-elevated p-3"
-              >
-                <div className="min-w-0">
-                  <div className="text-sm font-medium">
-                    {nameById.get(p.user_id) ?? "Unknown"}
-                    <span className="ml-2 text-xs text-muted-foreground tabular-nums">
-                      {p.exception_date}
-                    </span>
-                  </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-1">
-                    {p.early_from && (
-                      <span className="text-[9px] font-display uppercase tracking-widest text-victory border border-victory/40 rounded px-1">
-                        in from {fmtWallTime(p.early_from)}
-                      </span>
-                    )}
-                    {p.late_until && (
-                      <span className="text-[9px] font-display uppercase tracking-widest text-warning border border-warning/40 rounded px-1">
-                        out until {fmtWallTime(p.late_until)}
-                      </span>
-                    )}
-                    <span className="text-[10px] text-muted-foreground truncate">
-                      {p.reason}
-                      {nameById.has(p.granted_by) && ` — ${nameById.get(p.granted_by)}`}
-                    </span>
-                  </div>
-                </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={revokeMut.isPending}
-                  onClick={() => revokeMut.mutate(p.id)}
-                >
-                  <X className="w-3.5 h-3.5 text-destructive" />
-                  Revoke
-                </Button>
-              </div>
-            ))}
-          </div>
-        ) : passesQuery.isSuccess ? (
-          <div className="text-[11px] text-muted-foreground">No active passes.</div>
-        ) : null}
+    <div className="space-y-3">
+      <div className="text-[11px] text-muted-foreground">
+        Cutoff is 6 PM weekdays · 5 PM Saturday; times are Pacific. Granting again for the same day
+        replaces the pass.
       </div>
-    </ArcadePanel>
+      <div className="grid sm:grid-cols-2 gap-3">
+        <label className="block space-y-1">
+          <span className={FIELD_LABEL}>Player</span>
+          <Select value={userId} onValueChange={setUserId}>
+            <SelectTrigger>
+              <SelectValue placeholder="Pick a player…" />
+            </SelectTrigger>
+            <SelectContent>
+              {sorted.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.display_name ?? "Unknown"}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </label>
+        <label className="block space-y-1">
+          <span className={FIELD_LABEL}>Day</span>
+          <Input type="date" value={date} min={today} onChange={(e) => setDate(e.target.value)} />
+        </label>
+        <label className="block space-y-1">
+          <span className={FIELD_LABEL}>Clock-in OK from · PT, optional</span>
+          <Input type="time" value={earlyFrom} onChange={(e) => setEarlyFrom(e.target.value)} />
+        </label>
+        <label className="block space-y-1">
+          <span className={FIELD_LABEL}>Work until · PT, optional</span>
+          <Input type="time" value={lateUntil} onChange={(e) => setLateUntil(e.target.value)} />
+        </label>
+        <label className="block space-y-1 sm:col-span-2">
+          <span className={FIELD_LABEL}>Reason · required</span>
+          <Input
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder='e.g. "early neighborhood blitz — owner approved"'
+          />
+        </label>
+      </div>
+      <Button
+        onClick={() => grantMut.mutate()}
+        disabled={grantMut.isPending}
+        className="w-full sm:w-auto bg-warning text-background hover:bg-warning/90 font-display text-[10px] uppercase tracking-widest"
+      >
+        <KeyRound className="w-3.5 h-3.5 mr-1" />
+        Grant Pass
+      </Button>
+
+      {passesQuery.isError ? (
+        <div className="text-[11px] text-muted-foreground">
+          Passes unavailable — {(passesQuery.error as Error).message}
+        </div>
+      ) : passes.length > 0 ? (
+        <div className="space-y-2 pt-1">
+          {passes.map((p) => (
+            <div
+              key={p.id}
+              className="flex flex-wrap items-center justify-between gap-2 rounded border border-border bg-surface-elevated p-3"
+            >
+              <div className="min-w-0">
+                <div className="text-sm font-medium">
+                  {nameById.get(p.user_id) ?? "Unknown"}
+                  <span className="ml-2 text-xs text-muted-foreground tabular-nums">
+                    {p.exception_date}
+                  </span>
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-1">
+                  {p.early_from && (
+                    <span className="text-[9px] font-display uppercase tracking-widest text-victory border border-victory/40 rounded px-1">
+                      in from {fmtWallTime(p.early_from)}
+                    </span>
+                  )}
+                  {p.late_until && (
+                    <span className="text-[9px] font-display uppercase tracking-widest text-warning border border-warning/40 rounded px-1">
+                      out until {fmtWallTime(p.late_until)}
+                    </span>
+                  )}
+                  <span className="text-[10px] text-muted-foreground truncate">
+                    {p.reason}
+                    {nameById.has(p.granted_by) && ` — ${nameById.get(p.granted_by)}`}
+                  </span>
+                </div>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={revokeMut.isPending}
+                onClick={() => revokeMut.mutate(p.id)}
+              >
+                <X className="w-3.5 h-3.5 text-destructive" />
+                Revoke
+              </Button>
+            </div>
+          ))}
+        </div>
+      ) : passesQuery.isSuccess ? (
+        <div className="text-[11px] text-muted-foreground">No active passes.</div>
+      ) : null}
+    </div>
   );
 }

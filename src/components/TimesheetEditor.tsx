@@ -4,15 +4,32 @@ import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel, MobileCard, MobileCardHeader, MobileCardList } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { Clock, ChevronLeft, ChevronRight, Save, Trash2, AlertTriangle, Utensils } from "lucide-react";
+import {
+  Clock,
+  ChevronLeft,
+  ChevronRight,
+  Save,
+  Trash2,
+  AlertTriangle,
+  Utensils,
+  CalendarPlus,
+  KeyRound,
+  Square,
+} from "lucide-react";
 import { useWeekSelector } from "@/hooks/useWeekSelector";
 import { TimeClockReviewQueue } from "@/components/TimeClockReviewQueue";
 import { TimeClockBackfill } from "@/components/TimeClockBackfill";
 import { TimeClockExceptions } from "@/components/TimeClockExceptions";
-import { TimeClockLiveShifts } from "@/components/TimeClockLiveShifts";
-import { PushAlertsCard } from "@/components/PushAlertsCard";
 
 // Weeks anchor to the LA Monday (midnight PT reset).
 function toLocalInput(iso: string | null) {
@@ -26,7 +43,14 @@ function fromLocalInput(s: string): string | null {
   const d = new Date(s);
   return isNaN(d.getTime()) ? null : d.toISOString();
 }
+function toTimeInput(iso: string | null) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
+type Meal = { id: string; meal_start: string; meal_end: string | null };
 type Entry = {
   id: string;
   user_id: string;
@@ -37,8 +61,20 @@ type Entry = {
   entry_source: string;
   needs_correction: boolean;
   meal_status: string;
+  meal_periods: Meal[];
 };
 type Profile = { id: string; display_name: string };
+
+/** The lunch a row shows and edits: the earliest still-open or real-length
+ *  meal. admin_set_meal always rewrites the earliest row and collapses any
+ *  extras to zero length, so after a manager fix this IS the recorded lunch;
+ *  `extra` counts additional worker-punched breaks still deducting time. */
+function lunchOf(e: Entry) {
+  const meals = (e.meal_periods ?? [])
+    .filter((m) => m.meal_end === null || m.meal_end !== m.meal_start)
+    .sort((a, b) => a.meal_start.localeCompare(b.meal_start));
+  return { lunch: meals[0] ?? null, extra: Math.max(0, meals.length - 1) };
+}
 
 /** Meal states that need a human before payroll can approve the week. */
 const MEAL_ATTENTION: Record<string, string> = {
@@ -48,9 +84,10 @@ const MEAL_ATTENTION: Record<string, string> = {
   taken_late: "late lunch · premium",
 };
 
-/** Save/Void/Lunch trio — one component for the mobile card (labeled,
- *  full-width) and the desktop row (compact icons) so the dirty styling,
- *  disabled logic, and the reason prompts can never drift between views. */
+/** Save/Void pair — one component for the mobile card (labeled, full-width)
+ *  and the desktop row (compact icons) so the dirty styling, disabled logic,
+ *  and the reason prompts can never drift between views. Lunch edits ride the
+ *  same Save: the row's Lunch Out/In fields are part of the form. */
 function TimeEntryActions({
   compact = false,
   dirty,
@@ -58,7 +95,6 @@ function TimeEntryActions({
   deleting,
   onSave,
   onVoid,
-  onFixLunch,
 }: {
   compact?: boolean;
   dirty: boolean;
@@ -66,7 +102,6 @@ function TimeEntryActions({
   deleting: boolean;
   onSave: () => void;
   onVoid: () => void;
-  onFixLunch: () => void;
 }) {
   return (
     <div className={compact ? "flex items-center justify-end gap-1" : "flex gap-2"}>
@@ -82,10 +117,6 @@ function TimeEntryActions({
       >
         <Save className="w-3.5 h-3.5" />
         {!compact && "Save"}
-      </Button>
-      <Button size="sm" variant="outline" onClick={onFixLunch} className={cn(!compact && "flex-1")}>
-        <Utensils className="w-3.5 h-3.5 text-warning" />
-        {!compact && "Lunch"}
       </Button>
       <Button
         size="sm"
@@ -104,7 +135,8 @@ function TimeEntryActions({
 /** Chip row under a name: provenance + meal state that needs eyes. */
 function EntryFlags({ e }: { e: Entry }) {
   const meal = MEAL_ATTENTION[e.meal_status];
-  if (e.entry_source !== "auto_closed" && !e.needs_correction && !meal) return null;
+  const { extra } = lunchOf(e);
+  if (e.entry_source !== "auto_closed" && !e.needs_correction && !meal && extra === 0) return null;
   return (
     <span className="inline-flex flex-wrap gap-1 ml-2 align-middle">
       {e.entry_source === "auto_closed" && (
@@ -120,6 +152,14 @@ function EntryFlags({ e }: { e: Entry }) {
       {meal && (
         <span className="text-[9px] font-display uppercase tracking-widest text-warning border border-warning/40 rounded px-1">
           {meal}
+        </span>
+      )}
+      {extra > 0 && (
+        <span
+          className="text-[9px] font-display uppercase tracking-widest text-warning border border-warning/40 rounded px-1"
+          title="Extra punched breaks also deduct time. Saving the lunch fields folds everything into that one lunch."
+        >
+          +{extra} break{extra > 1 ? "s" : ""}
         </span>
       )}
     </span>
@@ -138,8 +178,15 @@ export function TimesheetEditor() {
   } = useWeekSelector({ endOffsetDays: 6 });
   const [filterUser, setFilterUser] = useState<string>("");
   const [needsReviewOnly, setNeedsReviewOnly] = useState(false);
+  const [addEntryOpen, setAddEntryOpen] = useState(false);
+  const [passesOpen, setPassesOpen] = useState(false);
+  // Lunch fields are HH:MM wall times on the shift's own day; clock fields
+  // stay full datetime-local strings.
   const [edits, setEdits] = useState<
-    Record<string, { clock_in?: string; clock_out?: string | null }>
+    Record<
+      string,
+      { clock_in?: string; clock_out?: string | null; lunch_out?: string; lunch_in?: string }
+    >
   >({});
 
   const { data, isLoading } = useQuery({
@@ -149,7 +196,7 @@ export function TimesheetEditor() {
         supabase
           .from("time_entries")
           .select(
-            "id, user_id, clock_in, clock_out, log_date, billable_hours, entry_source, needs_correction, meal_status",
+            "id, user_id, clock_in, clock_out, log_date, billable_hours, entry_source, needs_correction, meal_status, meal_periods (id, meal_start, meal_end)",
           )
           .gte("log_date", start)
           .lte("log_date", end)
@@ -198,29 +245,45 @@ export function TimesheetEditor() {
   // All history edits flow through the reasoned RPCs: the database rejects a
   // privileged time edit without a reason, and every change lands in
   // time_entry_audit with actor + before/after. log_date is stamped
-  // server-side from the LA calendar day of the new clock-in.
+  // server-side from the LA calendar day of the new clock-in. One save
+  // commits the whole row — punch times via admin_update_time_entry, lunch
+  // via admin_set_meal — under the same reason.
   const saveMut = useMutation({
     mutationFn: async ({
       id,
-      clock_in,
-      clock_out,
+      clock,
+      meal,
       reason,
     }: {
       id: string;
-      clock_in: string;
-      clock_out: string | null;
+      clock: { clock_in: string; clock_out: string | null } | null;
+      meal: { start: string; end: string } | null;
       reason: string;
     }) => {
-      const { error } = await supabase.rpc("admin_update_time_entry", {
-        _id: id,
-        _clock_in: clock_in,
-        _clock_out: clock_out,
-        _reason: reason,
-      });
-      if (error) throw error;
+      if (clock) {
+        const { error } = await supabase.rpc("admin_update_time_entry", {
+          _id: id,
+          _clock_in: clock.clock_in,
+          _clock_out: clock.clock_out,
+          _reason: reason,
+        });
+        if (error) throw error;
+      }
+      if (meal) {
+        const { error } = await supabase.rpc("admin_set_meal", {
+          _time_entry_id: id,
+          _meal_start: meal.start,
+          _meal_end: meal.end,
+          _reason: reason,
+        });
+        if (error)
+          throw new Error(
+            clock ? `Punch times saved, but the lunch didn't: ${error.message}` : error.message,
+          );
+      }
     },
     onSuccess: (_d, vars) => {
-      toast.success("Time entry updated");
+      toast.success("Entry saved — hours repriced");
       setEdits((e) => {
         const { [vars.id]: _omit, ...rest } = e;
         return rest;
@@ -246,39 +309,12 @@ export function TimesheetEditor() {
     onError: (e: Error) => toast.error("Void failed", { description: e.message }),
   });
 
-  const lunchMut = useMutation({
-    mutationFn: async ({
-      entryId,
-      mealStart,
-      mealEnd,
-      reason,
-    }: {
-      entryId: string;
-      mealStart: string;
-      mealEnd: string;
-      reason: string;
-    }) => {
-      const { error } = await supabase.rpc("admin_set_meal", {
-        _time_entry_id: entryId,
-        _meal_start: mealStart,
-        _meal_end: mealEnd,
-        _reason: reason,
-      });
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      toast.success("Lunch recorded — hours repriced");
-      qc.invalidateQueries({ queryKey: ["timesheets"] });
-      qc.invalidateQueries({ queryKey: ["payroll-ledger"] });
-    },
-    onError: (e: Error) => toast.error("Lunch update failed", { description: e.message }),
-  });
-
   function saveRow(e: Entry) {
     const edit = edits[e.id];
     if (!edit) return;
     let clockIn = e.clock_in;
     let clockOut: string | null = e.clock_out;
+    const clockDirty = edit.clock_in !== undefined || edit.clock_out !== undefined;
     if (edit.clock_in !== undefined) {
       const iso = fromLocalInput(edit.clock_in);
       if (!iso) {
@@ -299,9 +335,60 @@ export function TimesheetEditor() {
         clockOut = iso;
       }
     }
+
+    // Lunch: HH:MM fields anchored to the shift's day AS SAVED (edited
+    // clock-in included), so fixing a wrong punch date moves the lunch with
+    // it in the same save. An untouched field falls back to the recorded
+    // lunch so editing just one side works.
+    let meal: { start: string; end: string } | null = null;
+    if (edit.lunch_out !== undefined || edit.lunch_in !== undefined) {
+      const { lunch } = lunchOf(e);
+      const outHM = edit.lunch_out ?? toTimeInput(lunch?.meal_start ?? null);
+      const inHM = edit.lunch_in ?? toTimeInput(lunch?.meal_end ?? null);
+      if (!outHM && !inHM) {
+        toast.error(
+          lunch
+            ? "Recorded lunches can't be erased — type the corrected times instead."
+            : "Enter both lunch times, or leave them blank.",
+        );
+        return;
+      }
+      if (!outHM || !inHM) {
+        toast.error("Lunch needs both times — out and back in.");
+        return;
+      }
+      const day = toLocalInput(clockIn).slice(0, 10);
+      const start = new Date(`${day}T${outHM}:00`);
+      const endD = new Date(`${day}T${inHM}:00`);
+      if (isNaN(start.getTime()) || isNaN(endD.getTime())) {
+        toast.error("Invalid lunch time");
+        return;
+      }
+      if (endD <= start) {
+        toast.error("Lunch end must be after lunch start");
+        return;
+      }
+      if (
+        start.getTime() < new Date(clockIn).getTime() ||
+        (clockOut && endD.getTime() > new Date(clockOut).getTime())
+      ) {
+        toast.error("Lunch must fall inside the shift", {
+          description: "Off by design? Fix the clock-in/out times in the same save.",
+        });
+        return;
+      }
+      meal = { start: start.toISOString(), end: endD.toISOString() };
+    }
+
+    if (!clockDirty && !meal) return;
     const reason = window.prompt("Reason for this change (required — it goes on the audit trail):");
     if (!reason || !reason.trim()) return;
-    saveMut.mutate({ id: e.id, clock_in: clockIn, clock_out: clockOut, reason: reason.trim() });
+    saveMut.mutate({
+      id: e.id,
+      clock: clockDirty ? { clock_in: clockIn, clock_out: clockOut } : null,
+      meal,
+      reason: reason.trim(),
+    });
   }
 
   function voidRow(e: Entry, name: string) {
@@ -312,39 +399,38 @@ export function TimesheetEditor() {
     voidMut.mutate({ id: e.id, reason: reason.trim() });
   }
 
-  // P0 lunch fix: HH:MM prompts on the entry's own date, entered in Pacific
-  // wall time (the office's zone).
-  function fixLunch(e: Entry) {
-    const startHM = window.prompt(`Lunch START on ${e.log_date} (HH:MM, 24h Pacific):`, "12:00");
-    if (!startHM) return;
-    const endHM = window.prompt(`Lunch END on ${e.log_date} (HH:MM, 24h Pacific):`, "12:30");
-    if (!endHM) return;
-    const hm = /^([01]?\d|2[0-3]):([0-5]\d)$/;
-    if (!hm.test(startHM.trim()) || !hm.test(endHM.trim())) {
-      toast.error("Times must be HH:MM (24-hour)");
+  // One-tap version of the same reasoned save — ends the shift right now,
+  // for the worker who left without punching out. Blocked mid-lunch: fix the
+  // real lunch times on the row first, or the deduction comes out wrong.
+  function clockOutNow(e: Entry) {
+    const name = profileById.get(e.user_id)?.display_name ?? "this player";
+    const { lunch } = lunchOf(e);
+    if (lunch && !lunch.meal_end) {
+      toast.error(`${name} is on lunch`, {
+        description: "Set their real Lunch In time on this row first, then clock them out.",
+      });
       return;
     }
-    const mealStart = new Date(`${e.log_date}T${startHM.trim().padStart(5, "0")}:00`);
-    const mealEnd = new Date(`${e.log_date}T${endHM.trim().padStart(5, "0")}:00`);
-    if (mealEnd <= mealStart) {
-      toast.error("Lunch end must be after start");
-      return;
-    }
-    const reason = window.prompt("Reason (required — e.g. \"worker attested lunch, forgot to punch\"):");
+    const reason = window.prompt(
+      `Clock ${name} out as of right now? Enter the reason (required — it goes on the audit trail):`,
+    );
     if (!reason || !reason.trim()) return;
-    lunchMut.mutate({
-      entryId: e.id,
-      mealStart: mealStart.toISOString(),
-      mealEnd: mealEnd.toISOString(),
+    saveMut.mutate({
+      id: e.id,
+      clock: { clock_in: e.clock_in, clock_out: new Date().toISOString() },
+      meal: null,
       reason: reason.trim(),
     });
   }
 
   const weekLabel = `${weekStart.toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${weekEnd.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
 
-  // One handler for all four datetime inputs (mobile/desktop × in/out).
-  const editField = (id: string, field: "clock_in" | "clock_out", value: string) =>
-    setEdits((s) => ({ ...s, [id]: { ...s[id], [field]: value } }));
+  // One handler for every editable field (mobile/desktop × clock/lunch).
+  const editField = (
+    id: string,
+    field: "clock_in" | "clock_out" | "lunch_out" | "lunch_in",
+    value: string,
+  ) => setEdits((s) => ({ ...s, [id]: { ...s[id], [field]: value } }));
 
   // Shared by the desktop table and mobile card list so both render identical
   // edit state through the same handlers.
@@ -352,13 +438,22 @@ export function TimesheetEditor() {
     () =>
       visibleEntries.map((e) => {
         const edit = edits[e.id] ?? {};
+        const { lunch } = lunchOf(e);
         return {
           e,
           name: profileById.get(e.user_id)?.display_name ?? "Unknown",
           edit,
-          dirty: edit.clock_in !== undefined || edit.clock_out !== undefined,
+          dirty:
+            edit.clock_in !== undefined ||
+            edit.clock_out !== undefined ||
+            edit.lunch_out !== undefined ||
+            edit.lunch_in !== undefined,
           inVal: edit.clock_in ?? toLocalInput(e.clock_in),
           outVal: edit.clock_out !== undefined ? (edit.clock_out ?? "") : toLocalInput(e.clock_out),
+          lunchOutVal: edit.lunch_out ?? toTimeInput(lunch?.meal_start ?? null),
+          lunchInVal: edit.lunch_in ?? toTimeInput(lunch?.meal_end ?? null),
+          // Open meal punch = they're at lunch right now.
+          onLunchNow: !!lunch && !lunch.meal_end && edit.lunch_in === undefined,
         };
       }),
     [visibleEntries, edits, profileById],
@@ -366,11 +461,66 @@ export function TimesheetEditor() {
 
   return (
     <div className="space-y-4">
-      {/* All-crew flagged punches — approve here or fix a row below. */}
+      {/* All-crew flagged punches — approve here, or fix the row below. */}
       <TimeClockReviewQueue />
-      <PushAlertsCard />
 
-      <ArcadePanel title="Timesheets · Owner Edit Mode">
+      <ArcadePanel
+        title="Timesheets"
+        action={
+          <div className="flex items-center gap-2">
+            <Dialog open={addEntryOpen} onOpenChange={setAddEntryOpen}>
+              <DialogTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="font-display text-[10px] tracking-widest uppercase"
+                >
+                  <CalendarPlus className="w-3.5 h-3.5 mr-1.5" />
+                  Add Entry
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-lg">
+                <DialogHeader>
+                  <DialogTitle className="font-display uppercase tracking-widest text-sm">
+                    Backfill · Add Entry
+                  </DialogTitle>
+                  <DialogDescription>
+                    Create a whole shift for anyone — a missed punch, a forgotten day, a new hire's
+                    first shift.
+                  </DialogDescription>
+                </DialogHeader>
+                <TimeClockBackfill
+                  profiles={data?.profiles ?? []}
+                  onDone={() => setAddEntryOpen(false)}
+                />
+              </DialogContent>
+            </Dialog>
+            <Dialog open={passesOpen} onOpenChange={setPassesOpen}>
+              <DialogTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="font-display text-[10px] tracking-widest uppercase"
+                >
+                  <KeyRound className="w-3.5 h-3.5 mr-1.5" />
+                  Passes
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-lg">
+                <DialogHeader>
+                  <DialogTitle className="font-display uppercase tracking-widest text-sm">
+                    Early / Late Passes
+                  </DialogTitle>
+                  <DialogDescription>
+                    Pre-approve one day's early clock-in or late finish so it never flags.
+                  </DialogDescription>
+                </DialogHeader>
+                <TimeClockExceptions profiles={data?.profiles ?? []} />
+              </DialogContent>
+            </Dialog>
+          </div>
+        }
+      >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={() => shiftWeek(-1)}>
@@ -406,25 +556,11 @@ export function TimesheetEditor() {
         <div className="mt-3 flex items-start gap-2 text-[11px] text-muted-foreground border-l-2 border-warning/60 pl-2">
           <AlertTriangle className="w-3.5 h-3.5 mt-0.5 text-warning shrink-0" />
           <span>
-            Hours are paid in full — only punched (or manager-entered) lunches are deducted, and
-            Sundays pay when worked. Every save and void needs a reason and lands on the audit
-            trail. Auto-closed shifts are flagged; resolve them (fix the time or confirm it) before
-            approving the week's payroll run.
+            Edit any field and hit Save — every change needs a reason and is audited. Flagged and
+            auto-closed shifts need resolving before payroll can freeze the week.
           </span>
         </div>
-      </ArcadePanel>
 
-      {/* Owner/Manager tools beyond row edits: one-tap clock-out of anyone
-          currently punched in, create whole entries for anyone (backfill),
-          and pre-approve early starts / late finishes so known exceptions
-          never flag or auto-close. */}
-      <TimeClockLiveShifts profiles={data?.profiles ?? []} />
-      <div className="grid lg:grid-cols-2 gap-4 items-start">
-        <TimeClockBackfill profiles={data?.profiles ?? []} />
-        <TimeClockExceptions profiles={data?.profiles ?? []} />
-      </div>
-
-      <ArcadePanel title="Entries">
         {isLoading ? (
           <div className="text-sm text-muted-foreground">Loading time entries…</div>
         ) : visibleEntries.length === 0 ? (
@@ -435,62 +571,99 @@ export function TimesheetEditor() {
         ) : (
           <>
             <MobileCardList>
-              {rows.map(({ e, name, edit, dirty, inVal, outVal }) => (
-                <MobileCard key={e.id}>
-                  <MobileCardHeader
-                    left={
-                      <>
-                        {name}
-                        <EntryFlags e={e} />
-                      </>
-                    }
-                    right={
-                      <span className="text-neon tabular-nums">
-                        {Number(e.billable_hours ?? 0).toFixed(2)}h
+              {rows.map(
+                ({ e, name, edit, dirty, inVal, outVal, lunchOutVal, lunchInVal, onLunchNow }) => (
+                  <MobileCard key={e.id}>
+                    <MobileCardHeader
+                      left={
+                        <>
+                          {name}
+                          <EntryFlags e={e} />
+                        </>
+                      }
+                      right={
+                        <span className="text-neon tabular-nums">
+                          {Number(e.billable_hours ?? 0).toFixed(2)}h
+                        </span>
+                      }
+                    />
+                    <div className="flex items-center justify-between gap-2 text-xs tabular-nums">
+                      <span className="text-muted-foreground">{e.log_date}</span>
+                      <span className="font-display text-victory">
+                        Week {(totalsByUser.get(e.user_id) ?? 0).toFixed(2)}h
                       </span>
-                    }
-                  />
-                  <div className="flex items-center justify-between gap-2 text-xs tabular-nums">
-                    <span className="text-muted-foreground">{e.log_date}</span>
-                    <span className="font-display text-victory">
-                      Week {(totalsByUser.get(e.user_id) ?? 0).toFixed(2)}h
-                    </span>
-                  </div>
-                  <label className="block space-y-1">
-                    <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-                      Clock In
-                    </span>
-                    <Input
-                      type="datetime-local"
-                      value={inVal}
-                      onChange={(v) => editField(e.id, "clock_in", v.target.value)}
-                      className="w-full"
+                    </div>
+                    <label className="block space-y-1">
+                      <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                        Clock In
+                      </span>
+                      <Input
+                        type="datetime-local"
+                        value={inVal}
+                        onChange={(v) => editField(e.id, "clock_in", v.target.value)}
+                        className="w-full"
+                      />
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="block space-y-1">
+                        <span className="flex items-center gap-1.5 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                          <Utensils className="w-3 h-3 text-warning" />
+                          Lunch Out
+                        </span>
+                        <Input
+                          type="time"
+                          value={lunchOutVal}
+                          onChange={(v) => editField(e.id, "lunch_out", v.target.value)}
+                          className="w-full"
+                        />
+                      </label>
+                      <label className="block space-y-1">
+                        <span className="flex items-center gap-1.5 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                          Lunch In
+                          {onLunchNow && (
+                            <span className="text-[9px] text-warning animate-pulse">out now</span>
+                          )}
+                        </span>
+                        <Input
+                          type="time"
+                          value={lunchInVal}
+                          onChange={(v) => editField(e.id, "lunch_in", v.target.value)}
+                          className="w-full"
+                        />
+                      </label>
+                    </div>
+                    <label className="block space-y-1">
+                      <span className="flex items-center gap-1.5 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                        Clock Out
+                        {!e.clock_out && !edit.clock_out && (
+                          <button
+                            type="button"
+                            disabled={saveMut.isPending}
+                            onClick={() => clockOutNow(e)}
+                            className="inline-flex items-center gap-1 normal-case tracking-normal text-victory animate-pulse hover:animate-none hover:underline disabled:opacity-50"
+                          >
+                            <Square className="w-2.5 h-2.5" />
+                            live — tap to clock out
+                          </button>
+                        )}
+                      </span>
+                      <Input
+                        type="datetime-local"
+                        value={outVal}
+                        onChange={(v) => editField(e.id, "clock_out", v.target.value)}
+                        className="w-full"
+                      />
+                    </label>
+                    <TimeEntryActions
+                      dirty={dirty}
+                      saving={saveMut.isPending}
+                      deleting={voidMut.isPending}
+                      onSave={() => saveRow(e)}
+                      onVoid={() => voidRow(e, name)}
                     />
-                  </label>
-                  <label className="block space-y-1">
-                    <span className="flex items-center gap-1.5 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-                      Clock Out
-                      {!e.clock_out && !edit.clock_out && (
-                        <span className="text-[9px] text-victory animate-pulse">live</span>
-                      )}
-                    </span>
-                    <Input
-                      type="datetime-local"
-                      value={outVal}
-                      onChange={(v) => editField(e.id, "clock_out", v.target.value)}
-                      className="w-full"
-                    />
-                  </label>
-                  <TimeEntryActions
-                    dirty={dirty}
-                    saving={saveMut.isPending}
-                    deleting={voidMut.isPending}
-                    onSave={() => saveRow(e)}
-                    onVoid={() => voidRow(e, name)}
-                    onFixLunch={() => fixLunch(e)}
-                  />
-                </MobileCard>
-              ))}
+                  </MobileCard>
+                ),
+              )}
             </MobileCardList>
             <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-sm">
@@ -499,6 +672,8 @@ export function TimesheetEditor() {
                     <th className="text-left py-2 pr-3">Canvasser</th>
                     <th className="text-left py-2 pr-3">Date</th>
                     <th className="text-left py-2 pr-3">Clock In</th>
+                    <th className="text-left py-2 pr-3">Lunch Out</th>
+                    <th className="text-left py-2 pr-3">Lunch In</th>
                     <th className="text-left py-2 pr-3">Clock Out</th>
                     <th className="text-right py-2 pr-3">Billable</th>
                     <th className="text-right py-2 pr-3">Week Total</th>
@@ -506,62 +681,103 @@ export function TimesheetEditor() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map(({ e, name, edit, dirty, inVal, outVal }) => {
-                    return (
-                      <tr
-                        key={e.id}
-                        className="border-b border-border/40 transition-colors duration-200 hover:bg-surface-elevated"
-                      >
-                        <td className="py-2 pr-3 font-medium">
-                          {name}
-                          <EntryFlags e={e} />
-                        </td>
-                        <td className="py-2 pr-3 text-xs text-muted-foreground tabular-nums">
-                          {e.log_date}
-                        </td>
-                        <td className="py-2 pr-3">
-                          <Input
-                            type="datetime-local"
-                            value={inVal}
-                            onChange={(v) => editField(e.id, "clock_in", v.target.value)}
-                            className="h-8 text-xs w-full min-w-[150px]"
-                          />
-                        </td>
-                        <td className="py-2 pr-3">
-                          <div className="flex items-center gap-1">
+                  {rows.map(
+                    ({
+                      e,
+                      name,
+                      edit,
+                      dirty,
+                      inVal,
+                      outVal,
+                      lunchOutVal,
+                      lunchInVal,
+                      onLunchNow,
+                    }) => {
+                      return (
+                        <tr
+                          key={e.id}
+                          className="border-b border-border/40 transition-colors duration-200 hover:bg-surface-elevated"
+                        >
+                          <td className="py-2 pr-3 font-medium">
+                            {name}
+                            <EntryFlags e={e} />
+                          </td>
+                          <td className="py-2 pr-3 text-xs text-muted-foreground tabular-nums">
+                            {e.log_date}
+                          </td>
+                          <td className="py-2 pr-3">
                             <Input
                               type="datetime-local"
-                              value={outVal}
-                              onChange={(v) => editField(e.id, "clock_out", v.target.value)}
+                              value={inVal}
+                              onChange={(v) => editField(e.id, "clock_in", v.target.value)}
                               className="h-8 text-xs w-full min-w-[150px]"
                             />
-                            {!e.clock_out && !edit.clock_out && (
-                              <span className="text-[9px] font-display uppercase text-victory animate-pulse">
-                                live
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="py-2 pr-3 text-right font-display text-neon tabular-nums">
-                          {Number(e.billable_hours ?? 0).toFixed(2)}h
-                        </td>
-                        <td className="py-2 pr-3 text-right font-display text-victory tabular-nums">
-                          {(totalsByUser.get(e.user_id) ?? 0).toFixed(2)}h
-                        </td>
-                        <td className="py-2 pr-1 text-right">
-                          <TimeEntryActions
-                            compact
-                            dirty={dirty}
-                            saving={saveMut.isPending}
-                            deleting={voidMut.isPending}
-                            onSave={() => saveRow(e)}
-                            onVoid={() => voidRow(e, name)}
-                            onFixLunch={() => fixLunch(e)}
-                          />
-                        </td>
-                      </tr>
-                    );
-                  })}
+                          </td>
+                          <td className="py-2 pr-3">
+                            <Input
+                              type="time"
+                              value={lunchOutVal}
+                              onChange={(v) => editField(e.id, "lunch_out", v.target.value)}
+                              className="h-8 text-xs w-[92px]"
+                            />
+                          </td>
+                          <td className="py-2 pr-3">
+                            <div className="flex items-center gap-1">
+                              <Input
+                                type="time"
+                                value={lunchInVal}
+                                onChange={(v) => editField(e.id, "lunch_in", v.target.value)}
+                                className="h-8 text-xs w-[92px]"
+                              />
+                              {onLunchNow && (
+                                <span className="text-[9px] font-display uppercase text-warning animate-pulse">
+                                  out now
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-2 pr-3">
+                            <div className="flex items-center gap-1">
+                              <Input
+                                type="datetime-local"
+                                value={outVal}
+                                onChange={(v) => editField(e.id, "clock_out", v.target.value)}
+                                className="h-8 text-xs w-full min-w-[150px]"
+                              />
+                              {!e.clock_out && !edit.clock_out && (
+                                <button
+                                  type="button"
+                                  disabled={saveMut.isPending}
+                                  onClick={() => clockOutNow(e)}
+                                  title="Clock them out right now"
+                                  className="inline-flex items-center gap-0.5 whitespace-nowrap text-[9px] font-display uppercase text-victory animate-pulse hover:animate-none hover:underline disabled:opacity-50"
+                                >
+                                  <Square className="w-2.5 h-2.5" />
+                                  live
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-2 pr-3 text-right font-display text-neon tabular-nums">
+                            {Number(e.billable_hours ?? 0).toFixed(2)}h
+                          </td>
+                          <td className="py-2 pr-3 text-right font-display text-victory tabular-nums">
+                            {(totalsByUser.get(e.user_id) ?? 0).toFixed(2)}h
+                          </td>
+                          <td className="py-2 pr-1 text-right">
+                            <TimeEntryActions
+                              compact
+                              dirty={dirty}
+                              saving={saveMut.isPending}
+                              deleting={voidMut.isPending}
+                              onSave={() => saveRow(e)}
+                              onVoid={() => voidRow(e, name)}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    },
+                  )}
                 </tbody>
               </table>
             </div>
