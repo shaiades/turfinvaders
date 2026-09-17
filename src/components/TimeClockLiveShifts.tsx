@@ -31,7 +31,8 @@ function fmtRunning(ms: number) {
  *  Closing goes through admin_update_time_entry (reason required, audited,
  *  arrives resolved), exactly like typing the time into the row below — this
  *  is just the fast path. A shift on lunch can't be one-tapped: set the real
- *  lunch times first (Lunch on the entry row) so the deduction is right. */
+ *  lunch times first (the Lunch Out/In fields on the entry row) so the
+ *  deduction is right. */
 export function TimeClockLiveShifts({ profiles }: { profiles: Profile[] }) {
   const qc = useQueryClient();
   const [now, setNow] = useState(() => Date.now());
@@ -107,7 +108,7 @@ export function TimeClockLiveShifts({ profiles }: { profiles: Profile[] }) {
     if (lunchRunning) {
       toast.error(`${name} is on lunch`, {
         description:
-          "Set their real lunch times first (Lunch on the entry row below), then clock them out — otherwise the deduction is wrong.",
+          "Type their real lunch times into their entry row below first, then clock them out — otherwise the deduction is wrong.",
       });
       return;
     }
