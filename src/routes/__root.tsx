@@ -10,7 +10,13 @@ import leafletCss from "leaflet/dist/leaflet.css?url";
 import "../lib/fonts";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { supabase } from "@/integrations/supabase/client";
+import { useTheme } from "@/hooks/useTheme";
 import { Toaster } from "sonner";
+
+// Runs before first paint (placed ahead of the stylesheet link in <head>) so
+// a user who chose light mode doesn't see a flash of the default dark theme.
+const THEME_INIT_SCRIPT =
+  "try{if(localStorage.getItem('theme')==='light')document.documentElement.classList.remove('dark')}catch(e){}";
 
 function NotFoundComponent() {
   return (
@@ -90,7 +96,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 function RootShell({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className="dark">
-      <head><HeadContent /></head>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        <HeadContent />
+      </head>
       <body>{children}<Scripts /></body>
     </html>
   );
@@ -99,6 +108,7 @@ function RootShell({ children }: { children: ReactNode }) {
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const router = useRouter();
+  const { theme } = useTheme();
   useEffect(() => {
     // supabase-js re-emits SIGNED_IN on tab focus / session recovery, not
     // just at real logins. Re-running every route guard on each focus gave
@@ -130,7 +140,7 @@ function RootComponent() {
           read as themselves instead of one gray chrome. Reward moments get
           the gold reward-toast look via rewardToast() (src/lib/reward-toast). */}
       <Toaster
-        theme="dark"
+        theme={theme}
         position="top-center"
         richColors
         offset={{ top: 76 }}

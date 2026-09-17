@@ -69,8 +69,65 @@
 
 :root {
   --radius: 0.5rem;
+  color-scheme: light;
 
-  /* Dark arcade base */
+  /* Light arcade base — default until .dark is applied (see useTheme) */
+  --background: oklch(0.985 0.004 250);
+  --foreground: oklch(0.2 0.02 270);
+  --surface: oklch(0.97 0.006 250);
+  --surface-elevated: oklch(1 0 0);
+
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.2 0.02 270);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.2 0.02 270);
+
+  /* Turf Invaders wordmark palette: Neon Orange, Arcade Blue, Vivid Green, Hot Pink */
+  --primary: oklch(0.75 0.19 55); /* neon orange */
+  --primary-foreground: oklch(0.14 0.03 270);
+
+  --secondary: oklch(0.94 0.008 250);
+  --secondary-foreground: oklch(0.2 0.02 270);
+
+  --muted: oklch(0.95 0.007 250);
+  --muted-foreground: oklch(0.45 0.02 260);
+
+  --accent: oklch(0.68 0.2 245); /* arcade blue */
+  --accent-foreground: oklch(0.98 0.01 250);
+
+  --destructive: oklch(0.65 0.24 25);
+  --destructive-foreground: oklch(0.98 0 0);
+
+  --border: oklch(0.88 0.01 250);
+  --input: oklch(0.93 0.01 250);
+  --ring: oklch(0.75 0.19 55);
+
+  /* Neon/victory/warning double as literal text colors (text-neon,
+   * text-victory, …) — darkened here vs. the dark-mode values below so they
+   * stay legible against a light background instead of washing out. */
+  --neon: oklch(0.58 0.24 340); /* hot pink */
+  --neon-foreground: oklch(0.14 0.03 270);
+  --neon-magenta: oklch(0.58 0.24 340); /* alias for legacy usage */
+  --neon-orange: oklch(0.75 0.19 55);
+  --neon-blue: oklch(0.68 0.2 245);
+  --victory: oklch(0.5 0.18 145); /* vivid green */
+  --warning: oklch(0.55 0.16 90); /* neon yellow */
+
+  /* Faction source-of-truth. Turf reuses the wordmark pink/blue so the
+   * whole app stays one palette; Kombat gets its own blood/gold/black.
+   * Kombat's palette stays constant across light/dark — it's always a
+   * blood-red/gold-on-black skin by design, not the app-wide theme. */
+  --turf-pink: var(--neon-magenta);
+  --turf-cyan: var(--neon-blue);
+  --kombat-red: oklch(0.54 0.22 27); /* dried-blood red */
+  --kombat-gold: oklch(0.8 0.15 85); /* trophy gold */
+  --kombat-black: oklch(0.13 0.015 20); /* deep warm black */
+}
+
+.dark {
+  color-scheme: dark;
+
+  /* Dark arcade base — the app's original/default look */
   --background: oklch(0.16 0.02 270);
   --foreground: oklch(0.96 0.01 250);
   --surface: oklch(0.2 0.03 270);
@@ -81,53 +138,24 @@
   --popover: oklch(0.22 0.03 270);
   --popover-foreground: oklch(0.96 0.01 250);
 
-  /* Turf Invaders wordmark palette: Neon Orange, Arcade Blue, Vivid Green, Hot Pink */
-  --primary: oklch(0.75 0.19 55); /* neon orange */
-  --primary-foreground: oklch(0.14 0.03 270);
-
   --secondary: oklch(0.28 0.04 270);
   --secondary-foreground: oklch(0.96 0.01 250);
 
   --muted: oklch(0.26 0.03 270);
   --muted-foreground: oklch(0.68 0.03 260);
 
-  --accent: oklch(0.68 0.2 245); /* arcade blue */
-  --accent-foreground: oklch(0.98 0.01 250);
-
-  --destructive: oklch(0.65 0.24 25);
-  --destructive-foreground: oklch(0.98 0 0);
-
   --border: oklch(0.32 0.04 270);
   --input: oklch(0.28 0.04 270);
-  --ring: oklch(0.75 0.19 55);
 
   --neon: oklch(0.72 0.27 340); /* hot pink */
-  --neon-foreground: oklch(0.14 0.03 270);
   --neon-magenta: oklch(0.72 0.27 340); /* alias for legacy usage */
-  --neon-orange: oklch(0.75 0.19 55);
-  --neon-blue: oklch(0.68 0.2 245);
   --victory: oklch(0.8 0.22 145); /* vivid green */
   --warning: oklch(0.82 0.17 90); /* neon yellow */
-
-  /* Faction source-of-truth. Turf reuses the wordmark pink/blue so the
-   * whole app stays one palette; Kombat gets its own blood/gold/black. */
-  --turf-pink: var(--neon-magenta);
-  --turf-cyan: var(--neon-blue);
-  --kombat-red: oklch(0.54 0.22 27); /* dried-blood red */
-  --kombat-gold: oklch(0.8 0.15 85); /* trophy gold */
-  --kombat-black: oklch(0.13 0.015 20); /* deep warm black */
-}
-
-.dark {
-  color-scheme: dark;
 }
 
 @layer base {
   * {
     border-color: var(--color-border);
-  }
-  html {
-    color-scheme: dark;
   }
   body {
     background-color: var(--color-background);
