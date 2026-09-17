@@ -18,7 +18,11 @@ export function CompanySettingsPanel() {
   useEffect(() => { if (settings?.company_name) setName(settings.company_name); }, [settings?.company_name]);
 
   const update = useMutation({
-    mutationFn: async (patch: { global_visibility?: boolean; company_name?: string }) => {
+    mutationFn: async (patch: {
+      global_visibility?: boolean;
+      company_name?: string;
+      objections_quickpick_enabled?: boolean;
+    }) => {
       const { error } = await supabase.from("company_settings").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", true);
       if (error) throw error;
     },
@@ -28,6 +32,7 @@ export function CompanySettingsPanel() {
 
   if (isLoading) return <div className="text-sm text-muted-foreground">Loading…</div>;
   const visibility = !!settings?.global_visibility;
+  const objectionsEnabled = !!settings?.objections_quickpick_enabled;
 
   return (
     <>
@@ -53,6 +58,33 @@ export function CompanySettingsPanel() {
             aria-pressed={visibility}
           >
             {visibility ? <><Eye className="w-4 h-4" /> ON</> : <><EyeOff className="w-4 h-4" /> OFF</>}
+          </button>
+        </div>
+      </ArcadePanel>
+
+      <ArcadePanel title="Door Objection Tracking">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+          <div>
+            <p className="text-sm">
+              When ON, marking a house "Not Interested" asks the rep which objection they got
+              (Have a guy, No money, Talk to my spouse, etc.) — a quick pick, skippable, for
+              reviewing what reps are hitting most.
+            </p>
+            <p className="text-xs text-muted-foreground mt-2">
+              When OFF, "Not Interested" logs instantly with no extra tap, same as today.
+            </p>
+          </div>
+          <button
+            onClick={() => update.mutate({ objections_quickpick_enabled: !objectionsEnabled })}
+            disabled={update.isPending}
+            className={`shrink-0 inline-flex items-center gap-2 px-4 py-3 rounded-md font-display text-xs uppercase tracking-widest transition-colors ${
+              objectionsEnabled
+                ? "bg-[var(--victory)] text-primary-foreground shadow-[var(--shadow-glow)]"
+                : "bg-surface-elevated text-muted-foreground border border-border"
+            }`}
+            aria-pressed={objectionsEnabled}
+          >
+            {objectionsEnabled ? <><Eye className="w-4 h-4" /> ON</> : <><EyeOff className="w-4 h-4" /> OFF</>}
           </button>
         </div>
       </ArcadePanel>

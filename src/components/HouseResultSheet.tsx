@@ -26,6 +26,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { withTimeout } from "@/lib/abort-timeout";
 import { PIN_LABELS, type PinType } from "@/lib/pin-results";
 import { haversineM, MATCH_METERS, type OsmHouse } from "@/lib/house-cache";
+import { DOOR_OBJECTIONS } from "@/lib/objections";
 
 // Untyped table access (ObjectionDojo/gratitude pattern) until generated
 // types catch up with house_notes — the default SupabaseClient generics
@@ -38,6 +39,7 @@ export function HouseResultSheet({
   house,
   results,
   busy,
+  objectionsEnabled = false,
   onDrop,
   onSwitch,
 }: {
@@ -47,10 +49,13 @@ export function HouseResultSheet({
   /** The knock-result vocabulary (the page's KNOCK_RESULTS list). */
   results: Array<{ type: PinType; label: string; color: string; icon: React.ReactNode }>;
   busy: boolean;
+  /** Captain toggle (company_settings.objections_quickpick_enabled): shows a
+   *  quick objection pick after "Not Interested" instead of dropping instantly. */
+  objectionsEnabled?: boolean;
   /** Log a fresh knock on this house with the tapped result. */
-  onDrop: (house: OsmHouse, pin_type: PinType) => void;
+  onDrop: (house: OsmHouse, pin_type: PinType, objection?: string) => void;
   /** Correct today's existing result on this house. */
-  onSwitch: (pinId: string, pin_type: PinType) => void;
+  onSwitch: (pinId: string, pin_type: PinType, objection?: string) => void;
 }) {
   // Latched copy (PinActionSheet pattern): the parent clears the house while
   // the close animation plays — rendering from `view` keeps it from emptying.
@@ -58,14 +63,36 @@ export function HouseResultSheet({
   // Switch mode is the default when today already logged this house;
   // "Knocked again" flips one interaction to drop mode.
   const [again, setAgain] = useState(false);
+  // Set after tapping "Not Interested" with the objection toggle on — swaps
+  // the result grid for the objection quick-pick instead of closing right away.
+  const [pendingSwitchId, setPendingSwitchId] = useState<string | null>(null);
+  const [pickingObjection, setPickingObjection] = useState(false);
 
   useEffect(() => {
     if (open) {
       setView(house);
       setAgain(false);
+      setPickingObjection(false);
+      setPendingSwitchId(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, house?.id]);
+
+  function finishNotInterested(objection?: string) {
+    if (!view) return;
+    if (pendingSwitchId) {
+      onSwitch(pendingSwitchId, "not_interested", objection);
+    } else {
+      onDrop(
+        { ...view, street: view.street || road, zip: view.zip || revQuery.data?.postcode || "" },
+        "not_interested",
+        objection,
+      );
+    }
+    setPickingObjection(false);
+    setPendingSwitchId(null);
+    onOpenChange(false);
+  }
 
   const hasCurrent = !!view?.currentPinId && !again;
 
@@ -122,84 +149,118 @@ export function HouseResultSheet({
             {title}
           </SheetTitle>
           <SheetDescription>
-            {hasCurrent && view?.currentType
-              ? `Today: ${PIN_LABELS[view.currentType]} — tap a result to switch it (stats adjust)`
-              : "Tap what happened at this door — one tap logs the knock and the result."}
+            {pickingObjection
+              ? "What was the objection? Pick one, or skip."
+              : hasCurrent && view?.currentType
+                ? `Today: ${PIN_LABELS[view.currentType]} — tap a result to switch it (stats adjust)`
+                : "Tap what happened at this door — one tap logs the knock and the result."}
           </SheetDescription>
         </SheetHeader>
 
-        <div className="space-y-3 overflow-y-auto px-4 pt-3 pb-4">
-          <div className="grid grid-cols-3 gap-2" data-tour="house-results">
-            {results.map((r) => {
-              const current = hasCurrent && view?.currentType === r.type;
-              return (
+        {pickingObjection ? (
+          <div className="space-y-3 overflow-y-auto px-4 pt-3 pb-4">
+            <div className="grid grid-cols-2 gap-2" data-tour="house-objections">
+              {DOOR_OBJECTIONS.map((objection) => (
                 <button
-                  key={r.type}
+                  key={objection}
                   type="button"
-                  disabled={busy || current}
-                  onClick={() => {
-                    if (!view) return;
-                    if (hasCurrent && view.currentPinId) {
-                      onSwitch(view.currentPinId, r.type);
-                    } else {
-                      // Ride the resolved street + zip along (the Lead flow
-                      // shows a copyable address while the rep fills the
-                      // form) — never the reverse-geocoded house NUMBER,
-                      // which can be interpolated onto the neighbor.
-                      onDrop(
-                        {
-                          ...view,
-                          street: view.street || road,
-                          zip: view.zip || revQuery.data?.postcode || "",
-                        },
-                        r.type,
-                      );
-                    }
-                    onOpenChange(false);
-                  }}
-                  className={`flex min-h-16 flex-col items-center justify-center gap-1 rounded-lg border p-2 ${busy ? "opacity-60" : ""}`}
-                  style={{
-                    color: r.color,
-                    borderColor: current ? r.color : "var(--border)",
-                    background: current
-                      ? `color-mix(in oklab, ${r.color} 14%, var(--surface))`
-                      : "var(--surface)",
-                    boxShadow: current ? `0 0 14px -4px ${r.color}` : "none",
-                  }}
+                  disabled={busy}
+                  onClick={() => finishNotInterested(objection)}
+                  className={`min-h-14 rounded-lg border border-border bg-surface px-2 py-2 text-xs font-display uppercase tracking-widest ${busy ? "opacity-60" : ""}`}
                 >
-                  {r.icon}
-                  <span className="font-display text-[9px] uppercase tracking-widest">
-                    {r.label}
-                  </span>
-                  {current && (
-                    <span className="text-[8px] uppercase tracking-widest text-muted-foreground">
-                      Current
-                    </span>
-                  )}
+                  {objection}
                 </button>
-              );
-            })}
-          </div>
-
-          {!!view?.currentPinId && !again && (
+              ))}
+            </div>
             <Button
               variant="outline"
-              className="w-full gap-2"
+              className="w-full"
               disabled={busy}
-              onClick={() => setAgain(true)}
+              onClick={() => finishNotInterested(undefined)}
             >
-              <RotateCcw className="w-4 h-4" />
-              Knocked again — log a new result
+              Skip — don't log an objection
             </Button>
-          )}
-          {again && (
-            <div className="text-xs text-muted-foreground text-center">
-              Next tap logs a fresh knock on this house.
+          </div>
+        ) : (
+          <div className="space-y-3 overflow-y-auto px-4 pt-3 pb-4">
+            <div className="grid grid-cols-3 gap-2" data-tour="house-results">
+              {results.map((r) => {
+                const current = hasCurrent && view?.currentType === r.type;
+                return (
+                  <button
+                    key={r.type}
+                    type="button"
+                    disabled={busy || current}
+                    onClick={() => {
+                      if (!view) return;
+                      const switchId = hasCurrent && view.currentPinId ? view.currentPinId : null;
+                      if (r.type === "not_interested" && objectionsEnabled) {
+                        setPendingSwitchId(switchId);
+                        setPickingObjection(true);
+                        return;
+                      }
+                      if (switchId) {
+                        onSwitch(switchId, r.type);
+                      } else {
+                        // Ride the resolved street + zip along (the Lead flow
+                        // shows a copyable address while the rep fills the
+                        // form) — never the reverse-geocoded house NUMBER,
+                        // which can be interpolated onto the neighbor.
+                        onDrop(
+                          {
+                            ...view,
+                            street: view.street || road,
+                            zip: view.zip || revQuery.data?.postcode || "",
+                          },
+                          r.type,
+                        );
+                      }
+                      onOpenChange(false);
+                    }}
+                    className={`flex min-h-16 flex-col items-center justify-center gap-1 rounded-lg border p-2 ${busy ? "opacity-60" : ""}`}
+                    style={{
+                      color: r.color,
+                      borderColor: current ? r.color : "var(--border)",
+                      background: current
+                        ? `color-mix(in oklab, ${r.color} 14%, var(--surface))`
+                        : "var(--surface)",
+                      boxShadow: current ? `0 0 14px -4px ${r.color}` : "none",
+                    }}
+                  >
+                    {r.icon}
+                    <span className="font-display text-[9px] uppercase tracking-widest">
+                      {r.label}
+                    </span>
+                    {current && (
+                      <span className="text-[8px] uppercase tracking-widest text-muted-foreground">
+                        Current
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
-          )}
 
-          {view && <HouseNotes house={view} />}
-        </div>
+            {!!view?.currentPinId && !again && (
+              <Button
+                variant="outline"
+                className="w-full gap-2"
+                disabled={busy}
+                onClick={() => setAgain(true)}
+              >
+                <RotateCcw className="w-4 h-4" />
+                Knocked again — log a new result
+              </Button>
+            )}
+            {again && (
+              <div className="text-xs text-muted-foreground text-center">
+                Next tap logs a fresh knock on this house.
+              </div>
+            )}
+
+            {view && <HouseNotes house={view} />}
+          </div>
+        )}
       </SheetContent>
     </Sheet>
   );

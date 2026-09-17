@@ -10,6 +10,7 @@ import { ArcadePanel } from "@/components/arcade";
 import { ActiveRun } from "@/components/ActiveRun";
 import { CrewMap } from "@/components/CrewMap";
 import { NeonMap, type Territory, type LatLng } from "@/components/NeonMap";
+import { getLastMapView, setLastMapView } from "@/lib/last-map-view";
 import { simplifyRing } from "@/lib/simplify-polygon";
 import {
   AreaDetailsSheet,
@@ -839,7 +840,14 @@ function ManagerTerritoryView({
             // history rings under the finger is what crashed iOS Safari.
             // Live turfs stay for context; the coverage returns on release.
             territories={drawing ? territories : mapTerritories}
-            fitPolygons={fitPolygons}
+            // Skip the initial fit-all-turfs once a view is already saved
+            // (canvassing round-trip) — restore the saved position instead
+            // of zooming back out to frame every turf on every switch.
+            fitPolygons={getLastMapView() ? [] : fitPolygons}
+            center={getLastMapView()?.center}
+            initialZoom={getLastMapView()?.zoom}
+            initialBearing={getLastMapView()?.bearing}
+            onViewChange={setLastMapView}
             pins={[]}
             houses={[]}
             me={me}

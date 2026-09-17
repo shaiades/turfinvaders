@@ -161,7 +161,16 @@ export function useFieldPins(userId: string | undefined, me: LatLng | null) {
   const dropAtPoint = useMutation({
     // pin_type is captured at tap time — reading the armed result in the
     // callbacks could mislabel the toast if the rep switches mid-flight.
-    mutationFn: async ({ ll, pin_type }: { ll: LatLng; pin_type: ActivePin }) => {
+    mutationFn: async ({
+      ll,
+      pin_type,
+      objection,
+    }: {
+      ll: LatLng;
+      pin_type: ActivePin;
+      /** Optional door-objection tag (Turf Tools quick-pick), "Not Interested" only. */
+      objection?: string;
+    }) => {
       const fix = await getPositionOrNull({
         enableHighAccuracy: true,
         maximumAge: 10000,
@@ -185,6 +194,7 @@ export function useFieldPins(userId: string | undefined, me: LatLng | null) {
         device_lng: device.lng,
         distance_m,
         is_remote_drop,
+        objection: objection ?? null,
       });
       if (error) throw error;
       return { is_remote_drop, distance_m, pin_type };
@@ -244,7 +254,7 @@ export function useFieldPins(userId: string | undefined, me: LatLng | null) {
   const lastDropRef = useRef<{ t: number; ll: LatLng } | null>(null);
 
   /** The map-tap entry point: GPS guard + double-tap dedupe, then insert. */
-  const guardedMapDrop = (ll: LatLng, pin_type: ActivePin) => {
+  const guardedMapDrop = (ll: LatLng, pin_type: ActivePin, objection?: string) => {
     // Block BEFORE the optimistic row: a no-GPS drop would otherwise buzz,
     // show a pin for the 8 s fix wait, then silently vanish.
     if (!me) {
@@ -254,7 +264,7 @@ export function useFieldPins(userId: string | undefined, me: LatLng | null) {
     const last = lastDropRef.current;
     if (last && Date.now() - last.t < 600 && haversineMeters(last.ll, ll) < 8) return;
     lastDropRef.current = { t: Date.now(), ll };
-    dropAtPoint.mutate({ ll, pin_type });
+    dropAtPoint.mutate({ ll, pin_type, objection });
   };
 
   /** The tally-button entry point: the pin IS the device fix, so it can never
@@ -302,10 +312,20 @@ export function useFieldPins(userId: string | undefined, me: LatLng | null) {
   // rolls over at LA midnight), the .eq("log_date", today) guard here (a
   // stale edit no-ops), and the DB fence in 20260824150000 (RLS).
   const updatePin = useMutation({
-    mutationFn: async ({ id, pin_type }: { id: string; pin_type: ActivePin }) => {
+    mutationFn: async ({
+      id,
+      pin_type,
+      objection,
+    }: {
+      id: string;
+      pin_type: ActivePin;
+      /** Omit to leave any existing objection tag untouched; pass a value
+       *  (including "") to set/clear it. */
+      objection?: string;
+    }) => {
       const { error } = await supabase
         .from("field_pins")
-        .update({ pin_type })
+        .update({ pin_type, ...(objection !== undefined ? { objection } : {}) })
         .eq("id", id)
         .eq("log_date", laTodayISO());
       if (error) throw error;
