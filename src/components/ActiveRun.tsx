@@ -21,6 +21,7 @@ import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { GratitudeGate, hasPassedGratitudeGate } from "@/components/GratitudeGate";
 import { NeonMap, type Territory, type LatLng } from "@/components/NeonMap";
+import { getLastMapView, setLastMapView } from "@/lib/last-map-view";
 import { PinActionSheet } from "@/components/PinActionSheet";
 import { HouseResultSheet } from "@/components/HouseResultSheet";
 import { FieldStandingsSheet } from "@/components/FieldStandingsSheet";
@@ -177,6 +178,13 @@ export function ActiveRun({
   }, [user?.id]);
   const { me, geoStatus } = useGeoWatch(!loading && (!requiresGratitudeGate(role) || gatePassed));
   const pins = useFieldPins(user?.id, me);
+  // Objection quick-pick toggle (captain feedback 2026-09-17) — same inline
+  // company_settings read used at dashboard.tsx and canvassers.$id.tsx.
+  const companySettingsQuery = useQuery({
+    queryKey: ["company_settings"],
+    queryFn: async () => (await supabase.from("company_settings").select("*").maybeSingle()).data,
+  });
+  const objectionsEnabled = !!companySettingsQuery.data?.objections_quickpick_enabled;
   // Crew Map beacon: moved to AppShell (<CrewBeacon/>, owner ask 2026-09-14)
   // so reps broadcast from EVERY tab, not just this screen — this watch's
   // first fix still writes the geo-granted marker that arms it.
@@ -467,7 +475,14 @@ export function ActiveRun({
               me={me}
               height="clamp(420px, 64dvh, 900px)"
               follow
-              fitPolygons={lockPolygons}
+              // Skip the initial turf-lock fit once a view is already saved
+              // (Turf Tools round-trip) — restore the saved position instead
+              // of snapping back to the turf frame every switch.
+              fitPolygons={getLastMapView() ? [] : lockPolygons}
+              center={getLastMapView()?.center}
+              initialZoom={getLastMapView()?.zoom}
+              initialBearing={getLastMapView()?.bearing}
+              onViewChange={setLastMapView}
               houseBubbles
               zipTints={isCaptain ? zipZones.tints : undefined}
               onHouseTap={(h) => setHouseTarget(h)}
@@ -657,8 +672,9 @@ export function ActiveRun({
         house={houseTarget}
         results={SHEET_RESULTS}
         busy={pins.dropAtPoint.isPending || pins.updatePin.isPending}
-        onDrop={(h, pin_type) => {
-          pins.guardedMapDrop({ lat: h.lat, lng: h.lng }, pin_type);
+        objectionsEnabled={objectionsEnabled}
+        onDrop={(h, pin_type, objection) => {
+          pins.guardedMapDrop({ lat: h.lat, lng: h.lng }, pin_type, objection);
           // A lead IS the Monday form — the pin marks the house, the form
           // submits the lead (one flow, owner directive 2026-09-10). The
           // house's address rides along (header + form prefill); the OSM
@@ -668,8 +684,8 @@ export function ActiveRun({
             setLeadOpen(true);
           }
         }}
-        onSwitch={(pinId, pin_type) => {
-          pins.updatePin.mutate({ id: pinId, pin_type });
+        onSwitch={(pinId, pin_type, objection) => {
+          pins.updatePin.mutate({ id: pinId, pin_type, objection });
           // Switching a result TO lead is submitting a lead — same one flow
           // as the tile's drop path above; without this the switch minted a
           // lead pin with no Monday lead behind it.

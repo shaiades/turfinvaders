@@ -181,18 +181,21 @@ export type Database = {
           company_name: string
           global_visibility: boolean
           id: boolean
+          objections_quickpick_enabled: boolean
           updated_at: string
         }
         Insert: {
           company_name?: string
           global_visibility?: boolean
           id?: boolean
+          objections_quickpick_enabled?: boolean
           updated_at?: string
         }
         Update: {
           company_name?: string
           global_visibility?: boolean
           id?: boolean
+          objections_quickpick_enabled?: boolean
           updated_at?: string
         }
         Relationships: []
@@ -389,6 +392,7 @@ export type Database = {
           lng: number
           log_date: string
           note: string | null
+          objection: string | null
           pin_type: Database["public"]["Enums"]["pin_type"]
         }
         Insert: {
@@ -403,6 +407,7 @@ export type Database = {
           lng: number
           log_date?: string
           note?: string | null
+          objection?: string | null
           pin_type: Database["public"]["Enums"]["pin_type"]
         }
         Update: {
@@ -417,6 +422,7 @@ export type Database = {
           lng?: number
           log_date?: string
           note?: string | null
+          objection?: string | null
           pin_type?: Database["public"]["Enums"]["pin_type"]
         }
         Relationships: [

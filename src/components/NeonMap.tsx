@@ -392,6 +392,38 @@ function BearingWatcher({ onBearing }: { onBearing: (deg: number) => void }) {
   return null;
 }
 
+/** Reports center/zoom/bearing on move/zoom/rotate so a caller can restore
+ *  the view after this NeonMap unmounts (Turf Tools mounts a separate map
+ *  instance — captain feedback 2026-09-17: switching modes reset the view). */
+function ViewPersistWatcher({
+  onChange,
+}: {
+  onChange: (v: { center: LatLng; zoom: number; bearing: number }) => void;
+}) {
+  const map = useMap();
+  const cbRef = useRef(onChange);
+  cbRef.current = onChange;
+  useEffect(() => {
+    const report = () => {
+      const c = map.getCenter();
+      cbRef.current({
+        center: { lat: c.lat, lng: c.lng },
+        zoom: map.getZoom(),
+        bearing: map.getBearing?.() ?? 0,
+      });
+    };
+    map.on("moveend", report);
+    map.on("zoomend", report);
+    map.on("rotate", report);
+    return () => {
+      map.off("moveend", report);
+      map.off("zoomend", report);
+      map.off("rotate", report);
+    };
+  }, [map]);
+  return null;
+}
+
 function InvalidateOnMount() {
   const map = useMap();
   useEffect(() => {
@@ -672,6 +704,9 @@ function NeonMapInner({
   center,
   height = 480,
   follow = false,
+  initialZoom,
+  initialBearing,
+  onViewChange,
   fitPolygons,
   onTerritoryClick,
   onPinClick,
@@ -694,6 +729,14 @@ function NeonMapInner({
   /** px number (capped at 65vh) or any CSS length verbatim, e.g. "42dvh". */
   height?: number | string;
   follow?: boolean;
+  /** Overrides the follow/13 default zoom at construction (e.g. restoring a
+   *  saved view across a mode-switch remount). */
+  initialZoom?: number;
+  /** Overrides the 0 default bearing at construction. */
+  initialBearing?: number;
+  /** Reports center/zoom/bearing on move/zoom/rotate — pairs with
+   *  initialZoom/initialBearing/center to survive a remount. */
+  onViewChange?: (v: { center: LatLng; zoom: number; bearing: number }) => void;
   /** Open framing the union of these rings (all of a canvasser's turfs) and
    *  re-frame on reassignment. Framing only — movement stays free. */
   fitPolygons?: LatLng[][];
@@ -976,7 +1019,7 @@ function NeonMapInner({
       >
         <MapContainer
           center={[fallbackCenter.lat, fallbackCenter.lng]}
-          zoom={follow ? 17 : 13}
+          zoom={initialZoom ?? (follow ? 17 : 13)}
           zoomControl={false}
           // Stock shift-drag box-zoom FIGHTS leaflet-rotate's shiftKeyRotate
           // for the same gesture — both enabled, a shift-drag box-zoomed and
@@ -995,7 +1038,7 @@ function NeonMapInner({
           touchRotate
           shiftKeyRotate
           rotateControl={false}
-          bearing={0}
+          bearing={initialBearing ?? 0}
           style={{ height: "100%", width: "100%", background: "#0b0f1a" }}
           ref={(instance) => {
             mapRef.current = instance;
@@ -1025,6 +1068,7 @@ function NeonMapInner({
           <BearingWatcher onBearing={setBearing} />
           {houseBubbles && <ZoomWatcher onZoom={setZoomLevel} />}
           {hasDashedLabels && <ViewTracker onView={setLabelView} />}
+          {onViewChange && <ViewPersistWatcher onChange={onViewChange} />}
           <FlyTo target={flyTo} />
           <ClickCapture onClick={handleClick} />
           <ZipBordersLayer

@@ -10,6 +10,7 @@ import { Home, MessageSquare, Sparkles, DollarSign, AlertTriangle, ArrowLeft, Th
 import { commissionRateForPoints, weeklyPoints } from "@/lib/pay";
 import { isManagerRole } from "@/lib/roles";
 import { laDateISO, laMidnightUtcISO, addDaysISO, weekStartOfISO } from "@/lib/dates";
+import { DOOR_OBJECTIONS } from "@/lib/objections";
 
 export const Route = createFileRoute("/_authenticated/canvassers/$canvasserId/field")({
   head: () => ({ meta: [{ title: "Field Activity — Turf Invaders" }] }),
@@ -38,6 +39,7 @@ function timeLabel(iso: string) {
 type PinRow = {
   id: string; pin_type: FieldPin["pin_type"]; lat: number; lng: number;
   is_remote_drop: boolean | null; distance_m: number | null; created_at: string;
+  objection: string | null;
 };
 type SaleRow = { id: string; sale_amount: number | null; customer_name: string | null; address: string | null; reviewed_at: string | null; created_at: string };
 
@@ -76,7 +78,7 @@ function FieldActivityPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("field_pins")
-        .select("id, pin_type, lat, lng, is_remote_drop, distance_m, created_at")
+        .select("id, pin_type, lat, lng, is_remote_drop, distance_m, created_at, objection")
         .eq("canvasser_id", canvasserId).eq("log_date", day)
         .order("created_at", { ascending: true });
       if (error) throw error;
@@ -155,6 +157,20 @@ function FieldActivityPage() {
     };
   }, [timeline, commissionRate, pins]);
 
+  // Objection breakdown for the day (captain feedback 2026-09-17: review
+  // what reps are hitting most). Only pins logged while the quick-pick
+  // toggle was on carry an objection — everything else is simply excluded.
+  const objectionCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const p of pins) {
+      if (!p.objection) continue;
+      counts.set(p.objection, (counts.get(p.objection) ?? 0) + 1);
+    }
+    return DOOR_OBJECTIONS.map((o) => ({ objection: o, count: counts.get(o) ?? 0 })).filter(
+      (o) => o.count > 0,
+    );
+  }, [pins]);
+
   // Turf overlay — the areas actually assigned to this canvasser (the legacy
   // `territories` table is dead: nothing writes it since the turfs flow landed).
   const territoriesQuery = useQuery({
@@ -232,6 +248,21 @@ function FieldActivityPage() {
         />
       </ArcadePanel>
 
+      {objectionCounts.length > 0 && (
+        <ArcadePanel title={`Objections · ${day}`}>
+          <ul className="flex flex-wrap gap-2">
+            {objectionCounts.map(({ objection, count }) => (
+              <li
+                key={objection}
+                className="flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-display uppercase tracking-widest"
+              >
+                {objection} <span className="text-neon">{count}</span>
+              </li>
+            ))}
+          </ul>
+        </ArcadePanel>
+      )}
+
       <ArcadePanel title="Timeline · Money Accumulating Per Knock">
         {stats.series.length === 0 ? (
           <div className="text-sm text-muted-foreground">No activity logged for this day yet.</div>
@@ -262,7 +293,8 @@ function FieldActivityPage() {
               const Icon = PIN_ICONS[p.pin_type] ?? Home;
               const label = p.is_remote_drop
                 ? "REMOTE DROP (flagged)"
-                : (PIN_LABELS[p.pin_type] ?? p.pin_type.toUpperCase());
+                : (PIN_LABELS[p.pin_type] ?? p.pin_type.toUpperCase()) +
+                  (p.objection ? ` · ${p.objection}` : "");
               return (
                 <li key={`p-${p.id}`} className="flex items-center gap-3 rounded border border-border bg-surface px-3 py-2">
                   {p.is_remote_drop
