@@ -56,6 +56,7 @@ import {
 } from "@/lib/dates";
 import { useWeekSelector } from "@/hooks/useWeekSelector";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
+import { useCrewPins } from "@/hooks/useCrewLive";
 import { Link } from "@tanstack/react-router";
 import { useAuth } from "@/hooks/useAuth";
 import { canManageTarget, isAdminRole, isManagerRole } from "@/lib/roles";
@@ -498,6 +499,16 @@ function FleetDispatchInner({
     [clockedByDay],
   );
 
+  // Field activity today (owner ask 2026-09-17): a rep who's actively
+  // dropping pins but hasn't punched in yet — or forgot to — must still show
+  // up on the Day roster, just dimmed. Same "who left a mark today" signal
+  // CrewMap already uses (useCrewPins), independent of time_entries/daily_logs.
+  const activityQ = useCrewPins(tab === "day" && isViewingToday);
+  const activeToday = useMemo(
+    () => new Set((activityQ.data ?? []).map((p) => p.canvasser_id)),
+    [activityQ.data],
+  );
+
   // Realtime — one channel; prefix invalidation refreshes funnel, production,
   // suspension window, roster, and vans (fixes the old stale-banner gap).
   // profiles/teams keep one manager's van moves live on another's open board.
@@ -814,14 +825,17 @@ function FleetDispatchInner({
     // Tuesday shows on Monday's day view and on no later day.
     //
     // Day roster = clocked-in people (owner, 2026-09-11): an active rep with
-    // no punch AND no production that day sits out that day's board. The
-    // production half keeps a missed punch from ever hiding real numbers
-    // (tiles stay ≡ the boards); Week and Month keep the full roster;
-    // clockReady keeps the gate off until presence actually loaded.
+    // no punch AND no production AND no field activity that day sits out
+    // that day's board. The production/activity half keeps a missed punch
+    // from ever hiding real numbers (tiles stay ≡ the boards); Week and
+    // Month keep the full roster; clockReady keeps the gate off until
+    // presence actually loaded. 2026-09-17: a rep who's out pinning without
+    // having punched in now clears the gate too (see isDim below for the
+    // matching dimmed-row treatment) — production alone used to hide them.
     const gated = enriched.filter((r) => {
       if (r.g.former) return hasProduction(r);
       if (tab === "day" && clockReady && !clockedOn(r.g.activeIds, dayISO)) {
-        return hasProduction(r);
+        return hasProduction(r) || r.g.activeIds.some((id) => activeToday.has(id));
       }
       return true;
     });
@@ -844,7 +858,17 @@ function FleetDispatchInner({
     dayISO,
     clockReady,
     clockedOn,
+    activeToday,
   ]);
+
+  // Dimmed-row signal for DispatchRow (owner ask 2026-09-17): bright = clocked
+  // in today, dim = showing only from production/field-activity. Former rows
+  // skip the clock gate entirely (see the gate above), so they never dim here.
+  const isDim = useCallback(
+    (r: FunnelRow) =>
+      !r.g.former && tab === "day" && clockReady && !clockedOn(r.g.activeIds, dayISO),
+    [tab, clockReady, clockedOn, dayISO],
+  );
 
   const totals = useMemo(() => {
     let sub = 0,
@@ -1210,6 +1234,7 @@ function FleetDispatchInner({
       ) : (
         <DispatchFleet
           clockStateFor={clockStateFor}
+          isDim={isDim}
           rows={rows}
           vans={vans}
           crossOfficeVanIds={crossOfficeVanIds}
@@ -1572,12 +1597,16 @@ function DispatchRow({
   manage,
   gridManage = false,
   clockState = null,
+  dim = false,
 }: {
   r: FunnelRow;
   manage?: RowManage;
   gridManage?: boolean;
   /** "on" = open shift right now · "off" = punched today, clocked out. */
   clockState?: "on" | "off" | null;
+  /** No clock-in today — row shows only from production/field activity
+   *  (owner ask 2026-09-17): render dimmer than a punched-in row. */
+  dim?: boolean;
 }) {
   const { realRole, user } = useAuth();
   // Your own line glows (audit C-9) — the ladder does it for reps; the
@@ -1593,19 +1622,27 @@ function DispatchRow({
     <div
       className={`${rowGrid(gridManage || !!manage)} px-2 py-1.5 rounded border transition-colors duration-200 hover:border-neon/60 ${
         self ? "border-neon/50 bg-neon/10" : "border-border bg-surface"
-      }`}
+      } ${dim ? "opacity-60" : ""}`}
     >
       <span className="text-sm truncate flex items-center gap-1.5 min-w-0">
-        {clockState && (
+        {dim ? (
           <span
-            aria-label={clockState === "on" ? "On the clock" : "Clocked out"}
-            title={clockState === "on" ? "On the clock right now" : "Punched today · clocked out"}
-            className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-              clockState === "on"
-                ? "bg-[var(--victory)] shadow-[0_0_6px_var(--victory)]"
-                : "bg-muted-foreground/50"
-            }`}
+            aria-label="Not clocked in"
+            title="No clock-in today — showing from production/field activity"
+            className="h-1.5 w-1.5 shrink-0 rounded-full border border-muted-foreground/60"
           />
+        ) : (
+          clockState && (
+            <span
+              aria-label={clockState === "on" ? "On the clock" : "Clocked out"}
+              title={clockState === "on" ? "On the clock right now" : "Punched today · clocked out"}
+              className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                clockState === "on"
+                  ? "bg-[var(--victory)] shadow-[0_0_6px_var(--victory)]"
+                  : "bg-muted-foreground/50"
+              }`}
+            />
+          )
         )}
         <span aria-hidden>{r.sub > 0 ? "🔥" : "🍩"}</span>
         {profileId ? (
@@ -1805,6 +1842,7 @@ function DispatchFleet({
   fieldDateLabel,
   leadsDateLabel,
   clockStateFor,
+  isDim,
 }: {
   rows: FunnelRow[];
   vans: Van[];
@@ -1818,6 +1856,9 @@ function DispatchFleet({
   leadsDateLabel?: string;
   /** Day-tab live punch state per row (ids → on/off/null); undefined off Day. */
   clockStateFor?: (ids: string[]) => "on" | "off" | null;
+  /** No clock-in today but showing from production/field activity (owner ask
+   *  2026-09-17) — undefined off Day, same lifecycle as clockStateFor. */
+  isDim?: (r: FunnelRow) => boolean;
 }) {
   const { office: activeOffice, matches } = useOfficeFilter();
   const { realRole } = useAuth();
@@ -2014,6 +2055,7 @@ function DispatchFleet({
                               manage={manageFor(r, v.id)}
                               gridManage={canEditRows}
                               clockState={clockStateFor?.(r.g.ids) ?? null}
+                              dim={isDim?.(r) ?? false}
                             />
                           ))}
                         </div>
@@ -2055,6 +2097,7 @@ function DispatchFleet({
                   manage={manageFor(r, null)}
                   gridManage={canEditRows}
                   clockState={clockStateFor?.(r.g.ids) ?? null}
+                  dim={isDim?.(r) ?? false}
                 />
               ))}
             </div>
