@@ -138,9 +138,19 @@ export function AreaDetailsSheet({
   }, [open, mode, vertexCount, turf?.id, turf?.assigned_user_id, turf?.assigned_at, turf?.name]);
 
   const teamScoped = !!myTeamId && !showEveryone;
+  const currentAssigneeId = turf?.assigned_user_id ?? null;
 
   const filtered = useMemo(() => {
-    const scoped = myTeamId && !showEveryone ? users.filter((u) => u.team_id === myTeamId) : users;
+    // Team-scoping (owner ask 2026-09-17) narrows the picker, but it must
+    // never hide the area's CURRENT assignee — if they've since moved teams
+    // (a common state per Move Players / former-member history), that made
+    // reassigning look randomly broken: the picker looked complete (never
+    // empty, so no hint anything was missing) while the one person a captain
+    // most needed — whoever they're replacing — simply wasn't in it.
+    const scoped =
+      myTeamId && !showEveryone
+        ? users.filter((u) => u.team_id === myTeamId || u.id === currentAssigneeId)
+        : users;
     const q = query.trim().toLowerCase();
     if (!q) return scoped;
     return scoped.filter(
@@ -149,7 +159,7 @@ export function AreaDetailsSheet({
         (u.office_location ?? "").toLowerCase().includes(q) ||
         (u.team_name ?? "").toLowerCase().includes(q),
     );
-  }, [users, query, myTeamId, showEveryone]);
+  }, [users, query, myTeamId, showEveryone, currentAssigneeId]);
 
   const isEdit = view.mode === "edit";
   const shownTurf = view.turf;
@@ -291,6 +301,21 @@ export function AreaDetailsSheet({
                 placeholder={teamScoped ? "Search your team" : "Search users"}
                 aria-label="Search users"
               />
+              {/* Always-on, not just when the list happens to come up empty —
+                  a non-empty but narrowed list gave zero signal it was
+                  narrowed at all. */}
+              {teamScoped && (
+                <div className="text-[10px] text-muted-foreground">
+                  Showing your team only.{" "}
+                  <button
+                    type="button"
+                    onClick={() => setShowEveryone(true)}
+                    className="text-neon underline underline-offset-2"
+                  >
+                    Search everyone
+                  </button>
+                </div>
+              )}
             </div>
 
             {repeatWarning && (
