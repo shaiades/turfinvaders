@@ -13,6 +13,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useDateRange } from "@/hooks/useDateRange";
 import { useDispatchRoster, useDispatchVans } from "@/hooks/useFleetRoster";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
+import { useCrewPins } from "@/hooks/useCrewLive";
 import {
   getClockPresence,
   getDispatchProduction,
@@ -28,6 +29,9 @@ type MemberRow = {
   dk: number;
   ptt: number;
   former: boolean;
+  /** No clock-in today — showing from production/field activity only (owner
+   *  ask 2026-09-17): render dimmer than a punched-in row. */
+  dim: boolean;
 };
 
 type VanGroup = {
@@ -123,6 +127,16 @@ export function FieldStandingsSheet({
     [range.tab, range.startISO, clockLoaded, clockData],
   );
 
+  // Field activity today (owner ask 2026-09-17): a rep dropping pins without
+  // having punched in must still show, just dimmed — same "who left a mark
+  // today" signal CrewMap uses. useCrewPins is hardcoded to today's LA date,
+  // so it only applies while the Day tab is actually looking at today.
+  const activityQ = useCrewPins(open && range.tab === "day" && range.isLive);
+  const activeToday = useMemo(
+    () => new Set((activityQ.data ?? []).map((p) => p.canvasser_id)),
+    [activityQ.data],
+  );
+
   const myTeamId = useMemo(() => {
     if (!user?.id) return null;
     return roster.data?.profiles.find((p) => p.id === user.id)?.team_id ?? null;
@@ -146,7 +160,11 @@ export function FieldStandingsSheet({
       // where showing requires a punch that day (or a log row): the owner's
       // 2026-09-11 clock-in rule, matching Fleet Dispatch.
       if ((former || p.is_placeholder) && !r) continue;
-      if (dayClock && !r && !dayClock.has(p.id)) continue;
+      const punched = !dayClock || dayClock.has(p.id);
+      // 2026-09-17: field activity alone also clears the Day gate now (a rep
+      // out pinning without having punched in must still show) — production
+      // already did. Only truly idle reps (no punch, no log row, no pins) sit out.
+      if (dayClock && !r && !punched && !activeToday.has(p.id)) continue;
       const row: MemberRow = {
         id: p.id,
         name: p.display_name ?? "Player",
@@ -154,6 +172,7 @@ export function FieldStandingsSheet({
         dk: r?.drs ?? 0,
         ptt: r?.tlk ?? 0,
         former,
+        dim: !former && !punched,
       };
       // Former reps bucket under the van their in-range rows were stamped
       // with (live team_id was nulled at removal) — same rule as dispatch.
@@ -205,7 +224,7 @@ export function FieldStandingsSheet({
       { sale: 0, dk: 0, ptt: 0 },
     );
     return { groups, totals };
-  }, [roster.data, vansQ.data, production.data, dayClock]);
+  }, [roster.data, vansQ.data, production.data, dayClock, activeToday]);
 
   const isOpenGroup = (g: VanGroup) => expanded[g.id] ?? g.id === (myTeamId ?? "__own__");
   const loading = roster.isPending || production.isPending;
@@ -290,12 +309,19 @@ export function FieldStandingsSheet({
                         return (
                           <div
                             key={r.id}
-                            className={`grid grid-cols-[minmax(0,1fr)_2.75rem_3.25rem_3.25rem_3rem] items-center gap-x-2 py-2 pl-5 ${mine ? "rounded bg-neon/10" : ""}`}
+                            className={`grid grid-cols-[minmax(0,1fr)_2.75rem_3.25rem_3.25rem_3rem] items-center gap-x-2 py-2 pl-5 ${mine ? "rounded bg-neon/10" : ""} ${r.dim ? "opacity-60" : ""}`}
                           >
                             <div
-                              className={`truncate text-sm ${r.former ? "text-muted-foreground/70" : ""} ${mine ? "text-neon" : ""}`}
+                              className={`flex min-w-0 items-center gap-1.5 truncate text-sm ${r.former ? "text-muted-foreground/70" : ""} ${mine ? "text-neon" : ""}`}
                             >
-                              {r.name}
+                              {r.dim && (
+                                <span
+                                  aria-label="Not clocked in"
+                                  title="No clock-in today — showing from production/field activity"
+                                  className="h-1.5 w-1.5 shrink-0 rounded-full border border-muted-foreground/60"
+                                />
+                              )}
+                              <span className="truncate">{r.name}</span>
                               {r.former ? " · former" : ""}
                             </div>
                             <Cells sale={r.sale} dk={r.dk} ptt={r.ptt} />

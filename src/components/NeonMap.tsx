@@ -37,13 +37,6 @@ export type Territory = {
   currentAssignee?: string | null;
   /** Past assignments newest-first, dates pre-formatted for the popup. */
   history?: Array<{ name: string; when: string }>;
-  /** RepCard historical coverage — faint reference dashed area with no
-   *  backing turf row. The popup still opens (it's real, tappable geometry)
-   *  but must say so instead of offering "Assign / edit →": that button used
-   *  to look identical to a real turf's and silently no-op on tap (the
-   *  caller's onTerritoryClick short-circuits on the `repcard:` id prefix),
-   *  which read as "I can't reassign this" with zero explanation. */
-  readOnly?: boolean;
 };
 
 export type FieldPin = {
@@ -1126,6 +1119,12 @@ function NeonMapInner({
               t.currentAssignee ? 1 : 0,
               t.currentAssignee ? 5 : 4,
             );
+            // RepCard historical coverage has no editable turf row behind it
+            // (owner report 2026-09-18: "I click an area but it won't let me
+            // assign/edit" — the button rendered anyway and onTerritoryClick
+            // silently no-op'd for these ids). Tell them why instead of a
+            // dead tap: draw a new area over it to make that ground assignable.
+            const isHistorical = t.id.startsWith("repcard:");
             return (
               <Polygon
                 key={t.id}
@@ -1156,8 +1155,11 @@ function NeonMapInner({
                     ) : (
                       <div className="nm-pop-empty">No earlier assignments</div>
                     )}
-                    {t.readOnly ? (
-                      <div className="nm-pop-empty">Historical coverage — not editable</div>
+                    {isHistorical ? (
+                      <div className="nm-pop-empty">
+                        Historical coverage — no live area here yet. Draw a new area over it to
+                        assign this ground.
+                      </div>
                     ) : (
                       <button
                         type="button"
