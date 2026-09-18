@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link } from "@tanstack/react-router";
 import {
@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import { Archive, ArchiveRestore, History, Merge, Pencil, Send, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { deleteProfile } from "@/lib/fleet.functions";
+import { getInviteTarget } from "@/lib/invites.functions";
 import { useSetUserRole } from "@/hooks/useSetUserRole";
 import { ROSTER_KEYS, useArchiveAgents, useMoveAgents } from "@/hooks/useRosterActions";
 import { useAuth } from "@/hooks/useAuth";
@@ -80,11 +81,22 @@ export function PlayerSheet({
 }) {
   const qc = useQueryClient();
   const { realRole } = useAuth();
+  const isAdminActor = isAdminRole(realRole);
   const setRole = useSetUserRole();
   const moveAgents = useMoveAgents(vans);
   const archiveAgents = useArchiveAgents();
   const deleteProfileFn = useServerFn(deleteProfile);
+  const getInviteTargetFn = useServerFn(getInviteTarget);
   const assignable = group?.canModify ? assignableRolesFor(realRole) : [];
+
+  // Admin-only email lookup for the sheet header — reuses the Invite
+  // dialog's own server fn (already gated + already resolves placeholder/
+  // no-login accounts) instead of adding a second path to auth.users.
+  const emailQuery = useQuery({
+    queryKey: ["player_email", group?.repId],
+    queryFn: () => getInviteTargetFn({ data: { user_id: group!.repId } }),
+    enabled: isAdminActor && !!group && !group.noLogin,
+  });
 
   const setSuspension = useMutation({
     mutationFn: async ({ ids, tracked }: { ids: string[]; tracked: boolean }) => {
@@ -135,7 +147,6 @@ export function PlayerSheet({
   const g = group;
   const name = g.display_name ?? "Player";
   const lastOwner = g.primary === "owner" && ownerCount <= 1;
-  const isAdminActor = isAdminRole(realRole);
   const joined = g.createdAt
     ? new Date(g.createdAt).toLocaleDateString("en-US", {
         timeZone: "America/Los_Angeles",
@@ -174,6 +185,20 @@ export function PlayerSheet({
               </span>
             )}
           </SheetDescription>
+          {isAdminActor && !g.noLogin && (
+            <p className="text-xs text-muted-foreground break-all">
+              {emailQuery.isLoading
+                ? "Loading email…"
+                : emailQuery.data?.email
+                  ? emailQuery.data.email
+                  : "No email on file"}
+              {emailQuery.data?.synthetic_email && (
+                <span className="ml-1.5 text-[color:var(--neon-blue)]">
+                  (placeholder — not deliverable)
+                </span>
+              )}
+            </p>
+          )}
         </SheetHeader>
 
         <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-4">
