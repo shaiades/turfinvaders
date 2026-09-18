@@ -1110,6 +1110,12 @@ function NeonMapInner({
               t.currentAssignee ? 1 : 0,
               t.currentAssignee ? 5 : 4,
             );
+            // RepCard historical coverage has no editable turf row behind it
+            // (owner report 2026-09-18: "I click an area but it won't let me
+            // assign/edit" — the button rendered anyway and onTerritoryClick
+            // silently no-op'd for these ids). Tell them why instead of a
+            // dead tap: draw a new area over it to make that ground assignable.
+            const isHistorical = t.id.startsWith("repcard:");
             return (
               <Polygon
                 key={t.id}
@@ -1140,18 +1146,25 @@ function NeonMapInner({
                     ) : (
                       <div className="nm-pop-empty">No earlier assignments</div>
                     )}
-                    <button
-                      type="button"
-                      className="nm-pop-btn"
-                      onClick={() => {
-                        // Close the on-map card before the sheet takes over, so
-                        // it isn't left open behind (and after) the sheet.
-                        mapRef.current?.closePopup();
-                        onTerritoryClick!(t.id);
-                      }}
-                    >
-                      Assign / edit →
-                    </button>
+                    {isHistorical ? (
+                      <div className="nm-pop-empty">
+                        Historical coverage — no live area here yet. Draw a new area over it to
+                        assign this ground.
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        className="nm-pop-btn"
+                        onClick={() => {
+                          // Close the on-map card before the sheet takes over, so
+                          // it isn't left open behind (and after) the sheet.
+                          mapRef.current?.closePopup();
+                          onTerritoryClick!(t.id);
+                        }}
+                      >
+                        Assign / edit →
+                      </button>
+                    )}
                   </Popup>
                 )}
               </Polygon>
