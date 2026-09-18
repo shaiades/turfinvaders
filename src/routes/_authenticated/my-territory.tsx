@@ -6,6 +6,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useGeoWatch } from "@/hooks/useFieldPins";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { assigneeColor } from "@/lib/assignee-colors";
+import { isLaToday } from "@/lib/dates";
 import { ArcadePanel } from "@/components/arcade";
 import { ActiveRun } from "@/components/ActiveRun";
 import { CrewMap } from "@/components/CrewMap";
@@ -512,9 +513,15 @@ function ManagerTerritoryView({
         color: assigneeColor(t.assigned_user_id),
         polygon: (t.polygon_coordinates ?? []) as LatLng[],
         dashed: !t.assigned_user_id,
-        assignmentLabel: t.assigned_user_id
-          ? (t.assignee?.display_name ?? "Assigned")
-          : "Unassigned",
+        // Name pills only for today's moves (owner ask 2026-09-18: "keep
+        // track of where my teams are at daily" — every past assignment ever
+        // made rendering its name at once buried the map). Tapping the area
+        // still shows the full assignment history regardless of the label.
+        assignmentLabel: !t.assigned_user_id
+          ? "Unassigned"
+          : isLaToday(t.assigned_at)
+            ? (t.assignee?.display_name ?? "Assigned")
+            : undefined,
         currentAssignee: t.assigned_user_id ? (t.assignee?.display_name ?? "Assigned") : null,
         history: historyByTurf.get(t.id) ?? [],
       })),
@@ -546,7 +553,10 @@ function ManagerTerritoryView({
           color: r.color || "#8b5cf6",
           polygon: simplifyRing((r.polygon_coordinates ?? []) as LatLng[]),
           dashed: true,
-          assignmentLabel: label,
+          // Same today-only label rule as live turfs — this is 2026-season
+          // import history, so in practice these never carry a name pill
+          // anymore (the coverage shape still renders for context).
+          assignmentLabel: isLaToday(r.assigned_at) ? label : undefined,
           currentAssignee: r.rep_name ?? null,
           history: r.assigned_at ? [{ name: "RepCard 2026", when: fmt(r.assigned_at) }] : [],
         };
