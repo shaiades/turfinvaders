@@ -118,12 +118,14 @@ function zipLabelIcon(zip: string, tint?: ZipTint): L.DivIcon {
   let icon = labelIconCache.get(key);
   if (!icon) {
     const safeLabel = tint?.label?.replace(/[<>&"']/g, "") ?? "";
-    const html = tint
-      ? `<div style="transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:1px;background:rgba(11,15,26,0.8);border:1px solid ${tint.color};padding:3px 7px;border-radius:6px;white-space:nowrap;box-shadow:0 0 10px color-mix(in srgb, ${tint.color} 45%, transparent);">
+    // Outer padding = finger-sized hit box when the pill is the ZIP tap target.
+    const pill = tint
+      ? `<div style="display:flex;flex-direction:column;align-items:center;gap:1px;background:rgba(11,15,26,0.8);border:1px solid ${tint.color};padding:3px 7px;border-radius:6px;white-space:nowrap;box-shadow:0 0 10px color-mix(in srgb, ${tint.color} 45%, transparent);">
            <span style="color:rgba(232,244,255,0.95);font:700 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:0.08em;">${zip}</span>
            <span style="color:${tint.color};font:700 9px/1 ui-sans-serif,system-ui;letter-spacing:0.04em;">${safeLabel}</span>
          </div>`
-      : `<div style="transform:translate(-50%,-50%);display:inline-block;background:rgba(11,15,26,0.72);border:1px solid rgba(232,244,255,0.45);color:rgba(232,244,255,0.92);font:700 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:0.08em;padding:2px 6px;border-radius:4px;white-space:nowrap;">${zip}</div>`;
+      : `<div style="display:inline-block;background:rgba(11,15,26,0.72);border:1px solid rgba(232,244,255,0.45);color:rgba(232,244,255,0.92);font:700 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:0.08em;padding:2px 6px;border-radius:4px;white-space:nowrap;">${zip}</div>`;
+    const html = `<div style="transform:translate(-50%,-50%);display:inline-block;padding:8px;">${pill}</div>`;
     icon = L.divIcon({
       html,
       className: "zip-border-label",
@@ -179,7 +181,7 @@ export function ZipBordersLayer({
   enabled: boolean;
   /** Assigned ZIPs: captain color + name pill (zip_assignments). */
   tints?: Record<string, ZipTint>;
-  /** Admin assign mode: every visible ZIP becomes tappable. */
+  /** Admin handoff: the ZIP's label pill (only) becomes tappable. */
   onZipTap?: (zip: string) => void;
 }) {
   const map = useMap();
@@ -258,12 +260,11 @@ export function ZipBordersLayer({
           const tint = tints?.[f.zip];
           return (
             <Polygon
-              // Interactivity and style bake into the layer at creation —
-              // key by them so entering assign mode rebuilds the paths.
-              key={`${f.zip}|${tint ? tint.color : "plain"}|${tappable ? "tap" : "inert"}`}
+              // Never interactive: a ZIP's interior must not steal taps from
+              // the turf polygons beneath — the label pill is the ZIP handle.
+              key={`${f.zip}|${tint ? tint.color : "plain"}`}
               positions={f.polys}
-              interactive={tappable}
-              eventHandlers={tappable ? { click: () => tapRef.current?.(f.zip) } : undefined}
+              interactive={false}
               pathOptions={
                 tint
                   ? {
@@ -273,20 +274,15 @@ export function ZipBordersLayer({
                       // A captain's zone reads as a wash of their color.
                       fill: true,
                       fillColor: tint.color,
-                      fillOpacity: tappable ? 0.16 : 0.1,
-                      interactive: tappable,
+                      fillOpacity: 0.1,
+                      interactive: false,
                     }
                   : {
                       color: "#e8f4ff",
                       weight: 1.5,
                       opacity: 0.55,
-                      // fill:false paths only hit-test on the stroke — assign
-                      // mode needs the interior tappable, so give unassigned
-                      // ZIPs a whisper of fill while assigning.
-                      fill: tappable,
-                      fillColor: "#e8f4ff",
-                      fillOpacity: tappable ? 0.05 : 0,
-                      interactive: tappable,
+                      fill: false,
+                      interactive: false,
                     }
               }
             />
@@ -301,10 +297,13 @@ export function ZipBordersLayer({
           if (!tint && zoom < LABEL_MIN_ZOOM) return null;
           return (
             <Marker
-              key={`${f.zip}-label${tint ? `|${tint.color}|${tint.label}` : ""}`}
+              // `interactive` bakes in at creation — key by it so toggling
+              // rebuilds the marker.
+              key={`${f.zip}-label${tint ? `|${tint.color}|${tint.label}` : ""}|${tappable ? "tap" : "inert"}`}
               position={f.labelAt}
               icon={zipLabelIcon(f.zip, tint)}
-              interactive={false}
+              interactive={tappable}
+              eventHandlers={tappable ? { click: () => tapRef.current?.(f.zip) } : undefined}
               zIndexOffset={-600}
             />
           );
