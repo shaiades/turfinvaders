@@ -809,8 +809,9 @@ function NeonMapInner({
   const [zoomLevel, setZoomLevel] = useState<number | null>(null);
   // Viewport (moveend/zoomend) — drives dashed-label culling below.
   const [labelView, setLabelView] = useState<{ bounds: L.LatLngBounds; zoom: number } | null>(null);
-  // Assign mode must see the ZIPs it's assigning, whatever the toggle says.
-  const zipsEnabled = zipOn || !!onZipTap;
+  // ZIP visibility is purely the rail toggle — onZipTap only decides whether
+  // visible label pills open the captain handoff sheet.
+  const zipsEnabled = zipOn;
   // Drawing needs a light map: the vector canvas repaints on every stroke
   // sample, so shed the heavy read-only layers (customer badges, ZIP borders,
   // house bubbles) while the finger is the priority. They come right back

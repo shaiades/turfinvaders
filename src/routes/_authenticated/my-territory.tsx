@@ -27,7 +27,7 @@ import { useZipTints, useZipAssignmentActions } from "@/hooks/useZipAssignments"
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { Crosshair, Pencil, MapPin, MapPinned, Trash2, Users, X, Zap } from "lucide-react";
+import { Crosshair, Pencil, MapPin, Trash2, Users, X, Zap } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/my-territory")({
   head: () => ({ meta: [{ title: "My Territory — Turf Invaders" }] }),
@@ -157,11 +157,11 @@ function ManagerTerritoryView({
   const [listDeleteId, setListDeleteId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [searchBusy, setSearchBusy] = useState(false);
-  // ZIP command: admins tap ZIPs on the map to hand them to captains
-  // (owner ask 2026-09-11); captains see the zones read-only and chunk
-  // their ZIPs into turfs with the drawing flow below.
+  // ZIP command: admins tap a ZIP's label pill to hand the zone to a captain
+  // (owner ask 2026-09-19: pill only — zone interiors must never steal taps
+  // from turfs); captains see the zones read-only and chunk their ZIPs into
+  // turfs with the drawing flow below.
   const isAdmin = role === "owner" || role === "office_staff";
-  const [assignZips, setAssignZips] = useState(false);
   const [zipTarget, setZipTarget] = useState<string | null>(null);
   const [flyTo, setFlyTo] = useState<{
     bounds: [[number, number], [number, number]];
@@ -786,20 +786,6 @@ function ManagerTerritoryView({
               Cancel Drawing
             </Button>
           )}
-          {isAdmin && (
-            <Button
-              variant={assignZips ? "default" : "outline"}
-              onClick={() => {
-                setDrawing(false);
-                setPendingPolygon(null);
-                setAssignZips((v) => !v);
-              }}
-              className="gap-2"
-            >
-              <MapPinned className="w-3.5 h-3.5" />
-              {assignZips ? "Done Assigning" : "Assign ZIPs"}
-            </Button>
-          )}
           {onOpenCrewMap && (
             <Button variant="outline" onClick={onOpenCrewMap} className="gap-2">
               <Users className="w-3.5 h-3.5" /> Crew Map
@@ -808,9 +794,7 @@ function ManagerTerritoryView({
           <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
             {drawing
               ? "Drag on the map to draw an area"
-              : assignZips
-                ? "Tap a ZIP on the map to hand it to a captain"
-                : `${territories.length} area(s) drawn`}
+              : `${territories.length} area(s) drawn`}
           </span>
           {/* Jump the map to a ZIP or a street/place — dispatch mornings
               shouldn't start with a cross-county pan hunt. Street names are
@@ -866,9 +850,9 @@ function ManagerTerritoryView({
             pendingPolygon={pendingPolygon}
             mode={mapMode}
             zipTints={zipZones.tints}
-            onZipTap={assignZips ? (zip) => setZipTarget(zip) : undefined}
+            onZipTap={isAdmin ? (zip) => setZipTarget(zip) : undefined}
             onTerritoryClick={
-              !drawing && !assignZips
+              !drawing
                 ? (id) => {
                     // RepCard historical areas are read-only — the popup shows
                     // their info, but they have no editable turf row.
@@ -880,9 +864,8 @@ function ManagerTerritoryView({
             }
             // Tapping a turf opens an on-map card (current assignee + recent
             // history + an edit button) rather than jumping straight to the
-            // sheet. Disabled mid-draw (a stray tap would fight drawing) and
-            // in assign mode (the tap belongs to the ZIP underneath).
-            territoryPopups={!drawing && !assignZips}
+            // sheet. Disabled mid-draw (a stray tap would fight drawing).
+            territoryPopups={!drawing}
             // Inside the map frame so the fallback follows the map into
             // fullscreen (a sibling would be stranded behind the fixed map).
             overlay={
