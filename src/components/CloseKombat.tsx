@@ -175,7 +175,12 @@ const COMPANY_TILES: TileDef[] = [
     accent: "accent",
     sub: { label: "Reset %", value: (t) => fmtPct(t.resetPct), accent: "accent" },
   },
-  { label: "PM", value: (t) => fmtCount(t.pm), accent: "warning" },
+  {
+    label: "PM",
+    value: (t) => fmtCount(t.pm),
+    accent: "warning",
+    sub: { label: "PM %", value: (t) => fmtPct(t.pmPct), accent: "warning" },
+  },
   {
     label: "Sold",
     value: (t) => fmtCount(t.sold),
@@ -1083,6 +1088,7 @@ function CloseKombatInner({
                           <th className="text-right py-2 px-2 font-normal">ND %</th>
                           <th className="text-right py-2 px-2 font-normal">OL %</th>
                           <th className="text-right py-2 px-2 font-normal">Reset %</th>
+                          <th className="text-right py-2 px-2 font-normal">PM %</th>
                           <th className="text-right py-2 px-2 font-normal">Close %</th>
                           <th className="text-right py-2 px-2 font-normal">Reload %</th>
                           <th className="text-right py-2 px-2 font-normal">Cancel %</th>
@@ -1168,6 +1174,9 @@ function CloseKombatInner({
                             <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-accent">
                               {fmtPct(r.resetPct)}
                             </td>
+                            <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-warning">
+                              {fmtPct(r.pmPct)}
+                            </td>
                             <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
                               {fmtPct(r.closePct)}
                             </td>
@@ -1238,6 +1247,9 @@ function CloseKombatInner({
                           </td>
                           <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
                             {fmtPct(totals.resetPct)}
+                          </td>
+                          <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                            {fmtPct(totals.pmPct)}
                           </td>
                           <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
                             {fmtPct(totals.closePct)}
@@ -1492,6 +1504,7 @@ const KOMBAT_GLOSSARY: GlossarySections = [
     terms: [
       ["Sit %", "(PM + Sold) ÷ Appts."],
       ["Close %", "Sold ÷ (PM + Sold) — lead demos only, reloads excluded."],
+      ["PM %", "PM ÷ Appts — the share of resulted leads that sat but didn't keep the sale."],
       ["Cancel %", "Cancels ÷ (Sold + Cancels) — the share of written sales that died."],
       ["Reload %", "Reload ÷ (Sold + Reload) — the share of all sales that were reloads."],
       ["Leads/Sale", "Appts ÷ Sold, shown as a number (4.5), not a percentage."],
@@ -1584,6 +1597,7 @@ function MobileStatBlock({ s }: { s: KombatTotals }) {
     { label: "ND %", value: fmtPct(s.noDemoPct), className: "text-destructive" },
     { label: "OL %", value: fmtPct(s.olPct), className: "text-warning" },
     { label: "Reset %", value: fmtPct(s.resetPct), className: "text-accent" },
+    { label: "PM %", value: fmtPct(s.pmPct), className: "text-warning" },
     { label: "Reload %", value: fmtPct(s.reloadPct), className: "text-victory" },
     { label: "Cancel %", value: fmtPct(s.cancelPct), className: "text-destructive" },
     { label: "Leads / Sale", value: fmtRatio(s.leadsToSale) },
