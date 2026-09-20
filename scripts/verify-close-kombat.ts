@@ -185,6 +185,7 @@ eq("sitPct = (PM+Sold)/Appts, cancels included via PM", totals.sitPct, demos / a
 eq("noShowPct", totals.noShowPct, 10 / appts);
 eq("noDemoPct", totals.noDemoPct, 8 / appts);
 eq("resetPct", totals.resetPct, 6 / appts);
+eq("pmPct = PM/Appts", totals.pmPct, 8 / appts);
 eq("closePct = Sold/(PM+Sold)", totals.closePct, 5 / demos);
 eq("reloadPct = Reload/(Sold+Reload)", totals.reloadPct, 3 / sales);
 eq("cancelPct = Cancels/(Sold+Cancels)", totals.cancelPct, 2 / (5 + 2));

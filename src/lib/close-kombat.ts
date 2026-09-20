@@ -395,6 +395,8 @@ export type RepStats = {
   closePct: number | null;
   /** Reset ÷ Appts — null until an appt exists. */
   resetPct: number | null;
+  /** PM ÷ Appts — share of resulted leads that sat but didn't keep a sale. */
+  pmPct: number | null;
   /** Reload ÷ (Sold + Reload) (owner, 2026-07-30) — the share of sales that
    *  were reloads, NOT a share of leads; null until a sale exists. */
   reloadPct: number | null;
@@ -435,6 +437,7 @@ const emptyStats = (): Omit<RepStats, "rep"> => ({
   sitPct: null,
   closePct: null,
   resetPct: null,
+  pmPct: null,
   reloadPct: null,
   noDemoPct: null,
   noShowPct: null,
@@ -685,6 +688,7 @@ export function aggregateCloseKombat(
     s.sitPct = s.appts > 0 ? demos / s.appts : null;
     s.closePct = demos > 0 ? s.sold / demos : null;
     s.resetPct = s.appts > 0 ? s.reset / s.appts : null;
+    s.pmPct = s.appts > 0 ? s.pm / s.appts : null;
     s.noDemoPct = s.appts > 0 ? s.noDemo / s.appts : null;
     s.noShowPct = s.appts > 0 ? s.noShow / s.appts : null;
     s.olPct = s.appts > 0 ? s.ol / s.appts : null;
