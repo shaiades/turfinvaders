@@ -27,14 +27,16 @@ export type RepRates = {
 
 export type RepRatesSource = "self" | "company";
 
-/** Structural so both a RepStats row and KombatTotals fit. */
-type RatesInput = {
+/** Structural so a RepStats row, KombatTotals, or a hand-summed baseline
+ *  all fit. Exported for the props that carry one across components. */
+export type RepRatesInput = {
   sold: number;
   reloads: number;
   revenue: number;
   sitPct: number | null;
   closePct: number | null;
 } | null;
+type RatesInput = RepRatesInput;
 
 /** Rates from one trailing aggregate, or null when any leg can't support the
  *  math — a 0% close rate or $0 revenue would back-solve to Infinity. */

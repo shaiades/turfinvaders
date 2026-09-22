@@ -104,19 +104,34 @@ Deno.serve(async (req) => {
     return json({ skipped: "not a monday" });
   }
 
-  // Audience = every sales rep (the Goals tab is theirs alone); multi-role
-  // holders dedupe via the Set.
-  const { data: roleRows } = await admin
+  // Audience = every ACTIVE sales rep (the Goals tab is theirs alone) —
+  // archived reps keep their user_roles rows and possibly stale push
+  // subscriptions, and a terminated rep must not get a weekly goal nudge
+  // forever. supabase-js never throws, so every error is checked (house
+  // rule): a swallowed error here would return a clean-looking
+  // "matched: 0" that masks a total send failure.
+  const { data: roleRows, error: rolesErr } = await admin
     .from("user_roles")
     .select("user_id")
     .eq("role", "sales_rep");
-  const targets = [...new Set((roleRows ?? []).map((r: { user_id: string }) => r.user_id))];
+  if (rolesErr) return json({ error: `user_roles read failed: ${rolesErr.message}` }, 500);
+  const holders = [...new Set((roleRows ?? []).map((r: { user_id: string }) => r.user_id))];
+  if (holders.length === 0) return json({ sent: 0, pruned: 0, failed: 0, matched: 0 });
+
+  const { data: activeRows, error: activeErr } = await admin
+    .from("profiles")
+    .select("id")
+    .in("id", holders)
+    .eq("is_active", true);
+  if (activeErr) return json({ error: `profiles read failed: ${activeErr.message}` }, 500);
+  const targets = (activeRows ?? []).map((r: { id: string }) => r.id);
   if (targets.length === 0) return json({ sent: 0, pruned: 0, failed: 0, matched: 0 });
 
-  const { data: subs } = await admin
+  const { data: subs, error: subsErr } = await admin
     .from("push_subscriptions")
     .select("endpoint, p256dh, auth")
     .in("user_id", targets);
+  if (subsErr) return json({ error: `push_subscriptions read failed: ${subsErr.message}` }, 500);
   const result = await sendToSubs(subs ?? [], {
     title: "🥊 New week — set your goal",
     body: "Set your weekly volume goal and see exactly what it takes to hit it.",
