@@ -142,6 +142,11 @@ export function useMyPinsToday(userId: string | undefined) {
       if (error) throw error;
       return (data ?? []) as FieldPin[];
     },
+    // Own drops land optimistically in this exact cache entry and invalidate
+    // explicitly, so staleness only affects cross-device edits — a remount
+    // on weak cellular should paint today's pins from cache, not refetch.
+    staleTime: 60_000,
+    gcTime: 30 * 60_000,
   });
   return { query, pinsKey };
 }

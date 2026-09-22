@@ -11,7 +11,8 @@ import { ArcadePanel } from "@/components/arcade";
 import { ActiveRun } from "@/components/ActiveRun";
 import { CrewMap } from "@/components/CrewMap";
 import { NeonMap, type Territory, type LatLng } from "@/components/NeonMap";
-import { getLastMapView, setLastMapView } from "@/lib/last-map-view";
+import { getLastMapView, setLastMapView, type MapView } from "@/lib/last-map-view";
+import type { MapDataStatus } from "@/lib/map-status";
 import { simplifyRing } from "@/lib/simplify-polygon";
 import {
   AreaDetailsSheet,
@@ -304,6 +305,11 @@ function ManagerTerritoryView({
       if (error) throw error;
       return (data ?? []) as unknown as TurfRow[];
     },
+    // Realtime invalidation (below) pushes reassignments within ~1s, so a
+    // remount on weak signal serves cached polygons instantly instead of
+    // holding an empty map on the refetch.
+    staleTime: 5 * 60_000,
+    gcTime: 30 * 60_000,
   });
 
   // RepCard 2026 territory history — read-only coverage drawn on the same map.
@@ -339,6 +345,22 @@ function ManagerTerritoryView({
     invalidateKeys: [["turfs"], ["turf_history"], ["zip_assignments"]],
     enabled: !!user?.id,
   });
+
+  // On-map status for the areas fetch — this screen used to fail SILENTLY
+  // (empty Kansas-centered map, "0 area(s) drawn") when turfs couldn't load.
+  const turfDataStatus: MapDataStatus = {
+    state: turfsQuery.isPending ? "loading" : turfsQuery.isError ? "error" : "ok",
+    what: "areas",
+    onRetry: () => void turfsQuery.refetch(),
+  };
+  // Saved-view suppression of the fit-all-turfs frame, FROZEN at first
+  // authed render — same rationale as ActiveRun's savedView: re-evaluating
+  // per render would let the map's own first move suppress the fit forever.
+  const savedViewRef = useRef<MapView | null | undefined>(undefined);
+  if (savedViewRef.current === undefined && user?.id) {
+    savedViewRef.current = getLastMapView(user.id);
+  }
+  const savedView = savedViewRef.current ?? null;
 
   // ZIP zones: tint map for the ZCTA layer + the assignment actions.
   const zipZones = useZipTints();
@@ -767,10 +789,9 @@ function ManagerTerritoryView({
           </div>
           {!drawing ? (
             <Button
-              onClick={() => {
-                setAssignZips(false);
-                setDrawing(true);
-              }}
+              // PR #247 removed Assign-ZIPs mode but left a setAssignZips(false)
+              // call here — a ReferenceError that made this button a no-op.
+              onClick={() => setDrawing(true)}
               className="gap-2"
             >
               <Pencil className="w-3.5 h-3.5" /> Draw New Area
@@ -794,7 +815,12 @@ function ManagerTerritoryView({
           <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
             {drawing
               ? "Drag on the map to draw an area"
-              : `${territories.length} area(s) drawn`}
+              : // "0 area(s) drawn" while the fetch is pending/failed would be
+                // a lie — the on-map pill narrates those states; this label
+                // only counts once the rows actually landed.
+                turfsQuery.isSuccess
+                ? `${territories.length} area(s) drawn`
+                : "…"}
           </span>
           {/* Jump the map to a ZIP or a street/place — dispatch mornings
               shouldn't start with a cross-county pan hunt. Street names are
@@ -834,14 +860,16 @@ function ManagerTerritoryView({
             // history rings under the finger is what crashed iOS Safari.
             // Live turfs stay for context; the coverage returns on release.
             territories={drawing ? territories : mapTerritories}
-            // Skip the initial fit-all-turfs once a view is already saved
-            // (canvassing round-trip) — restore the saved position instead
-            // of zooming back out to frame every turf on every switch.
-            fitPolygons={getLastMapView() ? [] : fitPolygons}
-            center={getLastMapView()?.center}
-            initialZoom={getLastMapView()?.zoom}
-            initialBearing={getLastMapView()?.bearing}
-            onViewChange={setLastMapView}
+            // Skip the initial fit-all-turfs once a view was already saved
+            // AT MOUNT (canvassing round-trip, or yesterday's persisted
+            // spot) — frozen so the map's own moves can't retroactively
+            // suppress the fit once turfs land.
+            fitPolygons={savedView ? [] : fitPolygons}
+            center={savedView?.center}
+            initialZoom={savedView?.zoom}
+            initialBearing={savedView?.bearing}
+            onViewChange={(v) => setLastMapView(v, user?.id)}
+            dataStatus={turfDataStatus}
             pins={[]}
             houses={[]}
             me={me}

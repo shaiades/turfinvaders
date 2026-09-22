@@ -13,7 +13,8 @@ import L from "leaflet";
 import "leaflet-rotate";
 import { LocateFixed, Maximize2, Minimize2, Navigation2 } from "lucide-react";
 import { viewBounds } from "@/lib/map-bounds";
-import type { TileHealth } from "@/lib/map-status";
+import { resolveMapStatus, type MapDataStatus, type TileHealth } from "@/lib/map-status";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { PIN_COLORS, type PinType } from "@/lib/pin-results";
 import { ZipBordersLayer, ZIP_MIN_ZOOM, type ZipTint } from "@/components/ZipBorders";
 import { HouseBubblesLayer, HOUSE_MIN_ZOOM, type OsmHouse } from "@/components/HouseBubbles";
@@ -864,6 +865,7 @@ function NeonMapInner({
   onZipTap,
   crew,
   overlay,
+  dataStatus,
 }: {
   territories: Territory[];
   pins?: FieldPin[];
@@ -912,6 +914,10 @@ function NeonMapInner({
    *  fullscreen. Position them absolute with z-[1000] like before — a
    *  sibling-of-NeonMap overlay gets left behind when the map goes fixed. */
   overlay?: ReactNode;
+  /** The owning screen's data health (turfs/areas query) — feeds the single
+   *  status pill so a slow/failed fetch says so ON the map instead of
+   *  blanking or silently emptying it. */
+  dataStatus?: MapDataStatus;
 }) {
   const [draft, setDraft] = useState<LatLng[]>([]);
   const mapRef = useRef<L.Map | null>(null);
@@ -970,6 +976,17 @@ function NeonMapInner({
   // house bubbles) while the finger is the priority. They come right back
   // when draw mode ends.
   const drawingNow = mode.kind === "draw";
+  // The single status pill's verdict — inputs pre-gated here so the
+  // resolver stays a pure priority stack.
+  const online = useOnlineStatus();
+  const mapStatus = resolveMapStatus({
+    online,
+    data: dataStatus,
+    tileHealth: tiles.health,
+    circlesUnavailable:
+      houseBubbles && circlesUnavailable && zoomLevel != null && zoomLevel >= HOUSE_MIN_ZOOM,
+    zoomHint: houseBubbles && zoomLevel != null && zoomLevel >= 14 && zoomLevel < HOUSE_MIN_ZOOM,
+  });
   // Full screen = CSS takeover (fixed overlay), NOT the Fullscreen API —
   // iPhone Safari doesn't allow element fullscreen and this app lives on
   // phones. z-[1500] sits above page chrome and the z-30 bottom nav but
@@ -1516,35 +1533,61 @@ function NeonMapInner({
           </div>
         )}
 
-        {/* "Every home has a circle" only holds at door-to-door zoom — between
-          neighborhood browse (z14) and there, say so instead of showing a
-          silently circle-less map. One tap fixes it. Bottom-center is free
-          on both bubble screens (armed chips bottom-3, trophy bottom-16
-          left, controls bottom-16 right). */}
-        {houseBubbles && zoomLevel != null && zoomLevel >= 14 && zoomLevel < HOUSE_MIN_ZOOM && (
-          <button
-            type="button"
-            onClick={() => mapRef.current?.setZoom(HOUSE_MIN_ZOOM)}
-            className="absolute bottom-16 left-1/2 -translate-x-1/2 z-[1000] min-h-11 rounded-full border border-neon/60 bg-surface/90 backdrop-blur px-4 font-display text-[10px] uppercase tracking-widest text-neon"
-          >
-            Zoom in for house circles
-          </button>
-        )}
-
-        {/* Overpass down (no/low service) — house circles won't appear, but
-          logging still works: every result chip is always "armed" (one is
-          selected by default), so a tap anywhere on the bare map still drops
-          that result exactly where tapped (useFieldPins.dropAtPoint). Stays
-          up for as long as it's true instead of a toast shown once and
-          gone — the whole point is a crew member glancing back at a bad-
-          service moment still sees it. Same slot as the zoom pill above;
-          the two never show together (this needs HOUSE_MIN_ZOOM, that pill
-          only shows below it). */}
-        {houseBubbles && !drawingNow && circlesUnavailable && zoomLevel != null && zoomLevel >= HOUSE_MIN_ZOOM && (
-          <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-[1000] max-w-[calc(100%-1.5rem)] rounded-full border border-[var(--warning)]/60 bg-surface/90 backdrop-blur px-4 py-2 text-center font-display text-[10px] uppercase tracking-widest text-[var(--warning)]">
-            Circles unavailable — tap the map to log a result
-          </div>
-        )}
+        {/* ONE status pill, bottom-center (free on every screen: armed chips
+          sit bottom-3, trophy bottom-16 left, controls bottom-16 right).
+          resolveMapStatus owns the priority stack — offline > turf data >
+          tiles > circles-down > zoom hint — so a bad-service moment reads
+          as one honest sentence instead of a silently black or empty map.
+          Passive pills are pointer-events-none: logging still works under
+          any of them (a result chip is always armed, a bare-map tap drops
+          it — the circles-down fallback from PR #243). Actionable pills
+          ARE the button: retry refetches turfs, zoom-hint jumps to circle
+          zoom. Hidden while drawing — the stroke owns the screen. */}
+        {/* The aria-live container stays MOUNTED (empty when quiet) — screen
+          readers only announce changes inside a live region that already
+          existed; tearing it down per state would skip announcements. */}
+        <div
+          aria-live="polite"
+          className="absolute bottom-16 left-1/2 -translate-x-1/2 z-[1000] max-w-[calc(100%-1.5rem)] empty:hidden"
+        >
+          {!drawingNow && mapStatus && (
+            mapStatus.kind === "zoom-hint" ? (
+              <button
+                type="button"
+                onClick={() => mapRef.current?.setZoom(HOUSE_MIN_ZOOM)}
+                className="min-h-11 whitespace-nowrap rounded-full border border-neon/60 bg-surface/90 backdrop-blur px-4 font-display text-[10px] uppercase tracking-widest text-neon"
+              >
+                Zoom in for house circles
+              </button>
+            ) : mapStatus.kind === "data-error" ? (
+              <button
+                type="button"
+                onClick={mapStatus.onRetry}
+                className="min-h-11 rounded-full border border-[var(--warning)]/60 bg-surface/90 backdrop-blur px-4 py-2 text-center font-display text-[10px] uppercase tracking-widest text-[var(--warning)]"
+              >
+                Couldn't load {mapStatus.what} — tap to retry
+              </button>
+            ) : (
+              <div
+                className={`pointer-events-none rounded-full border bg-surface/90 backdrop-blur px-4 py-2 text-center font-display text-[10px] uppercase tracking-widest ${
+                  mapStatus.kind === "data-loading" || mapStatus.kind === "tiles-loading"
+                    ? "border-neon/60 text-neon animate-pulse"
+                    : "border-[var(--warning)]/60 text-[var(--warning)]"
+                }`}
+              >
+                {mapStatus.kind === "offline"
+                  ? "No connection — map may not update"
+                  : mapStatus.kind === "data-loading"
+                    ? `Loading ${mapStatus.what}…`
+                    : mapStatus.kind === "weak-signal"
+                      ? "Weak signal — map may be slow"
+                      : mapStatus.kind === "tiles-loading"
+                        ? "Loading map…"
+                        : "Circles unavailable — tap the map to log a result"}
+              </div>
+            )
+          )}
+        </div>
 
         {/* Map controls: fullscreen + compass + ZIP borders toggle + recenter,
           bottom-right */}
