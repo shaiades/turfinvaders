@@ -1543,12 +1543,15 @@ function NeonMapInner({
           it — the circles-down fallback from PR #243). Actionable pills
           ARE the button: retry refetches turfs, zoom-hint jumps to circle
           zoom. Hidden while drawing — the stroke owns the screen. */}
-        {!drawingNow && mapStatus && (
-          <div
-            aria-live="polite"
-            className="absolute bottom-16 left-1/2 -translate-x-1/2 z-[1000] max-w-[calc(100%-1.5rem)]"
-          >
-            {mapStatus.kind === "zoom-hint" ? (
+        {/* The aria-live container stays MOUNTED (empty when quiet) — screen
+          readers only announce changes inside a live region that already
+          existed; tearing it down per state would skip announcements. */}
+        <div
+          aria-live="polite"
+          className="absolute bottom-16 left-1/2 -translate-x-1/2 z-[1000] max-w-[calc(100%-1.5rem)] empty:hidden"
+        >
+          {!drawingNow && mapStatus && (
+            mapStatus.kind === "zoom-hint" ? (
               <button
                 type="button"
                 onClick={() => mapRef.current?.setZoom(HOUSE_MIN_ZOOM)}
@@ -1582,9 +1585,9 @@ function NeonMapInner({
                         ? "Loading map…"
                         : "Circles unavailable — tap the map to log a result"}
               </div>
-            )}
-          </div>
-        )}
+            )
+          )}
+        </div>
 
         {/* Map controls: fullscreen + compass + ZIP borders toggle + recenter,
           bottom-right */}

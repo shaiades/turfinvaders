@@ -18,9 +18,29 @@ const TTL_MS = 24 * 60 * 60 * 1000;
 const WRITE_DEBOUNCE_MS = 500;
 const keyFor = (uid: string) => `ti_last_map_view:v1:${uid}`;
 
-let last: MapView | null = null;
+let last: (MapView & { at: number }) | null = null;
 let lastUid: string | null = null;
 let writeTimer: number | null = null;
+let pendingWrite: { v: MapView; userId: string } | null = null;
+let flushHooked = false;
+
+// The debounce would drop the last pan if the rep swipes the app away
+// within 500ms — pagehide is the reliable iOS Safari/PWA teardown signal
+// (unload never fires there), so flush synchronously on the way out.
+function hookFlush() {
+  if (flushHooked || typeof window === "undefined") return;
+  flushHooked = true;
+  window.addEventListener("pagehide", () => {
+    if (!pendingWrite) return;
+    const { v, userId } = pendingWrite;
+    pendingWrite = null;
+    try {
+      localStorage.setItem(keyFor(userId), JSON.stringify({ ...v, at: Date.now() }));
+    } catch {
+      /* best-effort */
+    }
+  });
+}
 
 function sane(v: unknown): v is MapView & { at: number } {
   if (typeof v !== "object" || v === null) return false;
@@ -45,28 +65,40 @@ export function getLastMapView(userId?: string): MapView | null {
   // A user switch on shared devices must never leak the previous rep's spot.
   if (userId && lastUid !== null && lastUid !== userId) last = null;
   if (userId) lastUid = userId;
-  if (last) return last;
+  // TTL applies to the in-memory value too — an iOS tab resumed days later
+  // must not sidestep the shelf life the storage path enforces.
+  if (last && Date.now() - last.at <= TTL_MS) {
+    return { center: last.center, zoom: last.zoom, bearing: last.bearing };
+  }
   if (!userId || typeof window === "undefined") return null;
   try {
     const raw = localStorage.getItem(keyFor(userId));
     if (!raw) return null;
     const v = JSON.parse(raw) as unknown;
     if (!sane(v) || Date.now() - v.at > TTL_MS) return null;
-    last = { center: { lat: v.center.lat, lng: v.center.lng }, zoom: v.zoom, bearing: v.bearing };
-    return last;
+    last = {
+      center: { lat: v.center.lat, lng: v.center.lng },
+      zoom: v.zoom,
+      bearing: v.bearing,
+      at: v.at,
+    };
+    return { center: last.center, zoom: last.zoom, bearing: last.bearing };
   } catch {
     return null; // private mode / corrupt JSON — same as no saved view
   }
 }
 
 export function setLastMapView(v: MapView, userId?: string): void {
-  last = v;
+  last = { ...v, at: Date.now() };
   if (!userId) return;
   lastUid = userId;
   if (typeof window === "undefined") return;
+  hookFlush();
+  pendingWrite = { v, userId };
   if (writeTimer != null) window.clearTimeout(writeTimer);
   writeTimer = window.setTimeout(() => {
     writeTimer = null;
+    pendingWrite = null;
     try {
       localStorage.setItem(keyFor(userId), JSON.stringify({ ...v, at: Date.now() }));
     } catch {
