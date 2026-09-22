@@ -31,6 +31,7 @@ import {
   formatWeekRange,
   laMonthStartISO,
   laTodayISO,
+  laWeekStartISO,
   monthStartISO,
   nextMonthStartISO,
 } from "@/lib/dates";
@@ -448,19 +449,109 @@ function CloseKombatInner({
     },
     staleTime: 15_000,
   });
-  const goalsOfficeCards = useMemo(
-    () => (goalsCardsQuery.data ?? []).filter((c) => matches(c.office_location)),
-    [goalsCardsQuery.data, matches],
-  );
+  // The Goals tab runs on the UNFILTERED goals fetch throughout, with its
+  // OWN matcher (review 2026-09-22, two catches from the same root):
+  //  · the page-level `matcher` is built from the Stats tab's fetch pool, so
+  //    a rep who browsed Stats to a range predating them would lose their
+  //    identity here and see $0/company rates for a week they really closed;
+  //  · the sticky office picker scopes officeCards, and a rep's own goal
+  //    numbers must never move with a company-viewing filter (nor may an
+  //    office-scoped figure hide under a "Company avg" label).
+  const goalsCards = goalsCardsQuery.data;
+  const goalsMatcher = useMemo(() => {
+    const names = new Set<string>();
+    for (const c of goalsCards ?? []) {
+      for (const n of countReps(c)) names.add(n);
+      for (const n of volumeReps(c)) names.add(n);
+    }
+    return buildRepMatcher(displayName, [...names]);
+  }, [displayName, goalsCards]);
   const weekRow = useMemo(() => {
-    if (!isRep || !matcher.matched) return null;
-    const { reps: weekReps } = aggregateCloseKombat(goalsOfficeCards, {
+    if (!isRep || !goalsMatcher.matched) return null;
+    const { reps: weekReps } = aggregateCloseKombat(goalsCards ?? [], {
       start: goalsWeek.weekStartISO,
       end: goalsWeek.weekEndISO,
     });
-    const idx = weekReps.findIndex((r) => matcher.isMe(r.rep));
+    const idx = weekReps.findIndex((r) => goalsMatcher.isMe(r.rep));
     return idx >= 0 ? weekReps[idx] : null;
-  }, [isRep, matcher, goalsOfficeCards, goalsWeek.weekStartISO, goalsWeek.weekEndISO]);
+  }, [isRep, goalsMatcher, goalsCards, goalsWeek.weekStartISO, goalsWeek.weekEndISO]);
+
+  // Trailing 2 COMPLETED weeks (owner, 2026-09-22): the back-solve's rates
+  // come from here, never from the week in progress — Monday morning has no
+  // current-week data, and Monday morning is exactly when goals get set.
+  // Zero extra queries: the goals fetch is padded ±42d, which fully covers
+  // weekStart−14 → weekStart−1.
+  const trailingStart = addDaysISO(goalsWeek.weekStartISO, -14);
+  const trailingEnd = addDaysISO(goalsWeek.weekStartISO, -1);
+  const trailingRow = useMemo(() => {
+    if (!isRep || !goalsMatcher.matched) return null;
+    const { reps: tReps } = aggregateCloseKombat(goalsCards ?? [], {
+      start: trailingStart,
+      end: trailingEnd,
+    });
+    const idx = tReps.findIndex((r) => goalsMatcher.isMe(r.rep));
+    return idx >= 0 ? tReps[idx] : null;
+  }, [isRep, goalsMatcher, goalsCards, trailingStart, trailingEnd]);
+  // Company fallback baseline, summed over PER-REP rows rather than the
+  // card-level totals (review 2026-09-22): per-rep revenue is SPLIT volume
+  // while totals revenue is full contract price, and a rep's own progress is
+  // their split share — mixing the two would overstate the avg deal a new
+  // rep should divide their goal by. Summing rep rows keeps the semantics
+  // identical to a rep's own trailing numbers. Null until the fetch settles
+  // so a loading tab can never claim "not enough data" as fact.
+  const trailingCompanyBaseline = useMemo(() => {
+    if (!isRep || !goalsCardsQuery.isSuccess) return null;
+    const { reps: tReps } = aggregateCloseKombat(goalsCards ?? [], {
+      start: trailingStart,
+      end: trailingEnd,
+    });
+    let appts = 0,
+      demos = 0,
+      sold = 0,
+      reloads = 0,
+      revenue = 0;
+    for (const r of tReps) {
+      appts += r.appts;
+      demos += r.pm + r.sold;
+      sold += r.sold;
+      reloads += r.reloads;
+      revenue += r.revenue;
+    }
+    return {
+      sold,
+      reloads,
+      revenue,
+      sitPct: appts > 0 ? demos / appts : null,
+      closePct: demos > 0 ? sold / demos : null,
+    };
+  }, [isRep, goalsCardsQuery.isSuccess, goalsCards, trailingStart, trailingEnd]);
+
+  // Monday ritual (owner, 2026-09-22): a rep's FIRST Close Kombat open of a
+  // new LA week lands on the Goals tab — once per week per device, stamped
+  // BEFORE navigating so a storage failure can never loop (CloseKombatIntro's
+  // rule). A push deep-link (?tab=goals) or any non-Stats landing stamps
+  // without navigating: the rep has seen goals this week, so a later
+  // Stats-first open must not yank them again. Previews never stamp or
+  // navigate — View As keeps the owner's own device stamps out of this.
+  const weeklyNudgeDone = useRef(false);
+  useEffect(() => {
+    if (weeklyNudgeDone.current) return;
+    if (!isRep || isPreview || !user?.id) return;
+    weeklyNudgeDone.current = true;
+    const key = `ti_ck_goals_week_v1:${user.id}`;
+    const thisWeek = laWeekStartISO();
+    try {
+      if (window.localStorage.getItem(key) === thisWeek) return;
+      window.localStorage.setItem(key, thisWeek);
+    } catch {
+      return; // can't persist → never redirect, or every open would yank them
+    }
+    if (pageTab === "stats") setPageTab("goals");
+    // pageTab/setPageTab are read, not reacted to — the nudge fires once when
+    // the signed-in rep state first settles, and re-running on tab changes
+    // would re-yank a rep who navigated away.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRep, isPreview, user?.id]);
 
   const cardById = useMemo(() => {
     const m = new Map<string, BlockCard>();
@@ -1438,8 +1529,12 @@ function CloseKombatInner({
             <CloseKombatGoalsTab
               userId={user?.id}
               weekLabel={formatWeekRange(goalsWeek.weekStart, goalsWeek.weekEnd)}
-              weekLoading={goalsCardsQuery.isLoading}
+              weekStatus={
+                goalsCardsQuery.isError ? "error" : goalsCardsQuery.isSuccess ? "ready" : "loading"
+              }
               weekRow={weekRow}
+              trailingRow={trailingRow}
+              trailingCompanyBaseline={trailingCompanyBaseline}
               isPreview={isPreview}
               previewName={isPreview ? displayName : null}
             />

@@ -19,7 +19,8 @@
     "verify:overtime": "npx tsx scripts/verify-overtime.ts",
     "verify:piggy": "npx tsx scripts/verify-piggy.ts",
     "verify:snap": "npx tsx scripts/verify-house-snap.ts",
-    "verify:housestore": "npx tsx scripts/verify-house-store.ts"
+    "verify:housestore": "npx tsx scripts/verify-house-store.ts",
+    "verify:repgoals": "npx tsx scripts/verify-rep-goals.ts"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",

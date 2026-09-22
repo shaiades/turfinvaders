@@ -625,7 +625,7 @@ export type Database = {
           team_id: string | null
           updated_at: string
           weekly_income_goal: number
-          weekly_sales_goal: number | null
+          weekly_volume_goal: number | null
           xp: number
         }
         Insert: {
@@ -656,7 +656,7 @@ export type Database = {
           team_id?: string | null
           updated_at?: string
           weekly_income_goal?: number
-          weekly_sales_goal?: number | null
+          weekly_volume_goal?: number | null
           xp?: number
         }
         Update: {
@@ -687,7 +687,7 @@ export type Database = {
           team_id?: string | null
           updated_at?: string
           weekly_income_goal?: number
-          weekly_sales_goal?: number | null
+          weekly_volume_goal?: number | null
           xp?: number
         }
         Relationships: [

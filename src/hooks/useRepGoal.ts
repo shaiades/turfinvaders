@@ -1,11 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
-/** The sales rep's own weekly sales-count goal — profiles.weekly_sales_goal
- *  (20260917150100). Mirrors useCanvasserProfile's useSaveGoals shape, but
- *  scoped to the one column reps need rather than the canvasser goal trio. */
+/** The sales rep's weekly VOLUME goal in dollars — profiles.weekly_volume_goal
+ *  (20260922230000, superseding the count goal). Mirrors useCanvasserProfile's
+ *  useSaveGoals shape, scoped to the one column reps need. */
 
-export const repGoalKey = (userId: string) => ["rep_weekly_sales_goal", userId] as const;
+export const repGoalKey = (userId: string) => ["rep_weekly_volume_goal", userId] as const;
 
 export function useRepGoal(userId: string | undefined) {
   return useQuery({
@@ -15,27 +15,27 @@ export function useRepGoal(userId: string | undefined) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("profiles")
-        .select("weekly_sales_goal")
+        .select("weekly_volume_goal")
         .eq("id", userId!)
         .maybeSingle();
       if (error) throw error;
-      return (data?.weekly_sales_goal ?? null) as number | null;
+      return (data?.weekly_volume_goal ?? null) as number | null;
     },
   });
 }
 
-/** Goal input clamps identically everywhere it's edited — mirrors clampGoal
- *  in useCanvasserProfile.ts. */
-export const clampSalesGoal = (draft: string) => Math.max(0, Math.round(Number(draft) || 0));
+/** Goal input clamps identically everywhere it's edited — whole dollars,
+ *  never negative (mirrors clampGoal in useCanvasserProfile.ts). */
+export const clampVolumeGoal = (draft: string) => Math.max(0, Math.round(Number(draft) || 0));
 
 export function useSaveRepGoal(userId: string | undefined) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (weekly_sales_goal: number) => {
+    mutationFn: async (weekly_volume_goal: number) => {
       if (!userId) throw new Error("Not signed in");
       const { error } = await supabase
         .from("profiles")
-        .update({ weekly_sales_goal })
+        .update({ weekly_volume_goal })
         .eq("id", userId);
       if (error) throw error;
     },
