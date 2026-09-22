@@ -1239,7 +1239,7 @@ function FleetDispatchInner({
       {!readOnly && <WebhookUrlBanner />}
       {!readOnly && <MondayTokenCard />}
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
         <TotalTile label="Submitted" value={totals.sub} accent="neon" />
         <TotalTile label="Confirmed" value={totals.conf} accent="victory" />
         <TotalTile label="Future" value={totals.fut} accent="accent" />
@@ -2537,7 +2537,16 @@ function TotalTile({
       <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
         {label}
       </div>
-      <div className={`font-display text-2xl mt-1 ${TILE_TEXT[accent]}`}>{value}</div>
+      {/* Fluid size per column count (2 / 4 / 7 across the breakpoints): a
+          full "$1,234,567" overflows the card's overflow-hidden at a fixed
+          text-2xl — this was silently clipping the month Volume tile's last
+          digits even before the Cancels tile — so the value scales with the
+          viewport instead, capped at the old 1.5rem. */}
+      <div
+        className={`font-display text-[clamp(0.95rem,5vw,1.5rem)] sm:text-[clamp(0.95rem,2.6vw,1.5rem)] lg:text-[clamp(0.95rem,1.45vw,1.5rem)] whitespace-nowrap mt-1 ${TILE_TEXT[accent]}`}
+      >
+        {value}
+      </div>
       {sub && <div className="text-[10px] font-mono text-muted-foreground mt-0.5">{sub}</div>}
     </ArcadeCard>
   );
