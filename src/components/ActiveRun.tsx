@@ -26,7 +26,7 @@ import type { MapDataStatus } from "@/lib/map-status";
 import { PinActionSheet } from "@/components/PinActionSheet";
 import { HouseResultSheet } from "@/components/HouseResultSheet";
 import { FieldStandingsSheet } from "@/components/FieldStandingsSheet";
-import type { OsmHouse } from "@/components/HouseBubbles";
+import { prefetchTurfHouses, type OsmHouse } from "@/components/HouseBubbles";
 import { ArcadePanel } from "@/components/arcade";
 import { toast } from "sonner";
 import { rewardToast } from "@/lib/reward-toast";
@@ -333,6 +333,20 @@ export function ActiveRun({
         .filter((p) => p.length >= 3),
     [turfsQuery.data],
   );
+
+  // Preload the day's houses over morning WiFi/parking-lot signal, into the
+  // disk store, so weak mid-turf cellular serves circles from cache.
+  // Canvassers only (a captain's query returns EVERY turf — prefetching all
+  // of them would hammer the public Overpass mirrors); 4s delay cedes the
+  // network to the visible viewport's own fetch; the sig-set inside
+  // prefetchTurfHouses dedupes realtime turf refetches.
+  useEffect(() => {
+    if (isCaptain || !turfsQuery.isSuccess || lockPolygons.length === 0) return;
+    const t = window.setTimeout(() => {
+      void prefetchTurfHouses(lockPolygons);
+    }, 4_000);
+    return () => window.clearTimeout(t);
+  }, [isCaptain, turfsQuery.isSuccess, lockPolygons]);
 
   const armedResult = KNOCK_RESULTS.find((r) => r.type === active);
 

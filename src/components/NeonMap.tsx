@@ -13,7 +13,12 @@ import L from "leaflet";
 import "leaflet-rotate";
 import { LocateFixed, Maximize2, Minimize2, Navigation2 } from "lucide-react";
 import { viewBounds } from "@/lib/map-bounds";
-import { resolveMapStatus, type MapDataStatus, type TileHealth } from "@/lib/map-status";
+import {
+  resolveMapStatus,
+  type HouseFetchStatus,
+  type MapDataStatus,
+  type TileHealth,
+} from "@/lib/map-status";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { PIN_COLORS, type PinType } from "@/lib/pin-results";
 import { ZipBordersLayer, ZIP_MIN_ZOOM, type ZipTint } from "@/components/ZipBorders";
@@ -316,6 +321,51 @@ function FitPolygons({
     // maxZoom 17: a single tiny turf must not open at rooftop zoom 20.
     map.fitBounds(b.pad(paddingRatio), { padding: [20, 20], animate: false, maxZoom: 17 });
   }, [map, polygons, paddingRatio]);
+  return null;
+}
+
+/** The zoom-trap fix: the turf fit (maxZoom 17, so big turfs open at z15/16)
+ *  used to disable FollowMe's snap-to-street (initialSnap={!hasFit}), and a
+ *  rep could walk their whole shift below HOUSE_MIN_ZOOM with no circles.
+ *  One-shot: once a GPS fix lands INSIDE the turf while zoomed out, give the
+ *  overview beat (~2s from mount, so the rep sees their whole turf), then
+ *  fly to street level at their position. A hand-drag (tracking off via
+ *  TrackingBreaker) cancels it for the session — a deliberate pinch-out
+ *  must never be fought; the zoom pill and recenter button remain. */
+function ArrivalZoom({
+  me,
+  tracking,
+  polygons,
+  paused,
+}: {
+  me: LatLng | null | undefined;
+  tracking: boolean;
+  polygons: LatLng[][];
+  paused: boolean;
+}) {
+  const map = useMap();
+  const done = useRef(false);
+  const mountedAt = useRef(Date.now());
+  useEffect(() => {
+    if (paused || done.current || !me || !tracking) return;
+    if (map.getZoom() >= HOUSE_MIN_ZOOM) {
+      done.current = true;
+      return;
+    }
+    if (!polygons.some((p) => p.length >= 3 && pointInPolygon(me, p))) return;
+    const wait = Math.max(0, 2000 - (Date.now() - mountedAt.current));
+    const t = window.setTimeout(() => {
+      if (done.current || map.getZoom() >= HOUSE_MIN_ZOOM) return;
+      done.current = true;
+      // Instant, not flyTo: FollowMe's next GPS tick panTo would CANCEL an
+      // in-flight fly mid-animation and strand the rep at an intermediate
+      // zoom (~z16) with the one-shot already spent. The 2s overview beat
+      // above provides the "see your turf first" feel; the jump itself must
+      // be atomic.
+      map.setView([me.lat, me.lng], HOUSE_MIN_ZOOM, { animate: false });
+    }, wait);
+    return () => window.clearTimeout(t);
+  }, [map, me?.lat, me?.lng, me, tracking, paused, polygons]);
   return null;
 }
 
@@ -958,10 +1008,11 @@ function NeonMapInner({
   // Current zoom — drives the "zoom in for house circles" pill on bubble
   // screens (below HOUSE_MIN_ZOOM the map is silently circle-less otherwise).
   const [zoomLevel, setZoomLevel] = useState<number | null>(null);
-  // Overpass down/offline (low-service field crew) — drives the persistent
-  // "circles unavailable" banner below, replacing a toast that only fired
-  // once per session and was easy to miss.
-  const [circlesUnavailable, setCirclesUnavailable] = useState(false);
+  // Overpass health (low-service field crew) — drives the status pill's
+  // circles states; the retry token clears HouseBubbles' failure cooldown
+  // and refetches now (FlyTo key pattern).
+  const [circlesStatus, setCirclesStatus] = useState<HouseFetchStatus>("ok");
+  const [houseRetryToken, setHouseRetryToken] = useState(0);
   // Imagery-layer health: failing/stalling tiles flip lowData, which sheds
   // the satellite layer so the transportation labels over the dark container
   // become a lite street map instead of a silent black rectangle.
@@ -983,9 +1034,11 @@ function NeonMapInner({
     online,
     data: dataStatus,
     tileHealth: tiles.health,
-    circlesUnavailable:
-      houseBubbles && circlesUnavailable && zoomLevel != null && zoomLevel >= HOUSE_MIN_ZOOM,
-    zoomHint: houseBubbles && zoomLevel != null && zoomLevel >= 14 && zoomLevel < HOUSE_MIN_ZOOM,
+    circles:
+      houseBubbles && zoomLevel != null && zoomLevel >= HOUSE_MIN_ZOOM ? circlesStatus : "ok",
+    // Any zoom below circle level gets the hint (it used to cut off under
+    // z14, leaving a silently circle-less map at neighborhood browse).
+    zoomHint: houseBubbles && zoomLevel != null && zoomLevel < HOUSE_MIN_ZOOM,
   });
   // Full screen = CSS takeover (fixed overlay), NOT the Fullscreen API —
   // iPhone Safari doesn't allow element fullscreen and this app lives on
@@ -1295,7 +1348,8 @@ function NeonMapInner({
               enabled
               pins={pins}
               onHouseTap={onHouseTap}
-              onAvailabilityChange={(available) => setCirclesUnavailable(!available)}
+              onStatusChange={setCirclesStatus}
+              retryToken={houseRetryToken}
             />
           )}
           {hasFit && <FitPolygons polygons={fitPolygons!} />}
@@ -1308,6 +1362,16 @@ function NeonMapInner({
                 initialSnap={!hasFit}
                 paused={mode.kind === "draw"}
               />
+              {/* Only the turf-fit path is zoom-trapped (the saved-view and
+                no-fit paths snap to street via initialSnap). */}
+              {hasFit && houseBubbles && (
+                <ArrivalZoom
+                  me={me}
+                  tracking={tracking}
+                  polygons={fitPolygons!}
+                  paused={mode.kind === "draw"}
+                />
+              )}
             </>
           ) : (
             allPoints.length > 0 && !hasFit && <FitBounds points={allPoints} />
@@ -1554,10 +1618,24 @@ function NeonMapInner({
             mapStatus.kind === "zoom-hint" ? (
               <button
                 type="button"
-                onClick={() => mapRef.current?.setZoom(HOUSE_MIN_ZOOM)}
+                // From far out, a bare setZoom lands on map-center nowhere —
+                // jump to the rep's own position when we have one.
+                onClick={() =>
+                  me
+                    ? mapRef.current?.setView([me.lat, me.lng], HOUSE_MIN_ZOOM)
+                    : mapRef.current?.setZoom(HOUSE_MIN_ZOOM)
+                }
                 className="min-h-11 whitespace-nowrap rounded-full border border-neon/60 bg-surface/90 backdrop-blur px-4 font-display text-[10px] uppercase tracking-widest text-neon"
               >
                 Zoom in for house circles
+              </button>
+            ) : mapStatus.kind === "circles-unavailable" ? (
+              <button
+                type="button"
+                onClick={() => setHouseRetryToken((t) => t + 1)}
+                className="min-h-11 rounded-full border border-[var(--warning)]/60 bg-surface/90 backdrop-blur px-4 py-2 text-center font-display text-[10px] uppercase tracking-widest text-[var(--warning)]"
+              >
+                Circles unavailable — tap here to retry · map taps still log
               </button>
             ) : mapStatus.kind === "data-error" ? (
               <button
@@ -1570,9 +1648,9 @@ function NeonMapInner({
             ) : (
               <div
                 className={`pointer-events-none rounded-full border bg-surface/90 backdrop-blur px-4 py-2 text-center font-display text-[10px] uppercase tracking-widest ${
-                  mapStatus.kind === "data-loading" || mapStatus.kind === "tiles-loading"
-                    ? "border-neon/60 text-neon animate-pulse"
-                    : "border-[var(--warning)]/60 text-[var(--warning)]"
+                  mapStatus.kind === "offline" || mapStatus.kind === "weak-signal"
+                    ? "border-[var(--warning)]/60 text-[var(--warning)]"
+                    : "border-neon/60 text-neon animate-pulse"
                 }`}
               >
                 {mapStatus.kind === "offline"
@@ -1583,7 +1661,7 @@ function NeonMapInner({
                       ? "Weak signal — map may be slow"
                       : mapStatus.kind === "tiles-loading"
                         ? "Loading map…"
-                        : "Circles unavailable — tap the map to log a result"}
+                        : "Finding house circles…"}
               </div>
             )
           )}
