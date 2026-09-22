@@ -13,6 +13,7 @@ import L from "leaflet";
 import "leaflet-rotate";
 import { LocateFixed, Maximize2, Minimize2, Navigation2 } from "lucide-react";
 import { viewBounds } from "@/lib/map-bounds";
+import type { TileHealth } from "@/lib/map-status";
 import { PIN_COLORS, type PinType } from "@/lib/pin-results";
 import { ZipBordersLayer, ZIP_MIN_ZOOM, type ZipTint } from "@/components/ZipBorders";
 import { HouseBubblesLayer, HOUSE_MIN_ZOOM, type OsmHouse } from "@/components/HouseBubbles";
@@ -349,6 +350,125 @@ function ZoomWatcher({ onZoom }: { onZoom: (z: number) => void }) {
     };
   }, [map]);
   return null;
+}
+
+// Tile-health thresholds. Degraded = ≥3 tile errors in the trailing 15s with
+// zero successes, OR no first paint within 8s of the layer starting to load.
+// Sustained degradation for 10s drops the heavy imagery layer (low-data
+// mode); a 60s timer or the browser's `online` event re-tries it.
+const TILE_ERR_WINDOW_MS = 15_000;
+const TILE_DEGRADED_ERRORS = 3;
+const TILE_FIRST_PAINT_STALL_MS = 8_000;
+const LOW_DATA_AFTER_MS = 10_000;
+const LOW_DATA_RETRY_MS = 60_000;
+
+/** Tile-health telemetry + low-data fallback for the imagery basemap.
+ *
+ * Per-tile bookkeeping lies under Leaflet's abort semantics (a tile aborted
+ * by pan/zoom fires neither tileload nor tileerror), so pending state comes
+ * from the layer's own loading/load pair, and error/success rates from
+ * rolling timestamp windows evaluated on a 1s tick — no per-event renders,
+ * and time-based rules (the first-paint stall) fall out of the tick for
+ * free. Handlers attach to the imagery layer only: it's the heavy layer
+ * that goes missing on weak signal, and one layer keeps the signal clean.
+ */
+function useTileHealth() {
+  const [health, setHealth] = useState<TileHealth>("unknown");
+  const [lowData, setLowData] = useState(false);
+  const box = useRef({
+    loading: false,
+    epochStartAt: 0,
+    everLoaded: false,
+    loads: [] as number[],
+    errors: [] as number[],
+    degradedSince: 0,
+    lowData: false,
+    lowDataAt: 0,
+  }).current;
+
+  const eventHandlers = useMemo(
+    () => ({
+      loading: () => {
+        box.loading = true;
+        if (!box.epochStartAt) box.epochStartAt = Date.now();
+      },
+      load: () => {
+        box.loading = false;
+      },
+      tileload: () => {
+        box.everLoaded = true;
+        box.loads.push(Date.now());
+        if (box.loads.length > 40) box.loads.splice(0, 20);
+      },
+      tileerror: () => {
+        box.errors.push(Date.now());
+        if (box.errors.length > 40) box.errors.splice(0, 20);
+      },
+    }),
+    [box],
+  );
+
+  useEffect(() => {
+    const retryImagery = () => {
+      if (!box.lowData) return;
+      box.lowData = false;
+      box.lowDataAt = 0;
+      setLowData(false);
+    };
+    const tick = () => {
+      const now = Date.now();
+      if (box.lowData) {
+        // Imagery is unmounted — no events arrive. Health stays "degraded"
+        // (that's why we're here) until the retry remounts the layer.
+        setHealth("degraded");
+        if (now - box.lowDataAt > LOW_DATA_RETRY_MS) retryImagery();
+        return;
+      }
+      const errs = box.errors.filter((t) => now - t < TILE_ERR_WINDOW_MS).length;
+      const okays = box.loads.filter((t) => now - t < TILE_ERR_WINDOW_MS).length;
+      const stalled =
+        box.loading &&
+        !box.everLoaded &&
+        box.epochStartAt > 0 &&
+        now - box.epochStartAt > TILE_FIRST_PAINT_STALL_MS;
+      const degraded = (errs >= TILE_DEGRADED_ERRORS && okays === 0) || stalled;
+      const next: TileHealth = degraded
+        ? "degraded"
+        : box.loading
+          ? "loading"
+          : box.everLoaded
+            ? "ok"
+            : box.epochStartAt
+              ? "loading"
+              : "unknown";
+      setHealth((prev) => (prev === next ? prev : next));
+      if (!degraded) {
+        box.degradedSince = 0;
+        return;
+      }
+      if (!box.degradedSince) box.degradedSince = now;
+      if (now - box.degradedSince > LOW_DATA_AFTER_MS) {
+        // Reset the epoch so the remount on retry re-arms the stall rule.
+        box.loading = false;
+        box.epochStartAt = 0;
+        box.everLoaded = false;
+        box.loads.length = 0;
+        box.errors.length = 0;
+        box.degradedSince = 0;
+        box.lowData = true;
+        box.lowDataAt = now;
+        setLowData(true);
+      }
+    };
+    const id = window.setInterval(tick, 1000);
+    window.addEventListener("online", retryImagery);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener("online", retryImagery);
+    };
+  }, [box]);
+
+  return { eventHandlers, health, lowData };
 }
 
 /** Report viewport bounds + zoom on move/zoom end — drives dashed-label
@@ -811,6 +931,10 @@ function NeonMapInner({
   // "circles unavailable" banner below, replacing a toast that only fired
   // once per session and was easy to miss.
   const [circlesUnavailable, setCirclesUnavailable] = useState(false);
+  // Imagery-layer health: failing/stalling tiles flip lowData, which sheds
+  // the satellite layer so the transportation labels over the dark container
+  // become a lite street map instead of a silent black rectangle.
+  const tiles = useTileHealth();
   // Viewport (moveend/zoomend) — drives dashed-label culling below.
   const [labelView, setLabelView] = useState<{ bounds: L.LatLngBounds; zoom: number } | null>(null);
   // ZIP visibility is purely the rail toggle — onZipTap only decides whether
@@ -1049,24 +1173,58 @@ function NeonMapInner({
             mapRef.current = instance;
           }}
         >
-          <TileLayer
-            attribution="&copy; Esri"
-            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-            maxNativeZoom={19}
-            maxZoom={20}
-          />
+          {/* Shared weak-network tuning on all basemap layers:
+            crossOrigin="anonymous" keeps responses non-opaque so sw.js can
+            cache them; keepBuffer holds off-screen tiles so panning shows
+            map, not container; updateWhenIdle + updateWhenZooming={false}
+            stop mid-gesture requests that get aborted anyway — on 1-bar
+            cellular every wasted request starves the ones that matter. */}
+          {!tiles.lowData && (
+            <TileLayer
+              attribution="&copy; Esri"
+              url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+              // Overzoom z19-20 from z18 tiles: 4x fewer requests exactly at
+              // house-working zooms, and tiles seen on the way in get reused.
+              // Esri's z19 imagery is patchy in the suburbs anyway.
+              maxNativeZoom={18}
+              maxZoom={20}
+              // Explicit stacking: a low-data retry remounts this layer
+              // after the label layers, and add-order would put satellite
+              // imagery ON TOP of the street names without it.
+              zIndex={1}
+              crossOrigin="anonymous"
+              keepBuffer={4}
+              updateWhenIdle
+              updateWhenZooming={false}
+              eventHandlers={tiles.eventHandlers}
+            />
+          )}
           {/* Street names on the imagery (Jorge's ask, 2026-09-12) — Esri's
             transportation reference layer, the standard hybrid pairing. Its
-            tiles label streets progressively as you zoom in. */}
+            tiles label streets progressively as you zoom in. Native z19 kept:
+            street-name text is what canvassers actually read. */}
           <TileLayer
             url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}"
             maxNativeZoom={19}
             maxZoom={20}
+            zIndex={2}
+            crossOrigin="anonymous"
+            keepBuffer={4}
+            updateWhenIdle
+            updateWhenZooming={false}
           />
+          {/* City/neighborhood names for orientation — overview zooms only.
+            At z15+ it duplicated Transportation and cost a third request per
+            grid cell right where canvassers live. */}
           <TileLayer
             url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
-            maxNativeZoom={19}
-            maxZoom={20}
+            maxNativeZoom={14}
+            maxZoom={14}
+            zIndex={3}
+            crossOrigin="anonymous"
+            keepBuffer={4}
+            updateWhenIdle
+            updateWhenZooming={false}
           />
           <InvalidateOnMount />
           <AttributionPrefixOff />
