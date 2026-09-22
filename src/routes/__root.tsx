@@ -9,6 +9,7 @@ import appCss from "../styles.css?url";
 import leafletCss from "leaflet/dist/leaflet.css?url";
 import "../lib/fonts";
 import { reportLovableError } from "../lib/lovable-error-reporting";
+import { registerServiceWorker } from "../lib/register-sw";
 import { supabase } from "@/integrations/supabase/client";
 import { useTheme } from "@/hooks/useTheme";
 import { Toaster } from "sonner";
@@ -82,6 +83,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     links: [
       { rel: "stylesheet", href: appCss },
       { rel: "stylesheet", href: leafletCss },
+      // Basemap host: at field-cellular RTTs the DNS+TCP+TLS handshake alone
+      // can cost seconds — start it before Leaflet asks for the first tile.
+      { rel: "preconnect", href: "https://server.arcgisonline.com", crossOrigin: "anonymous" },
+      { rel: "dns-prefetch", href: "https://server.arcgisonline.com" },
       { rel: "icon", type: "image/png", href: "/favicon.png" },
       { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
       { rel: "manifest", href: "/site.webmanifest" },
@@ -109,6 +114,9 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const router = useRouter();
   const { theme } = useTheme();
+  useEffect(() => {
+    registerServiceWorker();
+  }, []);
   useEffect(() => {
     // supabase-js re-emits SIGNED_IN on tab focus / session recovery, not
     // just at real logins. Re-running every route guard on each focus gave

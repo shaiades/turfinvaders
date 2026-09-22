@@ -13,6 +13,7 @@ import L from "leaflet";
 import "leaflet-rotate";
 import { LocateFixed, Maximize2, Minimize2, Navigation2 } from "lucide-react";
 import { viewBounds } from "@/lib/map-bounds";
+import type { TileHealth } from "@/lib/map-status";
 import { PIN_COLORS, type PinType } from "@/lib/pin-results";
 import { ZipBordersLayer, ZIP_MIN_ZOOM, type ZipTint } from "@/components/ZipBorders";
 import { HouseBubblesLayer, HOUSE_MIN_ZOOM, type OsmHouse } from "@/components/HouseBubbles";
@@ -349,6 +350,150 @@ function ZoomWatcher({ onZoom }: { onZoom: (z: number) => void }) {
     };
   }, [map]);
   return null;
+}
+
+// Tile-health thresholds. Degraded (weak signal) = errors dominating
+// successes in the trailing window — stale-if-error cache hits keep some
+// cells painting on a dead link, so "any success" must not mask failure —
+// OR a loading cycle making no progress (8s before the first-ever paint,
+// the cold-open field symptom; 15s after, for hung requests that never
+// error). Low-data mode (shed the imagery layer) needs TOTAL failure:
+// with mixed cached/uncached cells the cached satellite squares are worth
+// keeping. Sustained 10s to engage; 60s timer or `online` to retry.
+const TILE_ERR_WINDOW_MS = 15_000;
+const TILE_DEGRADED_ERRORS = 3;
+const TILE_FIRST_PAINT_STALL_MS = 8_000;
+const TILE_STALL_MS = 15_000;
+const LOW_DATA_AFTER_MS = 10_000;
+const LOW_DATA_RETRY_MS = 60_000;
+
+/** Tile-health telemetry + low-data fallback for the imagery basemap.
+ *
+ * Per-tile bookkeeping lies under Leaflet's abort semantics (a tile aborted
+ * by pan/zoom fires neither tileload nor tileerror), so pending state comes
+ * from the layer's own loading/load pair, and error/success rates from
+ * rolling timestamp windows evaluated on a 1s tick — no per-event renders,
+ * and time-based rules (the first-paint stall) fall out of the tick for
+ * free. Handlers attach to the imagery layer only: it's the heavy layer
+ * that goes missing on weak signal, and one layer keeps the signal clean.
+ */
+function useTileHealth() {
+  const [health, setHealth] = useState<TileHealth>("unknown");
+  const [lowData, setLowData] = useState(false);
+  const box = useRef({
+    loading: false,
+    epochStartAt: 0,
+    cycleStartAt: 0,
+    lastLoadAt: 0,
+    everLoaded: false,
+    loads: [] as number[],
+    errors: [] as number[],
+    degradedSince: 0,
+    lowData: false,
+    lowDataAt: 0,
+  }).current;
+
+  const eventHandlers = useMemo(
+    () => ({
+      loading: () => {
+        if (!box.loading) box.cycleStartAt = Date.now();
+        box.loading = true;
+        if (!box.epochStartAt) box.epochStartAt = Date.now();
+      },
+      load: () => {
+        box.loading = false;
+      },
+      tileload: () => {
+        box.everLoaded = true;
+        box.lastLoadAt = Date.now();
+        box.loads.push(box.lastLoadAt);
+        if (box.loads.length > 40) box.loads.splice(0, 20);
+      },
+      tileerror: () => {
+        box.errors.push(Date.now());
+        if (box.errors.length > 40) box.errors.splice(0, 20);
+      },
+    }),
+    [box],
+  );
+
+  useEffect(() => {
+    // Full reset — engage and retry both need it: events can still fire in
+    // the beat between the engage-tick and React actually unmounting the
+    // layer, and a stale epochStartAt would instantly re-trip the stall
+    // rule on the retry's remount.
+    const resetEpoch = () => {
+      box.loading = false;
+      box.epochStartAt = 0;
+      box.cycleStartAt = 0;
+      box.lastLoadAt = 0;
+      box.everLoaded = false;
+      box.loads.length = 0;
+      box.errors.length = 0;
+      box.degradedSince = 0;
+    };
+    const retryImagery = () => {
+      if (!box.lowData) return;
+      box.lowData = false;
+      box.lowDataAt = 0;
+      resetEpoch();
+      setLowData(false);
+    };
+    const tick = () => {
+      const now = Date.now();
+      if (box.lowData) {
+        // Imagery is unmounted — no events arrive. Health stays "degraded"
+        // (that's why we're here) until the retry remounts the layer.
+        setHealth("degraded");
+        if (now - box.lowDataAt > LOW_DATA_RETRY_MS) retryImagery();
+        return;
+      }
+      const errs = box.errors.filter((t) => now - t < TILE_ERR_WINDOW_MS).length;
+      const okays = box.loads.filter((t) => now - t < TILE_ERR_WINDOW_MS).length;
+      // No-progress watchdog, anchored to the later of cycle start / last
+      // tile landed — catches both the cold-open hang and mid-session hangs
+      // that never produce error events (no SW controlling yet).
+      const anchor = Math.max(box.cycleStartAt, box.lastLoadAt);
+      const stallAfter = box.everLoaded ? TILE_STALL_MS : TILE_FIRST_PAINT_STALL_MS;
+      const stalled = box.loading && anchor > 0 && now - anchor > stallAfter;
+      // Weak signal = errors dominate; total failure = nothing landing at
+      // all. Stale-if-error cache hits count as successes, so only total
+      // failure justifies shedding the imagery layer (cached satellite
+      // cells are worth keeping in mixed coverage).
+      const failing = errs >= TILE_DEGRADED_ERRORS && errs >= okays * 2;
+      const totalFailure = (errs >= TILE_DEGRADED_ERRORS && okays === 0) || stalled;
+      const degraded = failing || stalled;
+      const next: TileHealth = degraded
+        ? "degraded"
+        : box.loading
+          ? "loading"
+          : box.everLoaded
+            ? "ok"
+            : box.epochStartAt
+              ? "loading"
+              : "unknown";
+      setHealth((prev) => (prev === next ? prev : next));
+      if (!totalFailure) {
+        box.degradedSince = 0;
+        return;
+      }
+      if (!box.degradedSince) box.degradedSince = now;
+      if (now - box.degradedSince > LOW_DATA_AFTER_MS) {
+        resetEpoch();
+        box.lowData = true;
+        box.lowDataAt = now;
+        setLowData(true);
+      }
+    };
+    const id = window.setInterval(tick, 1000);
+    window.addEventListener("online", retryImagery);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener("online", retryImagery);
+    };
+  }, [box]);
+
+  return { eventHandlers, health, lowData };
 }
 
 /** Report viewport bounds + zoom on move/zoom end — drives dashed-label
@@ -811,6 +956,10 @@ function NeonMapInner({
   // "circles unavailable" banner below, replacing a toast that only fired
   // once per session and was easy to miss.
   const [circlesUnavailable, setCirclesUnavailable] = useState(false);
+  // Imagery-layer health: failing/stalling tiles flip lowData, which sheds
+  // the satellite layer so the transportation labels over the dark container
+  // become a lite street map instead of a silent black rectangle.
+  const tiles = useTileHealth();
   // Viewport (moveend/zoomend) — drives dashed-label culling below.
   const [labelView, setLabelView] = useState<{ bounds: L.LatLngBounds; zoom: number } | null>(null);
   // ZIP visibility is purely the rail toggle — onZipTap only decides whether
@@ -1049,24 +1198,62 @@ function NeonMapInner({
             mapRef.current = instance;
           }}
         >
-          <TileLayer
-            attribution="&copy; Esri"
-            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-            maxNativeZoom={19}
-            maxZoom={20}
-          />
+          {/* Shared weak-network tuning on all basemap layers:
+            crossOrigin="anonymous" keeps responses non-opaque so sw.js can
+            cache them; keepBuffer holds off-screen tiles so panning shows
+            map, not container; updateWhenIdle + updateWhenZooming={false}
+            stop mid-gesture requests that get aborted anyway — on 1-bar
+            cellular every wasted request starves the ones that matter. */}
+          {!tiles.lowData && (
+            <TileLayer
+              attribution="&copy; Esri"
+              url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+              // Overzoom z19-20 from z18 tiles: 4x fewer requests exactly at
+              // house-working zooms, and tiles seen on the way in get reused.
+              // Esri's z19 imagery is patchy in the suburbs anyway.
+              maxNativeZoom={18}
+              maxZoom={20}
+              // Explicit stacking: a low-data retry remounts this layer
+              // after the label layers, and add-order would put satellite
+              // imagery ON TOP of the street names without it.
+              zIndex={1}
+              crossOrigin="anonymous"
+              keepBuffer={4}
+              updateWhenIdle
+              updateWhenZooming={false}
+              eventHandlers={tiles.eventHandlers}
+            />
+          )}
           {/* Street names on the imagery (Jorge's ask, 2026-09-12) — Esri's
             transportation reference layer, the standard hybrid pairing. Its
-            tiles label streets progressively as you zoom in. */}
+            tiles label streets progressively as you zoom in. Native z19 kept:
+            street-name text is what canvassers actually read. */}
           <TileLayer
+            // Same attribution string as the imagery layer — Leaflet
+            // ref-counts duplicates (shows once), and this layer staying
+            // mounted keeps "© Esri" on screen in low-data mode.
+            attribution="&copy; Esri"
             url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}"
             maxNativeZoom={19}
             maxZoom={20}
+            zIndex={2}
+            crossOrigin="anonymous"
+            keepBuffer={4}
+            updateWhenIdle
+            updateWhenZooming={false}
           />
+          {/* City/neighborhood names for orientation — overview zooms only.
+            At z15+ it duplicated Transportation and cost a third request per
+            grid cell right where canvassers live. */}
           <TileLayer
             url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
-            maxNativeZoom={19}
-            maxZoom={20}
+            maxNativeZoom={14}
+            maxZoom={14}
+            zIndex={3}
+            crossOrigin="anonymous"
+            keepBuffer={4}
+            updateWhenIdle
+            updateWhenZooming={false}
           />
           <InvalidateOnMount />
           <AttributionPrefixOff />
