@@ -484,9 +484,11 @@ function FleetDispatchInner({
   );
   const clockQ = useQuery({
     queryKey: ["fleet_dispatch", "clock", clockDates],
-    // The 60s poll exists to fill the morning Day board as people punch in;
-    // completed-day presence on Week/Month rides realtime invalidation.
-    refetchInterval: tab === "day" && isViewingToday ? 60_000 : false,
+    // Punch dots show TODAY's live state on every tab (owner ask 2026-09-22),
+    // so the light poll runs everywhere — without it a Week-tab dot would
+    // stay green after the punch-out (time_entries isn't in the realtime
+    // publication).
+    refetchInterval: 60_000,
     queryFn: async () => getClockPresence({ data: { dates: clockDates } }),
   });
   const clockedByDay = useMemo(() => {
@@ -495,18 +497,21 @@ function FleetDispatchInner({
     return m;
   }, [clockQ.data]);
   // Live punch state per row (audit C-7): the presence fetch already knows
-  // who punched today; openNow says who is STILL on the clock. Only
-  // meaningful on the Day tab looking at today.
+  // who punched today; openNow says who is STILL on the clock. The dot is a
+  // TODAY-fact on every range (owner ask 2026-09-22: "who is working right
+  // now" shouldn't vanish on Week/Month or a pinned past day) — the viewed
+  // range scopes the numbers, never this mark, and the tooltips already
+  // speak in real-today terms ("right now", "punched today").
   const openNowSet = useMemo(() => new Set(clockQ.data?.openNow ?? []), [clockQ.data]);
   const clockStateFor = useMemo(() => {
-    if (tab !== "day" || !isViewingToday || !clockQ.isSuccess) return undefined;
-    const punched = clockedByDay.get(dayISO) ?? new Set<string>();
+    if (!clockQ.isSuccess) return undefined;
+    const punched = clockedByDay.get(today) ?? new Set<string>();
     return (ids: string[]): "on" | "off" | null => {
       if (ids.some((id) => openNowSet.has(id))) return "on";
       if (ids.some((id) => punched.has(id))) return "off";
       return null;
     };
-  }, [tab, isViewingToday, clockQ.isSuccess, clockedByDay, dayISO, openNowSet]);
+  }, [clockQ.isSuccess, clockedByDay, today, openNowSet]);
   /** Presence gates apply only once the fetch SUCCEEDED. On error (local dev
    *  has no service key; a deploy-window blip) the roster fails OPEN to
    *  everyone and the donut list fails SAFE to nobody — missing data must
@@ -1662,22 +1667,27 @@ function DispatchRow({
       } ${dim ? "opacity-60" : ""}`}
     >
       <span className="text-sm truncate flex items-center gap-1.5 min-w-0">
-        {dim ? (
+        {clockState === "on" ? (
+          // Green beats the dim hollow dot: on a pinned past day a rep can be
+          // dim for THAT day yet on the clock right now — "working right now"
+          // is the mark the owner scans for, so it always shows.
+          <span
+            aria-label="On the clock"
+            title="On the clock right now"
+            className="h-2 w-2 shrink-0 rounded-full bg-[var(--victory)] shadow-[0_0_6px_var(--victory)]"
+          />
+        ) : dim ? (
           <span
             aria-label="Not clocked in"
             title="No clock-in today — showing from production/field activity"
             className="h-1.5 w-1.5 shrink-0 rounded-full border border-muted-foreground/60"
           />
         ) : (
-          clockState && (
+          clockState === "off" && (
             <span
-              aria-label={clockState === "on" ? "On the clock" : "Clocked out"}
-              title={clockState === "on" ? "On the clock right now" : "Punched today · clocked out"}
-              className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                clockState === "on"
-                  ? "bg-[var(--victory)] shadow-[0_0_6px_var(--victory)]"
-                  : "bg-muted-foreground/50"
-              }`}
+              aria-label="Clocked out"
+              title="Punched today · clocked out"
+              className="h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/50"
             />
           )
         )}
