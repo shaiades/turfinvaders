@@ -807,6 +807,10 @@ function NeonMapInner({
   // Current zoom — drives the "zoom in for house circles" pill on bubble
   // screens (below HOUSE_MIN_ZOOM the map is silently circle-less otherwise).
   const [zoomLevel, setZoomLevel] = useState<number | null>(null);
+  // Overpass down/offline (low-service field crew) — drives the persistent
+  // "circles unavailable" banner below, replacing a toast that only fired
+  // once per session and was easy to miss.
+  const [circlesUnavailable, setCirclesUnavailable] = useState(false);
   // Viewport (moveend/zoomend) — drives dashed-label culling below.
   const [labelView, setLabelView] = useState<{ bounds: L.LatLngBounds; zoom: number } | null>(null);
   // ZIP visibility is purely the rail toggle — onZipTap only decides whether
@@ -1083,7 +1087,12 @@ function NeonMapInner({
             from eating polygon vertices. */}
           {!drawingNow && <CustomerHomesLayer tappable />}
           {houseBubbles && !drawingNow && (
-            <HouseBubblesLayer enabled pins={pins} onHouseTap={onHouseTap} />
+            <HouseBubblesLayer
+              enabled
+              pins={pins}
+              onHouseTap={onHouseTap}
+              onAvailabilityChange={(available) => setCirclesUnavailable(!available)}
+            />
           )}
           {hasFit && <FitPolygons polygons={fitPolygons!} />}
           {follow ? (
@@ -1333,6 +1342,21 @@ function NeonMapInner({
           >
             Zoom in for house circles
           </button>
+        )}
+
+        {/* Overpass down (no/low service) — house circles won't appear, but
+          logging still works: every result chip is always "armed" (one is
+          selected by default), so a tap anywhere on the bare map still drops
+          that result exactly where tapped (useFieldPins.dropAtPoint). Stays
+          up for as long as it's true instead of a toast shown once and
+          gone — the whole point is a crew member glancing back at a bad-
+          service moment still sees it. Same slot as the zoom pill above;
+          the two never show together (this needs HOUSE_MIN_ZOOM, that pill
+          only shows below it). */}
+        {houseBubbles && !drawingNow && circlesUnavailable && zoomLevel != null && zoomLevel >= HOUSE_MIN_ZOOM && (
+          <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-[1000] max-w-[calc(100%-1.5rem)] rounded-full border border-[var(--warning)]/60 bg-surface/90 backdrop-blur px-4 py-2 text-center font-display text-[10px] uppercase tracking-widest text-[var(--warning)]">
+            Circles unavailable — tap the map to log a result
+          </div>
         )}
 
         {/* Map controls: fullscreen + compass + ZIP borders toggle + recenter,

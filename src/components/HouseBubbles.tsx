@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Marker, useMap } from "react-leaflet";
 import L from "leaflet";
 import { useQuery } from "@tanstack/react-query";
-import { toast } from "sonner";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { viewBounds } from "@/lib/map-bounds";
@@ -80,7 +79,6 @@ const QUADRANT_SPACING_MS = 300;
 const coveredBounds: L.LatLngBounds[] = [];
 const MAX_COVERED = 64; // splits add up to 5 rects per dense view
 let lastFailAt = 0;
-let failNoticeShown = false;
 
 /** One Overpass round trip; returns RAW per-class element counts (before
  *  client filters — filtered elements consumed print budget too, and the
@@ -248,11 +246,18 @@ export function HouseBubblesLayer({
   enabled,
   pins = [],
   onHouseTap,
+  onAvailabilityChange,
 }: {
   enabled: boolean;
   /** Today's pins — they color the bubbles of the houses they landed on. */
   pins?: FieldPin[];
   onHouseTap?: (house: OsmHouse) => void;
+  /** Fires false the moment an Overpass fetch fails (offline/low-service, or
+   *  the public endpoints are just down) and true again the next time one
+   *  succeeds — drives NeonMap's persistent "circles unavailable" banner so
+   *  the fallback (arm a result, tap the bare map) stays visible for as
+   *  long as it's actually true, not just a toast shown once per session. */
+  onAvailabilityChange?: (available: boolean) => void;
 }) {
   const map = useMap();
   const [renderTick, setRenderTick] = useState(0);
@@ -262,6 +267,8 @@ export function HouseBubblesLayer({
   const debounceRef = useRef<number | null>(null);
   const tapRef = useRef(onHouseTap);
   tapRef.current = onHouseTap;
+  const availabilityRef = useRef(onAvailabilityChange);
+  availabilityRef.current = onAvailabilityChange;
 
   useEffect(() => {
     if (!enabled) return;
@@ -293,19 +300,15 @@ export function HouseBubblesLayer({
         inflightRef.current = want;
         try {
           await fetchHouses(want, ac.signal, () => setRenderTick((t) => t + 1));
+          availabilityRef.current?.(true);
         } catch (e) {
           if (!(e instanceof DOMException && e.name === "AbortError")) {
-            // Bubbles simply don't appear; armed bare-map taps keep working.
-            // One honest sentence per session, canvass screen only (spectate
-            // has no armed chips to point at).
+            // Bubbles simply don't appear; armed bare-map taps keep working —
+            // NeonMap's banner (driven by onAvailabilityChange) says so for
+            // as long as it stays true, canvass screen only (spectate has no
+            // armed chips to point at).
             console.warn("[house-bubbles] fetch failed", e);
-            if (!failNoticeShown && tapRef.current && map.getZoom() >= HOUSE_MIN_ZOOM) {
-              failNoticeShown = true;
-              toast.warning(
-                "House circles can't load right now — arm a result and tap the house on the map to log it.",
-                { id: "house-bubbles-offline", duration: 6000 },
-              );
-            }
+            if (tapRef.current) availabilityRef.current?.(false);
           }
         } finally {
           // A finished (or failed) fetch is no longer in flight — a stale
