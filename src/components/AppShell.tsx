@@ -20,6 +20,7 @@ import { AppMenu } from "@/components/AppMenu";
 import { CanvasserTutorial, startCanvasserTutorial } from "@/components/tutorial/CanvasserTutorial";
 import { WelcomeAnimation, isWelcomeAnimationForced } from "@/components/WelcomeAnimation";
 import { CloseKombatIntro, isCloseKombatIntroForced } from "@/components/CloseKombatIntro";
+import { EodRecapFx, isEodRecapForced } from "@/components/EodRecapFx";
 import { CLOSE_KOMBAT_ROLES, ROLE_LABEL, canUseViewAs, privilegeRole } from "@/lib/roles";
 import {
   LogOut,
@@ -105,6 +106,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   // First-sign-in arcade intro: while it's checking/playing, hold the page
   // tour back so the two first-open moments can't stack.
   const [introActive, setIntroActive] = useState(false);
+  // End-of-day recap cutscene: same hold for the tour. Play order on a
+  // morning open that owes both: intro → EOD recap → page tour.
+  const [eodActive, setEodActive] = useState(false);
   // Compare against the COLLAPSED real role: a confirmer's `role` is always
   // "canvasser" (privilegeRole in useAuth) and must not read as a View As
   // override.
@@ -587,6 +591,17 @@ export function AppShell({ children }: { children: ReactNode }) {
           <WelcomeAnimation userId={user.id} onActiveChange={setIntroActive} />
         ))}
 
+      {/* End-of-day recap — every non-rep role, once per COMPLETED report day
+          (the 6 PM PT lock; owner ask 2026-09-22): the day's top canvassers,
+          then the doughnut zone. Gated on the REAL role like the intro;
+          `?eod_demo=1` previews with canned names from any account and never
+          stamps. `heldBack` sequences it after the morning intro. */}
+      {user &&
+        (isEodRecapForced() ||
+          (realRole !== null && privilegeRole(realRole) !== "sales_rep")) && (
+          <EodRecapFx userId={user.id} heldBack={introActive} onActiveChange={setEodActive} />
+        )}
+
       {/* Per-page discovery tips: each screen's mini-tour auto-pops the first
           time this account opens it; the header "?" replays the current
           screen's tips. Canvasser tier + captains + sales reps (the kombat
@@ -599,7 +614,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           const tourRole = privilegeRole(realRole);
           return (
             (tourRole === "canvasser" || tourRole === "captain" || tourRole === "sales_rep") &&
-            !introActive && (
+            !introActive &&
+            !eodActive && (
               <CanvasserTutorial
                 userId={user.id}
                 missionRoute={tourRole === "captain" ? "/mission" : "/dashboard"}

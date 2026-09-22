@@ -163,7 +163,7 @@ export const PAGE_TOURS: Record<TourPageId, TutorialStep[]> = {
       id: "wrap",
       target: "wrap-header",
       title: "Daily Wrap-Up",
-      body: "The end-of-day report: today's winners, who took a doughnut (a zero), and the week's point bosses. It locks at 7 PM.",
+      body: "The end-of-day report: today's winners, who took a doughnut (a zero), and the week's point bosses. It locks at 6 PM.",
     },
   ],
   // The closer's board (rep audit R-7) — MK-money dialect, never canvasser

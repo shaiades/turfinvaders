@@ -7,9 +7,7 @@ import { GlossarySheet } from "@/components/GlossarySheet";
 import { AlertTriangle, Info, Trophy } from "lucide-react";
 import { addDaysISO, laTodayISO, reportDates } from "@/lib/dates";
 import { formatCurrency } from "@/lib/utils";
-import { getClockPresence } from "@/lib/dispatch.functions";
-import { isRecentlyActive, lastActiveMap, SUSPENSION_RECENCY_DAYS } from "@/lib/suspension";
-import { isLeadSourceName } from "@/lib/lead-sources";
+import { useClockPresence, useDailyWrapRows, type WrapRow } from "@/hooks/useDailyWrapRows";
 import { useAuth } from "@/hooks/useAuth";
 import { sumLogCounters, useTodayLogs } from "@/hooks/useDailyLogs";
 import { usePiggyBank } from "@/hooks/usePiggyBank";
@@ -24,21 +22,10 @@ export const Route = createFileRoute("/_authenticated/daily-wrap")({
   component: DailyWrap,
 });
 
-type Row = {
-  id: string;
-  name: string;
-  todayLeads: number;
-  ydayLeads: number;
-  /** Leads on the day BEFORE yday — the second judged day of the zero lists. */
-  yday2Leads: number;
-  weekPoints: number;
-  recent: boolean;
-  tracked: boolean;
-  /** false = archived/removed — off the zero lists, but earned awards stay. */
-  active: boolean;
-  /** First-week rookie with no credited day yet — off the zero lists. */
-  graced: boolean;
-};
+/** Row building lives in useDailyWrapRows — shared with the end-of-day recap
+ *  cutscene (EodRecapFx) so both surfaces agree on who counts and what a
+ *  day's leads are. */
+type Row = WrapRow;
 
 /** One doughnut card for both zero lists — the freezer (2+ zeros, red) and
  *  the fresh doughnuts (1 zero, neutral) rendered the same markup twice.
@@ -165,86 +152,21 @@ function DailyWrap() {
   // Zero lists judge only FINISHED report days (owner, 2026-09-11: today
   // must not count toward suspension until the day is over). The two judged
   // days are `yday` and the day before it — pre-lock that's yesterday and
-  // the day prior; after the 7 PM roll `yday` IS the just-finished day, so
+  // the day prior; after the 6 PM roll `yday` IS the just-finished day, so
   // today joins the lists exactly at the lock. Clock-in gate (owner,
   // 2026-09-11): nobody lands on a zero list for a day they never punched
   // in; both judged days are real PT calendar days, so presence is checked
   // on them directly. Presence rides the server fn because canvassers only
   // read their own time_entries. Until it loads (or if it fails — local dev
   // has no service key) the zero lists stay EMPTY: missing data must never
-  // flag a person.
+  // flag a person. Row building + presence both live in useDailyWrapRows,
+  // shared with the EodRecapFx cutscene (keep the selectors below in
+  // lockstep with its winner/donut predicates).
   const yday2 = addDaysISO(yday, -1);
   const clockDates = useMemo(() => [...new Set([yday, yday2])], [yday, yday2]);
-  const clockQ = useQuery({
-    queryKey: ["daily_wrap", "clock", clockDates],
-    queryFn: async () => getClockPresence({ data: { dates: clockDates } }),
-  });
-  const clockReady = clockQ.isSuccess;
-  const clockedSets = useMemo(() => {
-    const m = new Map<string, Set<string>>();
-    for (const [d, ids] of Object.entries(clockQ.data?.byDate ?? {})) m.set(d, new Set(ids));
-    return m;
-  }, [clockQ.data]);
+  const { clockReady, clockedOn } = useClockPresence(clockDates);
 
-  const { data: rows = [], isLoading } = useQuery({
-    queryKey: ["daily_wrap", today],
-    queryFn: async (): Promise<Row[]> => {
-      // Fetch back far enough to judge 7-day recency even on a Monday/Tuesday,
-      // when wkStart is only 0–1 days back.
-      const cutoff = addDaysISO(today, -SUSPENSION_RECENCY_DAYS);
-      const metricsStart = cutoff < wkStart ? cutoff : wkStart;
-      const [profilesR, metricsR] = await Promise.all([
-        supabase
-          .from("profiles")
-          .select("id, display_name, status, created_at, suspension_tracked, is_active")
-          .neq("status", "inactive"),
-        supabase
-          .from("daily_metrics")
-          .select("canvasser_id, metric_date, leads_confirmed, leads_submitted, pitch_missed, sales")
-          .gte("metric_date", metricsStart),
-      ]);
-      const profiles = profilesR.data ?? [];
-      const metrics = metricsR.data ?? [];
-
-      const byUser = new Map<string, { today: number; yday: number; yday2: number; pts: number }>();
-      for (const m of metrics) {
-        const rec = byUser.get(m.canvasser_id) ?? { today: 0, yday: 0, yday2: 0, pts: 0 };
-        const leads = (m.leads_confirmed ?? 0) + (m.leads_submitted ?? 0);
-        if (m.metric_date === today) rec.today += leads;
-        if (m.metric_date === yday) rec.yday += leads;
-        if (m.metric_date === yday2) rec.yday2 += leads;
-        // Points stay week-scoped even though the fetch may reach further back.
-        if (m.metric_date >= wkStart) rec.pts += (m.pitch_missed ?? 0) * 1 + (m.sales ?? 0) * 2;
-        byUser.set(m.canvasser_id, rec);
-      }
-      const lastMap = lastActiveMap(metrics);
-      // Pseudo lead-source channels (Job Walk, Upsell, …) live in profiles
-      // but are the office's credit, never canvassers (owner rule, PR
-      // #133/#172) — they must not appear as winners, bosses, or doughnuts.
-      const people = profiles.filter((p) => !isLeadSourceName(p.display_name));
-      return people.map((p) => {
-        const r = byUser.get(p.id) ?? { today: 0, yday: 0, yday2: 0, pts: 0 };
-        return {
-          id: p.id,
-          name: p.display_name ?? "Unknown",
-          todayLeads: r.today,
-          ydayLeads: r.yday,
-          yday2Leads: r.yday2,
-          weekPoints: r.pts,
-          recent: isRecentlyActive(today, [p.id], lastMap, (p.created_at ?? "").slice(0, 10)),
-          tracked: p.suspension_tracked !== false,
-          // Archive writes is_active, never the status enum — an archived rep
-          // must leave the zero lists immediately but keep any earned awards.
-          active: p.is_active !== false,
-          // 1-week rookie grace (owner decision 2026-09-09) — display-side only;
-          // real suspension tracking in lib/suspension.ts is untouched. The
-          // metrics fetch reaches at least `cutoff` back, so lastMap covers a
-          // graced rookie's whole tenure.
-          graced: (p.created_at ?? "").slice(0, 10) >= cutoff && !lastMap.has(p.id),
-        };
-      });
-    },
-  });
+  const { data: rows = [], isLoading } = useDailyWrapRows(today);
 
   const { suspension, doughnuts, winners, club3, bosses7 } = useMemo(() => {
     // `recent` keeps week-gone reps out of the freezer (see src/lib/suspension.ts);
@@ -254,10 +176,9 @@ function DailyWrap() {
     // All four gate only the zero lists — awards a rep earned before removal
     // stay on the wrap. Both lists judge ONLY the two finished report days
     // (yday, yday2) — an in-progress day never counts (owner, 2026-09-11);
-    // it joins at the 7 PM lock, when yday becomes the just-finished day.
+    // it joins at the 6 PM lock, when yday becomes the just-finished day.
     // Clock-in gates likewise touch only the zero lists: a zero day counts
     // only when it was actually punched.
-    const clockedOn = (id: string, day: string) => clockedSets.get(day)?.has(id) ?? false;
     const suspension = rows.filter(
       (r) =>
         r.ydayLeads === 0 &&
@@ -285,7 +206,7 @@ function DailyWrap() {
     const club3 = rows.filter((r) => r.weekPoints >= 3 && r.weekPoints < 7).sort((a, b) => b.weekPoints - a.weekPoints);
     const bosses7 = rows.filter((r) => r.weekPoints >= 7).sort((a, b) => b.weekPoints - a.weekPoints);
     return { suspension, doughnuts, winners, club3, bosses7 };
-  }, [rows, clockReady, clockedSets, yday, yday2]);
+  }, [rows, clockReady, clockedOn, yday, yday2]);
 
   if (isLoading) return <div className="text-sm text-muted-foreground">Loading daily wrap…</div>;
 
@@ -305,7 +226,7 @@ function DailyWrap() {
             animation: "suspend-pulse 1.8s ease-in-out infinite",
           }}
         >
-          ⚡ Live Preview · Report finalizes at 7:00 PM Pacific
+          ⚡ Live Preview · Report finalizes at 6:00 PM Pacific
         </div>
       )}
       <div data-tour="wrap-header">
@@ -320,7 +241,7 @@ function DailyWrap() {
           </button>
         </div>
         <p className="text-xs text-muted-foreground mt-1 font-display uppercase tracking-widest">
-          End of Day Report · Locks at 7:00 PM Pacific
+          End of Day Report · Locks at 6:00 PM Pacific
         </p>
         <p className="text-[10px] text-muted-foreground mt-0.5 font-display uppercase tracking-widest">
           Report date {today} (PT) · Prior {yday}
@@ -388,7 +309,7 @@ function DailyWrap() {
         )}
         {!locked && (
           <p className="mt-3 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-            Finished days only — today can't earn a zero until the 7 PM lock.
+            Finished days only — today can't earn a zero until the 6 PM lock.
           </p>
         )}
       </section>

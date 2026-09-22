@@ -147,7 +147,7 @@ export function formatWeekRange(start: Date, end: Date): string {
   return `${sM} ${sD}, ${start.getFullYear()} – ${eM} ${eD}, ${end.getFullYear()}`;
 }
 
-// --- Report-date clock (7 PM PT lock) ---
+// --- Report-date clock (6 PM PT lock) ---
 
 const LA_DATE_HOUR_PARTS = new Intl.DateTimeFormat("en-US", {
   timeZone: LA_TZ,
@@ -159,9 +159,11 @@ const LA_DATE_HOUR_PARTS = new Intl.DateTimeFormat("en-US", {
 });
 
 /**
- * The report-date is the PT calendar date whose 7:00 PM boundary is the "lock".
- * Before 7 PM PT → report-date = current PT date (live preview of today's totals).
- * At/after 7 PM PT → report-date rolls forward: today's totals seed the NEXT PT date.
+ * The report-date is the PT calendar date whose 6:00 PM boundary is the "lock"
+ * (moved from 7 PM, owner ask 2026-09-22 — the shift's auto clock-out already
+ * lands at 6 PM, and the end-of-day recap + push key off this same boundary).
+ * Before 6 PM PT → report-date = current PT date (live preview of today's totals).
+ * At/after 6 PM PT → report-date rolls forward: today's totals seed the NEXT PT date.
  * `wkStart` is the LA Monday of the report-date's week.
  */
 export function reportDates(): { today: string; yday: string; wkStart: string; locked: boolean } {
@@ -170,7 +172,7 @@ export function reportDates(): { today: string; yday: string; wkStart: string; l
   );
   const hour = Number(parts.hour === "24" ? "0" : parts.hour);
   const currentPT = `${parts.year}-${parts.month}-${parts.day}`;
-  const locked = hour >= 19;
+  const locked = hour >= 18;
   const today = locked ? addDaysISO(currentPT, 1) : currentPT;
   return { today, yday: addDaysISO(today, -1), wkStart: weekStartOfISO(today), locked };
 }
@@ -187,6 +189,15 @@ export function lastWorkedDaysBefore(todayISO: string, n: number): string[] {
     if (new Date(`${d}T00:00:00Z`).getUTCDay() !== 0) out.push(d);
   }
   return out;
+}
+
+/** The most recent COMPLETED report day: the last Mon–Sat day strictly before
+ *  the live report anchor. Rolls forward at the 6 PM PT lock; Sundays never
+ *  appear (nobody works them). Sat 6:01 PM → Sat; all Sunday → Sat; Mon 9 AM
+ *  (pre-lock) → Sat — the weekend gap is bridged, so a rep who never opened
+ *  the app after Saturday's lock still gets Saturday's recap Monday morning. */
+export function completedReportDay(): string {
+  return lastWorkedDaysBefore(reportDates().today, 1)[0];
 }
 
 /** Remaining Mon–Sat workdays in the LA month containing `todayISO`,

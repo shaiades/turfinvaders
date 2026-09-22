@@ -161,8 +161,8 @@ function FleetDispatchInner({
   const [daySel, setDaySel] = useState<DaySel>("today");
   // Full calendar days (owner, 2026-08-04): "Today" is the LA calendar day,
   // midnight to 11:59 PM PT — today's results stay under Today all day. The
-  // old 7 PM report-day roll (lock chip + confetti) is gone from this board;
-  // the Daily Wrap page keeps its own 7 PM clock.
+  // old report-day roll (lock chip + confetti) is gone from this board;
+  // the Daily Wrap page keeps its own clock (6 PM lock since 2026-09-22).
   const [today, setToday] = useState(laTodayISO);
   const yday = addDaysISO(today, -1);
   const dayISO = daySel === "today" ? today : daySel;
@@ -433,10 +433,12 @@ function FleetDispatchInner({
 
   // Suspension window: the last 14 completed worked days (Sundays excluded).
   // Feeds the donut check (first two days) and the zero-streak display.
+  // Always-on (not day-tab-gated) since the Suspension Board became a
+  // persistent panel on every range tab (owner ask 2026-09-22); the window
+  // anchors to the live `today`, never the selected range.
   const workedDays = useMemo(() => lastWorkedDaysBefore(today, 14), [today]);
-  const { data: windowMetrics = [] } = useQuery({
+  const windowQ = useQuery({
     queryKey: ["fleet_dispatch", "suspension-window", today],
-    enabled: tab === "day",
     queryFn: async () => {
       const { data } = await supabase
         .from("daily_metrics")
@@ -451,6 +453,7 @@ function FleetDispatchInner({
       }>;
     },
   });
+  const windowMetrics = windowQ.data ?? [];
 
   // Clock-in presence (owner, 2026-09-11): the Day roster is who PUNCHED IN
   // that day, and a day with no punch never counts toward a donut. Presence
@@ -458,14 +461,21 @@ function FleetDispatchInner({
   // leaderboard audience) can only read their own time_entries; the table
   // isn't in the realtime publication, so a light poll keeps the morning
   // board filling in as people clock in.
+  // One canonical date set on every tab (Suspension Board rework, 2026-09-22):
+  // the viewed day + today + the 14-day worked window (≤17 dates, under the
+  // server fn's cap). The old shape covered only the pinned day off-today,
+  // so pinning a past day and switching tabs would leave the worked days
+  // uncovered — clockedOn() would read false everywhere while clockReady
+  // stayed true, and the board would wrongly declare "nobody at risk".
   const clockDates = useMemo(
-    () => (isViewingToday ? [dayISO, ...workedDays] : [dayISO]),
-    [dayISO, isViewingToday, workedDays],
+    () => [...new Set([dayISO, today, ...workedDays])],
+    [dayISO, today, workedDays],
   );
   const clockQ = useQuery({
     queryKey: ["fleet_dispatch", "clock", clockDates],
-    enabled: tab === "day",
-    refetchInterval: isViewingToday ? 60_000 : false,
+    // The 60s poll exists to fill the morning Day board as people punch in;
+    // completed-day presence on Week/Month rides realtime invalidation.
+    refetchInterval: tab === "day" && isViewingToday ? 60_000 : false,
     queryFn: async () => getClockPresence({ data: { dates: clockDates } }),
   });
   const clockedByDay = useMemo(() => {
@@ -683,7 +693,10 @@ function FleetDispatchInner({
   // De-duplicate by normalized display_name. If any duplicate is a captain,
   // the merged row inherits the captain role. Metrics, points, and volume
   // from every duplicate canvasser_id aggregate into a single row.
-  const rows = useMemo(() => {
+  // UNGATED on purpose (Suspension Board rework, 2026-09-22): the watch list
+  // reads these rows so a flagged rep who hasn't punched in today stays
+  // listed; the board itself consumes the day-gated `rows` memo below.
+  const enrichedRows = useMemo(() => {
     type Group = {
       key: string;
       ids: string[];
@@ -816,23 +829,37 @@ function FleetDispatchInner({
       const sub = conf + fut + kil;
       return { g, effTeam, conf, kil, fut, sub, pts, vol, res };
     });
-    // The former-row gate: removed/archived people render only in ranges
-    // where they actually produced (same predicate as the unassigned pen),
-    // so they never appear as forward-looking zero rows. Filtering HERE —
-    // before totals and bucketing — keeps the top tiles ≡ Σ van cards.
-    // Every query window is scoped to the selected range now (the Day tab
-    // included), so in-range production alone decides — a rep removed
-    // Tuesday shows on Monday's day view and on no later day.
-    //
-    // Day roster = clocked-in people (owner, 2026-09-11): an active rep with
-    // no punch AND no production AND no field activity that day sits out
-    // that day's board. The production/activity half keeps a missed punch
-    // from ever hiding real numbers (tiles stay ≡ the boards); Week and
-    // Month keep the full roster; clockReady keeps the gate off until
-    // presence actually loaded. 2026-09-17: a rep who's out pinning without
-    // having punched in now clears the gate too (see isDim below for the
-    // matching dimmed-row treatment) — production alone used to hide them.
-    const gated = enriched.filter((r) => {
+    return enriched;
+  }, [
+    visible,
+    metricByCanvasser,
+    pointsByUser,
+    volumeByUser,
+    resultsByUser,
+    officeTab,
+    crossOfficeVanIds,
+    sliceValues,
+    snapshotTeamByUser,
+  ]);
+
+  // The former-row gate: removed/archived people render only in ranges
+  // where they actually produced (same predicate as the unassigned pen),
+  // so they never appear as forward-looking zero rows. Filtering HERE —
+  // before totals and bucketing — keeps the top tiles ≡ Σ van cards.
+  // Every query window is scoped to the selected range now (the Day tab
+  // included), so in-range production alone decides — a rep removed
+  // Tuesday shows on Monday's day view and on no later day.
+  //
+  // Day roster = clocked-in people (owner, 2026-09-11): an active rep with
+  // no punch AND no production AND no field activity that day sits out
+  // that day's board. The production/activity half keeps a missed punch
+  // from ever hiding real numbers (tiles stay ≡ the boards); Week and
+  // Month keep the full roster; clockReady keeps the gate off until
+  // presence actually loaded. 2026-09-17: a rep who's out pinning without
+  // having punched in now clears the gate too (see isDim below for the
+  // matching dimmed-row treatment) — production alone used to hide them.
+  const rows = useMemo(() => {
+    const gated = enrichedRows.filter((r) => {
       if (r.g.former) return hasProduction(r);
       if (tab === "day" && clockReady && !clockedOn(r.g.activeIds, dayISO)) {
         return hasProduction(r) || r.g.activeIds.some((id) => activeToday.has(id));
@@ -844,22 +871,7 @@ function FleetDispatchInner({
       if (b.conf !== a.conf) return b.conf - a.conf;
       return (a.g.display_name ?? "").localeCompare(b.g.display_name ?? "");
     });
-  }, [
-    visible,
-    metricByCanvasser,
-    pointsByUser,
-    volumeByUser,
-    resultsByUser,
-    officeTab,
-    crossOfficeVanIds,
-    sliceValues,
-    snapshotTeamByUser,
-    tab,
-    dayISO,
-    clockReady,
-    clockedOn,
-    activeToday,
-  ]);
+  }, [enrichedRows, tab, dayISO, clockReady, clockedOn, activeToday]);
 
   // Dimmed-row signal for DispatchRow (owner ask 2026-09-17): bright = clocked
   // in today, dim = showing only from production/field-activity. Former rows
@@ -890,8 +902,11 @@ function FleetDispatchInner({
 
   // Suspension rule (owner, 2026-07-28): any TWO consecutive WORKED days
   // (Mon–Sat; Sundays never count) with zero leads generated = donut. Only
-  // completed days count — today-in-progress never flags anyone, so the list
-  // is stable all day and rolls at 7 PM with the report date. Since
+  // completed days count — today-in-progress never flags anyone: the list is
+  // anchored to the live LA calendar day (midnight roll), never the selected
+  // range, and since 2026-09-22 the Suspension Board renders it on EVERY
+  // range tab — a flagged rep who hasn't punched in today stays listed (the
+  // 7-day recency gate still ages out people who actually left). Since
   // 2026-09-11 a day with NO CLOCK-IN never counts against anyone: both
   // qualifying days must be punched days, and a day off resets the streak
   // (donutEval in lib/suspension.ts holds the rule). Excluded: profiles with
@@ -900,15 +915,16 @@ function FleetDispatchInner({
   // over 7 calendar days (presumed off the team; auto-archive finishes the
   // job at 14).
   const suspensionRows = useMemo(() => {
-    if (tab !== "day" || !isViewingToday || workedDays.length < 2) return [];
-    // No presence data, no donuts — see the clockReady note above. Rows are
-    // already day-gated, so the banner also only ever names people who are
-    // clocked in (or produced) TODAY.
-    if (!clockReady) return [];
+    if (workedDays.length < 2) return [];
+    // No presence data, no donuts — and no METRICS data, no donuts either:
+    // an errored suspension-window fetch reads as "zero activity" and would
+    // flag every clocked-in rep. Missing data must never flag a person; the
+    // board's status line owns telling the viewer the list can't judge.
+    if (!clockReady || !windowQ.isSuccess) return [];
     const genOn = (ids: string[], day: string) =>
       ids.reduce((a, id) => a + (genByDay.get(id)?.get(day) ?? 0), 0);
     const [d1, d2] = workedDays;
-    return rows.flatMap((r) => {
+    return enrichedRows.flatMap((r) => {
       // Former members never hit the donut list — archive_agent keeps
       // suspension_tracked on purpose, and a just-removed rep still passes
       // the 7-day recency check, so without this they'd pop right back up.
@@ -938,18 +954,27 @@ function FleetDispatchInner({
       ];
     });
   }, [
-    rows,
+    enrichedRows,
     genByDay,
     workedDays,
-    tab,
-    isViewingToday,
     dismissed,
     lastActiveBy,
     today,
     rolesByUser,
     clockReady,
+    windowQ.isSuccess,
     clockedOn,
   ]);
+
+  // The always-visible Suspension Board must never show the clean state on
+  // missing data — "nobody at risk" is only claimable once BOTH feeds landed
+  // (local dev has no service key; a deploy blip can drop either fetch).
+  const suspensionStatus: "loading" | "error" | "ready" =
+    windowQ.isError || clockQ.isError
+      ? "error"
+      : windowQ.isSuccess && clockQ.isSuccess
+        ? "ready"
+        : "loading";
 
   const canManage = !readOnly && isManagerRole(realRole);
   // Row actions (move/rename/combine/archive) are role-gated, NOT page-gated
@@ -1168,8 +1193,9 @@ function FleetDispatchInner({
       </div>
       <p className="text-[10px] text-muted-foreground -mt-2">{footnote}</p>
 
-      <SuspensionBanner
+      <SuspensionBoard
         rows={suspensionRows}
+        status={suspensionStatus}
         onRemove={
           // Role-gated, not page-gated: captains get the one-click ✕ on their
           // read-only surfaces — the leaderboard and the Command van board
@@ -2149,8 +2175,15 @@ function DispatchFleet({
   );
 }
 
-function SuspensionBanner({
+/** The always-visible Suspension Board (owner ask 2026-09-22 — the old
+ *  banner only existed on the Day-tab-viewing-today and vanished entirely
+ *  when clean, so it read as missing). Renders on every range tab: the red
+ *  alert flavor appears only when someone actually qualifies; a clean board
+ *  says so explicitly, and missing feed data says "can't judge" instead of
+ *  ever claiming nobody is at risk. */
+function SuspensionBoard({
   rows,
+  status,
   onRemove,
 }: {
   rows: Array<{
@@ -2159,6 +2192,7 @@ function SuspensionBanner({
     d2: string;
     streakLabel: string;
   }>;
+  status: "loading" | "error" | "ready";
   onRemove?: (g: {
     key: string;
     ids: string[];
@@ -2166,46 +2200,69 @@ function SuspensionBanner({
     display_name: string | null;
   }) => void;
 }) {
-  if (rows.length === 0) return null;
   return (
-    <ArcadeCard className="border-destructive/60 bg-destructive/10">
-      <div className="flex items-center gap-2 mb-1">
-        <AlertTriangle className="w-4 h-4 text-destructive animate-pulse" />
-        <div className="font-display text-sm text-destructive uppercase tracking-widest">
-          🚨 Suspension Warning
+    <ArcadePanel
+      title="Suspension Board"
+      action={
+        rows.length > 0 ? (
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-destructive/60 bg-destructive/10 px-2.5 py-0.5 font-display text-[10px] uppercase tracking-widest text-destructive">
+            <AlertTriangle className="w-3 h-3 animate-pulse" />
+            {rows.length} at risk
+          </span>
+        ) : undefined
+      }
+    >
+      {rows.length > 0 ? (
+        <div className="rounded-md border border-destructive/60 bg-destructive/10 p-3">
+          <div className="flex items-center gap-2 mb-1">
+            <AlertTriangle className="w-4 h-4 text-destructive animate-pulse" />
+            <div className="font-display text-sm text-destructive uppercase tracking-widest">
+              🚨 Suspension Warning
+            </div>
+          </div>
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground mb-3">
+            2 consecutive clocked-in days without a lead · days with no punch never count · Sundays
+            excluded · completed days only · active within 7 days
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {rows.map((r) => (
+              <ArcadeCard key={r.g.key} className="relative pl-3 pr-7 py-1.5 border-destructive/40">
+                {onRemove && (
+                  <button
+                    type="button"
+                    onClick={() => onRemove(r.g)}
+                    title="Remove from the suspension list (old / fired). Re-enable in Manage Players."
+                    aria-label={`Remove ${r.g.display_name ?? "player"} from the suspension list`}
+                    className="absolute top-1 right-1 w-4 h-4 inline-flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/20"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+                <div className="flex items-center gap-2">
+                  <span className="frozen-doughnut" aria-hidden>
+                    🍩
+                  </span>
+                  <span className="text-sm font-medium">{r.g.display_name ?? "—"}</span>
+                </div>
+                <div className="text-[10px] font-mono text-muted-foreground mt-0.5">
+                  0 leads {fmtWorkedDay(r.d2)} + {fmtWorkedDay(r.d1)} · {r.streakLabel}-day streak
+                </div>
+              </ArcadeCard>
+            ))}
+          </div>
         </div>
-      </div>
-      <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground mb-3">
-        2 consecutive clocked-in days without a lead · days with no punch never count · Sundays
-        excluded · completed days only · active within 7 days
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {rows.map((r) => (
-          <ArcadeCard key={r.g.key} className="relative pl-3 pr-7 py-1.5 border-destructive/40">
-            {onRemove && (
-              <button
-                type="button"
-                onClick={() => onRemove(r.g)}
-                title="Remove from the suspension list (old / fired). Re-enable in Manage Players."
-                aria-label={`Remove ${r.g.display_name ?? "player"} from the suspension list`}
-                className="absolute top-1 right-1 w-4 h-4 inline-flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/20"
-              >
-                <X className="w-3 h-3" />
-              </button>
-            )}
-            <div className="flex items-center gap-2">
-              <span className="frozen-doughnut" aria-hidden>
-                🍩
-              </span>
-              <span className="text-sm font-medium">{r.g.display_name ?? "—"}</span>
-            </div>
-            <div className="text-[10px] font-mono text-muted-foreground mt-0.5">
-              0 leads {fmtWorkedDay(r.d2)} + {fmtWorkedDay(r.d1)} · {r.streakLabel}-day streak
-            </div>
-          </ArcadeCard>
-        ))}
-      </div>
-    </ArcadeCard>
+      ) : status === "ready" ? (
+        <p className="text-sm text-muted-foreground">
+          🍩 Nobody at risk. Two clocked-in days in a row with zero leads lands a player here.
+        </p>
+      ) : status === "error" ? (
+        <p className="text-sm text-muted-foreground">
+          Clock presence unavailable — the watch list can't judge days right now.
+        </p>
+      ) : (
+        <p className="text-sm text-muted-foreground">Checking the watch list…</p>
+      )}
+    </ArcadePanel>
   );
 }
 

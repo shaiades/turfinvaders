@@ -75,7 +75,7 @@ import {
  * Close Kombat — sales-rep standings straight from the Monday.com Block
  * boards, in Monday's own column language (Iss / BO / OL / RS / PM / Sale).
  * Day / Week / Month / Year ranges are all LA-calendar (card_date is the
- * physical appointment date — no 7 PM report lock here). Standings are ranked by sale
+ * physical appointment date — no report-lock clock here). Standings are ranked by sale
  * volume in every range (owner, 2026-07-30). Shared cards: each rep gets
  * full RESULT credit but the sale VOLUME splits evenly (owner, 2026-07-29);
  * Office Appointments are not leads and aren't tracked here (owner,
