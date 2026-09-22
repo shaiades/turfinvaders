@@ -102,6 +102,10 @@ export function CanvasserLeaderboard() {
       ...Object.keys(prod.points ?? {}),
       ...Object.keys(prod.volume ?? {}),
       ...Object.keys(prod.results ?? {}),
+      // A cancel-only rep (their sale WCC-cancelled, no log rows in range)
+      // has keys ONLY here — without this spread the cxl keep-alive below
+      // never even sees them and their row vanishes.
+      ...Object.keys(prod.cancels ?? {}),
     ]);
     const rows: LadderRow[] = [];
     for (const id of ids) {
@@ -109,7 +113,10 @@ export function CanvasserLeaderboard() {
       const pts = prod.points?.[id] ?? 0;
       const vol = prod.volume?.[id] ?? 0;
       const lds = r?.lds ?? 0;
-      if (pts === 0 && vol === 0 && lds === 0 && (r?.drs ?? 0) === 0) continue;
+      // cancels: volume is net of WCC-cancelled sales now — a rep whose only
+      // in-range sale got cancelled must keep their row, not vanish.
+      const cxl = prod.cancels?.[id] ?? 0;
+      if (pts === 0 && vol === 0 && lds === 0 && cxl === 0 && (r?.drs ?? 0) === 0) continue;
       const prof = profById.get(id);
       // Pseudo lead-source channels (Job Walk, Upsell, …) are the OFFICE's
       // credit, never canvassers (owner rule, PR #133/#172) — they race on

@@ -51,7 +51,11 @@ const SECTIONS: Array<{ heading: string; terms: Array<[string, string]> }> = [
     terms: [
       ["Points", "PM = 1 pt · Sale = 2 pts. Points drive your hourly tier and the leaderboard."],
       ["PM", "Pitch-miss sit — you sat the demo, no sale (worth 1 point)"],
-      ["Volume", "Confirmed sale dollars in the selected range"],
+      ["Volume", "Confirmed sale dollars in the selected range — WCC-cancelled sales excluded"],
+      [
+        "Cancels",
+        "Sales the Sales Report's WCC column later killed — removed from Volume on the sale's own day (matching payroll), never from Sales. Close Kombat can still differ a little: FTDs, duplicate copy-family cards, and re-priced saves count differently there.",
+      ],
     ],
   },
   {
