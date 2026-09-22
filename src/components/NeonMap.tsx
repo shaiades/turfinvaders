@@ -357,8 +357,12 @@ function ArrivalZoom({
     const t = window.setTimeout(() => {
       if (done.current || map.getZoom() >= HOUSE_MIN_ZOOM) return;
       done.current = true;
-      // Animated so the move reads as intentional, not a glitch.
-      map.flyTo([me.lat, me.lng], HOUSE_MIN_ZOOM, { duration: 0.8 });
+      // Instant, not flyTo: FollowMe's next GPS tick panTo would CANCEL an
+      // in-flight fly mid-animation and strand the rep at an intermediate
+      // zoom (~z16) with the one-shot already spent. The 2s overview beat
+      // above provides the "see your turf first" feel; the jump itself must
+      // be atomic.
+      map.setView([me.lat, me.lng], HOUSE_MIN_ZOOM, { animate: false });
     }, wait);
     return () => window.clearTimeout(t);
   }, [map, me?.lat, me?.lng, me, tracking, paused, polygons]);

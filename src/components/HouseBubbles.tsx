@@ -467,6 +467,16 @@ export function HouseBubblesLayer({
     const fire = async () => {
       // Re-check at fire time — the rep may have zoomed out mid-debounce.
       if (map.getZoom() < HOUSE_MIN_ZOOM) return;
+      const want = viewBounds(map).pad(0.4);
+      // Disk/cache first, BEFORE the cooldown gate: hydration is local and
+      // an area we can already paint must clear the "unavailable" pill
+      // immediately — deferring it 20s would show a warning over visibly
+      // rendering circles.
+      if (await hydrateCovered(want)) setRenderTick((t) => t + 1);
+      if (coveredBounds.some((b) => b.contains(want))) {
+        statusRef.current?.("ok");
+        return;
+      }
       // Failure cooldown: never storm the endpoints, but never go dead
       // either — exactly ONE deferred fetch re-arms itself for expiry
       // (pre-#249 this cleared the debounce outright, which read as
@@ -474,14 +484,6 @@ export function HouseBubblesLayer({
       const wait = lastFailAt + FAIL_COOLDOWN_MS - Date.now();
       if (wait > 0) {
         debounceRef.current = window.setTimeout(fire, wait + 250);
-        return;
-      }
-      const want = viewBounds(map).pad(0.4);
-      // Disk first: a reload (or a prefetched turf) paints from IndexedDB
-      // before any network is attempted.
-      if (await hydrateCovered(want)) setRenderTick((t) => t + 1);
-      if (coveredBounds.some((b) => b.contains(want))) {
-        statusRef.current?.("ok");
         return;
       }
       // A walking rep's GPS-follow pans fire moveend every settle; if the
