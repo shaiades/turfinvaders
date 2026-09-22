@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
   OfficeFilterProvider,
@@ -33,6 +33,7 @@ import {
   Pencil,
   Merge,
   Info,
+  RefreshCw,
 } from "lucide-react";
 import {
   Select,
@@ -69,6 +70,7 @@ import {
   getDispatchProduction,
   type DispatchResults,
 } from "@/lib/dispatch.functions";
+import { getKombatSyncInfo, syncBlockCards } from "@/lib/close-kombat.functions";
 import { FleetDispatchManage } from "@/components/FleetDispatchManage";
 import { GlossarySheet } from "@/components/GlossarySheet";
 import { RepcardSeasonBoard } from "@/components/RepcardSeasonBoard";
@@ -394,6 +396,17 @@ function FleetDispatchInner({
     () => new Map(Object.entries(production.data?.volume ?? {})),
     [production.data],
   );
+  // WCC-cancelled sales in the window — Volume already excludes them
+  // server-side; these carry the count + excluded dollars for the Cancels
+  // tile. ?? {}: payloads cached before this shipped lack the keys.
+  const cancelsByUser = useMemo(
+    () => new Map(Object.entries(production.data?.cancels ?? {})),
+    [production.data],
+  );
+  const cancelledVolByUser = useMemo(
+    () => new Map(Object.entries(production.data?.cancelledVol ?? {})),
+    [production.data],
+  );
   const resultsByUser = useMemo(
     () => new Map<string, DispatchResults>(Object.entries(production.data?.results ?? {})),
     [production.data],
@@ -592,7 +605,9 @@ function FleetDispatchInner({
         kil = 0,
         fut = 0,
         pts = 0,
-        vol = 0;
+        vol = 0,
+        cxl = 0,
+        cxlVol = 0;
       const res: DispatchResults = {
         lds: 0,
         sit: 0,
@@ -612,6 +627,8 @@ function FleetDispatchInner({
       const om = officeMetricByCanvasser.get(office);
       const op = productionData?.officePoints?.[office] ?? {};
       const ov = productionData?.officeVolume?.[office] ?? {};
+      const oc = productionData?.officeCancels?.[office] ?? {};
+      const ocv = productionData?.officeCancelledVol?.[office] ?? {};
       const orr = productionData?.officeResults?.[office] ?? {};
       for (const id of ids) {
         const m = om?.get(id);
@@ -623,6 +640,8 @@ function FleetDispatchInner({
         }
         pts += op[id] ?? 0;
         vol += ov[id] ?? 0;
+        cxl += oc[id] ?? 0;
+        cxlVol += ocv[id] ?? 0;
         const rr = orr[id];
         if (rr) {
           res.lds += rr.lds;
@@ -643,7 +662,7 @@ function FleetDispatchInner({
           res.rnt += rr.rnt ?? 0;
         }
       }
-      return { conf, kil, fut, sub: conf + fut + kil, pts, vol, res };
+      return { conf, kil, fut, sub: conf + fut + kil, pts, vol, cxl, cxlVol, res };
     },
     [officeMetricByCanvasser, productionData],
   );
@@ -793,7 +812,9 @@ function FleetDispatchInner({
         kil = 0,
         fut = 0,
         pts = 0,
-        vol = 0;
+        vol = 0,
+        cxl = 0,
+        cxlVol = 0;
       const res: DispatchResults = {
         lds: 0,
         sit: 0,
@@ -820,6 +841,8 @@ function FleetDispatchInner({
         }
         pts += pointsByUser.get(id) ?? 0;
         vol += volumeByUser.get(id) ?? 0;
+        cxl += cancelsByUser.get(id) ?? 0;
+        cxlVol += cancelledVolByUser.get(id) ?? 0;
         const rr = resultsByUser.get(id);
         if (rr) {
           res.lds += rr.lds;
@@ -843,7 +866,7 @@ function FleetDispatchInner({
       // Submitted = the sum of actioned results (owner, 2026-07-28):
       // Submitted ≡ Confirmed + Future + Blowout by construction.
       const sub = conf + fut + kil;
-      return { g, effTeam, conf, kil, fut, sub, pts, vol, res };
+      return { g, effTeam, conf, kil, fut, sub, pts, vol, cxl, cxlVol, res };
     });
     return enriched;
   }, [
@@ -851,6 +874,8 @@ function FleetDispatchInner({
     metricByCanvasser,
     pointsByUser,
     volumeByUser,
+    cancelsByUser,
+    cancelledVolByUser,
     resultsByUser,
     officeTab,
     crossOfficeVanIds,
@@ -904,7 +929,9 @@ function FleetDispatchInner({
       fut = 0,
       kil = 0,
       sal = 0,
-      vol = 0;
+      vol = 0,
+      cxl = 0,
+      cxlVol = 0;
     rows.forEach((r) => {
       sub += r.sub;
       conf += r.conf;
@@ -912,8 +939,10 @@ function FleetDispatchInner({
       kil += r.kil;
       sal += r.res.sal;
       vol += r.vol;
+      cxl += r.cxl;
+      cxlVol += r.cxlVol;
     });
-    return { sub, conf, fut, kil, sal, vol };
+    return { sub, conf, fut, kil, sal, vol, cxl, cxlVol };
   }, [rows]);
 
   // Suspension rule (owner, 2026-07-28): any TWO consecutive WORKED days
@@ -1000,12 +1029,19 @@ function FleetDispatchInner({
   // stay page-gated behind !readOnly.
   const canEditRows = isManagerRole(realRole);
 
+  // Volume is NET of WCC-cancelled sales on every tab (2026-09-22, matching
+  // payroll calc v7): a cancel removes the dollars from the day/week/month
+  // the sale was CONFIRMED — retroactively — while Sales stays board-truth
+  // and Cancels counts what was removed. Frozen payroll runs keep their
+  // approved figures and reconcile via clawbacks instead.
+  const cancelNote =
+    "Cancels are sales the Sales Report's WCC column later killed — their dollars leave Volume (on the sale's own day, matching payroll) while Sales keeps counting the written sale.";
   const footnote =
     tab === "day"
-      ? "The day's roster is who CLOCKED IN that day — no punch and no production, no row, and days you weren't clocked in never count toward the suspension list. Every number shows the selected day. Funnel columns credit the day the lead was SUBMITTED — a confirm recorded Monday for a Friday lead updates Friday, so recent days keep filling in for a few days. Lead results, Sales, and Points credit each card's BLOCK day (the weekday it ran on the Block board). Volume is sale dollars confirmed that day, midnight to midnight Pacific."
+      ? `The day's roster is who CLOCKED IN that day — no punch and no production, no row, and days you weren't clocked in never count toward the suspension list. Every number shows the selected day. Funnel columns credit the day the lead was SUBMITTED — a confirm recorded Monday for a Friday lead updates Friday, so recent days keep filling in for a few days. Lead results, Sales, and Points credit each card's BLOCK day (the weekday it ran on the Block board). Volume is sale dollars confirmed that day, midnight to midnight Pacific, net of cancelled sales. ${cancelNote}`
       : tab === "week"
-        ? "Funnel counts credit each lead's submission day, so a just-closed week keeps filling in early the next week. Lead results credit each card's BLOCK day (the weekday it ran on the Block board), Mon–Sun of the selected week, Pacific time. Points: PM = 1 pt, Sale = 2 pts; BO/RS = 0. Volume runs Mon 12:00 AM → next Mon 12:00 AM Pacific."
-        : "Every number covers the calendar month, Pacific time — funnel counts on each lead's submission day, lead results on each card's block day. Points: PM = 1 pt, Sale = 2 pts. Volume resets on the 1st, 12:00 AM Pacific.";
+        ? `Funnel counts credit each lead's submission day, so a just-closed week keeps filling in early the next week. Lead results credit each card's BLOCK day (the weekday it ran on the Block board), Mon–Sun of the selected week, Pacific time. Points: PM = 1 pt, Sale = 2 pts; BO/RS = 0. Volume runs Mon 12:00 AM → next Mon 12:00 AM Pacific, net of cancelled sales. ${cancelNote}`
+        : `Every number covers the calendar month, Pacific time — funnel counts on each lead's submission day, lead results on each card's block day. Points: PM = 1 pt, Sale = 2 pts. Volume resets on the 1st, 12:00 AM Pacific, and is net of cancelled sales. ${cancelNote}`;
 
   return (
     <div className="space-y-4">
@@ -1055,6 +1091,10 @@ function FleetDispatchInner({
             )}
             {!readOnly && (
               <>
+                {/* Real-role gated like Close Kombat's sync (View-As must
+                    not hide a working button); the server fn re-checks
+                    ADMIN_ROLES regardless. */}
+                {isAdminRole(realRole) && <SyncFromMondayButton />}
                 <WebhookLogsButton />
                 <OfficeFilterToggle />
               </>
@@ -1199,12 +1239,21 @@ function FleetDispatchInner({
       {!readOnly && <WebhookUrlBanner />}
       {!readOnly && <MondayTokenCard />}
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-3">
         <TotalTile label="Submitted" value={totals.sub} accent="neon" />
         <TotalTile label="Confirmed" value={totals.conf} accent="victory" />
         <TotalTile label="Future" value={totals.fut} accent="accent" />
         <TotalTile label="Blowout" value={totals.kil} accent="danger" />
         <TotalTile label="Sales" value={totals.sal} accent="victory" />
+        {/* Cancels sits beside Volume so "Sales 1 · Volume $0" reads as
+            explained, not broken: Sales stays board-truth (the sale WAS
+            written), Cancels shows what WCC later killed, Volume is net. */}
+        <TotalTile
+          label="Cancels"
+          value={totals.cxl}
+          accent="danger"
+          sub={totals.cxlVol > 0 ? `−${formatCurrency(totals.cxlVol)}` : undefined}
+        />
         <TotalTile label="Volume" value={formatCurrency(totals.vol)} accent="victory" />
       </div>
       <p className="text-[10px] text-muted-foreground -mt-2">{footnote}</p>
@@ -1349,7 +1398,11 @@ type FunnelRow = {
   fut: number;
   kil: number;
   pts: number;
+  /** Net of WCC-cancelled sales — the cancelled dollars sit in cxlVol. */
   vol: number;
+  /** WCC-cancelled sales in the window, counted on the SALE's day. */
+  cxl: number;
+  cxlVol: number;
   res: DispatchResults;
 };
 
@@ -1495,6 +1548,10 @@ const hasProduction = (r: FunnelRow) =>
     r.kil +
     r.pts +
     r.vol +
+    // A cancelled-out sale is still production: without cxl here a former
+    // rep whose only in-range sale got WCC-cancelled would lose their row
+    // and the Cancels tile would stop reconciling with payroll.
+    r.cxl +
     r.res.lds +
     r.res.ol +
     r.res.sal +
@@ -1519,6 +1576,8 @@ const totalsOfRows = (list: FunnelRow[]): DispatchStats =>
       kil: a.kil + r.kil,
       pts: a.pts + r.pts,
       vol: a.vol + r.vol,
+      cxl: a.cxl + r.cxl,
+      cxlVol: a.cxlVol + r.cxlVol,
       res: {
         lds: a.res.lds + r.res.lds,
         sit: a.res.sit + r.res.sit,
@@ -1543,6 +1602,8 @@ const totalsOfRows = (list: FunnelRow[]): DispatchStats =>
       kil: 0,
       pts: 0,
       vol: 0,
+      cxl: 0,
+      cxlVol: 0,
       res: {
         lds: 0,
         sit: 0,
@@ -1621,7 +1682,7 @@ function DispatchStatCells({ s, bold = false }: { s: DispatchStats; bold?: boole
         {s.pts}
       </span>
       <span
-        title="Volume — confirmed sale dollars in the selected range"
+        title="Volume — confirmed sale dollars in the selected range (WCC-cancelled sales excluded)"
         className={`${cell} ${metricClass(s.vol, "victory")}`}
       >
         {formatCurrency(s.vol)}
@@ -1861,7 +1922,7 @@ function DispatchColHeader({ manage = false }: { manage?: boolean }) {
         Pts
       </span>
       <span
-        title="Volume — confirmed sale dollars in the selected range"
+        title="Volume — confirmed sale dollars in the selected range (WCC-cancelled sales excluded)"
         className="text-right text-[9px] font-display uppercase tracking-widest text-muted-foreground"
       >
         Vol
@@ -2463,10 +2524,13 @@ function TotalTile({
   label,
   value,
   accent,
+  sub,
 }: {
   label: string;
   value: number | string;
   accent: keyof typeof TILE_TEXT;
+  /** Small caption under the value (the Cancels tile's excluded dollars). */
+  sub?: string;
 }) {
   return (
     <ArcadeCard>
@@ -2474,7 +2538,83 @@ function TotalTile({
         {label}
       </div>
       <div className={`font-display text-2xl mt-1 ${TILE_TEXT[accent]}`}>{value}</div>
+      {sub && <div className="text-[10px] font-mono text-muted-foreground mt-0.5">{sub}</div>}
     </ArcadeCard>
+  );
+}
+
+/** "2h ago" for the sync-stamp caption; coarse on purpose. (Duplicated from
+ *  CloseKombat.tsx — importing that component file would pull the whole
+ *  Kombat bundle into the dashboard chunk.) */
+function relTime(iso: string | null): string {
+  if (!iso) return "never";
+  const mins = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60_000));
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 48) return `${hrs}h ago`;
+  return `${Math.round(hrs / 24)}d ago`;
+}
+
+/** The same sync Close Kombat's gold button runs (syncBlockCards, scope
+ *  "active"): re-pulls this week's + last week's Block boards and stamps
+ *  WCC cancels from the current + previous month's Sales Reports — the
+ *  stamps that net this board's Volume. Quick scope only; the ~50-board
+ *  Full-history backfill stays a Close Kombat admin task (healing a cancel
+ *  on an OLDER month's report needs it). No AbortSignal wiring needed here:
+ *  the board's data rides one server-fn POST, not Kombat's page-walk. */
+function SyncFromMondayButton() {
+  const qc = useQueryClient();
+  const syncInfo = useQuery({
+    // Shared with Close Kombat's freshness caption — both move together.
+    queryKey: ["kombat_sync_info"],
+    staleTime: 60_000,
+    queryFn: () => getKombatSyncInfo(),
+  });
+  const sync = useMutation({
+    mutationFn: () => syncBlockCards({ data: { scope: "active" } }),
+    onSuccess: (res) => {
+      const fetched = res.results.reduce((s, r) => s + r.fetched, 0);
+      toast.success(
+        `Synced ${res.results.length} board${res.results.length === 1 ? "" : "s"} · ${fetched} cards`,
+      );
+      if (res.skipped.length > 0) {
+        toast.warning(
+          `${res.skipped.length} board${res.skipped.length === 1 ? "" : "s"} skipped — see webhook logs`,
+        );
+      }
+      const cancels = res.wcc.reports.reduce((s, r) => s + r.cancelled, 0);
+      if (cancels > 0) {
+        toast.info(
+          `${cancels} cancelled/CTC/FTD sale${cancels === 1 ? "" : "s"} on the Sales Reports`,
+        );
+      }
+      if (res.wcc.errors.length > 0) {
+        toast.warning(`Cancels pass: ${res.wcc.errors.length} report board(s) failed — see logs`);
+      }
+      // This board doesn't subscribe to block_cards realtime, so without the
+      // fleet_dispatch prefix invalidation a sync would never refresh it;
+      // the trigger's leads stamps arrive as a debounced second belt.
+      qc.invalidateQueries({ queryKey: ["fleet_dispatch"] });
+      qc.invalidateQueries({ queryKey: ["block_cards"] });
+      qc.invalidateQueries({ queryKey: ["kombat_sync_info"] });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Sync failed"),
+  });
+  return (
+    <NeonButton
+      tone="turf-cyan"
+      disabled={sync.isPending}
+      onClick={() => sync.mutate()}
+      title={`Re-pull this week's active Block boards + Sales Report cancels${
+        // Hide the freshness claim until the query resolves — "never" while
+        // loading would be a false statement (CloseKombat caption precedent).
+        syncInfo.data ? ` · last sync ${relTime(syncInfo.data.lastSyncedAt)}` : ""
+      }`}
+    >
+      <RefreshCw className={`w-3.5 h-3.5 ${sync.isPending ? "animate-spin" : ""}`} />
+      <span className="hidden sm:inline">Sync from Monday</span>
+      <span className="sm:hidden">Sync</span>
+    </NeonButton>
   );
 }
 

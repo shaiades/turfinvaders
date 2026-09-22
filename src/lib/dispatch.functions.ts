@@ -39,6 +39,34 @@ export type DispatchResults = {
   rnt: number;
 };
 
+// Page every read — an unpaged select silently truncates at PostgREST's
+// 1,000-row cap (the same failure class that dropped June's boards, PR #161).
+// Builders must .order("id"): unordered LIMIT/OFFSET has no stable order
+// under live writes, so pages could skip or repeat rows. Pass `key` to
+// drop cross-page duplicates when the caller counts rows individually.
+const PAGE = 1000;
+async function pageAll<T>(
+  build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
+  key?: (row: T) => string,
+): Promise<T[]> {
+  const out: T[] = [];
+  const seen = key ? new Set<string>() : null;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await build(from, from + PAGE - 1);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      if (seen && key) {
+        const k = key(row);
+        if (seen.has(k)) continue;
+        seen.add(k);
+      }
+      out.push(row);
+    }
+    if ((data ?? []).length < PAGE) break;
+  }
+  return out;
+}
+
 export const getDispatchProduction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => {
@@ -57,26 +85,40 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-    const [logsR, leadsR] = await Promise.all([
-      supabaseAdmin
-        .from("daily_logs")
-        .select(
-          "canvasser_id, demos_sits, sales, no_demo, future_leads, ctc, non_core, one_legs, unmarked, doors_knocked, people_talked_to, not_interested, renters, not_home, leads_called_in, office_location, log_date, team_id",
-        )
-        .gte("log_date", data.log_start)
-        .lte("log_date", data.log_end),
+    const [logRows, leadRows] = await Promise.all([
+      pageAll(
+        (from, to) =>
+          supabaseAdmin
+            .from("daily_logs")
+            .select(
+              "id, canvasser_id, demos_sits, sales, no_demo, future_leads, ctc, non_core, one_legs, unmarked, doors_knocked, people_talked_to, not_interested, renters, not_home, leads_called_in, office_location, log_date, team_id",
+            )
+            .gte("log_date", data.log_start)
+            .lte("log_date", data.log_end)
+            .order("id", { ascending: true })
+            .range(from, to),
+        (r) => String(r.id),
+      ),
       // Two-sided superset fetch; the COALESCE(reviewed_at, created_at)
       // re-window below is the authoritative filter (pay-engine parity).
-      supabaseAdmin
-        .from("leads")
-        .select("canvasser_id, sale_amount, created_at, reviewed_at, monday_item_id, team_id")
-        .eq("status", "confirmed")
-        .or(
-          `and(created_at.gte.${data.vol_start},created_at.lt.${data.vol_end}),and(reviewed_at.gte.${data.vol_start},reviewed_at.lt.${data.vol_end})`,
-        ),
+      // sale_cancelled_at rides along un-filtered: cancelled sales must
+      // reach the client-side split so the Cancels tally can count them.
+      pageAll(
+        (from, to) =>
+          supabaseAdmin
+            .from("leads")
+            .select(
+              "id, canvasser_id, sale_amount, created_at, reviewed_at, monday_item_id, team_id, sale_cancelled_at",
+            )
+            .eq("status", "confirmed")
+            .or(
+              `and(created_at.gte.${data.vol_start},created_at.lt.${data.vol_end}),and(reviewed_at.gte.${data.vol_start},reviewed_at.lt.${data.vol_end})`,
+            )
+            .order("id", { ascending: true })
+            .range(from, to),
+        (r) => String(r.id),
+      ),
     ]);
-    if (logsR.error) throw logsR.error;
-    if (leadsR.error) throw leadsR.error;
 
     const points: Record<string, number> = {};
     const results: Record<string, DispatchResults> = {};
@@ -109,7 +151,7 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
       ni: 0,
       rnt: 0,
     });
-    for (const l of logsR.data ?? []) {
+    for (const l of logRows) {
       if (!l.canvasser_id) continue;
       if (
         l.team_id &&
@@ -156,9 +198,17 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
     const volStartMs = Date.parse(data.vol_start);
     const volEndMs = Date.parse(data.vol_end);
     const volume: Record<string, number> = {};
-    const counted: Array<{ cid: string; amt: number; mid: string | null }> = [];
+    // WCC-cancelled sales, tallied on the SALE's attribution day (calc-v7 /
+    // PayrollLedger axis): the dollars leave `volume`, the count lands in
+    // `cancels`. The count requires amt > 0 — the copy-family trigger can
+    // stamp a same-customer desk lead that never carried money, and that
+    // must not show two cancels for one dead sale.
+    const cancels: Record<string, number> = {};
+    const cancelledVol: Record<string, number> = {};
+    type CountedLead = { cid: string; amt: number; mid: string | null; cancelled: boolean };
+    const counted: CountedLead[] = [];
     const leadSnapAt: Record<string, number> = {};
-    for (const l of leadsR.data ?? []) {
+    for (const l of leadRows) {
       if (!l.canvasser_id) continue;
       const at = Date.parse(l.reviewed_at ?? l.created_at ?? "");
       if (Number.isNaN(at) || at < volStartMs || at >= volEndMs) continue;
@@ -169,11 +219,18 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
         leadSnapAt[l.canvasser_id] = at;
       }
       const amt = Number(l.sale_amount ?? 0);
-      volume[l.canvasser_id] = (volume[l.canvasser_id] ?? 0) + amt;
+      const cancelled = l.sale_cancelled_at != null;
+      if (!cancelled) {
+        volume[l.canvasser_id] = (volume[l.canvasser_id] ?? 0) + amt;
+      } else if (amt > 0) {
+        cancels[l.canvasser_id] = (cancels[l.canvasser_id] ?? 0) + 1;
+        cancelledVol[l.canvasser_id] = (cancelledVol[l.canvasser_id] ?? 0) + amt;
+      }
       counted.push({
         cid: l.canvasser_id,
         amt,
         mid: l.monday_item_id ? String(l.monday_item_id) : null,
+        cancelled,
       });
     }
 
@@ -208,19 +265,32 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
       }
     }
     const officeVolume: Record<string, Record<string, number>> = {};
+    const officeCancels: Record<string, Record<string, number>> = {};
+    const officeCancelledVol: Record<string, Record<string, number>> = {};
     for (const c of counted) {
       const office = (c.mid && officeByMid.get(c.mid)) || DEFAULT_OFFICE;
-      const vo = (officeVolume[office] ??= {});
-      vo[c.cid] = (vo[c.cid] ?? 0) + c.amt;
+      if (!c.cancelled) {
+        const vo = (officeVolume[office] ??= {});
+        vo[c.cid] = (vo[c.cid] ?? 0) + c.amt;
+      } else if (c.amt > 0) {
+        const co = (officeCancels[office] ??= {});
+        co[c.cid] = (co[c.cid] ?? 0) + 1;
+        const cv = (officeCancelledVol[office] ??= {});
+        cv[c.cid] = (cv[c.cid] ?? 0) + c.amt;
+      }
     }
 
     return {
       points,
       volume,
       results,
+      cancels,
+      cancelledVol,
       officePoints,
       officeVolume,
       officeResults,
+      officeCancels,
+      officeCancelledVol,
       snapshotTeam,
     };
   });
@@ -306,23 +376,6 @@ export const getFunnelBaseline = createServerFn({ method: "POST" })
   .handler(async () => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const since = addDaysISO(laTodayISO(), -60);
-    const PAGE = 1000;
-
-    // Page every read — the unpaged select silently truncates at 1000 rows,
-    // and the 60-day company window is already past 700 daily_logs rows
-    // (the same failure class that dropped June's boards, PR #161).
-    async function pageAll<T>(
-      build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
-    ): Promise<T[]> {
-      const out: T[] = [];
-      for (let from = 0; ; from += PAGE) {
-        const { data, error } = await build(from, from + PAGE - 1);
-        if (error) throw error;
-        out.push(...(data ?? []));
-        if ((data ?? []).length < PAGE) break;
-      }
-      return out;
-    }
 
     // Sits + sales live in daily_logs; confirms live in daily_metrics (the
     // office pipeline — daily_logs.confirmed_leads has never been written);
@@ -339,6 +392,7 @@ export const getFunnelBaseline = createServerFn({ method: "POST" })
           .from("daily_logs")
           .select("canvasser_id, log_date, doors_knocked, demos_sits, sales")
           .gte("log_date", since)
+          .order("id", { ascending: true })
           .range(from, to),
       ),
       pageAll<{ canvasser_id: string; metric_date: string; leads_confirmed: number | null }>(
@@ -347,15 +401,20 @@ export const getFunnelBaseline = createServerFn({ method: "POST" })
             .from("daily_metrics")
             .select("canvasser_id, metric_date, leads_confirmed")
             .gte("metric_date", since)
+            .order("id", { ascending: true })
             .range(from, to),
       ),
+      // WCC-cancelled sales pay nothing (calc v7 / useCanvasserStats parity)
+      // — they must not prop up the projected average commission either.
       pageAll<{ sale_amount: number | null }>((from, to) =>
         supabaseAdmin
           .from("leads")
           .select("sale_amount")
           .eq("status", "confirmed")
           .eq("is_sale", true)
+          .is("sale_cancelled_at", null)
           .gte("created_at", laMidnightUtcISO(since))
+          .order("id", { ascending: true })
           .range(from, to),
       ),
     ]);
