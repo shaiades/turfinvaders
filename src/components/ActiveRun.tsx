@@ -21,13 +21,13 @@ import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { GratitudeGate, hasPassedGratitudeGate } from "@/components/GratitudeGate";
 import { NeonMap, type Territory, type LatLng } from "@/components/NeonMap";
-import { getLastMapView, setLastMapView } from "@/lib/last-map-view";
+import { getLastMapView, setLastMapView, type MapView } from "@/lib/last-map-view";
+import type { MapDataStatus } from "@/lib/map-status";
 import { PinActionSheet } from "@/components/PinActionSheet";
 import { HouseResultSheet } from "@/components/HouseResultSheet";
 import { FieldStandingsSheet } from "@/components/FieldStandingsSheet";
 import type { OsmHouse } from "@/components/HouseBubbles";
 import { ArcadePanel } from "@/components/arcade";
-import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { rewardToast } from "@/lib/reward-toast";
 import {
@@ -254,6 +254,12 @@ export function ActiveRun({
       if (error) throw error;
       return (data ?? []) as unknown as TurfRow[];
     },
+    // Turf assignments change rarely and realtime invalidation (below)
+    // pushes changes within ~1s — a remount on weak cellular should serve
+    // the cached polygons instantly instead of re-fetching over the dead
+    // link (CrewMap's 5m precedent).
+    staleTime: 5 * 60_000,
+    gcTime: 30 * 60_000,
   });
 
   useRealtimeInvalidate({
@@ -330,18 +336,33 @@ export function ActiveRun({
 
   const armedResult = KNOCK_RESULTS.find((r) => r.type === active);
 
-  // Map slot state: don't render a map with nothing to lock to — the
-  // empty/error cards say what's happening instead of a Kansas-centered map.
-  // Tally buttons stay live in every state; only the map slot swaps.
-  const mapGate: "loading" | "error" | "empty" | "ready" = isCaptain
-    ? "ready"
-    : turfsQuery.isPending
-      ? "loading"
-      : turfsQuery.isError
-        ? "error"
-        : (turfsQuery.data ?? []).length === 0
-          ? "empty"
-          : "ready";
+  // Map slot state: the map mounts IMMEDIATELY — tiles start downloading
+  // while turfs load, and the on-map status pill narrates loading/error
+  // (with retry) instead of a text panel holding the whole slot hostage on
+  // weak cellular. Only the settled "no turf assigned" state keeps its
+  // panel — that's product truth with its own copy, not a network moment.
+  const mapGate: "empty" | "ready" =
+    !isCaptain && turfsQuery.isSuccess && (turfsQuery.data ?? []).length === 0
+      ? "empty"
+      : "ready";
+  const turfDataStatus: MapDataStatus = {
+    // isPending (first load, no cached rows) — a background refetch never
+    // flashes the pill.
+    state: turfsQuery.isPending ? "loading" : turfsQuery.isError ? "error" : "ok",
+    what: isCaptain ? "turfs" : "your turf",
+    onRetry: () => void turfsQuery.refetch(),
+  };
+  // Saved-view suppression of the turf fit must FREEZE at map mount: the
+  // map now mounts before turfs land, and FollowMe's first GPS pan feeds
+  // onViewChange — re-evaluating getLastMapView() per render would then
+  // suppress the fit forever, even on a first-ever login. Frozen on the
+  // first render where auth is resolved (GratitudeGate holds children
+  // until then, so the map cannot have mounted earlier).
+  const savedViewRef = useRef<MapView | null | undefined>(undefined);
+  if (savedViewRef.current === undefined && user?.id) {
+    savedViewRef.current = getLastMapView(user.id);
+  }
+  const savedView = savedViewRef.current ?? null;
 
   const editingPin = editingPinId
     ? ((pins.pinsQuery.data ?? []).find((p) => p.id === editingPinId) ?? null)
@@ -442,23 +463,6 @@ export function ActiveRun({
              anchor covers every state so the ring lands on the "no turf yet"
              panel too. ---- */}
         <div data-tour="field-map">
-          {mapGate === "loading" && (
-            <ArcadePanel title="My Turf">
-              <div className="text-sm text-muted-foreground">Loading your turf…</div>
-            </ArcadePanel>
-          )}
-          {mapGate === "error" && (
-            <ArcadePanel title="My Turf">
-              <div className="space-y-3">
-                <div className="text-sm text-muted-foreground">
-                  Couldn't load your turf. Check your signal and try again.
-                </div>
-                <Button variant="outline" onClick={() => turfsQuery.refetch()}>
-                  Retry
-                </Button>
-              </div>
-            </ArcadePanel>
-          )}
           {mapGate === "empty" && (
             <ArcadePanel title="My Turf">
               <div className="text-sm text-muted-foreground">
@@ -475,14 +479,17 @@ export function ActiveRun({
               me={me}
               height="clamp(420px, 64dvh, 900px)"
               follow
-              // Skip the initial turf-lock fit once a view is already saved
-              // (Turf Tools round-trip) — restore the saved position instead
-              // of snapping back to the turf frame every switch.
-              fitPolygons={getLastMapView() ? [] : lockPolygons}
-              center={getLastMapView()?.center}
-              initialZoom={getLastMapView()?.zoom}
-              initialBearing={getLastMapView()?.bearing}
-              onViewChange={setLastMapView}
+              // Skip the initial turf-lock fit once a view was already saved
+              // AT MOUNT (Turf Tools round-trip, or yesterday's persisted
+              // spot) — restore that position instead of snapping back to
+              // the turf frame. Frozen (savedView) so the map's own moves
+              // can't retroactively suppress a first-login fit.
+              fitPolygons={savedView ? [] : lockPolygons}
+              center={savedView?.center}
+              initialZoom={savedView?.zoom}
+              initialBearing={savedView?.bearing}
+              onViewChange={(v) => setLastMapView(v, user?.id)}
+              dataStatus={turfDataStatus}
               houseBubbles
               zipTints={isCaptain ? zipZones.tints : undefined}
               onHouseTap={(h) => setHouseTarget(h)}
