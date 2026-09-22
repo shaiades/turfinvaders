@@ -31,6 +31,7 @@ import {
   formatWeekRange,
   laMonthStartISO,
   laTodayISO,
+  laWeekStartISO,
   monthStartISO,
   nextMonthStartISO,
 } from "@/lib/dates";
@@ -461,6 +462,60 @@ function CloseKombatInner({
     const idx = weekReps.findIndex((r) => matcher.isMe(r.rep));
     return idx >= 0 ? weekReps[idx] : null;
   }, [isRep, matcher, goalsOfficeCards, goalsWeek.weekStartISO, goalsWeek.weekEndISO]);
+
+  // Trailing 2 COMPLETED weeks (owner, 2026-09-22): the back-solve's rates
+  // come from here, never from the week in progress — Monday morning has no
+  // current-week data, and Monday morning is exactly when goals get set.
+  // Zero extra queries: the goals fetch is padded ±42d, which fully covers
+  // weekStart−14 → weekStart−1.
+  const trailingStart = addDaysISO(goalsWeek.weekStartISO, -14);
+  const trailingEnd = addDaysISO(goalsWeek.weekStartISO, -1);
+  const trailingRow = useMemo(() => {
+    if (!isRep || !matcher.matched) return null;
+    const { reps: tReps } = aggregateCloseKombat(goalsOfficeCards, {
+      start: trailingStart,
+      end: trailingEnd,
+    });
+    const idx = tReps.findIndex((r) => matcher.isMe(r.rep));
+    return idx >= 0 ? tReps[idx] : null;
+  }, [isRep, matcher, goalsOfficeCards, trailingStart, trailingEnd]);
+  // Fallback baseline aggregates the UNFILTERED fetch on purpose: the sticky
+  // office picker scopes goalsOfficeCards, and an office-scoped number under
+  // a "Company avg" label would be a lie.
+  const trailingCompanyTotals = useMemo(() => {
+    if (!isRep) return null;
+    return aggregateCloseKombat(goalsCardsQuery.data ?? [], {
+      start: trailingStart,
+      end: trailingEnd,
+    }).totals;
+  }, [isRep, goalsCardsQuery.data, trailingStart, trailingEnd]);
+
+  // Monday ritual (owner, 2026-09-22): a rep's FIRST Close Kombat open of a
+  // new LA week lands on the Goals tab — once per week per device, stamped
+  // BEFORE navigating so a storage failure can never loop (CloseKombatIntro's
+  // rule). A push deep-link (?tab=goals) or any non-Stats landing stamps
+  // without navigating: the rep has seen goals this week, so a later
+  // Stats-first open must not yank them again. Previews never stamp or
+  // navigate — View As keeps the owner's own device stamps out of this.
+  const weeklyNudgeDone = useRef(false);
+  useEffect(() => {
+    if (weeklyNudgeDone.current) return;
+    if (!isRep || isPreview || !user?.id) return;
+    weeklyNudgeDone.current = true;
+    const key = `ti_ck_goals_week_v1:${user.id}`;
+    const thisWeek = laWeekStartISO();
+    try {
+      if (window.localStorage.getItem(key) === thisWeek) return;
+      window.localStorage.setItem(key, thisWeek);
+    } catch {
+      return; // can't persist → never redirect, or every open would yank them
+    }
+    if (pageTab === "stats") setPageTab("goals");
+    // pageTab/setPageTab are read, not reacted to — the nudge fires once when
+    // the signed-in rep state first settles, and re-running on tab changes
+    // would re-yank a rep who navigated away.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRep, isPreview, user?.id]);
 
   const cardById = useMemo(() => {
     const m = new Map<string, BlockCard>();
@@ -1440,6 +1495,8 @@ function CloseKombatInner({
               weekLabel={formatWeekRange(goalsWeek.weekStart, goalsWeek.weekEnd)}
               weekLoading={goalsCardsQuery.isLoading}
               weekRow={weekRow}
+              trailingRow={trailingRow}
+              trailingCompanyTotals={trailingCompanyTotals}
               isPreview={isPreview}
               previewName={isPreview ? displayName : null}
             />
