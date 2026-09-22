@@ -12,10 +12,23 @@ import {
   haversineM,
   ingestBuilding,
   ingestAddrNode,
+  restoreHouse,
   MATCH_METERS,
   type OsmHouse,
   type OverpassElement,
 } from "@/lib/house-cache";
+import {
+  rectKey,
+  rectIntersects,
+  isFresh,
+  putRect,
+  loadAllMeta,
+  getHouses,
+  touchRects,
+  pruneStore,
+  type StoredHouse,
+} from "@/lib/house-store";
+import type { HouseFetchStatus } from "@/lib/map-status";
 import type { FieldPin } from "@/components/NeonMap";
 
 /**
@@ -59,13 +72,27 @@ const RENDER_CAP = 300;
 // keep the builder loose without per-call-site casts.
 const rawTable = (name: string) => (supabase as unknown as SupabaseClient).from(name);
 
-// Public Overpass endpoints, tried in order. After both fail we go quiet for
-// a minute — a field crew must never turn into a retry storm.
+// Public Overpass endpoints. The primary fires immediately; the mirror is
+// HEDGED in 2.5s later (or the moment the primary fails fast) — first
+// success wins and aborts the loser. On weak field cellular that turns a
+// dead primary from a 10s stall into a ~3s failover, at the cost of at most
+// one extra in-flight request. After BOTH fail we go quiet for a beat — a
+// field crew must never turn into a retry storm (one deferred fetch fires
+// at cooldown expiry; the status pill's retry clears it early).
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
 ];
-const FAIL_COOLDOWN_MS = 60_000;
+const HEDGE_DELAY_MS = 2_500;
+const FAIL_COOLDOWN_MS = 20_000;
+// Server-side junk filter, mirroring EXCLUDED_BUILDINGS in house-cache.ts:
+// garages/sheds consumed print budget before the client filter dropped
+// them, and budget exhaustion is what forces quadrant splits (the slow
+// path). The client filter stays as belt-and-braces.
+const EXCLUDED_BUILDINGS_RE = "^(garage|garages|shed|carport|roof|greenhouse|hut|kiosk|service|ruins|no)$";
+// Surface "loading" only when a real network fetch outlives this grace —
+// cache hits and fast fetches never flash the pill.
+const LOADING_GRACE_MS = 600;
 // Per-request print budgets. A padded z17 frame in a dense SoCal tract holds
 // ~1300-1500 roof polygons (garages included — they consume budget before the
 // client filter drops them); 1800/900 covers it with headroom at ~150 B per
@@ -77,13 +104,64 @@ const QUADRANT_SPACING_MS = 300;
 
 // Fetch-state session caches (module scope — shared across remounts).
 const coveredBounds: L.LatLngBounds[] = [];
-const MAX_COVERED = 64; // splits add up to 5 rects per dense view
+// Splits add up to 5 rects per dense view; hydrated rects from the disk
+// store land here too, and must not FIFO-evict the session's own fetches.
+const MAX_COVERED = 128;
 let lastFailAt = 0;
+// Rects already persisted or hydrated this session — guards double writes
+// and double restores.
+const storedKeys = new Set<string>();
+let prunedThisSession = false;
 
-/** One Overpass round trip; returns RAW per-class element counts (before
- *  client filters — filtered elements consumed print budget too, and the
- *  counts are how the caller detects truncation). */
-async function overpassRequest(
+/** One attempt against one endpoint. Ingests on success (idempotent via
+ *  houseCache.has, so a double-success hedge race is harmless) and returns
+ *  RAW per-class element counts (before client filters — filtered elements
+ *  consumed print budget too, and the counts are how the caller detects
+ *  truncation). */
+async function overpassAttempt(
+  endpoint: string,
+  query: string,
+  signal: AbortSignal,
+): Promise<{ buildings: number; nodes: number }> {
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: `data=${encodeURIComponent(query)}`,
+    // 10 s client deadline per attempt. `[timeout:8]` is a server-side
+    // hint that never covers a hung connection. The deadline aborts as
+    // TimeoutError, so AbortError still uniquely means "caller cancelled".
+    signal: withTimeout(signal, 10_000),
+  });
+  if (!res.ok) throw new Error(`overpass ${res.status}`);
+  const data = (await res.json()) as { elements?: OverpassElement[]; remark?: string };
+  // Overpass can 200 a TIMED-OUT query: partial elements plus a
+  // runtime-error remark, with per-class counts under the caps.
+  // Counting that as complete would mark the rect covered and cache
+  // mid-block holes for the whole session — treat it as this attempt
+  // failing (the hedge/mirror gets its shot, then the cooldown).
+  if (data.remark && /runtime error|timed out/i.test(data.remark)) {
+    throw new Error(`overpass partial: ${data.remark.slice(0, 120)}`);
+  }
+  let buildings = 0;
+  let nodes = 0;
+  for (const el of data.elements ?? []) {
+    if (el.type === "way" || el.type === "relation") {
+      buildings++;
+      ingestBuilding(el);
+    } else if (el.type === "node") {
+      nodes++;
+      ingestAddrNode(el);
+    }
+  }
+  return { buildings, nodes };
+}
+
+/** Hedged round trip: primary now, mirror after HEDGE_DELAY_MS (or the
+ *  moment the primary fails fast). First success wins and aborts the
+ *  loser; max 2 requests per bbox, mirror only when the primary is slow
+ *  or dead — same order of load on the public endpoints as the old
+ *  sequential walk, minus the 10s dead-primary stall. */
+function overpassRequest(
   bounds: L.LatLngBounds,
   signal: AbortSignal,
 ): Promise<{ buildings: number; nodes: number }> {
@@ -98,55 +176,70 @@ async function overpassRequest(
   // MUST be body verbosity (`out N`) — `out tags N` strips node lat/lon and
   // every address point silently vanishes. Ways/relations keep `tags center`
   // (no member arrays — small payload; a relation's center is its bbox
-  // center, close enough for a multipolygon home).
+  // center, close enough for a multipolygon home). The !~/!key prefilters
+  // stop junk from eating the print caps server-side.
   const query =
     `[out:json][timeout:8];` +
-    `(way[building](${bbox});relation[building](${bbox}););out tags center ${BUILDING_CAP};` +
-    `node["addr:housenumber"](${bbox});out ${NODE_CAP};`;
-  let lastErr: unknown = null;
-  for (const endpoint of OVERPASS_ENDPOINTS) {
-    try {
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: `data=${encodeURIComponent(query)}`,
-        // 10 s client deadline per endpoint. `[timeout:8]` is a server-side
-        // hint that never covers a hung connection — before this, a stalled
-        // primary blocked the mirror failover until the next pan's abort,
-        // which read as "house circles never load". The deadline aborts as
-        // TimeoutError, so the AbortError rethrow below (user pan) still
-        // only matches real aborts and the mirror gets its turn.
-        signal: withTimeout(signal, 10_000),
-      });
-      if (!res.ok) throw new Error(`overpass ${res.status}`);
-      const data = (await res.json()) as { elements?: OverpassElement[]; remark?: string };
-      // Overpass can 200 a TIMED-OUT query: partial elements plus a
-      // runtime-error remark, with per-class counts under the caps.
-      // Counting that as complete would mark the rect covered and cache
-      // mid-block holes for the whole session — treat it as this endpoint
-      // failing (failover to the mirror, then the cooldown).
-      if (data.remark && /runtime error|timed out/i.test(data.remark)) {
-        throw new Error(`overpass partial: ${data.remark.slice(0, 120)}`);
-      }
-      let buildings = 0;
-      let nodes = 0;
-      for (const el of data.elements ?? []) {
-        if (el.type === "way" || el.type === "relation") {
-          buildings++;
-          ingestBuilding(el);
-        } else if (el.type === "node") {
-          nodes++;
-          ingestAddrNode(el);
-        }
-      }
-      return { buildings, nodes };
-    } catch (e) {
-      if (e instanceof DOMException && e.name === "AbortError") throw e;
-      lastErr = e;
+    `(way[building][building!~"${EXCLUDED_BUILDINGS_RE}"](${bbox});` +
+    `relation[building][building!~"${EXCLUDED_BUILDINGS_RE}"](${bbox}););` +
+    `out tags center ${BUILDING_CAP};` +
+    `node["addr:housenumber"][!"addr:unit"][!"entrance"](${bbox});out ${NODE_CAP};`;
+  return new Promise((resolve, reject) => {
+    const ctrls: AbortController[] = [];
+    let launched = 0;
+    let failed = 0;
+    let done = false;
+    let hedgeTimer: number | null = null;
+    let lastErr: unknown = null;
+    const finish = (settle: () => void) => {
+      if (done) return;
+      done = true;
+      if (hedgeTimer != null) window.clearTimeout(hedgeTimer);
+      signal.removeEventListener("abort", onOuterAbort);
+      for (const c of ctrls) c.abort();
+      settle();
+    };
+    const onOuterAbort = () =>
+      finish(() => reject(new DOMException("aborted", "AbortError")));
+    const launch = (i: number) => {
+      if (done || i >= OVERPASS_ENDPOINTS.length) return;
+      launched++;
+      const ac = new AbortController();
+      ctrls.push(ac);
+      overpassAttempt(OVERPASS_ENDPOINTS[i], query, ac.signal).then(
+        (counts) => finish(() => resolve(counts)),
+        (e) => {
+          if (done) return;
+          if (e instanceof DOMException && e.name === "AbortError") return; // we cancelled it
+          lastErr = e;
+          failed++;
+          if (launched < OVERPASS_ENDPOINTS.length) {
+            // Fast primary failure — don't wait out the hedge delay.
+            if (hedgeTimer != null) {
+              window.clearTimeout(hedgeTimer);
+              hedgeTimer = null;
+            }
+            launch(launched);
+          } else if (failed >= launched) {
+            lastFailAt = Date.now();
+            finish(() =>
+              reject(lastErr instanceof Error ? lastErr : new Error("overpass unavailable")),
+            );
+          }
+        },
+      );
+    };
+    if (signal.aborted) {
+      onOuterAbort();
+      return;
     }
-  }
-  lastFailAt = Date.now();
-  throw lastErr instanceof Error ? lastErr : new Error("overpass unavailable");
+    signal.addEventListener("abort", onOuterAbort, { once: true });
+    launch(0);
+    hedgeTimer = window.setTimeout(() => {
+      hedgeTimer = null;
+      launch(launched);
+    }, HEDGE_DELAY_MS);
+  });
 }
 
 function pushCovered(bounds: L.LatLngBounds) {
@@ -154,22 +247,95 @@ function pushCovered(bounds: L.LatLngBounds) {
   if (coveredBounds.length > MAX_COVERED) coveredBounds.shift();
 }
 
+/** Persist a covered rect's houses (or an empty parent coverage marker) to
+ *  the disk store, fire-and-forget. groupKey ties a split's quadrants to
+ *  their parent marker so eviction is group-atomic. */
+function persistRect(bounds: L.LatLngBounds, groupKey: string, includeHouses: boolean) {
+  const s = bounds.getSouth();
+  const w = bounds.getWest();
+  const n = bounds.getNorth();
+  const e = bounds.getEast();
+  const key = rectKey(s, w, n, e);
+  if (storedKeys.has(key)) return;
+  storedKeys.add(key);
+  const houses: StoredHouse[] = [];
+  if (includeHouses) {
+    for (const h of houseCache.values()) {
+      if (bounds.contains(h.pos)) {
+        const { pos: _pos, currentPinId: _p, currentType: _t, ...rest } = h;
+        houses.push(rest);
+      }
+    }
+  }
+  const now = Date.now();
+  void putRect({ key, s, w, n, e, groupKey, fetchedAt: now, lastUsedAt: now }, houses);
+}
+
+/** Restore any fresh persisted rects intersecting `want` into the session
+ *  cache + coveredBounds. Returns true when houses actually landed (the
+ *  caller bumps the render tick). On a reload with no service, this is the
+ *  difference between yesterday's circles painting in <100ms and nothing. */
+async function hydrateCovered(want: L.LatLngBounds): Promise<boolean> {
+  let landed = false;
+  try {
+    const metas = await loadAllMeta();
+    if (!prunedThisSession) {
+      prunedThisSession = true;
+      void pruneStore(Date.now());
+    }
+    const now = Date.now();
+    const wantRect = {
+      s: want.getSouth(),
+      w: want.getWest(),
+      n: want.getNorth(),
+      e: want.getEast(),
+    };
+    const touched: string[] = [];
+    for (const m of metas) {
+      if (storedKeys.has(m.key)) continue;
+      if (!isFresh(m, now) || !rectIntersects(m, wantRect)) continue;
+      const houses = await getHouses(m.key);
+      // Blob missing (partial write, cleared store) — do NOT mark covered,
+      // or the viewport fetch would skip a rect we can't actually paint.
+      if (houses == null) continue;
+      storedKeys.add(m.key);
+      for (const h of houses) restoreHouse(h);
+      pushCovered(L.latLngBounds([m.s, m.w], [m.n, m.e]));
+      touched.push(m.key);
+      if (houses.length > 0) landed = true;
+    }
+    if (touched.length > 0) void touchRects(touched, now);
+  } catch {
+    /* IDB unavailable — memory-only behavior, exactly as before */
+  }
+  return landed;
+}
+
 /** Fetch with truncation honesty: a print capped at N returns exactly N in
  *  database order — geographically arbitrary mid-block holes, the trust
- *  killer. A truncated fetch re-runs as 4 sequential quadrants (depth 1);
+ *  killer. A truncated fetch re-runs as 4 quadrants (depth 1) in two
+ *  concurrent PAIRS (polite to the public endpoints, half the wall clock);
  *  the parent rect is recorded only after ALL quadrants land, keeping the
  *  covered-bounds `contains` gate sound. Quadrants consult coveredBounds
- *  themselves so a walking rep's restarted split reuses finished pieces. */
+ *  themselves so a walking rep's restarted split reuses finished pieces.
+ *  Finished rects persist to the disk store under one groupKey per split. */
 async function fetchHouses(
   bounds: L.LatLngBounds,
   signal: AbortSignal,
   onChunk: () => void,
   depth = 0,
+  groupKey?: string,
 ): Promise<void> {
   if (depth > 0 && coveredBounds.some((b) => b.contains(bounds))) {
     onChunk();
     return;
   }
+  const ownKey = rectKey(
+    bounds.getSouth(),
+    bounds.getWest(),
+    bounds.getNorth(),
+    bounds.getEast(),
+  );
   const { buildings, nodes } = await overpassRequest(bounds, signal);
   const truncated = buildings >= BUILDING_CAP || nodes >= NODE_CAP;
   if (!truncated || depth >= 1) {
@@ -179,6 +345,7 @@ async function fetchHouses(
       console.warn("[house-bubbles] dense frame truncated after split");
     }
     pushCovered(bounds);
+    persistRect(bounds, groupKey ?? ownKey, true);
     onChunk();
     return;
   }
@@ -190,12 +357,26 @@ async function fetchHouses(
     L.latLngBounds([c.lat, bounds.getWest()], [bounds.getNorth(), c.lng]),
     L.latLngBounds([c.lat, c.lng], [bounds.getNorth(), bounds.getEast()]),
   ];
-  for (const q of quads) {
+  for (const pair of [
+    [quads[0], quads[1]],
+    [quads[2], quads[3]],
+  ]) {
     await new Promise((r) => setTimeout(r, QUADRANT_SPACING_MS));
     if (signal.aborted) throw new DOMException("aborted", "AbortError");
-    await fetchHouses(q, signal, onChunk, depth + 1);
+    // allSettled, not all: a fast-failing sibling must not orphan the other
+    // quadrant's in-flight promise as an unhandled rejection.
+    const results = await Promise.allSettled(
+      pair.map((q) => fetchHouses(q, signal, onChunk, depth + 1, ownKey)),
+    );
+    const failure = results.find(
+      (r): r is PromiseRejectedResult => r.status === "rejected",
+    );
+    if (failure) throw failure.reason;
   }
   pushCovered(bounds);
+  // Empty coverage marker: the quadrant blobs hold the houses; duplicating
+  // them at the parent would double the disk payload.
+  persistRect(bounds, ownKey, false);
 }
 
 // Bubble divIcons cached by look (same rationale as NeonMap's icon cache:
@@ -246,18 +427,21 @@ export function HouseBubblesLayer({
   enabled,
   pins = [],
   onHouseTap,
-  onAvailabilityChange,
+  onStatusChange,
+  retryToken = 0,
 }: {
   enabled: boolean;
   /** Today's pins — they color the bubbles of the houses they landed on. */
   pins?: FieldPin[];
   onHouseTap?: (house: OsmHouse) => void;
-  /** Fires false the moment an Overpass fetch fails (offline/low-service, or
-   *  the public endpoints are just down) and true again the next time one
-   *  succeeds — drives NeonMap's persistent "circles unavailable" banner so
-   *  the fallback (arm a result, tap the bare map) stays visible for as
-   *  long as it's actually true, not just a toast shown once per session. */
-  onAvailabilityChange?: (available: boolean) => void;
+  /** Circle-fetch health for NeonMap's status pill: "loading" when a real
+   *  network fetch outlives a short grace, "unavailable" after both
+   *  endpoints fail (canvass screen only — spectate has no armed chips to
+   *  point at), "ok" otherwise. Replaces the old boolean availability wire. */
+  onStatusChange?: (status: HouseFetchStatus) => void;
+  /** Bump to clear the failure cooldown and refetch NOW — the status pill's
+   *  tap-to-retry (FlyTo key pattern). */
+  retryToken?: number;
 }) {
   const map = useMap();
   const [renderTick, setRenderTick] = useState(0);
@@ -265,17 +449,87 @@ export function HouseBubblesLayer({
   const abortRef = useRef<AbortController | null>(null);
   const inflightRef = useRef<L.LatLngBounds | null>(null);
   const debounceRef = useRef<number | null>(null);
+  const loadingTimerRef = useRef<number | null>(null);
+  const refreshRef = useRef<(() => void) | null>(null);
   const tapRef = useRef(onHouseTap);
   tapRef.current = onHouseTap;
-  const availabilityRef = useRef(onAvailabilityChange);
-  availabilityRef.current = onAvailabilityChange;
+  const statusRef = useRef(onStatusChange);
+  statusRef.current = onStatusChange;
 
   useEffect(() => {
     if (!enabled) return;
+    const clearLoadingTimer = () => {
+      if (loadingTimerRef.current != null) {
+        window.clearTimeout(loadingTimerRef.current);
+        loadingTimerRef.current = null;
+      }
+    };
+    const fire = async () => {
+      // Re-check at fire time — the rep may have zoomed out mid-debounce.
+      if (map.getZoom() < HOUSE_MIN_ZOOM) return;
+      // Failure cooldown: never storm the endpoints, but never go dead
+      // either — exactly ONE deferred fetch re-arms itself for expiry
+      // (pre-#249 this cleared the debounce outright, which read as
+      // "circles permanently broken" on flaky LTE).
+      const wait = lastFailAt + FAIL_COOLDOWN_MS - Date.now();
+      if (wait > 0) {
+        debounceRef.current = window.setTimeout(fire, wait + 250);
+        return;
+      }
+      const want = viewBounds(map).pad(0.4);
+      // Disk first: a reload (or a prefetched turf) paints from IndexedDB
+      // before any network is attempted.
+      if (await hydrateCovered(want)) setRenderTick((t) => t + 1);
+      if (coveredBounds.some((b) => b.contains(want))) {
+        statusRef.current?.("ok");
+        return;
+      }
+      // A walking rep's GPS-follow pans fire moveend every settle; if the
+      // in-flight fetch (padded ~350 m beyond the frame) already covers
+      // the shifted viewport, let it FINISH instead of aborting a nearly
+      // done quadrant split over and over.
+      if (abortRef.current && inflightRef.current?.contains(want)) return;
+      abortRef.current?.abort();
+      const ac = new AbortController();
+      abortRef.current = ac;
+      inflightRef.current = want;
+      // "Loading" only if this real fetch outlives the grace — cache hits
+      // and quick fetches never flash the pill.
+      clearLoadingTimer();
+      loadingTimerRef.current = window.setTimeout(() => {
+        loadingTimerRef.current = null;
+        if (abortRef.current === ac) statusRef.current?.("loading");
+      }, LOADING_GRACE_MS);
+      try {
+        await fetchHouses(want, ac.signal, () => setRenderTick((t) => t + 1));
+        clearLoadingTimer();
+        statusRef.current?.("ok");
+      } catch (e) {
+        // AbortError = superseded by a newer pan/zoom; the successor cleared
+        // our loading timer when it scheduled its own and owns the status.
+        if (!(e instanceof DOMException && e.name === "AbortError")) {
+          // Bubbles simply don't appear; armed bare-map taps keep working —
+          // the status pill says so for as long as it stays true (canvass
+          // screen only; spectate reports "ok" = nothing to say).
+          console.warn("[house-bubbles] fetch failed", e);
+          clearLoadingTimer();
+          statusRef.current?.(tapRef.current ? "unavailable" : "ok");
+        }
+      } finally {
+        // A finished (or failed) fetch is no longer in flight — a stale
+        // ref here would make the contains-skip above block retries of
+        // this area after a failure.
+        if (abortRef.current === ac) {
+          abortRef.current = null;
+          inflightRef.current = null;
+          clearLoadingTimer();
+        }
+      }
+    };
     const refresh = () => {
       const zoom = map.getZoom();
       setView({ bounds: viewBounds(map), zoom });
-      if (zoom < HOUSE_MIN_ZOOM || Date.now() - lastFailAt < FAIL_COOLDOWN_MS) {
+      if (zoom < HOUSE_MIN_ZOOM) {
         // Clear any pending timer too — a fetch scheduled at street zoom
         // must not fire against a zoomed-out viewport (a giant bbox that
         // truncates past the split depth would poison coveredBounds).
@@ -284,53 +538,28 @@ export function HouseBubblesLayer({
         return;
       }
       if (debounceRef.current != null) window.clearTimeout(debounceRef.current);
-      debounceRef.current = window.setTimeout(async () => {
-        // Re-check at fire time — the rep may have zoomed out mid-debounce.
-        if (map.getZoom() < HOUSE_MIN_ZOOM) return;
-        const want = viewBounds(map).pad(0.4);
-        if (coveredBounds.some((b) => b.contains(want))) return;
-        // A walking rep's GPS-follow pans fire moveend every settle; if the
-        // in-flight fetch (padded ~350 m beyond the frame) already covers
-        // the shifted viewport, let it FINISH instead of aborting a nearly
-        // done quadrant split over and over.
-        if (abortRef.current && inflightRef.current?.contains(want)) return;
-        abortRef.current?.abort();
-        const ac = new AbortController();
-        abortRef.current = ac;
-        inflightRef.current = want;
-        try {
-          await fetchHouses(want, ac.signal, () => setRenderTick((t) => t + 1));
-          availabilityRef.current?.(true);
-        } catch (e) {
-          if (!(e instanceof DOMException && e.name === "AbortError")) {
-            // Bubbles simply don't appear; armed bare-map taps keep working —
-            // NeonMap's banner (driven by onAvailabilityChange) says so for
-            // as long as it stays true, canvass screen only (spectate has no
-            // armed chips to point at).
-            console.warn("[house-bubbles] fetch failed", e);
-            if (tapRef.current) availabilityRef.current?.(false);
-          }
-        } finally {
-          // A finished (or failed) fetch is no longer in flight — a stale
-          // ref here would make the contains-skip above block retries of
-          // this area after a failure.
-          if (abortRef.current === ac) {
-            abortRef.current = null;
-            inflightRef.current = null;
-          }
-        }
-      }, 400);
+      debounceRef.current = window.setTimeout(fire, 400);
     };
+    refreshRef.current = refresh;
     refresh();
     map.on("moveend", refresh);
     map.on("zoomend", refresh);
     return () => {
       map.off("moveend", refresh);
       map.off("zoomend", refresh);
+      refreshRef.current = null;
       if (debounceRef.current != null) window.clearTimeout(debounceRef.current);
+      clearLoadingTimer();
       abortRef.current?.abort();
     };
   }, [map, enabled]);
+
+  // Status-pill retry: clear the cooldown and go now.
+  useEffect(() => {
+    if (!retryToken) return;
+    lastFailAt = 0;
+    refreshRef.current?.();
+  }, [retryToken]);
 
   const inFrame = useMemo(() => {
     void renderTick;
@@ -509,4 +738,83 @@ export function HouseBubblesLayer({
       })}
     </>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Turf prefetch — morning WiFi (or the parking-lot bar of signal) loads the
+// day's houses into the disk store before the rep starts walking.
+
+const PREFETCH_TILE_DEG = 0.008; // ≈ one padded z17 frame at SoCal latitude
+const PREFETCH_MAX_TILES = 6; // per turf, center-out; edges fill via viewport
+const prefetchedTurfSigs = new Set<string>();
+
+/** Background-fill the assigned turf's houses (canvasser turfs only — a
+ *  captain's query returns EVERY turf and prefetching all of them would
+ *  hammer the public mirrors). Sequential on purpose: background work never
+ *  competes with the interactive viewport fetch for parallelism. Failures
+ *  are silent (the viewport fetch owns the status pill) but do set the
+ *  shared cooldown, which is exactly the storm protection we want. */
+export async function prefetchTurfHouses(
+  polygons: Array<Array<{ lat: number; lng: number }>>,
+): Promise<void> {
+  try {
+    for (const poly of polygons) {
+      if (poly.length < 3) continue;
+      let s = 90;
+      let w = 180;
+      let n = -90;
+      let e = -180;
+      for (const p of poly) {
+        s = Math.min(s, p.lat);
+        n = Math.max(n, p.lat);
+        w = Math.min(w, p.lng);
+        e = Math.max(e, p.lng);
+      }
+      // One prefetch per turf shape per session — realtime turf refetches
+      // re-run the caller effect with the same polygons.
+      const sig = rectKey(s, w, n, e);
+      if (prefetchedTurfSigs.has(sig)) continue;
+      prefetchedTurfSigs.add(sig);
+      // Small pad so edge houses (door on the boundary street) make it in.
+      s -= 0.0006;
+      w -= 0.0006;
+      n += 0.0006;
+      e += 0.0006;
+      const rows = Math.max(1, Math.ceil((n - s) / PREFETCH_TILE_DEG));
+      const cols = Math.max(1, Math.ceil((e - w) / PREFETCH_TILE_DEG));
+      const cLat = (s + n) / 2;
+      const cLng = (w + e) / 2;
+      const tiles: Array<{ b: L.LatLngBounds; d: number }> = [];
+      for (let i = 0; i < rows; i++) {
+        for (let j = 0; j < cols; j++) {
+          const b = L.latLngBounds(
+            [s + (i * (n - s)) / rows, w + (j * (e - w)) / cols],
+            [s + ((i + 1) * (n - s)) / rows, w + ((j + 1) * (e - w)) / cols],
+          );
+          const cc = b.getCenter();
+          const dy = cc.lat - cLat;
+          const dx = cc.lng - cLng;
+          tiles.push({ b, d: dy * dy + dx * dx });
+        }
+      }
+      tiles.sort((a, b) => a.d - b.d);
+      const ac = new AbortController();
+      let fetched = 0;
+      for (const t of tiles) {
+        if (fetched >= PREFETCH_MAX_TILES) break;
+        // Respect the shared failure cooldown — if the viewport fetch just
+        // burned both endpoints, background work stands down entirely.
+        if (Date.now() - lastFailAt < FAIL_COOLDOWN_MS) return;
+        if (coveredBounds.some((cb) => cb.contains(t.b))) continue;
+        await hydrateCovered(t.b);
+        if (coveredBounds.some((cb) => cb.contains(t.b))) continue;
+        fetched++;
+        await new Promise((r) => setTimeout(r, QUADRANT_SPACING_MS));
+        await fetchHouses(t.b, ac.signal, () => {});
+      }
+    }
+  } catch {
+    // Silent: prefetch is a nicety. lastFailAt is already set by the shared
+    // fetch machinery, so the next attempt waits out the cooldown.
+  }
 }

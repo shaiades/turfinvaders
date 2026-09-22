@@ -306,6 +306,18 @@ export function snapTapToHouse(
   return best ? { ...house, currentPinId: best.id, currentType: best.pin_type } : { ...house };
 }
 
+/** Re-insert a house persisted by src/lib/house-store.ts. The full ingest
+ *  dedupe already ran before it was stored, so this only re-mints the
+ *  transient fields: the stable pos tuple, and no pin match (pins are
+ *  re-matched live). Skips ids already in the session cache — a hydrated
+ *  rect can overlap a freshly-fetched one. */
+export function restoreHouse(h: Omit<OsmHouse, "pos" | "currentPinId" | "currentType">): void {
+  if (houseCache.has(h.id)) return;
+  const full: OsmHouse = { ...h, pos: [h.lat, h.lng] };
+  houseCache.set(h.id, full);
+  gridAdd(full);
+}
+
 /** Test hook (verify-house-snap): wipe the session cache between cases. */
 export function resetHouseCache() {
   houseCache.clear();

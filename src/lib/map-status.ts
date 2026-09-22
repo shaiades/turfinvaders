@@ -22,6 +22,11 @@ export type MapDataStatus = {
   onRetry?: () => void;
 };
 
+/** House-circle fetch health, emitted by HouseBubblesLayer. "loading" only
+ *  for real network fetches that outlive a short grace period — cache hits
+ *  and quick fetches stay silent. */
+export type HouseFetchStatus = "loading" | "ok" | "unavailable";
+
 export type MapStatus =
   | { kind: "offline" }
   | { kind: "data-error"; what: string; onRetry?: () => void }
@@ -29,6 +34,7 @@ export type MapStatus =
   | { kind: "weak-signal" }
   | { kind: "tiles-loading" }
   | { kind: "circles-unavailable" }
+  | { kind: "circles-loading" }
   | { kind: "zoom-hint" }
   | null;
 
@@ -41,7 +47,7 @@ export function resolveMapStatus(s: {
   online: boolean;
   data?: MapDataStatus;
   tileHealth: TileHealth;
-  circlesUnavailable: boolean;
+  circles: HouseFetchStatus;
   zoomHint: boolean;
 }): MapStatus {
   if (!s.online) return { kind: "offline" };
@@ -50,7 +56,8 @@ export function resolveMapStatus(s: {
   if (s.data?.state === "loading") return { kind: "data-loading", what: s.data.what };
   if (s.tileHealth === "degraded") return { kind: "weak-signal" };
   if (s.tileHealth === "loading") return { kind: "tiles-loading" };
-  if (s.circlesUnavailable) return { kind: "circles-unavailable" };
+  if (s.circles === "unavailable") return { kind: "circles-unavailable" };
+  if (s.circles === "loading") return { kind: "circles-loading" };
   if (s.zoomHint) return { kind: "zoom-hint" };
   return null;
 }
