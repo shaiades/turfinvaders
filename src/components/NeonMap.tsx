@@ -352,13 +352,18 @@ function ZoomWatcher({ onZoom }: { onZoom: (z: number) => void }) {
   return null;
 }
 
-// Tile-health thresholds. Degraded = ≥3 tile errors in the trailing 15s with
-// zero successes, OR no first paint within 8s of the layer starting to load.
-// Sustained degradation for 10s drops the heavy imagery layer (low-data
-// mode); a 60s timer or the browser's `online` event re-tries it.
+// Tile-health thresholds. Degraded (weak signal) = errors dominating
+// successes in the trailing window — stale-if-error cache hits keep some
+// cells painting on a dead link, so "any success" must not mask failure —
+// OR a loading cycle making no progress (8s before the first-ever paint,
+// the cold-open field symptom; 15s after, for hung requests that never
+// error). Low-data mode (shed the imagery layer) needs TOTAL failure:
+// with mixed cached/uncached cells the cached satellite squares are worth
+// keeping. Sustained 10s to engage; 60s timer or `online` to retry.
 const TILE_ERR_WINDOW_MS = 15_000;
 const TILE_DEGRADED_ERRORS = 3;
 const TILE_FIRST_PAINT_STALL_MS = 8_000;
+const TILE_STALL_MS = 15_000;
 const LOW_DATA_AFTER_MS = 10_000;
 const LOW_DATA_RETRY_MS = 60_000;
 
@@ -378,6 +383,8 @@ function useTileHealth() {
   const box = useRef({
     loading: false,
     epochStartAt: 0,
+    cycleStartAt: 0,
+    lastLoadAt: 0,
     everLoaded: false,
     loads: [] as number[],
     errors: [] as number[],
@@ -389,6 +396,7 @@ function useTileHealth() {
   const eventHandlers = useMemo(
     () => ({
       loading: () => {
+        if (!box.loading) box.cycleStartAt = Date.now();
         box.loading = true;
         if (!box.epochStartAt) box.epochStartAt = Date.now();
       },
@@ -397,7 +405,8 @@ function useTileHealth() {
       },
       tileload: () => {
         box.everLoaded = true;
-        box.loads.push(Date.now());
+        box.lastLoadAt = Date.now();
+        box.loads.push(box.lastLoadAt);
         if (box.loads.length > 40) box.loads.splice(0, 20);
       },
       tileerror: () => {
@@ -409,10 +418,25 @@ function useTileHealth() {
   );
 
   useEffect(() => {
+    // Full reset — engage and retry both need it: events can still fire in
+    // the beat between the engage-tick and React actually unmounting the
+    // layer, and a stale epochStartAt would instantly re-trip the stall
+    // rule on the retry's remount.
+    const resetEpoch = () => {
+      box.loading = false;
+      box.epochStartAt = 0;
+      box.cycleStartAt = 0;
+      box.lastLoadAt = 0;
+      box.everLoaded = false;
+      box.loads.length = 0;
+      box.errors.length = 0;
+      box.degradedSince = 0;
+    };
     const retryImagery = () => {
       if (!box.lowData) return;
       box.lowData = false;
       box.lowDataAt = 0;
+      resetEpoch();
       setLowData(false);
     };
     const tick = () => {
@@ -426,12 +450,19 @@ function useTileHealth() {
       }
       const errs = box.errors.filter((t) => now - t < TILE_ERR_WINDOW_MS).length;
       const okays = box.loads.filter((t) => now - t < TILE_ERR_WINDOW_MS).length;
-      const stalled =
-        box.loading &&
-        !box.everLoaded &&
-        box.epochStartAt > 0 &&
-        now - box.epochStartAt > TILE_FIRST_PAINT_STALL_MS;
-      const degraded = (errs >= TILE_DEGRADED_ERRORS && okays === 0) || stalled;
+      // No-progress watchdog, anchored to the later of cycle start / last
+      // tile landed — catches both the cold-open hang and mid-session hangs
+      // that never produce error events (no SW controlling yet).
+      const anchor = Math.max(box.cycleStartAt, box.lastLoadAt);
+      const stallAfter = box.everLoaded ? TILE_STALL_MS : TILE_FIRST_PAINT_STALL_MS;
+      const stalled = box.loading && anchor > 0 && now - anchor > stallAfter;
+      // Weak signal = errors dominate; total failure = nothing landing at
+      // all. Stale-if-error cache hits count as successes, so only total
+      // failure justifies shedding the imagery layer (cached satellite
+      // cells are worth keeping in mixed coverage).
+      const failing = errs >= TILE_DEGRADED_ERRORS && errs >= okays * 2;
+      const totalFailure = (errs >= TILE_DEGRADED_ERRORS && okays === 0) || stalled;
+      const degraded = failing || stalled;
       const next: TileHealth = degraded
         ? "degraded"
         : box.loading
@@ -442,19 +473,13 @@ function useTileHealth() {
               ? "loading"
               : "unknown";
       setHealth((prev) => (prev === next ? prev : next));
-      if (!degraded) {
+      if (!totalFailure) {
         box.degradedSince = 0;
         return;
       }
       if (!box.degradedSince) box.degradedSince = now;
       if (now - box.degradedSince > LOW_DATA_AFTER_MS) {
-        // Reset the epoch so the remount on retry re-arms the stall rule.
-        box.loading = false;
-        box.epochStartAt = 0;
-        box.everLoaded = false;
-        box.loads.length = 0;
-        box.errors.length = 0;
-        box.degradedSince = 0;
+        resetEpoch();
         box.lowData = true;
         box.lowDataAt = now;
         setLowData(true);
@@ -1204,6 +1229,10 @@ function NeonMapInner({
             tiles label streets progressively as you zoom in. Native z19 kept:
             street-name text is what canvassers actually read. */}
           <TileLayer
+            // Same attribution string as the imagery layer — Leaflet
+            // ref-counts duplicates (shows once), and this layer staying
+            // mounted keeps "© Esri" on screen in low-data mode.
+            attribution="&copy; Esri"
             url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}"
             maxNativeZoom={19}
             maxZoom={20}

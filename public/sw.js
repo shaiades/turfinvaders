@@ -64,8 +64,17 @@ function tileIsFresh(response) {
 }
 
 async function tileCacheFirst(request) {
-  const cache = await caches.open(TILE_CACHE);
-  const cached = await cache.match(request);
+  // The Cache API itself can be unavailable (private browsing, storage
+  // pressure, cleared site data). That must degrade to plain network —
+  // never to a broken map on a healthy connection.
+  let cache = null;
+  let cached;
+  try {
+    cache = await caches.open(TILE_CACHE);
+    cached = await cache.match(request);
+  } catch {
+    cache = null;
+  }
   if (cached && tileIsFresh(cached)) return cached;
   try {
     // AbortSignal.timeout is Safari 16+; older engines just fetch unbounded.
@@ -75,10 +84,14 @@ async function tileCacheFirst(request) {
     // Only cache real, non-opaque successes: the TileLayers request with
     // crossOrigin="anonymous" so responses are type "cors"; opaque entries
     // would be quota-padded by megabytes and unverifiable.
-    if (response.ok && (response.type === "cors" || response.type === "basic")) {
+    if (cache && response.ok && (response.type === "cors" || response.type === "basic")) {
       const copy = response.clone();
+      // delete-then-put so a refreshed tile re-enters at the END of
+      // cache.keys() — put() alone replaces in place, which would leave a
+      // just-refreshed tile at the front of the trim line.
       cache
-        .put(request, copy)
+        .delete(request)
+        .then(() => cache.put(request, copy))
         .then(() => trimTileCache(cache))
         .catch(() => {}); // quota/private-mode put failures never break the tile
     }
@@ -96,8 +109,9 @@ async function trimTileCache(cache) {
   if (trimming) return;
   trimming = true;
   try {
-    // cache.keys() is insertion-ordered and cache-first never re-puts a
-    // fresh hit, so the front of the list is the oldest — FIFO by batch.
+    // cache.keys() is insertion-ordered, fresh hits are never re-put, and
+    // refreshes delete-then-put (re-append) — so the front of the list is
+    // genuinely the oldest. FIFO by batch.
     const keys = await cache.keys();
     if (keys.length > MAX_TILE_ENTRIES) {
       await Promise.all(keys.slice(0, TRIM_BATCH).map((k) => cache.delete(k)));
