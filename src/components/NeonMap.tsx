@@ -905,6 +905,8 @@ function NeonMapInner({
   onViewChange,
   fitPolygons,
   onTerritoryClick,
+  onHistoricalAssign,
+  onHistoricalDelete,
   onPinClick,
   pendingPolygon,
   flyTo,
@@ -938,6 +940,11 @@ function NeonMapInner({
    *  re-frame on reassignment. Framing only — movement stays free. */
   fitPolygons?: LatLng[][];
   onTerritoryClick?: (id: string) => void;
+  /** Admin-only popup actions for `repcard:` historical-coverage rings:
+   *  promote into a live turf / delete the ring. Omitted (captains, canvasser
+   *  maps) the popup keeps its read-only explainer. */
+  onHistoricalAssign?: (id: string) => void;
+  onHistoricalDelete?: (id: string) => void;
   /** Makes field pins tappable (own-pin corrections). Omit = inert markers. */
   onPinClick?: (id: string) => void;
   /** A drawn-but-unsaved ring, previewed dashed white until saved/discarded. */
@@ -1244,6 +1251,17 @@ function NeonMapInner({
         <MapContainer
           center={[fallbackCenter.lat, fallbackCenter.lng]}
           zoom={initialZoom ?? (follow ? 17 : 13)}
+          // Fractional pinch zoom (owner ask 2026-09-22, RepCard-feel): 0
+          // removes the integer snap at gesture end. leaflet-rotate passes a
+          // falsy zoomSnap straight through, and every zoom gate here
+          // (HOUSE_MIN_ZOOM et al) compares with >=, so fractions are safe.
+          zoomSnap={0}
+          // Explicit ceiling: detectRetina decrements the imagery layer's own
+          // maxZoom on 2x+ screens, and without a map-level cap a non-retina
+          // device would inherit that layer's 21. Pinning 20 keeps every
+          // device identical AND keeps last-map-view's zoom<=20 sanity check
+          // valid — raise both together or saved views get discarded.
+          maxZoom={20}
           zoomControl={false}
           // Stock shift-drag box-zoom FIGHTS leaflet-rotate's shiftKeyRotate
           // for the same gesture — both enabled, a shift-drag box-zoomed and
@@ -1271,25 +1289,36 @@ function NeonMapInner({
           {/* Shared weak-network tuning on all basemap layers:
             crossOrigin="anonymous" keeps responses non-opaque so sw.js can
             cache them; keepBuffer holds off-screen tiles so panning shows
-            map, not container; updateWhenIdle + updateWhenZooming={false}
-            stop mid-gesture requests that get aborted anyway — on 1-bar
-            cellular every wasted request starves the ones that matter. */}
+            map, not container; updateWhenZooming={false} still suppresses
+            mid-pinch request churn. The imagery + street layers now load
+            DURING a pan (updateWhenIdle={false}, owner ask 2026-09-22 —
+            RepCard streams tiles under the finger; sw.js cache-first makes
+            revisits free). If "map never loads" field reports return, revert
+            updateWhenIdle first — it's the piece that trades 1-bar-cellular
+            thrift for pan smoothness. */}
           {!tiles.lowData && (
             <TileLayer
               attribution="&copy; Esri"
               url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-              // Overzoom z19-20 from z18 tiles: 4x fewer requests exactly at
-              // house-working zooms, and tiles seen on the way in get reused.
-              // Esri's z19 imagery is patchy in the suburbs anyway.
+              // Retina math (owner ask 2026-09-22, "RepCard looks sharper"):
+              // detectRetina requests min(screenZ, maxNativeZoom)+1 and draws
+              // 4 half-size tiles — so 18 here already fetches NATIVE z19
+              // (solid in SD/OC metro) on the crew's 3x iPhones. Do NOT bump
+              // maxNativeZoom to 19: that shifts URLs to z20, which Esri
+              // mostly lacks → transparent 404 tiles over the dark container.
+              // maxZoom 21 exists only to survive retina's -1 adjustment; the
+              // map-level maxZoom={20} is the real ceiling on every device.
+              detectRetina
               maxNativeZoom={18}
-              maxZoom={20}
+              maxZoom={21}
               // Explicit stacking: a low-data retry remounts this layer
               // after the label layers, and add-order would put satellite
               // imagery ON TOP of the street names without it.
               zIndex={1}
+              className="imagery-tiles"
               crossOrigin="anonymous"
               keepBuffer={4}
-              updateWhenIdle
+              updateWhenIdle={false}
               updateWhenZooming={false}
               eventHandlers={tiles.eventHandlers}
             />
@@ -1304,12 +1333,16 @@ function NeonMapInner({
             // mounted keeps "© Esri" on screen in low-data mode.
             attribution="&copy; Esri"
             url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}"
+            // NO detectRetina here: retina halves the displayed tile size,
+            // which halves this layer's rendered street-name text — sharper
+            // but unreadable on a phone. Photographic imagery has no text,
+            // so only that layer gets the retina treatment.
             maxNativeZoom={19}
             maxZoom={20}
             zIndex={2}
             crossOrigin="anonymous"
             keepBuffer={4}
-            updateWhenIdle
+            updateWhenIdle={false}
             updateWhenZooming={false}
           />
           {/* City/neighborhood names for orientation — overview zooms only.
@@ -1425,10 +1458,42 @@ function NeonMapInner({
                       <div className="nm-pop-empty">No earlier assignments</div>
                     )}
                     {isHistorical ? (
-                      <div className="nm-pop-empty">
-                        Historical coverage — no live area here yet. Draw a new area over it to
-                        assign this ground.
-                      </div>
+                      onHistoricalAssign || onHistoricalDelete ? (
+                        // Admin tier: promote the ring into a live turf, or
+                        // delete it outright (owner ask 2026-09-22).
+                        <>
+                          <div className="nm-pop-empty">2026 RepCard coverage</div>
+                          {onHistoricalAssign && (
+                            <button
+                              type="button"
+                              className="nm-pop-btn"
+                              onClick={() => {
+                                mapRef.current?.closePopup();
+                                onHistoricalAssign(t.id);
+                              }}
+                            >
+                              Assign this area →
+                            </button>
+                          )}
+                          {onHistoricalDelete && (
+                            <button
+                              type="button"
+                              className="nm-pop-btn nm-pop-btn-danger"
+                              onClick={() => {
+                                mapRef.current?.closePopup();
+                                onHistoricalDelete(t.id);
+                              }}
+                            >
+                              Delete history outline
+                            </button>
+                          )}
+                        </>
+                      ) : (
+                        <div className="nm-pop-empty">
+                          Historical coverage — no live area here yet. Draw a new area over it to
+                          assign this ground.
+                        </div>
+                      )
                     ) : (
                       <button
                         type="button"
