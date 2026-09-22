@@ -28,7 +28,7 @@ import { useZipTints, useZipAssignmentActions } from "@/hooks/useZipAssignments"
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { Crosshair, Pencil, MapPin, Trash2, Users, X, Zap } from "lucide-react";
+import { Crosshair, History, Pencil, MapPin, Trash2, Users, X, Zap } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/my-territory")({
   head: () => ({ meta: [{ title: "My Territory — Turf Invaders" }] }),
@@ -36,7 +36,8 @@ export const Route = createFileRoute("/_authenticated/my-territory")({
 });
 
 type RepcardTerritoryRow = {
-  repcard_area_id: number;
+  // uuid PK — the stable key for popup actions (repcard_area_id is nullable).
+  id: string;
   rep_name: string | null;
   team: string | null;
   color: string | null;
@@ -164,6 +165,30 @@ function ManagerTerritoryView({
   // turfs with the drawing flow below.
   const isAdmin = role === "owner" || role === "office_staff";
   const [zipTarget, setZipTarget] = useState<string | null>(null);
+  // Historical coverage (RepCard 2026) visibility — per device, default on.
+  // Hiding it also skips the paged fetch below (cellular kindness); the
+  // try/catch mirrors ti_zip_borders: private mode must not take the map down.
+  const [showHistory, setShowHistory] = useState(() => {
+    try {
+      return typeof window !== "undefined" && localStorage.getItem("ti_show_repcard_history") !== "0";
+    } catch {
+      return true;
+    }
+  });
+  function toggleHistory() {
+    setShowHistory((on) => {
+      try {
+        localStorage.setItem("ti_show_repcard_history", on ? "0" : "1");
+      } catch {
+        /* preference just won't stick */
+      }
+      return !on;
+    });
+  }
+  // Promote-in-flight: the history row to remove once its live turf saves.
+  const [promoteHistoryId, setPromoteHistoryId] = useState<string | null>(null);
+  // Historical ring pending the delete confirm dialog.
+  const [historyDelete, setHistoryDelete] = useState<{ id: string; label: string } | null>(null);
   const [flyTo, setFlyTo] = useState<{
     bounds: [[number, number], [number, number]];
     key: number;
@@ -208,7 +233,11 @@ function ManagerTerritoryView({
     try {
       const raw = localStorage.getItem(pendingKey);
       if (!raw) return;
-      const saved = JSON.parse(raw) as { polygon?: LatLng[]; at?: number };
+      const saved = JSON.parse(raw) as {
+        polygon?: LatLng[];
+        at?: number;
+        promoteHistoryId?: string;
+      };
       const poly = Array.isArray(saved.polygon) ? saved.polygon : [];
       const fresh = typeof saved.at === "number" && Date.now() - saved.at < 12 * 60 * 60 * 1000;
       if (poly.length < 3 || !fresh) {
@@ -216,6 +245,11 @@ function ManagerTerritoryView({
         return;
       }
       setPendingPolygon(poly);
+      // A crashed promote keeps its source link, so saving still removes the
+      // old dashed ring; a stale id just no-ops on the delete.
+      setPromoteHistoryId(
+        typeof saved.promoteHistoryId === "string" ? saved.promoteHistoryId : null,
+      );
       let s = 90,
         n = -90,
         w = 180,
@@ -246,7 +280,7 @@ function ManagerTerritoryView({
       if (pendingPolygon && pendingPolygon.length >= 3) {
         localStorage.setItem(
           pendingKey,
-          JSON.stringify({ polygon: pendingPolygon, at: Date.now() }),
+          JSON.stringify({ polygon: pendingPolygon, at: Date.now(), promoteHistoryId }),
         );
       } else {
         localStorage.removeItem(pendingKey);
@@ -254,7 +288,7 @@ function ManagerTerritoryView({
     } catch {
       /* best effort */
     }
-  }, [pendingPolygon, pendingKey]);
+  }, [pendingPolygon, pendingKey, promoteHistoryId]);
 
   async function flyToQuery(q: string) {
     if (searchBusy) return;
@@ -312,11 +346,13 @@ function ManagerTerritoryView({
     gcTime: 30 * 60_000,
   });
 
-  // RepCard 2026 territory history — read-only coverage drawn on the same map.
-  // Static historical data (RLS-gated to leadership), so fetch every row once,
-  // paged past PostgREST's 1000-row cap, and cache it for the session.
+  // RepCard 2026 territory history — coverage drawn on the same map. Mostly
+  // static (admin deletes/promotes are rare), so fetch every row once, paged
+  // past PostgREST's 1000-row cap, and cache it for the session; the realtime
+  // invalidation below handles the rare cross-device delete. Hidden via the
+  // History chip = don't fetch at all.
   const repcardTerritoryQuery = useQuery({
-    enabled: !!user?.id,
+    enabled: !!user?.id && showHistory,
     queryKey: ["repcard_territory"],
     staleTime: 60 * 60 * 1000,
     gcTime: 60 * 60 * 1000,
@@ -326,7 +362,7 @@ function ManagerTerritoryView({
       for (let from = 0; from < 20000; from += PAGE) {
         const { data, error } = await supabase
           .from("repcard_territory_history")
-          .select("repcard_area_id, rep_name, team, color, assigned_at, polygon_coordinates")
+          .select("id, rep_name, team, color, assigned_at, polygon_coordinates")
           .order("assigned_at", { ascending: true })
           .range(from, from + PAGE - 1);
         if (error) throw error;
@@ -341,8 +377,8 @@ function ManagerTerritoryView({
   // Managers see reassignments live (requires turfs in the realtime publication)
   useRealtimeInvalidate({
     channel: "my-territory-turfs",
-    tables: ["turfs", "zip_assignments"],
-    invalidateKeys: [["turfs"], ["turf_history"], ["zip_assignments"]],
+    tables: ["turfs", "zip_assignments", "repcard_territory_history"],
+    invalidateKeys: [["turfs"], ["turf_history"], ["zip_assignments"], ["repcard_territory"]],
     enabled: !!user?.id,
   });
 
@@ -570,7 +606,7 @@ function ManagerTerritoryView({
             : r.rep_name
           : "RepCard area";
         return {
-          id: `repcard:${r.repcard_area_id}`,
+          id: `repcard:${r.id}`,
           name: r.rep_name ?? "RepCard area",
           color: r.color || "#8b5cf6",
           polygon: simplifyRing((r.polygon_coordinates ?? []) as LatLng[]),
@@ -587,9 +623,11 @@ function ManagerTerritoryView({
   }, [repcardTerritoryQuery.data]);
 
   // Combined layer: RepCard coverage underneath, live turfs drawn on top.
+  // The History chip hides the coverage even when the query cache still holds
+  // rows (a re-show shouldn't refetch 2,700 polygons).
   const mapTerritories: Territory[] = useMemo(
-    () => [...repcardTerritories, ...territories],
-    [repcardTerritories, territories],
+    () => (showHistory ? [...repcardTerritories, ...territories] : territories),
+    [repcardTerritories, territories, showHistory],
   );
 
   // Auto-fit frames the LIVE turfs only — otherwise the 2,700 RepCard areas
@@ -605,6 +643,9 @@ function ManagerTerritoryView({
       name: string;
       assigned_user_id: string | null;
       polygon: LatLng[];
+      // Promote flow only: the repcard_territory_history row this polygon came
+      // from. Never part of the turfs insert — consumed in onSuccess.
+      promoteHistoryId?: string | null;
     }) => {
       const { data: authData } = await supabase.auth.getUser();
       const uid = authData.user?.id;
@@ -635,10 +676,18 @@ function ManagerTerritoryView({
       setPendingPolygon(null);
       setIsModalOpen(false);
       setDrawing(false);
+      // Promoted from historical coverage: the live turf now owns this
+      // ground, so retire the dashed source ring.
+      if (vars.promoteHistoryId) {
+        void removePromotedHistoryRow(vars.promoteHistoryId);
+        setPromoteHistoryId(null);
+      }
       qc.invalidateQueries({ queryKey: ["turfs"] });
       qc.invalidateQueries({ queryKey: ["turf_history"] });
     },
     onError: (e: Error) => {
+      // Promote state intentionally survives an insert failure — the floating
+      // Assign/Discard recovery path can retry with the source link intact.
       toast.error(`Failed to assign area: ${e.message}`, { duration: 8000 });
     },
   });
@@ -685,12 +734,86 @@ function ManagerTerritoryView({
     onError: (e: Error) => toast.error(e.message),
   });
 
+  /** Promote cleanup: retire the historical source ring once its live turf
+   *  saved. Fire-and-forget from saveTurf.onSuccess — the assignment already
+   *  succeeded, so a failure here only leaves a ghost dashed ring, which is
+   *  now user-fixable via the ring's own Delete action. 0 deleted rows =
+   *  another manager already removed it; equally fine. */
+  async function removePromotedHistoryRow(id: string) {
+    const { error } = await supabase
+      .from("repcard_territory_history")
+      .delete()
+      .eq("id", id)
+      .select("id");
+    if (error) {
+      toast.info(
+        "Area is live, but the old historical outline couldn't be removed — delete it from its popup.",
+        { duration: 8000 },
+      );
+    }
+    qc.invalidateQueries({ queryKey: ["repcard_territory"] });
+  }
+
+  // Direct delete of a historical coverage ring (owner ask 2026-09-22).
+  // `.select("id")`: a DELETE the RLS policy doesn't match "succeeds" with 0
+  // rows — surface that as an error instead of a fake success (the
+  // silent-no-op trap recorded in 20260916120000).
+  const deleteHistoryArea = useMutation({
+    mutationFn: async (id: string) => {
+      const { data, error } = await supabase
+        .from("repcard_territory_history")
+        .delete()
+        .eq("id", id)
+        .select("id");
+      if (error) throw new Error(error.message);
+      return (data ?? []).length;
+    },
+    onSuccess: (deleted) => {
+      if (deleted === 0) {
+        toast.error("Couldn't delete — it may already be gone.");
+      } else {
+        toast.success("Historical area deleted.");
+      }
+      setHistoryDelete(null);
+      qc.invalidateQueries({ queryKey: ["repcard_territory"] });
+    },
+    onError: (e: Error) => toast.error(`Failed to delete: ${e.message}`, { duration: 8000 }),
+  });
+
+  /** Historical ring → live turf: re-enter the post-draw assign flow with the
+   *  row's RAW ring — the rendered Territory polygon is RDP-simplified for
+   *  canvas speed, and a permanent turf boundary shouldn't inherit that ~12m
+   *  degradation. */
+  function startHistoricalAssign(territoryId: string) {
+    const row = (repcardTerritoryQuery.data ?? []).find((r) => `repcard:${r.id}` === territoryId);
+    if (!row || (row.polygon_coordinates ?? []).length < 3) {
+      toast.error("Couldn't load that historical area — try again.");
+      return;
+    }
+    setEditingTurfId(null);
+    setPromoteHistoryId(row.id);
+    setPendingPolygon(row.polygon_coordinates);
+    setIsModalOpen(true);
+  }
+
+  function startHistoricalDelete(territoryId: string) {
+    const row = (repcardTerritoryQuery.data ?? []).find((r) => `repcard:${r.id}` === territoryId);
+    if (!row) return;
+    setHistoryDelete({
+      id: row.id,
+      label: row.rep_name ? `${row.rep_name} — RepCard 2026` : "this historical area",
+    });
+  }
+
   // Managers never drop field pins — a stray map tap would insert a field_pins
   // row for them and bump their daily_logs via bump_daily_log_from_pin.
   const mapMode = drawing
     ? {
         kind: "draw" as const,
         onComplete: (poly: LatLng[]) => {
+          // A fresh drawing replaces any promote-in-flight polygon — saving
+          // it must not retire an unrelated historical ring.
+          setPromoteHistoryId(null);
           setPendingPolygon(poly);
           setIsModalOpen(true);
         },
@@ -802,6 +925,7 @@ function ManagerTerritoryView({
               onClick={() => {
                 setDrawing(false);
                 setPendingPolygon(null);
+                setPromoteHistoryId(null);
               }}
             >
               Cancel Drawing
@@ -812,6 +936,16 @@ function ManagerTerritoryView({
               <Users className="w-3.5 h-3.5" /> Crew Map
             </Button>
           )}
+          {/* 2,700 dashed RepCard rings are context, not clutter — until they
+              are. Per-device show/hide; off also skips their fetch. */}
+          <Button
+            variant="outline"
+            onClick={toggleHistory}
+            className="gap-2"
+            title={showHistory ? "Hide 2026 RepCard coverage" : "Show 2026 RepCard coverage"}
+          >
+            <History className="w-3.5 h-3.5" /> History {showHistory ? "On" : "Off"}
+          </Button>
           <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
             {drawing
               ? "Drag on the map to draw an area"
@@ -882,14 +1016,19 @@ function ManagerTerritoryView({
             onTerritoryClick={
               !drawing
                 ? (id) => {
-                    // RepCard historical areas are read-only — the popup shows
-                    // their info, but they have no editable turf row.
+                    // RepCard historical areas have no editable turf row — the
+                    // popup's own admin actions (below) handle them.
                     if (id.startsWith("repcard:")) return;
                     setEditingTurfId(id);
                     setIsModalOpen(true);
                   }
                 : undefined
             }
+            // Historical-coverage actions are admin tier only (owner ask
+            // 2026-09-22): captains keep the read-only explainer, matching
+            // the zip_assignments doctrine. RLS enforces the same line.
+            onHistoricalAssign={isAdmin && !drawing ? startHistoricalAssign : undefined}
+            onHistoricalDelete={isAdmin && !drawing ? startHistoricalDelete : undefined}
             // Tapping a turf opens an on-map card (current assignee + recent
             // history + an edit button) rather than jumping straight to the
             // sheet. Disabled mid-draw (a stray tap would fight drawing).
@@ -911,6 +1050,7 @@ function ManagerTerritoryView({
                     variant="outline"
                     onClick={() => {
                       setPendingPolygon(null);
+                      setPromoteHistoryId(null);
                       setIsModalOpen(false);
                     }}
                   >
@@ -1094,7 +1234,12 @@ function ManagerTerritoryView({
           if (editingTurf) {
             updateTurf.mutate({ id: editingTurf.id, name, assigned_user_id: assigneeId });
           } else if (pendingPolygon) {
-            saveTurf.mutate({ name, assigned_user_id: assigneeId, polygon: pendingPolygon });
+            saveTurf.mutate({
+              name,
+              assigned_user_id: assigneeId,
+              polygon: pendingPolygon,
+              promoteHistoryId,
+            });
           } else {
             // Shouldn't happen — the "deleted elsewhere" effect above closes
             // the sheet first — but a silent no-op here reads as "the button
@@ -1141,6 +1286,19 @@ function ManagerTerritoryView({
         deleting={deleteTurf.isPending}
         onConfirm={() => {
           if (listDeleteId) deleteTurf.mutate(listDeleteId);
+        }}
+      />
+
+      {/* Delete confirm for a historical coverage ring (map popup action) */}
+      <DeleteAreaConfirmDialog
+        open={!!historyDelete}
+        onOpenChange={(v) => {
+          if (!v) setHistoryDelete(null);
+        }}
+        areaName={historyDelete?.label ?? "this historical area"}
+        deleting={deleteHistoryArea.isPending}
+        onConfirm={() => {
+          if (historyDelete) deleteHistoryArea.mutate(historyDelete.id);
         }}
       />
     </>

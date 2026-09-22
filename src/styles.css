@@ -648,6 +648,17 @@
 .turf-popup .nm-pop-btn:hover {
   background: color-mix(in oklab, var(--neon) 28%, transparent);
 }
+/* Destructive variant (delete a historical coverage ring) — pairs under the
+   assign button, so a tighter gap. */
+.turf-popup .nm-pop-btn-danger {
+  margin-top: 6px;
+  border-color: color-mix(in oklab, var(--destructive) 55%, transparent);
+  background: color-mix(in oklab, var(--destructive) 14%, transparent);
+  color: var(--destructive);
+}
+.turf-popup .nm-pop-btn-danger:hover {
+  background: color-mix(in oklab, var(--destructive) 24%, transparent);
+}
 
 /* Map attribution: NeonMap drops Leaflet's branding prefix (owner ask
    2026-09-12); the tile terms still require "© Esri", so it stays — as a
@@ -663,6 +674,14 @@
 .leaflet-control-attribution a {
   color: inherit !important;
   text-decoration: none !important;
+}
+
+/* Esri World_Imagery ships noticeably washed-out next to the Google imagery
+   the crew knows from RepCard — a light saturation/contrast lift on the
+   imagery layer's own container (GridLayer className scopes here; the label
+   layers and the vector canvas are siblings and unaffected). */
+.imagery-tiles {
+  filter: saturate(1.15) contrast(1.05);
 }
 
 /* ── Sonner reskin ─────────────────────────────────────────────────────

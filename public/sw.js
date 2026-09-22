@@ -21,7 +21,7 @@
 
 const TILE_CACHE = "esri-tiles-v1"; // bump the suffix to invalidate en masse
 const TILE_HOST = "server.arcgisonline.com";
-const MAX_TILE_ENTRIES = 1000; // ~256px JPEG/PNG tiles ≈ 20-40MB — inside iOS quota
+const MAX_TILE_ENTRIES = 1600; // retina imagery ≈4x tiles/viewport; ≈ 30-60MB — inside iOS quota
 const TRIM_BATCH = 100;
 const TILE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const TILE_FETCH_TIMEOUT_MS = 12_000;
