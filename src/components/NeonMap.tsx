@@ -1090,7 +1090,7 @@ function NeonMapInner({
               enabled
               pins={pins}
               onHouseTap={onHouseTap}
-              onAvailabilityChange={setCirclesUnavailable}
+              onAvailabilityChange={(available) => setCirclesUnavailable(!available)}
             />
           )}
           {hasFit && <FitPolygons polygons={fitPolygons!} />}
