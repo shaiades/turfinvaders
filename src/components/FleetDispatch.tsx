@@ -440,10 +440,21 @@ function FleetDispatchInner({
   const windowQ = useQuery({
     queryKey: ["fleet_dispatch", "suspension-window", today],
     queryFn: async () => {
-      const { data } = await supabase
+      // Contiguous range (oldest worked day → today) rather than the worked
+      // days alone: donutEval only ever asks genOn about workedDays, but
+      // lastActiveBy needs Sundays AND today so the 7-day recency gate reads
+      // the same on every range tab — with .in(workedDays), today's activity
+      // reached the recency map only via the range-scoped funnel query, and
+      // the watch list changed with the selected range.
+      const { data, error } = await supabase
         .from("daily_metrics")
         .select("canvasser_id, metric_date, leads_generated, leads_submitted, leads_confirmed")
-        .in("metric_date", workedDays);
+        .gte("metric_date", workedDays[workedDays.length - 1])
+        .lte("metric_date", today);
+      // supabase-js never throws — without this, a failed fetch reads as an
+      // empty window (isSuccess + []), which would flag every clocked-in rep
+      // as a donut and leave the board's error state unreachable.
+      if (error) throw error;
       return (data ?? []) as Array<{
         canvasser_id: string;
         metric_date: string;

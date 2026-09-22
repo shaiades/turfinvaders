@@ -59,6 +59,12 @@ export function useDailyWrapRows(anchorISO: string, enabled = true) {
           .select("canvasser_id, metric_date, leads_confirmed, leads_submitted, pitch_missed, sales")
           .gte("metric_date", metricsStart),
       ]);
+      // supabase-js never throws — surface errors so consumers can tell a
+      // failed fetch from a genuinely empty day. The recap MUST see isError
+      // here (a silent [] would stamp the day as "empty" and skip forever);
+      // the wrap just gets default-[] rows plus React Query's retries.
+      if (profilesR.error) throw profilesR.error;
+      if (metricsR.error) throw metricsR.error;
       const profiles = profilesR.data ?? [];
       const metrics = metricsR.data ?? [];
 

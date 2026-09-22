@@ -88,7 +88,16 @@ function writeLocal(key: string, day: string) {
 
 type Winner = { name: string; leads: number };
 type Donut = { name: string; frozen: boolean };
-type RecapData = { day: string; winners: Winner[]; donuts: Donut[] };
+type RecapData = {
+  day: string;
+  winners: Winner[];
+  donuts: Donut[];
+  /** false = clock presence failed to load: the donut list is UNKNOWN, not
+   *  empty. Act 2 is skipped (never claim "zero doughnuts" on missing data)
+   *  and the day stays unstamped so the full recap replays once presence
+   *  recovers. */
+  donutsKnown: boolean;
+};
 
 const DEMO_WINNERS: Winner[] = [
   { name: "Ace Demo", leads: 4 },
@@ -109,13 +118,24 @@ const DEMO_DONUTS: Donut[] = [
 const CHIP_STEP = 260;
 const MAX_CHIP_NAMES = 8;
 
-function buildTimeline(winnerCount: number, donutCount: number) {
+function buildTimeline(winnerCount: number, donutCount: number, act2: boolean) {
   const T_TITLE = 250;
   // Podium pops lowest rank first; #1 always lands last.
   const popAt = (rankIdx: number) => 950 + (winnerCount - 1 - rankIdx) * 600;
   const T_TOP = winnerCount > 0 ? popAt(0) : 0; // #1 lands, confetti + fanfare
   const T_SHINE = T_TOP + 750; // counts finish ticking, gleam sweeps
   const T_ACT1_OUT = winnerCount > 0 ? T_SHINE + 700 : 1600;
+  if (!act2) {
+    // Donut list unknown (presence failed): Act 1 only — never an
+    // affirmative "zero doughnuts" claim the data can't back.
+    const NEVER = Number.MAX_SAFE_INTEGER;
+    const T_FADE = T_ACT1_OUT + 250;
+    return {
+      T_TITLE, popAt, T_TOP, T_SHINE, T_ACT1_OUT,
+      T_ACT2: NEVER, T_RAIN: NEVER, T_NAMES: NEVER, chipCount: 0, T_TAG: NEVER,
+      T_FADE, DURATION: T_FADE + 450, act2,
+    };
+  }
   const T_ACT2 = T_ACT1_OUT + 400;
   const T_RAIN = T_ACT2 + 300;
   const T_NAMES = T_ACT2 + 800;
@@ -123,7 +143,7 @@ function buildTimeline(winnerCount: number, donutCount: number) {
   const T_TAG = donutCount > 0 ? T_NAMES + chipCount * CHIP_STEP + 350 : T_ACT2 + 600;
   const T_FADE = T_TAG + (donutCount > 0 ? 900 : 1300);
   const DURATION = T_FADE + 450;
-  return { T_TITLE, popAt, T_TOP, T_SHINE, T_ACT1_OUT, T_ACT2, T_RAIN, T_NAMES, chipCount, T_TAG, T_FADE, DURATION };
+  return { T_TITLE, popAt, T_TOP, T_SHINE, T_ACT1_OUT, T_ACT2, T_RAIN, T_NAMES, chipCount, T_TAG, T_FADE, DURATION, act2 };
 }
 type Timeline = ReturnType<typeof buildTimeline>;
 
@@ -151,14 +171,16 @@ function buildSfx(tl: Timeline, winnerCount: number, donutCount: number): Beat[]
   } else {
     beats.push({ ms: 800, f: 330, d: 180, t: "sine" });
   }
-  // freezer womp descend into Act 2
-  [392, 330, 262, 196].forEach((f, i) => beats.push({ ms: tl.T_ACT2 + i * 110, f, d: 130, t: "square" }));
-  for (let i = 0; i < tl.chipCount; i++)
-    beats.push({ ms: tl.T_NAMES + i * CHIP_STEP, f: 587, d: 40, t: "sine" });
-  if (donutCount === 0) {
-    // everyone scored — a little victory blip instead of the walk of shame
-    beats.push({ ms: tl.T_TAG, f: 1046, d: 90, t: "square" });
-    beats.push({ ms: tl.T_TAG + 100, f: 1568, d: 180, t: "square" });
+  if (tl.act2) {
+    // freezer womp descend into Act 2
+    [392, 330, 262, 196].forEach((f, i) => beats.push({ ms: tl.T_ACT2 + i * 110, f, d: 130, t: "square" }));
+    for (let i = 0; i < tl.chipCount; i++)
+      beats.push({ ms: tl.T_NAMES + i * CHIP_STEP, f: 587, d: 40, t: "sine" });
+    if (donutCount === 0) {
+      // everyone scored — a little victory blip instead of the walk of shame
+      beats.push({ ms: tl.T_TAG, f: 1046, d: 90, t: "square" });
+      beats.push({ ms: tl.T_TAG + 100, f: 1568, d: 180, t: "square" });
+    }
   }
   return beats;
 }
@@ -217,10 +239,18 @@ export function EodRecapFx({
   heldBack?: boolean;
   onActiveChange?: (active: boolean) => void;
 }) {
-  const params = typeof window === "undefined" ? null : new URLSearchParams(window.location.search);
-  const forced = isEodRecapForced();
-  const holdParam = forced ? params?.get("eod_hold") : null;
-  const hold = holdParam ? Math.max(0, Number(holdParam) || 0) : null;
+  // Latched once per mount: a mid-play search-string change must never flip
+  // `forced` — markSeen's identity feeds the playing effect's deps, and an
+  // un-latched flip would restart the timeline AND stamp the real day from
+  // a demo run.
+  const [{ forced, hold }] = useState(() => {
+    if (typeof window === "undefined") return { forced: false, hold: null as number | null };
+    const p = new URLSearchParams(window.location.search);
+    const f = p.get("eod_demo") === "1";
+    const h = f ? p.get("eod_hold") : null;
+    // Clamp: an Infinity/garbage hold would spin the fixed-step sim forever.
+    return { forced: f, hold: h ? Math.min(20_000, Math.max(0, Number(h) || 0)) : null };
+  });
 
   // The judged day. State (not a mount-time constant) because the
   // visibilitychange re-arm below rolls it when the 6 PM lock passes while
@@ -228,15 +258,25 @@ export function EodRecapFx({
   const [day, setDay] = useState(() => (typeof window === "undefined" ? "" : completedReportDay()));
   const [phase, setPhase] = useState<"checking" | "loading" | "playing" | "done">(() => {
     if (typeof window === "undefined") return "done";
-    if (forced) return "playing";
+    // Demos enter via the ready→playing hop too, so heldBack still
+    // sequences ?eod_demo=1 AFTER the morning intro instead of stacking
+    // two z-[10020] overlays (and letting the buried intro burn its flag).
+    if (forced) return "loading";
     return readLocalSeen(seenKey(userId), completedReportDay()) ? "done" : "checking";
   });
-  const [ready, setReady] = useState(false);
+  const [ready, setReady] = useState(forced);
   const [visible, setVisible] = useState(false); // drives the CSS fade
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const doneRef = useRef(false);
   const dataRef = useRef<RecapData | null>(
-    forced ? { day: typeof window === "undefined" ? "" : completedReportDay(), winners: DEMO_WINNERS, donuts: DEMO_DONUTS } : null,
+    forced
+      ? {
+          day: typeof window === "undefined" ? "" : completedReportDay(),
+          winners: DEMO_WINNERS,
+          donuts: DEMO_DONUTS,
+          donutsKnown: true,
+        }
+      : null,
   );
 
   useEffect(() => {
@@ -298,16 +338,17 @@ export function EodRecapFx({
   }, [phase, day, userId, finish]);
 
   // Stage 2 — fetch the judged day's rows + clock presence, then decide.
-  const rowsQ = useDailyWrapRows(day, phase === "loading" && day !== "");
+  // Demos never fetch (dataRef is preset with canned names).
+  const rowsQ = useDailyWrapRows(day, phase === "loading" && day !== "" && !forced);
   const prevWorked = useMemo(() => (day ? lastWorkedDaysBefore(day, 1)[0] : ""), [day]);
   const clockDates = useMemo(() => (day ? [...new Set([day, prevWorked])] : []), [day, prevWorked]);
   const { clockReady, clockSettled, clockedOn } = useClockPresence(
     clockDates,
-    phase === "loading" && day !== "",
+    phase === "loading" && day !== "" && !forced,
   );
 
   useEffect(() => {
-    if (phase !== "loading") return;
+    if (phase !== "loading" || forced) return;
     if (!(rowsQ.isSuccess || rowsQ.isError) || !clockSettled) return;
     if (rowsQ.isError) {
       finish(); // no stamp — the next open retries
@@ -341,24 +382,40 @@ export function EodRecapFx({
       finish();
       return;
     }
-    dataRef.current = { day, winners, donuts };
+    dataRef.current = { day, winners, donuts, donutsKnown: clockReady };
     setReady(true);
-  }, [phase, rowsQ.isSuccess, rowsQ.isError, rowsQ.data, clockSettled, clockReady, clockedOn, day, prevWorked, markSeen, finish]);
+  }, [phase, forced, rowsQ.isSuccess, rowsQ.isError, rowsQ.data, clockSettled, clockReady, clockedOn, day, prevWorked, markSeen, finish]);
 
-  // Ready → playing, once the morning intro is out of the way. The fetch
-  // warmed during the intro; this hop is the only thing that waits.
+  // Foreground tick for the hop below: promoting to "playing" while the
+  // document is hidden would stamp and burn the whole recap invisibly (rAF
+  // suspended, the failsafe still firing) — exactly the push-then-pocket
+  // case this feature exists for.
+  const [visTick, setVisTick] = useState(0);
+  useEffect(() => {
+    const onVis = () => setVisTick((v) => v + 1);
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
+
+  // Ready → playing, once the morning intro is out of the way AND the
+  // document is actually visible. The fetch warmed during the intro; this
+  // hop is the only thing that waits.
   useEffect(() => {
     if (phase !== "loading" || !ready || heldBack) return;
+    if (document.visibilityState === "hidden") return; // wait for the foreground tick
     setPhase("playing");
-  }, [phase, ready, heldBack]);
+  }, [phase, ready, heldBack, visTick]);
 
   // Watchdog: a hung fetch (field networks) must not hold the page tour
-  // hostage all session via onActiveChange. No stamp — next open retries.
+  // hostage all session via onActiveChange. Armed only while UNSETTLED —
+  // a ready recap waiting on the intro or on visibility keeps its slot
+  // (the visibilitychange re-arm recovers any watchdog-finished day, since
+  // it never stamped). No stamp — next open retries.
   useEffect(() => {
-    if (phase !== "loading") return;
+    if (phase !== "loading" || ready) return;
     const wd = window.setTimeout(finish, 8000);
     return () => window.clearTimeout(wd);
-  }, [phase, finish]);
+  }, [phase, ready, finish]);
 
   // Re-arm on foreground: installed-PWA opens resume the SPA instead of
   // reloading, so a settled "done" must re-check when the completed day has
@@ -368,6 +425,10 @@ export function EodRecapFx({
     const recheck = () => {
       if (document.visibilityState !== "visible") return;
       if (!doneRef.current) return; // mid-cycle — leave the machine alone
+      // Reduced motion is a settled skip (deliberately unstamped) — without
+      // this, every foreground would bounce checking→done and unmount/
+      // remount the page tour via eodActive.
+      if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
       const d = completedReportDay();
       if (readLocalSeen(seenKey(userId), d)) return;
       doneRef.current = false;
@@ -387,7 +448,11 @@ export function EodRecapFx({
       finish();
       return;
     }
-    markSeen(data.day); // written at START so an interrupted run can't loop
+    // Written at START so an interrupted run can't loop — but ONLY when the
+    // donut half is real: with presence unavailable the recap plays Act 1
+    // alone and stays unstamped, so the full recap (doughnuts included)
+    // replays once presence recovers.
+    if (data.donutsKnown) markSeen(data.day);
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) {
@@ -401,7 +466,7 @@ export function EodRecapFx({
     const scale = canvas.width / VW;
 
     const { winners, donuts } = data;
-    const tl = buildTimeline(winners.length, donuts.length);
+    const tl = buildTimeline(winners.length, donuts.length, data.donutsKnown);
     const sfx = hold == null ? buildSfx(tl, winners.length, donuts.length) : [];
     const fired = new Set<number>();
     const beep = makeBeeper();
