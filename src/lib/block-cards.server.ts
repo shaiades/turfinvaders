@@ -213,6 +213,30 @@ export type WccReportResult = {
   /** Rows existed but no "Sales Rep" column resolved — report_reps for this
    *  board silently stayed untouched; a title rename would look like this. */
   reps_column_missing?: boolean;
+  /** Rows mirrored into report_sales this walk (Shark Tank parity). */
+  captured?: number;
+  /** Stale report_sales rows deleted by this board's reconcile. */
+  report_deleted?: number;
+};
+
+/** One Monday Sales-Report row, mirrored verbatim into public.report_sales
+ *  (owner, 2026-09-23). The Year tab computes Shark Tank standings from
+ *  these rows — sale_amt / reps count, no cancel filter (the office zeroes
+ *  Sale Amt on a cancel), Reload/Upsell rows count. */
+type ReportSaleInsert = {
+  monday_item_id: string;
+  board_id: string;
+  board_name: string;
+  office: string | null;
+  report_month: string;
+  customer_name: string | null;
+  date_sold: string | null;
+  sale_amt: number;
+  cancel_amt: number;
+  wcc: string | null;
+  sales_count: string | null;
+  phone: string | null;
+  reps: string[];
 };
 
 export type SyncSummary = {
@@ -485,20 +509,27 @@ export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSumm
     // Paged like the Block-board discovery (a single limit-100 page was one
     // month from dropping the June 2026 reports the same way the Block
     // listing dropped June's boards).
+    // Monday auto-creates a "Subitems of <board>" shadow board per report
+    // board — same name suffix, no WCC/Sales Rep columns, reload-titled
+    // rows that can fuzzy-bind to real cards. Never walk them. Two sets:
+    //  • SD/OC-prefixed books (May 2026 onward) — capture + the wcc/
+    //    report_reps STAMP passes, exactly as before.
+    //  • Un-prefixed 2026 books ("January 2026 Sales Report" … April, the
+    //    single-board era) — CAPTURE ONLY (owner, 2026-09-23: the Year tab
+    //    mirrors the Shark Tank YTD, which sums these boards). They must
+    //    never run the stamp matcher: those months have no Block cards, and
+    //    matchReportRow's date-blind fallback could bind a January repeat
+    //    customer to their June card. The 2023-25 books stay out entirely.
+    const reportYearOf = (n: string): number | null => {
+      const m = n.match(new RegExp(`(?:${MONTH_NAMES.join("|")})\\s+(\\d{4})`, "i"));
+      return m ? Number(m[1]) : null;
+    };
     let reportBoards = (await allBoards())
-      // Monday auto-creates a "Subitems of <board>" shadow board per report
-      // board — same name suffix, no WCC/Sales Rep columns, reload-titled
-      // rows that can fuzzy-bind to real cards. Never walk them. The SD/OC
-      // prefix gates paging to the two-office era (May 2026 onward): older
-      // un-prefixed reports ("April 2026 Sales Report", the 2023-25 books)
-      // cover months with no Block cards at all, so their rows could only
-      // ever waste the time budget or mis-bind.
       .filter(
-        (b) =>
-          /^(SD|OC)\s/i.test(b.name.trim()) &&
-          /\bsales report\b/i.test(b.name) &&
-          !/^subitems of/i.test(b.name.trim()),
-      );
+        (b) => /\bsales report\b/i.test(b.name) && !/^subitems of/i.test(b.name.trim()),
+      )
+      .map((b) => ({ ...b, stamp: /^(SD|OC)\s/i.test(b.name.trim()) }))
+      .filter((b) => b.stamp || (reportYearOf(b.name) ?? 0) >= 2026);
     if (input.scope !== "all") {
       // Quick syncs only touch the current + previous month's reports.
       const labels = recentMonthLabels().map((l) => l.toLowerCase());
@@ -520,7 +551,61 @@ export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSumm
       const matches = new Map<string, ReportRepHit[]>();
       for (const rb of reportBoards) {
         try {
-          wcc.reports.push(await collectReportBoard(token, rb, soldCards, matches));
+          // Stamped BEFORE the walk, same rationale as the Block-board
+          // reconcile: a row the office adds mid-walk must never read as
+          // stale.
+          const walkStartISO = new Date().toISOString();
+          const captured: ReportSaleInsert[] = [];
+          const res = await collectReportBoard(token, rb, soldCards, matches, {
+            stamp: rb.stamp,
+            capture: captured,
+          });
+          // report_sales mirror (owner, 2026-09-23): every walked report row
+          // upserts verbatim; the Year tab computes Shark Tank standings
+          // from these rows. Upsert + delete-reconcile only run when the
+          // walk completed — a thrown page error lands in catch below and
+          // leaves the board's rows untouched.
+          // No parseable month = no report_month bucket: capture stands down
+          // for the board (never guess a bucket) and the audit trail says so.
+          if (res.month_start === null) {
+            wcc.errors.push(`${rb.name}: month not parseable — report_sales capture skipped`);
+          }
+          for (const batch of chunks(captured, CHUNK)) {
+            const { error } = await supabaseAdmin
+              .from("report_sales")
+              .upsert(batch, { onConflict: "monday_item_id" });
+            if (error) throw new Error(`report_sales upsert: ${error.message}`);
+          }
+          // Reconcile whenever capture was ACTIVE for the walk (month parsed),
+          // even if it yielded zero rows — an emptied board must still clear
+          // its stale mirror rows, same as the Block-board reconcile.
+          if (res.month_start !== null) {
+            const existing: string[] = [];
+            for (let from = 0; ; from += CHUNK) {
+              const { data: page, error: exErr } = await supabaseAdmin
+                .from("report_sales")
+                .select("monday_item_id")
+                .eq("board_id", rb.id)
+                .lt("updated_at", walkStartISO)
+                .order("monday_item_id")
+                .range(from, from + CHUNK - 1);
+              if (exErr) throw new Error(`report_sales reconcile: ${exErr.message}`);
+              existing.push(...(page ?? []).map((r) => r.monday_item_id));
+              if (!page || page.length < CHUNK) break;
+            }
+            const capturedIds = new Set(captured.map((r) => r.monday_item_id));
+            const stale = existing.filter((id) => !capturedIds.has(id));
+            for (const batch of chunks(stale, CHUNK)) {
+              const { error } = await supabaseAdmin
+                .from("report_sales")
+                .delete()
+                .in("monday_item_id", batch);
+              if (error) throw new Error(`report_sales delete: ${error.message}`);
+            }
+            res.report_deleted = stale.length;
+          }
+          res.captured = captured.length;
+          wcc.reports.push(res);
         } catch (err) {
           wcc.errors.push(`${rb.name}: ${err instanceof Error ? err.message : String(err)}`);
         }
@@ -1045,6 +1130,10 @@ async function collectReportBoard(
   board: { id: string; name: string },
   soldCards: SoldCardLite[],
   matches: Map<string, ReportRepHit[]>,
+  // stamp: run the wcc/report_reps matcher (SD/OC-prefixed boards only —
+  // un-prefixed books have no Block cards and the date-blind fallback could
+  // mis-bind). capture: every walked row lands here for report_sales.
+  opts: { stamp: boolean; capture: ReportSaleInsert[] },
 ): Promise<WccReportResult> {
   const office = /^OC\b/i.test(board.name.trim())
     ? "Orange County"
@@ -1109,14 +1198,6 @@ async function collectReportBoard(
       // The stamp keeps following the current WCC text, so a later label
       // change flips the card either way on the next pass.
       const wccStored = wccRaw === "" || /^none$/i.test(wccRaw) ? null : wccRaw;
-      if (!name.trim()) continue;
-      result.rows += 1;
-      // FTDs count with cancels here: both kill the sale, both may have had
-      // the Block card's Sale cell reverted.
-      const isCancel = isDeadLabel(wccStored);
-      if (isCancel) result.cancelled += 1;
-      // Unset rows still run the matcher: a previously stamped card heals
-      // back to null when the report row un-cancels.
       const dateSold = colText(cols, "date sold");
       // Only a REAL Date Sold may narrow by date; monthMidISO is a guess off
       // the board name (the 15th), so it stays a tiebreaker, never a filter.
@@ -1144,6 +1225,40 @@ async function collectReportBoard(
       };
       const rowAmt = colMoney("sale amt");
       const cancelAmt = colMoney("cancel amt");
+      // report_sales mirror (owner, 2026-09-23): EVERY row captures — even
+      // unnamed ones (the Shark Tank widgets sum the whole column, so a row
+      // with money but no customer still counts) and $0 utility rows
+      // ("Move each month" sums to nothing downstream). Blank money = $0,
+      // never guessed. Skipped only when the board name yields no month —
+      // report_month is the Year bucket and is never invented.
+      if (reportMonthStart !== null) {
+        opts.capture.push({
+          monday_item_id: String(item.id),
+          board_id: board.id,
+          board_name: board.name,
+          office,
+          report_month: reportMonthStart,
+          customer_name: name.trim() === "" ? null : name.trim(),
+          date_sold: saleDate,
+          sale_amt: rowAmt ?? 0,
+          cancel_amt: cancelAmt ?? 0,
+          wcc: wccStored,
+          sales_count: colText(cols, "sales count"),
+          phone: colText(cols, "phone"),
+          reps: rowReps,
+        });
+      }
+      // Capture-only boards stop here: the stamp matcher below must never
+      // see a board with no Block-card era (see opts doc above).
+      if (!opts.stamp) continue;
+      if (!name.trim()) continue;
+      result.rows += 1;
+      // FTDs count with cancels here: both kill the sale, both may have had
+      // the Block card's Sale cell reverted.
+      const isCancel = isDeadLabel(wccStored);
+      if (isCancel) result.cancelled += 1;
+      // Unset rows still run the matcher: a previously stamped card heals
+      // back to null when the report row un-cancels.
       // The row's phone digits, for the matcher's last-resort tier when the
       // two sides spell the customer differently (Bunzal/Punzal, Aug '26).
       const rowPhone = phoneKey(colText(cols, "phone"));

@@ -9,6 +9,7 @@
 
 import {
   aggregateCloseKombat,
+  aggregateReportYear,
   auditBlockCards,
   cardOutcome,
   chooseReportReps,
@@ -16,6 +17,7 @@ import {
   preferAmountMatch,
   type BlockCard,
   type ReportRepHit,
+  type ReportSaleRow,
 } from "../src/lib/close-kombat";
 import {
   bestSoldMatch,
@@ -1474,6 +1476,93 @@ eq(
   )?.card.monday_item_id,
   "dang-sale",
 );
+
+// ---- Shark Tank parity: aggregateReportYear (owner, 2026-09-23) ----------
+// The Year tab's math IS the dashboard's: Sale Amt / rep count over every
+// row, no cancel filter (amounts are zeroed at the source), Reload/Upsell
+// rows count, Sold = full credit per rep on a "Sale" row.
+let rn = 0;
+const rrow = (over: Partial<ReportSaleRow>): ReportSaleRow => ({
+  monday_item_id: `r${rn++}`,
+  office: "San Diego",
+  report_month: "2026-09-01",
+  date_sold: "2026-09-10",
+  sale_amt: 0,
+  cancel_amt: 0,
+  wcc: "Completed",
+  sales_count: "Sale",
+  reps: ["Rep A"],
+  ...over,
+});
+
+{
+  // Even split across the Sales Rep column, cents kept.
+  const { reps, totals } = aggregateReportYear([
+    rrow({ sale_amt: 10001, reps: ["Rep A", "Rep B"] }),
+  ]);
+  eq("year: split A", reps.find((r) => r.rep === "Rep A")?.revenue, 5000.5);
+  eq("year: split B", reps.find((r) => r.rep === "Rep B")?.revenue, 5000.5);
+  eq("year: totals keep the full amount", totals.revenue, 10001);
+  eq("year: sold full credit A", reps.find((r) => r.rep === "Rep A")?.sold, 1);
+  eq("year: sold full credit B", reps.find((r) => r.rep === "Rep B")?.sold, 1);
+  eq("year: totals count the row once", totals.sold, 1);
+}
+{
+  // Cancelled row: the office zeroed Sale Amt and moved the money to
+  // Cancel Amt — $0 volume WITHOUT any wcc filtering, no sold.
+  const { reps, totals } = aggregateReportYear([
+    rrow({ sale_amt: 0, cancel_amt: 19490, wcc: "Cancelled", sales_count: "Cancelled" }),
+  ]);
+  eq("year: cancelled row pays $0", reps.length, 0);
+  eq("year: cancelled row counts no sale", totals.sold, 0);
+  eq("year: cancel dollars tracked", totals.cancelAmt, 19490);
+}
+{
+  // A WCC-cancelled row that still carries a Sale Amt counts anyway — the
+  // dashboard has no cancel filter, and parity means trusting the zeroing.
+  const { totals } = aggregateReportYear([rrow({ sale_amt: 5000, wcc: "Cancelled" })]);
+  eq("year: no re-filter by wcc", totals.revenue, 5000);
+}
+{
+  // Reload/Upsell rows pay volume but are not Sales.
+  const { reps, totals } = aggregateReportYear([
+    rrow({ sale_amt: 16389, sales_count: "Reload" }),
+    rrow({ sale_amt: 4000, sales_count: "Upsell" }),
+  ]);
+  eq("year: reload+upsell revenue", reps.find((r) => r.rep === "Rep A")?.revenue, 20389);
+  eq("year: reload+upsell not sold", reps.find((r) => r.rep === "Rep A")?.sold, 0);
+  eq("year: totals sold 0", totals.sold, 0);
+}
+{
+  // Repless rows: money joins the company total only — never a recipient.
+  // The "Move each month" utility row ($0, no Sales Count) no-ops entirely.
+  const { reps, totals } = aggregateReportYear([
+    rrow({ sale_amt: 7500, reps: [] }),
+    rrow({ sale_amt: 0, sales_count: null, reps: ["Rep A", "Rep B", "Rep C"] }),
+  ]);
+  eq("year: repless money in totals", totals.revenue, 7500);
+  eq("year: repless credits nobody", reps.length, 0);
+}
+{
+  // Ranking: volume first, then sales, then name — stable.
+  const { reps } = aggregateReportYear([
+    rrow({ sale_amt: 50, reps: ["Low"] }),
+    rrow({ sale_amt: 900, reps: ["High"] }),
+    rrow({ sale_amt: 100, sales_count: "Reload", reps: ["Tie B"] }),
+    rrow({ sale_amt: 100, reps: ["Tie A"] }),
+  ]);
+  eq("year: rank 1", reps[0]?.rep, "High");
+  eq("year: rank 2 (sales tiebreak)", reps[1]?.rep, "Tie A");
+  eq("year: rank 3", reps[2]?.rep, "Tie B");
+  eq("year: rank 4", reps[3]?.rep, "Low");
+}
+{
+  // Three-rep split rounds to cents at finalize (the dashboard's .58s).
+  const { reps } = aggregateReportYear([
+    rrow({ sale_amt: 10000, reps: ["A", "B", "C"] }),
+  ]);
+  eq("year: 3-way split rounds", reps.find((r) => r.rep === "A")?.revenue, 3333.33);
+}
 
 console.log(`checks run, ${fails.length} failure(s)`);
 for (const f of fails) console.log("  FAIL " + f);

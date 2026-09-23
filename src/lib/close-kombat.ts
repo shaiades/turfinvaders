@@ -1063,3 +1063,87 @@ export function auditBlockCards(
   );
   return items;
 }
+
+// ── Shark Tank parity: the YEAR tab ────────────────────────────────────────
+// The Year tab does NOT run the Block-card engine above. It mirrors the
+// office's Monday "Shark Tank" dashboards (owner directive 2026-09-23),
+// which sum the monthly Sales Report boards directly — so the Year tab
+// aggregates public.report_sales rows with the dashboard's own math and can
+// match the YTD Leaderboard to the cent. Confirmed empirically against the
+// live September 2026 widgets (SD $744,867 / OC $132,632 / Total $877,499):
+//   • volume = Sale Amt ÷ (count of names in the Sales Rep column), summed
+//     over EVERY row — no cancel filter. The office zeroes Sale Amt and
+//     moves the money to Cancel Amt when a sale dies, so the sum is already
+//     net; re-filtering by WCC here would double-punish.
+//   • Reload and Upsell rows COUNT toward rep volume (unlike the canvasser
+//     rules — this is the REP book).
+//   • Sold = rows whose Sales Count label is "Sale" — full credit to each
+//     rep on the row (the dashboard's Sale Counts widgets count rows per
+//     person, not fractional splits). ASSUMPTION flagged 2026-09-23: if the
+//     office's count widget ever proves fractional, flip SOLD_FULL_CREDIT.
+//   • Year membership is BOARD membership (report_month from the board
+//     name), never date_sold — a row dated Dec 30 on the January book is
+//     January, because the widget counts it there.
+// Deliberately company-wide: the Jan–Apr 2026 books are single un-prefixed
+// boards with no office, and the YTD Leaderboard itself is combined.
+
+/** One public.report_sales row (structural mirror; fixtures stay trivial). */
+export type ReportSaleRow = {
+  monday_item_id: string;
+  office: string | null;
+  report_month: string;
+  date_sold: string | null;
+  sale_amt: number;
+  cancel_amt: number;
+  wcc: string | null;
+  sales_count: string | null;
+  reps: string[];
+};
+
+export type YearRepRow = { rep: string; sold: number; revenue: number };
+
+export type YearAggregate = {
+  reps: YearRepRow[];
+  totals: { revenue: number; sold: number; cancelAmt: number };
+};
+
+const SOLD_FULL_CREDIT = true;
+
+export function aggregateReportYear(rows: ReportSaleRow[]): YearAggregate {
+  const byRep = new Map<string, YearRepRow>();
+  const repRow = (rep: string): YearRepRow => {
+    let r = byRep.get(rep);
+    if (!r) {
+      r = { rep, sold: 0, revenue: 0 };
+      byRep.set(rep, r);
+    }
+    return r;
+  };
+  const totals = { revenue: 0, sold: 0, cancelAmt: 0 };
+  for (const row of rows) {
+    const reps = cleanReps(row.reps);
+    const amt = row.sale_amt ?? 0;
+    totals.revenue += amt;
+    totals.cancelAmt += row.cancel_amt ?? 0;
+    // Repless rows: money stays in the company total only — never invent a
+    // recipient (same rule as the Block engine; the dashboard's formula
+    // {Sale Amt}/{Sales Rep count} divides by zero and credits nobody).
+    for (const name of reps) repRow(name).revenue += amt / reps.length;
+    const isSale = (row.sales_count ?? "").trim().toLowerCase() === "sale";
+    if (isSale) {
+      totals.sold += 1;
+      for (const name of reps) repRow(name).sold += SOLD_FULL_CREDIT ? 1 : 1 / reps.length;
+    }
+  }
+  totals.revenue = Math.round(totals.revenue * 100) / 100;
+  totals.cancelAmt = Math.round(totals.cancelAmt * 100) / 100;
+  // No all-zero rows: a rep appears once they carry money or a counted sale.
+  const reps = [...byRep.values()].filter((r) => r.revenue > 0 || r.sold > 0);
+  for (const r of reps) r.revenue = Math.round(r.revenue * 100) / 100;
+  // Same ranking doctrine as the Block engine: volume first, then sales,
+  // then name for a stable order.
+  reps.sort(
+    (a, b) => b.revenue - a.revenue || b.sold - a.sold || a.rep.localeCompare(b.rep),
+  );
+  return { reps, totals };
+}
