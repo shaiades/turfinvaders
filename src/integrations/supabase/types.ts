@@ -864,6 +864,60 @@ export type Database = {
         }
         Relationships: []
       }
+      report_sales: {
+        Row: {
+          board_id: string
+          board_name: string
+          cancel_amt: number
+          created_at: string
+          customer_name: string | null
+          date_sold: string | null
+          monday_item_id: string
+          office: string | null
+          phone: string | null
+          report_month: string
+          reps: string[]
+          sale_amt: number
+          sales_count: string | null
+          updated_at: string
+          wcc: string | null
+        }
+        Insert: {
+          board_id: string
+          board_name: string
+          cancel_amt?: number
+          created_at?: string
+          customer_name?: string | null
+          date_sold?: string | null
+          monday_item_id: string
+          office?: string | null
+          phone?: string | null
+          report_month: string
+          reps?: string[]
+          sale_amt?: number
+          sales_count?: string | null
+          updated_at?: string
+          wcc?: string | null
+        }
+        Update: {
+          board_id?: string
+          board_name?: string
+          cancel_amt?: number
+          created_at?: string
+          customer_name?: string | null
+          date_sold?: string | null
+          monday_item_id?: string
+          office?: string | null
+          phone?: string | null
+          report_month?: string
+          reps?: string[]
+          sale_amt?: number
+          sales_count?: string | null
+          updated_at?: string
+          wcc?: string | null
+        }
+        Relationships: []
+      }
       system_settings: {
         Row: {
           active_monday_board_oc: string | null

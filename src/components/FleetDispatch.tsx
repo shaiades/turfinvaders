@@ -2600,6 +2600,8 @@ function SyncFromMondayButton() {
       // the trigger's leads stamps arrive as a debounced second belt.
       qc.invalidateQueries({ queryKey: ["fleet_dispatch"] });
       qc.invalidateQueries({ queryKey: ["block_cards"] });
+      // The sync also mirrors Sales Report rows (the Kombat Year book).
+      qc.invalidateQueries({ queryKey: ["report_sales"] });
       qc.invalidateQueries({ queryKey: ["kombat_sync_info"] });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Sync failed"),

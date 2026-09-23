@@ -37,6 +37,7 @@ import {
 } from "@/lib/dates";
 import {
   aggregateCloseKombat,
+  aggregateReportYear,
   auditBlockCards,
   countReps,
   isReload,
@@ -48,6 +49,9 @@ import {
   type CardOutcome,
   type KombatTotals,
   type RepStats,
+  type ReportSaleRow,
+  type YearAggregate,
+  type YearRepRow,
 } from "@/lib/close-kombat";
 import { getKombatSyncInfo, syncBlockCards } from "@/lib/close-kombat.functions";
 import { GlossarySheet, type GlossarySections } from "@/components/GlossarySheet";
@@ -256,6 +260,10 @@ function CloseKombatInner({
   const currentYear = Number(todayISO.slice(0, 4));
   const [year, setYear] = useState<number>(currentYear);
   const isCurrentYear = year === currentYear;
+  // The Year tab is the Shark Tank mirror (owner, 2026-09-23) — a different
+  // data source and different math from every other range. See the report
+  // query below.
+  const isYearTab = tab === "year";
 
   const range: ResolvedRange = useMemo(() => {
     if (tab === "day") {
@@ -357,10 +365,62 @@ function CloseKombatInner({
     placeholderData: (prev) => prev,
   });
 
+  // --- Year tab data: the Shark Tank mirror (owner, 2026-09-23). The Year
+  // standings do NOT run the Block-card engine — they aggregate the monthly
+  // Sales Report rows (public.report_sales) with the dashboard's own math,
+  // so the Year tab matches the office's Shark Tank YTD Leaderboard exactly
+  // (see aggregateReportYear's doctrine block). Company-wide on purpose: the
+  // Jan–Apr 2026 books carry no office and the YTD Leaderboard itself is
+  // combined — the office filter deliberately does not apply here, and the
+  // pills hide on this tab. cardsQuery stays enabled on Year: Money/My Deals
+  // and the KA-CHING detector still run on cards.
+  const reportQuery = useQuery({
+    queryKey: ["report_sales", year],
+    enabled: isYearTab,
+    queryFn: async ({ signal }) => {
+      const PAGE = 1000;
+      const all: ReportSaleRow[] = [];
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await supabase
+          .from("report_sales")
+          .select(
+            "monday_item_id, office, report_month, date_sold, sale_amt, cancel_amt, wcc, sales_count, reps",
+          )
+          .gte("report_month", `${year}-01-01`)
+          .lte("report_month", `${year}-12-31`)
+          .order("monday_item_id")
+          .range(from, from + PAGE - 1)
+          .abortSignal(signal);
+        if (error) throw error;
+        all.push(...((data ?? []) as unknown as ReportSaleRow[]));
+        if (!data || data.length < PAGE) break;
+      }
+      return all;
+    },
+    staleTime: 15_000,
+    placeholderData: (prev) => prev,
+  });
+  const yearAgg: YearAggregate = useMemo(
+    () => aggregateReportYear(reportQuery.data ?? []),
+    [reportQuery.data],
+  );
+  // Year identity runs against the REPORT pool — the page matcher is built
+  // from the card fetch, which the Year standings don't use (same isolation
+  // rationale as goalsMatcher below).
+  const yearMatcher = useMemo(() => {
+    const names = new Set<string>();
+    for (const r of reportQuery.data ?? []) for (const n of r.reps) names.add(n);
+    return buildRepMatcher(displayName, [...names]);
+  }, [displayName, reportQuery.data]);
+  const myYearIdx = useMemo(
+    () => yearAgg.reps.findIndex((r) => yearMatcher.isMe(r.rep)),
+    [yearAgg.reps, yearMatcher],
+  );
+
   useRealtimeInvalidate({
     channel: "close-kombat-live",
-    tables: ["block_cards"],
-    invalidateKeys: [["block_cards"]],
+    tables: ["block_cards", "report_sales"],
+    invalidateKeys: [["block_cards"], ["report_sales"]],
   });
 
   const officeCards = useMemo(
@@ -764,7 +824,12 @@ function CloseKombatInner({
       if (res.wcc.errors.length > 0) {
         toast.warning(`Cancels pass: ${res.wcc.errors.length} report board(s) failed — see logs`);
       }
+      const mirrored = res.wcc.reports.reduce((s, r) => s + (r.captured ?? 0), 0);
+      if (mirrored > 0) {
+        toast.info(`Year book: ${mirrored} Sales Report rows mirrored`);
+      }
       qc.invalidateQueries({ queryKey: ["block_cards"] });
+      qc.invalidateQueries({ queryKey: ["report_sales"] });
       // The freshness caption must move the moment the sync that feeds it
       // lands (review 2026-09-12).
       qc.invalidateQueries({ queryKey: ["kombat_sync_info"] });
@@ -811,7 +876,10 @@ function CloseKombatInner({
               </NeonButton>
             </>
           )}
-          <OfficeFilterToggle />
+          {/* The Year tab is company-wide by design (the Shark Tank YTD is
+              combined and the Jan–Apr books carry no office) — showing the
+              pills there would promise a filter that doesn't apply. */}
+          {!(pageTab === "stats" && isYearTab) && <OfficeFilterToggle />}
         </div>
       </div>
 
@@ -966,8 +1034,9 @@ function CloseKombatInner({
 
           {/* Rep-first ordering (R-1): the closer's own range leads their one
           screen; the company tile wall moves below the standings for them.
-          Admins keep the office pulse on top. */}
-          {isRep && (
+          Admins keep the office pulse on top. On Year the hero reads the
+          Shark Tank book instead of the card engine. */}
+          {isRep && !isYearTab && (
             <RepHero
               row={myRow}
               rank={myIdx}
@@ -978,6 +1047,18 @@ function CloseKombatInner({
               hasNames={allBoardNames.length > 0}
               flash={heroFlash}
               dim={cardsQuery.isPlaceholderData}
+            />
+          )}
+          {isRep && isYearTab && (
+            <YearHero
+              row={myYearIdx >= 0 ? yearAgg.reps[myYearIdx] : null}
+              rank={myYearIdx}
+              repCount={yearAgg.reps.length}
+              ahead={myYearIdx > 0 ? yearAgg.reps[myYearIdx - 1] : null}
+              rangeLabel={range.label}
+              matched={yearMatcher.matched}
+              hasNames={(reportQuery.data ?? []).length > 0}
+              dim={reportQuery.isPlaceholderData}
             />
           )}
 
@@ -992,7 +1073,10 @@ function CloseKombatInner({
             />
           )}
 
-          {isRep && myAttention.length > 0 && (
+          {/* Card-hygiene flags describe the Block boards — on Year the
+          standings read the Sales Report book, so the flags would point at
+          numbers this tab doesn't use. */}
+          {isRep && !isYearTab && myAttention.length > 0 && (
             <ArcadePanel
               faction="kombat"
               title={`Your cards need office attention · ${myAttention.length}`}
@@ -1017,7 +1101,7 @@ function CloseKombatInner({
             </ArcadePanel>
           )}
 
-          {isRep && myDeals.length > 0 && (
+          {isRep && !isYearTab && myDeals.length > 0 && (
             <ArcadePanel
               faction="kombat"
               title={`My Deals · ${range.label}`}
@@ -1082,9 +1166,14 @@ function CloseKombatInner({
           (placeholderData) but dimmed — the Year fetch pages ~15 months of
           cards and can take seconds, and full-brightness stale numbers under
           a new label read as the new range's truth. */}
-          {!isRep && <CompanyTiles totals={totals} dim={cardsQuery.isPlaceholderData} />}
+          {!isRep && !isYearTab && (
+            <CompanyTiles totals={totals} dim={cardsQuery.isPlaceholderData} />
+          )}
+          {!isRep && isYearTab && (
+            <YearTiles totals={yearAgg.totals} dim={reportQuery.isPlaceholderData} />
+          )}
 
-          {attention.length > 0 && (
+          {!isYearTab && attention.length > 0 && (
             <ArcadePanel
               faction="kombat"
               title={`Needs Attention · ${attention.length}`}
@@ -1116,6 +1205,59 @@ function CloseKombatInner({
             </ArcadePanel>
           )}
 
+          {isYearTab ? (
+            /* The Year standings ARE the Shark Tank book (owner, 2026-09-23):
+            Sale Amt split by the report's Sales Rep column, cancels already
+            zeroed at the source, Reload/Upsell rows counting. Rank / Sales /
+            Volume only — appointment results live on the Block boards, which
+            don't cover the whole year. */
+            <div data-tour="kombat-standings">
+              <ArcadePanel
+                faction="kombat"
+                title={`Kombat Standings · ${range.label}`}
+                action={
+                  reportQuery.isPlaceholderData ? (
+                    <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground animate-pulse">
+                      Counting…
+                    </span>
+                  ) : range.isLive ? (
+                    <span className="text-[10px] font-display uppercase tracking-widest text-victory">
+                      Live
+                    </span>
+                  ) : undefined
+                }
+              >
+                <p className="mb-3 text-[10px] text-muted-foreground">
+                  Mirrors the office&apos;s Shark Tank YTD — straight from the monthly Sales Report
+                  boards · updates when the office syncs
+                  {syncInfo.data ? ` — last sync ${relTime(syncInfo.data.lastSyncedAt)}` : ""}.
+                </p>
+                {reportQuery.isLoading ? (
+                  <p className="text-sm text-muted-foreground">Loading the year book…</p>
+                ) : reportQuery.isError ? (
+                  <p className="text-sm text-destructive">
+                    Couldn&apos;t load the Sales Report rows — try again in a minute.
+                  </p>
+                ) : yearAgg.reps.length === 0 ? (
+                  <div className="text-sm text-muted-foreground space-y-1">
+                    <p>No Sales Report rows for {range.label} yet.</p>
+                    {isAdmin && (
+                      <p className="text-xs">
+                        Hit <span className="text-foreground">Full history</span> to pull every
+                        month&apos;s Sales Report board.
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <YearStandings
+                    agg={yearAgg}
+                    dim={reportQuery.isPlaceholderData}
+                    isMe={yearMatcher.isMe}
+                  />
+                )}
+              </ArcadePanel>
+            </div>
+          ) : (
           <div data-tour="kombat-standings">
             <ArcadePanel
               faction="kombat"
@@ -1409,9 +1551,13 @@ function CloseKombatInner({
               )}
             </ArcadePanel>
           </div>
+          )}
 
           {/* Office war (R-15): SD vs OC over the range on screen. Ignores the
-          office filter on purpose — a race needs both lanes. */}
+          office filter on purpose — a race needs both lanes. Hidden on Year:
+          the report book can't lane the Jan–Apr months (no office recorded),
+          so the race would understate both sides. */}
+          {!isYearTab && (
           <ArcadePanel
             faction="kombat"
             title={`Office War · ${range.label}`}
@@ -1466,6 +1612,7 @@ function CloseKombatInner({
               })()}
             </div>
           </ArcadePanel>
+          )}
 
           {/* Reps still get the company pulse — just after their own story. */}
           {isRep && (
@@ -1473,7 +1620,11 @@ function CloseKombatInner({
               <div className="mb-2 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
                 Company · {range.label}
               </div>
-              <CompanyTiles totals={totals} dim={cardsQuery.isPlaceholderData} />
+              {isYearTab ? (
+                <YearTiles totals={yearAgg.totals} dim={reportQuery.isPlaceholderData} />
+              ) : (
+                <CompanyTiles totals={totals} dim={cardsQuery.isPlaceholderData} />
+              )}
             </div>
           )}
 
@@ -1624,6 +1775,31 @@ const KOMBAT_GLOSSARY: GlossarySections = [
       [
         "Stamps",
         "Cancels and report splits move only when the office runs a sync — results land live, those don't. The line above the standings says when the stamps last moved.",
+      ],
+    ],
+  },
+  {
+    heading: "The Year tab",
+    terms: [
+      [
+        "Source",
+        "The Year tab mirrors the monthly Sales Report boards — the same math as the office's Shark Tank dashboard: Sale Amt split evenly across the report's Sales Rep column, counted in the board's month.",
+      ],
+      [
+        "Cancels",
+        "Already netted — the office zeroes a cancelled sale's amount on the report and moves it to Cancel Amt, so nothing is re-subtracted here.",
+      ],
+      [
+        "Reloads & upsells",
+        "Count toward Year volume — the report book records every dollar written for the rep.",
+      ],
+      [
+        "Offices",
+        "Company-wide by design: the Jan–Apr books don't record an office, and the Shark Tank YTD is combined — the office filter doesn't apply on this tab.",
+      ],
+      [
+        "Vs. Month",
+        "Day/Week/Month run on the Block boards (saves, FTDs, appointment dates), so summing months won't exactly equal the Year — the Year tab is the official Sales Report number.",
       ],
     ],
   },
@@ -1978,6 +2154,244 @@ function CompanyTiles({ totals, dim }: { totals: KombatTotals; dim: boolean }) {
           sub={d.sub && { label: d.sub.label, value: d.sub.value(totals), accent: d.sub.accent }}
         />
       ))}
+    </div>
+  );
+}
+
+/** Year company tiles — the Shark Tank book's three numbers. No appt tiles:
+ *  results live on the Block boards, which don't cover the whole year. */
+function YearTiles({ totals, dim }: { totals: YearAggregate["totals"]; dim: boolean }) {
+  return (
+    <div
+      className={cn("grid grid-cols-2 sm:grid-cols-3 gap-3 transition-opacity", dim && "opacity-50")}
+    >
+      <KombatTile label="Volume" value={fmtMoney(totals.revenue)} accent="victory" />
+      <KombatTile label="Sales" value={fmtCount(totals.sold)} accent="neon" />
+      <KombatTile label="Cancelled $" value={fmtMoney(totals.cancelAmt)} accent="destructive" />
+    </div>
+  );
+}
+
+/** The closer's own YEAR row — same shell as RepHero, but reading the Shark
+ *  Tank book: Volume, rank, Sales. No Close/Sit/Appts (those are Block-board
+ *  stats and the book doesn't carry them). */
+function YearHero({
+  row,
+  rank,
+  repCount,
+  ahead,
+  rangeLabel,
+  matched,
+  hasNames,
+  dim,
+}: {
+  row: YearRepRow | null;
+  rank: number;
+  repCount: number;
+  ahead: YearRepRow | null;
+  rangeLabel: string;
+  matched: string | null;
+  hasNames: boolean;
+  dim: boolean;
+}) {
+  const reduced = usePrefersReducedMotion();
+  const { display: revenueDisplay, bump: revenueBump } = useCountUp(row?.revenue ?? 0, reduced);
+  if (!matched && hasNames) {
+    return (
+      <ArcadeCard faction="kombat" className="p-4" data-tour="kombat-hero">
+        <div className="text-[10px] font-display uppercase tracking-widest text-warning">
+          Couldn&apos;t find your row
+        </div>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Your profile name didn&apos;t match any rep name on the Sales Reports. If you closed deals
+          this year, tell the office the name the reports use for you.
+        </p>
+      </ArcadeCard>
+    );
+  }
+  const gap = ahead && row ? ahead.revenue - row.revenue : 0;
+  return (
+    <div
+      data-tour="kombat-hero"
+      className={cn(
+        "rounded-xl border border-kombat-gold/40 bg-[color-mix(in_oklab,var(--kombat-gold)_7%,var(--surface))] p-5 transition-opacity",
+        dim && "opacity-50",
+      )}
+    >
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <div className="text-[10px] font-display uppercase tracking-widest text-kombat-gold/80">
+            Your {rangeLabel} · Volume
+          </div>
+          <div
+            className={cn(
+              "mt-1.5 font-display text-4xl sm:text-5xl text-kombat-gold leading-none tabular-nums",
+              revenueBump && !reduced && "transition-transform duration-200 scale-105",
+            )}
+          >
+            {fmtMoney(revenueDisplay)}
+          </div>
+        </div>
+        {row && (
+          <div className="text-right">
+            <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+              Rank
+            </div>
+            <div className="mt-1 font-display text-2xl tabular-nums">
+              {rank === 0 && row.revenue > 0 ? (
+                <Crown className="w-6 h-6 text-kombat-gold inline" aria-label="Champion" />
+              ) : (
+                `#${rank + 1}`
+              )}
+              <span className="text-muted-foreground text-sm"> / {repCount}</span>
+            </div>
+          </div>
+        )}
+      </div>
+      <div className="mt-3 flex items-baseline gap-x-4 gap-y-1 flex-wrap text-sm tabular-nums">
+        <span>
+          <span className="font-medium text-victory">{fmtCount(row?.sold ?? 0)}</span>{" "}
+          <span className="text-[9px] font-display uppercase tracking-wider text-muted-foreground">
+            Sales
+          </span>
+        </span>
+      </div>
+      <div className="mt-2 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+        {!row ? (
+          "No Sales Report rows with your name this year yet."
+        ) : rank === 0 && row.revenue > 0 ? (
+          "Top of the board 👑"
+        ) : ahead ? (
+          <>
+            <span className="text-kombat-gold">{fmtMoney(gap)}</span> behind {ahead.rep}
+          </>
+        ) : (
+          ""
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Year standings body: Rank / Rep / Sales / Volume, desktop table + mobile
+ *  cards, totals footer. The numbers ARE the Shark Tank YTD Leaderboard's. */
+function YearStandings({
+  agg,
+  dim,
+  isMe,
+}: {
+  agg: YearAggregate;
+  dim: boolean;
+  isMe: (name: string) => boolean;
+}) {
+  return (
+    <div className={cn("transition-opacity", dim && "opacity-50")}>
+      <div className="hidden md:block overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border">
+              <th className="text-left py-2 pr-2 font-normal">#</th>
+              <th className="text-left py-2 pr-2 font-normal">Rep</th>
+              <th className="text-right py-2 px-2 font-normal">Sales</th>
+              <th
+                className="text-right py-2 pl-2 font-normal"
+                title="Sale Amt split evenly across the report's Sales Rep column — the Shark Tank number"
+              >
+                Volume
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {agg.reps.map((r, i) => (
+              <tr
+                key={r.rep}
+                className={`border-b border-border/40 transition-colors duration-200 hover:bg-surface-elevated ${
+                  isMe(r.rep) ? "bg-kombat-gold/5 ring-1 ring-inset ring-kombat-gold/30" : ""
+                }`}
+              >
+                <td className="py-2.5 pr-2 text-muted-foreground tabular-nums">
+                  {i === 0 && r.revenue > 0 ? (
+                    <Crown className="w-4 h-4 text-kombat-gold inline" aria-label="Champion" />
+                  ) : (
+                    i + 1
+                  )}
+                </td>
+                <td className="py-2.5 pr-2 font-medium">
+                  {r.rep}
+                  {isMe(r.rep) && <YouTag />}
+                </td>
+                <td className={cn(kbCell, metricText(r.sold, "text-kombat-gold"))}>
+                  {fmtCount(r.sold)}
+                </td>
+                <td
+                  className={cn(
+                    "py-2.5 pl-2 text-right tabular-nums",
+                    metricText(r.revenue, "text-kombat-gold"),
+                  )}
+                >
+                  {fmtMoney(r.revenue)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="border-t border-neon/40 text-foreground">
+              <td className="py-2.5 pr-2" />
+              <td className="py-2.5 pr-2 font-display text-[10px] uppercase tracking-widest">
+                All report rows
+              </td>
+              <td className="py-2.5 px-2 text-right tabular-nums">{fmtCount(agg.totals.sold)}</td>
+              <td className="py-2.5 pl-2 text-right tabular-nums">
+                {fmtMoney(agg.totals.revenue)}
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <MobileCardList>
+        {agg.reps.map((r, i) => (
+          <MobileCard
+            key={r.rep}
+            className={isMe(r.rep) ? "border-kombat-gold/40 bg-kombat-gold/5" : undefined}
+          >
+            <MobileCardHeader
+              left={
+                <span className="flex items-center gap-1.5">
+                  {i === 0 && r.revenue > 0 ? (
+                    <Crown className="w-3.5 h-3.5 text-kombat-gold shrink-0" />
+                  ) : (
+                    <span className="text-muted-foreground tabular-nums">{i + 1}.</span>
+                  )}
+                  {r.rep}
+                  {isMe(r.rep) && <YouTag />}
+                </span>
+              }
+              right={
+                <span className={metricText(r.revenue, "text-kombat-gold")}>
+                  {fmtMoney(r.revenue)}
+                </span>
+              }
+            />
+            <div className="text-xs text-muted-foreground tabular-nums">
+              {fmtCount(r.sold)} <span className="font-display text-[9px] uppercase">Sales</span>
+            </div>
+          </MobileCard>
+        ))}
+        <MobileCard className="border-neon/40">
+          <MobileCardHeader
+            left={
+              <span className="font-display text-[10px] uppercase tracking-widest">
+                All report rows
+              </span>
+            }
+            right={<span className="text-victory">{fmtMoney(agg.totals.revenue)}</span>}
+          />
+          <div className="text-xs text-muted-foreground tabular-nums">
+            {fmtCount(agg.totals.sold)}{" "}
+            <span className="font-display text-[9px] uppercase">Sales</span>
+          </div>
+        </MobileCard>
+      </MobileCardList>
     </div>
   );
 }
