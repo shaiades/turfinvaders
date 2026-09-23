@@ -13,11 +13,16 @@ import {
   auditBlockCards,
   cardOutcome,
   chooseReportReps,
+  decideMissingFlag,
+  emptyStats,
+  filterReportRows,
+  mergeMonthStandings,
   phoneKey,
   preferAmountMatch,
   type BlockCard,
   type ReportRepHit,
   type ReportSaleRow,
+  type RepStats,
 } from "../src/lib/close-kombat";
 import {
   bestSoldMatch,
@@ -1562,6 +1567,145 @@ const rrow = (over: Partial<ReportSaleRow>): ReportSaleRow => ({
     rrow({ sale_amt: 10000, reps: ["A", "B", "C"] }),
   ]);
   eq("year: 3-way split rounds", reps.find((r) => r.rep === "A")?.revenue, 3333.33);
+}
+
+// ---- Month book: filterReportRows / mergeMonthStandings (owner, 2026-09-23)
+{
+  const rows = [
+    rrow({ report_month: "2026-09-01", office: "San Diego", sale_amt: 100 }),
+    rrow({ report_month: "2026-09-01", office: "Orange County", sale_amt: 40 }),
+    rrow({ report_month: "2026-08-01", office: "San Diego", sale_amt: 999 }),
+  ];
+  const m = filterReportRows(rows, { month: "2026-09-01" });
+  eq("book: month narrows", m.rows.length, 2);
+  eq("book: month not blind", m.officeBlind, false);
+  const sd = filterReportRows(rows, { month: "2026-09-01", office: "San Diego" });
+  eq("book: office equality", sd.rows.length, 1);
+  eq("book: office equality amt", sd.rows[0]?.sale_amt, 100);
+  const all = filterReportRows(rows, { month: "2026-09-01", office: "All" });
+  eq('book: "All" passes everything', all.rows.length, 2);
+  // The un-prefixed Jan–Apr books: office null on every row — an office
+  // filter is unanswerable, so the month shows combined and says so.
+  const blindRows = [
+    rrow({ report_month: "2026-01-01", office: null, sale_amt: 10 }),
+    rrow({ report_month: "2026-01-01", office: null, sale_amt: 20 }),
+  ];
+  const blind = filterReportRows(blindRows, { month: "2026-01-01", office: "San Diego" });
+  eq("book: blind month keeps all rows", blind.rows.length, 2);
+  eq("book: blind month flagged", blind.officeBlind, true);
+  // Mixed month (should never happen live): null-office rows drop under a
+  // real office filter, and the month is NOT blind.
+  const mixed = filterReportRows(
+    [...rows.slice(0, 2), rrow({ report_month: "2026-09-01", office: null, sale_amt: 7 })],
+    { month: "2026-09-01", office: "San Diego" },
+  );
+  eq("book: mixed month drops null-office rows", mixed.rows.length, 1);
+  eq("book: mixed month not blind", mixed.officeBlind, false);
+  const empty = filterReportRows([], { month: "2026-09-01", office: "San Diego" });
+  eq("book: empty input", empty.rows.length, 0);
+  eq("book: empty input not blind", empty.officeBlind, false);
+}
+{
+  const cardRow = (rep: string, over: Partial<RepStats>): RepStats => ({
+    rep,
+    ...emptyStats(),
+    ...over,
+  });
+  const cardReps = [
+    cardRow("Rep A", { appts: 10, sold: 3, revenue: 5000, sitPct: 0.5 }),
+    cardRow("Card Only", { appts: 4, sold: 1, revenue: 2500 }),
+  ];
+  const book = aggregateReportYear([
+    rrow({ sale_amt: 7777, reps: ["rep  a"] }), // whitespace/case ≠ join miss
+    rrow({ sale_amt: 4000, reps: ["Book Only"] }),
+    rrow({ sale_amt: 0, cancel_amt: 500, wcc: "Cancelled", sales_count: "Cancelled", reps: ["Zeroed"] }),
+  ]);
+  const merged = mergeMonthStandings(cardReps, book);
+  const a = merged.find((r) => r.rep === "Rep A");
+  eq("merge: revenue replaced by the book", a?.revenue, 7777);
+  eq("merge: funnel untouched", a?.appts, 10);
+  eq("merge: pcts untouched", a?.sitPct, 0.5);
+  const cardOnly = merged.find((r) => r.rep === "Card Only");
+  eq("merge: card-only rep shows $0", cardOnly?.revenue, 0);
+  eq("merge: card-only funnel intact", cardOnly?.sold, 1);
+  const stub = merged.find((r) => r.rep === "Book Only");
+  eq("merge: book-only stub appended", stub?.revenue, 4000);
+  eq("merge: stub sold stays card-based 0", stub?.sold, 0);
+  eq("merge: stub pct is null, not NaN", stub?.sitPct, null);
+  eq("merge: $0 book-only rep dropped", merged.some((r) => r.rep === "Zeroed"), false);
+  eq("merge: ranked by book volume", merged[0]?.rep, "Rep A");
+  eq("merge: rank 2", merged[1]?.rep, "Book Only");
+  eq("merge: rank 3", merged[2]?.rep, "Card Only");
+  // Two card names normalizing identically: the money is taken ONCE.
+  const dupMerged = mergeMonthStandings(
+    [cardRow("Rep A", { sold: 2 }), cardRow("REP  A", { sold: 1 })],
+    aggregateReportYear([rrow({ sale_amt: 1000, reps: ["Rep A"] })]),
+  );
+  eq(
+    "merge: duplicate-normalized names take the money once",
+    dupMerged.reduce((s, r) => s + r.revenue, 0),
+    1000,
+  );
+}
+
+// ---- Not-on-Sales-Report flag ------------------------------------------
+eq("flag: matched → false", decideMissingFlag({ matched: true, covered: true, soldAlive: true }), false);
+eq(
+  "flag: uncovered → null (quick sync never wipes history)",
+  decideMissingFlag({ matched: false, covered: false, soldAlive: true }),
+  null,
+);
+eq("flag: covered+alive → true", decideMissingFlag({ matched: false, covered: true, soldAlive: true }), true);
+eq("flag: covered+dead → false", decideMissingFlag({ matched: false, covered: true, soldAlive: false }), false);
+
+{
+  const flagged = audit([
+    card({ iss: "Iss", sale: "Sold", sale_price: 19528, missing_from_report: true }),
+  ]);
+  eq("audit: missing-report sale flagged", flagged[0]?.kind, "missing_report_row");
+  // One kind per card, worst first: money already counting wrong outranks
+  // money only missing from the book.
+  const blankWins = audit([
+    card({ iss: "Iss", sale: "Sold", sale_price: null, missing_from_report: true }),
+  ]);
+  eq("audit: blank_price outranks missing", blankWins[0]?.kind, "blank_price");
+  const excludedWins = audit([
+    card({ iss: "Not Issued", sale: "Sold", sale_price: 100, missing_from_report: true }),
+  ]);
+  eq("audit: excluded_sale outranks missing", excludedWins[0]?.kind, "excluded_sale");
+  const sorted = audit([
+    card({
+      iss: "Iss",
+      sale: "Sold",
+      sale_price: 100,
+      report_reps: ["Somebody Else"],
+      card_date: "2026-07-28",
+    }),
+    card({ iss: "Iss", sale: "Sold", sale_price: 100, missing_from_report: true }),
+  ]);
+  eq("audit: missing sorts above rep_mismatch", sorted[0]?.kind, "missing_report_row");
+  eq("audit: false stays quiet", audit([card({ iss: "Iss", sale: "Sold", sale_price: 100, missing_from_report: false })]).length, 0);
+  eq("audit: null stays quiet", audit([card({ iss: "Iss", sale: "Sold", sale_price: 100 })]).length, 0);
+  eq(
+    "audit: cancelled card stays quiet",
+    audit([card({ iss: "Iss", sale: "Sold", sale_price: 100, wcc: "Cancelled", missing_from_report: true })]).some(
+      (i) => i.kind === "missing_report_row",
+    ),
+    false,
+  );
+  eq(
+    "audit: Can/Save card stays quiet",
+    audit([
+      card({ iss: "Iss", sale: "Sold", sale_price: 100, comments: "Can/Save", missing_from_report: true }),
+    ]).some((i) => i.kind === "missing_report_row"),
+    false,
+  );
+  const windowed = auditBlockCards(
+    [card({ iss: "Iss", sale: "Sold", sale_price: 100, missing_from_report: true, card_date: "2026-06-01" })],
+    TODAY,
+    { start: "2026-07-01", end: "2026-07-31" },
+  );
+  eq("audit: window hides out-of-range missing card", windowed.length, 0);
 }
 
 console.log(`checks run, ${fails.length} failure(s)`);

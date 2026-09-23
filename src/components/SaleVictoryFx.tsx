@@ -101,6 +101,10 @@ export function useSaleVictory(opts: {
   const { settled, officeCards, matcher } = opts;
   // MTD row over the SAME padded fetch — NOT the visible range's myRow
   // (Today's row can't see last night).
+  // Deliberately CARD-based money, diverging from the Month tab's report-book
+  // volume (owner, 2026-09-23): the ceremony fires live on card sales whose
+  // Sales-Report rows don't exist yet — the book lags by a sync, and a
+  // celebration that waits for the office isn't one.
   const mtd = useMemo(() => {
     if (!settled) return null;
     const { reps } = aggregateCloseKombat(officeCards, { start: monthStart, end: monthEnd });
