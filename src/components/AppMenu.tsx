@@ -11,7 +11,7 @@ import { InvitePlayerSheet } from "@/components/InvitePlayerSheet";
 import { startCanvasserTutorial } from "@/components/tutorial/CanvasserTutorial";
 import { useAuth } from "@/hooks/useAuth";
 import { ROLE_LABEL } from "@/lib/role-policy";
-import { GraduationCap, Radar, Send, Sparkles, Users, CircleHelp } from "lucide-react";
+import { GraduationCap, Radar, Send, Sparkles, Users, CircleHelp, Compass, Telescope } from "lucide-react";
 
 const itemCls =
   "w-full flex items-center gap-3 rounded-md border border-border bg-surface px-4 py-3 min-h-12 text-left text-xs font-display uppercase tracking-widest text-foreground hover:border-neon/60 hover:text-neon transition-colors";
@@ -33,6 +33,7 @@ export function AppMenu({
   const { role, displayName } = useAuth();
   const [inviteOpen, setInviteOpen] = useState(false);
   const isAdminTier = role === "owner" || role === "office_staff";
+  const isOwner = role === "owner";
   const canInvite = isAdminTier || role === "captain";
 
   return (
@@ -78,6 +79,30 @@ export function AppMenu({
                 </span>
               </span>
             </Link>
+            {/* OWNER ONLY — not the admin tier. Purpose material is personal;
+                office staff never see it (owner decision 2026-09-23). */}
+            {isOwner && (
+              <Link to="/my-purpose" onClick={() => onOpenChange(false)} className={itemCls}>
+                <Compass className="w-4 h-4 shrink-0" />
+                <span className="flex-1">
+                  My Purpose
+                  <span className="block normal-case font-sans tracking-normal text-[11px] text-muted-foreground mt-0.5">
+                    Your own purpose profile — the same workshop the sales team gets
+                  </span>
+                </span>
+              </Link>
+            )}
+            {isOwner && (
+              <Link to="/purpose-leadership" onClick={() => onOpenChange(false)} className={itemCls}>
+                <Telescope className="w-4 h-4 shrink-0" />
+                <span className="flex-1">
+                  Purpose Leadership
+                  <span className="block normal-case font-sans tracking-normal text-[11px] text-muted-foreground mt-0.5">
+                    Coaching command center — every rep's direction and why
+                  </span>
+                </span>
+              </Link>
+            )}
             {role === "captain" && (
               <button
                 type="button"
