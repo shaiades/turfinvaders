@@ -9,11 +9,13 @@ import { useQuery } from "@tanstack/react-query";
 import { Compass } from "lucide-react";
 import type { AnswerMap, Visibility } from "@/lib/purpose/types";
 import {
+  CORE_VALUE_CHIPS,
   EMPTY_STATE_COPY,
   REVIEW_SECTIONS,
   SCOREBOARD_COPY,
   pickReminderLine,
 } from "@/data/purpose-workshop-content";
+import { QK } from "@/lib/purpose/questionKeys";
 import { usePurposeAnswers } from "@/hooks/usePurposeAnswers";
 import { usePurposeReflections, useSaveReflection } from "@/hooks/usePurposeReflections";
 import { usePurposeScoreboard } from "@/hooks/usePurposeScoreboard";
@@ -22,15 +24,33 @@ import { PurposeButton, PurposeCard, PurposeLabel, PurposeProgress, PurposeTexta
 import { VisibilityToggle } from "./steps";
 import { useRepGoal } from "@/hooks/useRepGoal";
 
-const PURPOSE_CARD_LABELS = new Set([
-  "MY ONE-YEAR TARGET",
-  "MY CORE WHY",
-  "WHAT I AM TRYING TO CREATE OR PROTECT",
-  "MY 90-DAY MISSION",
-  "THE STORY I AM QUESTIONING",
-  "MY IF–THEN PLAN",
-  "MY 90-DAY IDENTITY COMMITMENT",
-]);
+/** §18.1's eight rows, in order. Most come straight from REVIEW_SECTIONS;
+ *  two need their own renders — "create or protect" (why_6) has no §16
+ *  review row, and "the belief I am questioning" is the 3.5 answer, which
+ *  the §16 review layout deliberately omits. */
+function purposeCardRows(answers: AnswerMap): { label: string; value: string }[] {
+  const bySection = new Map(REVIEW_SECTIONS.map((s) => [s.label, s]));
+  const fromReview = (label: string) =>
+    bySection.get(label)?.render(answers, { maskPrivate: false }) ?? null;
+
+  const why6 = answers[QK.why_6];
+  const why6Values = ((why6?.json ?? {}) as { values?: string[] }).values ?? [];
+  const valueLabels = why6Values
+    .map((v) => CORE_VALUE_CHIPS.find((c) => c.value === v)?.label ?? v)
+    .join(", ");
+  const createProtect = [valueLabels, why6?.text?.trim()].filter(Boolean).join(" — ");
+
+  const rows: { label: string; value: string | null }[] = [
+    { label: "MY ONE-YEAR TARGET", value: fromReview("MY ONE-YEAR TARGET") },
+    { label: "MY CORE WHY", value: fromReview("MY CORE WHY") },
+    { label: "WHAT I AM TRYING TO CREATE OR PROTECT", value: createProtect || null },
+    { label: "MY 90-DAY MISSION", value: fromReview("MY 90-DAY MISSION") },
+    { label: "THE BELIEF I AM QUESTIONING", value: answers[QK.m3_belief_to_question]?.text ?? null },
+    { label: "MY IF–THEN PLAN", value: fromReview("MY IF–THEN PLAN") },
+    { label: "MY 90-DAY IDENTITY COMMITMENT", value: fromReview("MY 90-DAY IDENTITY COMMITMENT") },
+  ];
+  return rows.filter((r): r is { label: string; value: string } => !!r.value);
+}
 
 const fmtMoney = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
 const fmtPct = (p: number | null) => (p == null ? "—" : `${Math.round(p * 100)}%`);
@@ -76,10 +96,7 @@ export function PurposeHome({
     },
   });
 
-  const cardRows = REVIEW_SECTIONS.map((s) => ({
-    label: s.label,
-    value: s.render(answers, { maskPrivate: false }),
-  })).filter((r) => PURPOSE_CARD_LABELS.has(r.label) && r.value);
+  const cardRows = purposeCardRows(answers);
 
   const week = scoreboard.week;
   const volumeGoal = goal.data ?? null;

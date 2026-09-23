@@ -49,17 +49,11 @@ export class SaveQueue {
     return [...this.pending.keys()];
   }
 
-  /** Drain the queue now (Continue, blur, pagehide, manual retry). Safe to
-   *  call while a flush is running — entries re-queued during a flush are
-   *  picked up by the trailing pass. */
-  async flushAll(): Promise<void> {
-    if (this.disposed || this.inFlight) return;
-    if (this.debounceTimer) {
-      clearTimeout(this.debounceTimer);
-      this.debounceTimer = null;
-    }
-    if (this.pending.size === 0) return;
-    this.inFlight = true;
+  private passPromise: Promise<boolean> | null = null;
+
+  /** One save pass over a snapshot of the queue. Returns false on the first
+   *  error (that entry and later ones stay pending; a retry is scheduled). */
+  private async runPass(): Promise<boolean> {
     this.opts.onState("saving");
     let anyError = false;
     // Snapshot: writes that land while we're saving stay pending for the
@@ -67,7 +61,7 @@ export class SaveQueue {
     const batch = [...this.pending.entries()];
     for (const [key, entry] of batch) {
       const { error } = await this.opts.save(key, entry.value, entry.position);
-      if (this.disposed) return;
+      if (this.disposed) return false;
       if (error) {
         anyError = true;
         this.lastError = error;
@@ -76,25 +70,43 @@ export class SaveQueue {
       // Only clear if the entry wasn't superseded mid-flight.
       if (this.pending.get(key) === entry) this.pending.delete(key);
     }
-    this.inFlight = false;
     if (anyError) {
       this.failedAttempts += 1;
       if (this.failedAttempts > RETRY_DELAYS_MS.length) {
         this.opts.onState("device_only");
       } else {
-        this.opts.onState("saving");
         const delay = RETRY_DELAYS_MS[Math.min(this.failedAttempts - 1, RETRY_DELAYS_MS.length - 1)];
         if (this.retryTimer) clearTimeout(this.retryTimer);
         this.retryTimer = setTimeout(() => void this.flushAll(), delay);
       }
-      return;
+      return false;
     }
     this.failedAttempts = 0;
-    if (this.pending.size > 0) {
-      // Entries arrived while saving — trailing pass.
-      void this.flushAll();
-    } else {
-      this.opts.onState("saved");
+    if (this.pending.size === 0) this.opts.onState("saved");
+    return true;
+  }
+
+  /** Drain the queue NOW and only resolve once it is actually drained (or a
+   *  save failed). This is a true barrier: submit awaits it and must never
+   *  race an in-flight or still-pending answer — a concurrent call joins the
+   *  running pass instead of returning early. Returns true when fully
+   *  drained, false when an error left entries pending. */
+  async flushAll(): Promise<boolean> {
+    if (this.disposed) return true;
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+    for (;;) {
+      if (this.pending.size === 0) return true;
+      if (!this.passPromise) {
+        this.passPromise = this.runPass().finally(() => {
+          this.passPromise = null;
+        });
+      }
+      const ok = await this.passPromise;
+      if (this.disposed) return true;
+      if (!ok) return false;
     }
   }
 

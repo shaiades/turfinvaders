@@ -328,6 +328,21 @@ export function detectCrisis(text: string): boolean {
   return CRISIS_RE.test(n);
 }
 
+/** Why Level 3's "material outcome only" check (spec §16: e.g. "I can buy a
+ *  car" earns the deeper what-would-that-make-you-feel reprompt). Fires on a
+ *  SHORT answer built around an acquisition verb with no value/feeling
+ *  language; longer answers or anything already naming a value pass. */
+const MATERIAL_VERB_RE = /\b(buy|bought|get|got|own|have|drive|afford|purchase|upgrade)\b/;
+const VALUE_WORD_RE =
+  /\b(feel|feels|feeling|protect|prove|allow|respect|freedom|free|security|secure|safe|peace|family|kids?|children|proud|pride|growth|grow|courage|discipline|reliable|reliability|leader|leadership|contribute|contribution|belong|mastery|responsib\w*|independen\w*|health|legacy|stress|confiden\w*|trust|present|stability|stable)\b/;
+
+export function detectMaterialOnly(text: string): boolean {
+  const n = normalize(text);
+  if (!n) return false;
+  if (n.length > 80) return false;
+  return MATERIAL_VERB_RE.test(n) && !VALUE_WORD_RE.test(n);
+}
+
 /** Shown when detectCrisis fires. Compassionate and plain — not counseling,
  *  no shame, and it must be clear their answer was not blocked or exposed. */
 export const CRISIS_RESOURCES_COPY: {

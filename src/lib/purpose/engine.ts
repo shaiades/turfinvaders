@@ -36,18 +36,23 @@ export function resolveSteps(all: readonly StepDef[], a: AnswerMap): StepDef[] {
  *  surfaces them but an edited answer may proceed. */
 export function isStepComplete(step: StepDef, a: AnswerMap): boolean {
   const v = a[step.key];
-  if (!step.required && step.kind !== "story") {
-    // Optional steps are always "complete enough" to pass.
-    return true;
-  }
   let answered = false;
   switch (step.kind) {
     case "story":
       answered = asObj(v?.json).seen === true;
       break;
-    case "single_select":
+    case "single_select": {
       answered = nonEmpty(v?.text);
+      // A selection must belong to the CURRENTLY resolved option list — an
+      // edit that moves the ceiling across a band boundary leaves the old
+      // band's reason slug behind, and that stale pick must read as
+      // unanswered so the flow (and edit-mode chaining) revisits it.
+      if (answered && step.options) {
+        const opts = resolveDyn(step.options, a);
+        answered = opts.some((o) => o.value === v?.text);
+      }
       break;
+    }
     case "multi_select":
       answered = selectionsOf(v).length > 0;
       break;
@@ -94,6 +99,10 @@ export function isStepComplete(step: StepDef, a: AnswerMap): boolean {
       answered = true;
       break;
   }
+  // Optional steps pass while blank — but once ANSWERED they still face
+  // block-level validation, same as required ones (a future validator on an
+  // optional step must not silently stop blocking).
+  if (!step.required && step.kind !== "story" && !answered) return true;
   if (!answered) return false;
   const issue = step.validate?.(v, a);
   return issue?.level !== "block";

@@ -122,21 +122,51 @@ export function PurposeWorkshop({
         ? {
             kind: "edit",
             stepKey: editStepKey,
-            onDone: () => void navigate({ to: "/my-purpose" }),
+            // Editing always returns to the review — that's where every Edit
+            // button lives (5.7 and Purpose Home both route through it).
+            onDone: () =>
+              void navigate({
+                to: "/my-purpose/workshop",
+                search: { review: true },
+                replace: true,
+              }),
           }
         : { kind: "flow" },
     [editStepKey, navigate],
   );
   const ws = usePurposeWorkshop(profile, mode);
 
-  // ?review=1 — land on the final review (Purpose Home's "Review and edit").
-  const jumpedRef = useRef(false);
+  // Search-param driven jumps: ?step=<key> re-enters one step in edit mode,
+  // ?review=1 lands on the final review. Handled by token so the SAME param
+  // set never re-fires (Back from review must not snap forward again), but a
+  // NEW ?step= after an earlier one still jumps. ws is read through a ref —
+  // its identity changes every render and must not re-trigger the effect.
+  const wsRef = useRef(ws);
+  wsRef.current = ws;
+  const handledTokenRef = useRef("");
   useEffect(() => {
-    if (jumpToReview && !editStepKey && !ws.loading && !jumpedRef.current) {
-      jumpedRef.current = true;
-      ws.jumpToStep(QK.m5_review);
-    }
-  }, [jumpToReview, editStepKey, ws]);
+    if (ws.loading) return;
+    const token = editStepKey ? `edit:${editStepKey}` : jumpToReview ? "review" : "flow";
+    if (handledTokenRef.current === token) return;
+    handledTokenRef.current = token;
+    if (editStepKey) wsRef.current.jumpToStep(editStepKey);
+    else if (jumpToReview) wsRef.current.jumpToStep(QK.m5_review);
+  }, [editStepKey, jumpToReview, ws.loading]);
+
+  if (ws.loadFailed) {
+    return (
+      <div className="purpose-surface min-h-dvh">
+        <div className="mx-auto max-w-xl px-4 py-16 text-center">
+          <p className="text-base leading-relaxed text-[var(--purpose-ink-dim)]">
+            We couldn't load your saved answers right now. Nothing is lost.
+          </p>
+          <PurposeButton tone="ghost" onClick={ws.retryLoad} className="mt-6">
+            Try again
+          </PurposeButton>
+        </div>
+      </div>
+    );
+  }
 
   if (ws.loading) {
     return (
@@ -164,7 +194,15 @@ export function PurposeWorkshop({
       <ReviewScreen
         profile={profile}
         answers={ws.answers}
-        onEditStep={(key) => ws.jumpToStep(key)}
+        // Real edit mode (?step=): one step, "Save changes", then straight
+        // back here — never a 25-tap march through the remaining flow.
+        onEditStep={(key) =>
+          void navigate({
+            to: "/my-purpose/workshop",
+            search: { step: key, review: true },
+            replace: true,
+          })
+        }
         onBack={ws.goBack}
         onSubmitted={() => {
           ws.onSubmitted();
@@ -257,7 +295,12 @@ export function PurposeWorkshop({
         <div className="fixed inset-x-0 bottom-0 border-t border-[var(--purpose-line)] bg-[color-mix(in_oklab,var(--purpose-navy-deep)_92%,transparent)] backdrop-blur px-4 pb-safe">
           <div className="mx-auto flex w-full max-w-xl items-center justify-between gap-3 py-3">
             {isEdit ? (
-              <Link to="/my-purpose" className="text-sm text-[var(--purpose-ink-dim)] hover:text-[var(--purpose-ink)]">
+              <Link
+                to="/my-purpose/workshop"
+                search={{ review: true }}
+                replace
+                className="text-sm text-[var(--purpose-ink-dim)] hover:text-[var(--purpose-ink)]"
+              >
                 Cancel
               </Link>
             ) : (

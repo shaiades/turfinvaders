@@ -54,6 +54,11 @@ export function usePurposeWorkshop(profile: PurposeProfileRow, mode: WorkshopMod
   const [index, setIndex] = useState(0);
   const [issue, setIssue] = useState<StepIssue | null>(null);
   const [crisis, setCrisis] = useState(false);
+  // The support card shows at most once per QUESTION per mount — controlled
+  // textareas fire per keystroke, and re-opening the overlay on every
+  // character while the phrase is still present would trap someone
+  // mid-sentence about exactly the content the module invites.
+  const crisisShownForRef = useRef<Set<string>>(new Set());
   // Coach-tier escape hatch: the first Continue shows the callout; any edit
   // to the answer afterwards arms the next Continue even if the heuristic
   // still fires (false positives must never trap anyone).
@@ -162,7 +167,8 @@ export function usePurposeWorkshop(profile: PurposeProfileRow, mode: WorkshopMod
       });
       if (issue) setIssue(null);
       const text = answerTexts(stamped);
-      if (text && detectCrisis(text)) {
+      if (text && detectCrisis(text) && !crisisShownForRef.current.has(key)) {
+        crisisShownForRef.current.add(key);
         setCrisis(true);
         raiseSafetyFlag(key, stepDef?.module ?? "clear_board");
       }
@@ -274,7 +280,11 @@ export function usePurposeWorkshop(profile: PurposeProfileRow, mode: WorkshopMod
   }, [profile.id, profile.user_id, qc]);
 
   return {
-    loading: !answers,
+    loading: !answers && !answersQuery.isError,
+    // A dropped request on open must not strand the rep on a spinner — the
+    // shell renders a retry card off these two.
+    loadFailed: !answers && answersQuery.isError,
+    retryLoad: () => void answersQuery.refetch(),
     answers: (answers ?? {}) as AnswerMap,
     steps,
     index: clampedIndex,

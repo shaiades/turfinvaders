@@ -23,6 +23,7 @@ export const QK = {
   // Module 2 — The Ceiling
   m2_ceiling_amount: "m2_ceiling_amount", // → purpose_beliefs.current_ceiling_amount
   m2_ceiling_reason: "m2_ceiling_reason", // json {category, otherText?}
+  m2_ceiling_believe: "m2_ceiling_believe", // when band = low (§20.2 believability ask)
   m2_ceiling_story: "m2_ceiling_story", // → purpose_beliefs.stated_ceiling_reason
   m2_belief_categories: "m2_belief_categories", // → purpose_beliefs.belief_categories_json
   m2_fact_story: "m2_fact_story", // json {fact, story} → purpose_beliefs.fact/story_statement
@@ -30,6 +31,7 @@ export const QK = {
   m2_outside_view: "m2_outside_view",
   m2_outside_view_control: "m2_outside_view_control", // when external-only
   m2_personal_gap: "m2_personal_gap", // → purpose_beliefs.development_gap_categories_json
+  m2_fear_cost: "m2_fear_cost", // when constraint = fear_of_failure/fear_of_success (§20.3)
   m2_reflection: "m2_reflection", // story card (seen marker)
 
   // Module 3 — Build the Future
@@ -98,6 +100,7 @@ export type AnswerHome =
 
 export const ANSWER_HOMES: Partial<Record<QuestionKey, AnswerHome>> = {
   [QK.m2_ceiling_amount]: { table: "purpose_beliefs", kind: "beliefs" },
+  [QK.m2_ceiling_reason]: { table: "purpose_beliefs", kind: "beliefs" },
   [QK.m2_ceiling_story]: { table: "purpose_beliefs", kind: "beliefs" },
   [QK.m2_belief_categories]: { table: "purpose_beliefs", kind: "beliefs" },
   [QK.m2_fact_story]: { table: "purpose_beliefs", kind: "beliefs" },

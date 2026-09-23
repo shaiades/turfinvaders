@@ -30,6 +30,19 @@ import {
 const asObj = (v: unknown): Record<string, unknown> =>
   v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 
+/** Strip the free text of every answer marked private_to_rep. Used ONLY when
+ *  interpolating prompts that get PERSISTED — the rep's live screen renders
+ *  from the unredacted map (privacy gates leadership, not the rep). */
+function redactPrivateText(a: AnswerMap): AnswerMap {
+  const out: Record<string, AnswerValue> = { ...(a as Record<string, AnswerValue>) };
+  for (const [key, v] of Object.entries(out)) {
+    if (v?.visibility === "private_to_rep" && v.text) {
+      out[key] = { ...v, text: undefined };
+    }
+  }
+  return out as AnswerMap;
+}
+
 export const purposeAnswersKey = (profileId: string) => ["purpose_answers", profileId] as const;
 
 // ---------------------------------------------------------------------------
@@ -296,8 +309,12 @@ export function buildSaveAnswer(
             ...base,
             level_number: home.level,
             // Stored so leadership can audit WHICH dynamically-built question
-            // the rep actually answered (spec §9.10).
-            prompt_text: step ? resolveDyn(step.prompt, getAnswers()) : null,
+            // the rep actually answered (spec §9.10). Built from a REDACTED
+            // answer map: a stored prompt row can be leadership-visible while
+            // the PRIOR level it interpolates is private (why_5 quotes why_4),
+            // so private free text must never reach a persisted prompt — the
+            // builders fall back to the level's category label instead.
+            prompt_text: step ? resolveDyn(step.prompt, redactPrivateText(getAnswers())) : null,
             answer_text: value.text ?? null,
             answer_category: (j.category as string | undefined) ?? null,
             answer_categories_json: values,
@@ -306,6 +323,18 @@ export function buildSaveAnswer(
           },
           { onConflict: "purpose_profile_id,level_number" },
         );
+        // Retro-scrub: flipping why_4 private AFTER why_5 was answered must
+        // also rewrite why_5's already-stored prompt, or the old interpolated
+        // copy keeps the leaked words forever.
+        if (!error && home.level === 4 && value.visibility === "private_to_rep") {
+          const why5Step = ALL_STEPS.find((s) => s.key === "why_5");
+          if (why5Step) {
+            await purposeTable("purpose_whys")
+              .update({ prompt_text: resolveDyn(why5Step.prompt, redactPrivateText(getAnswers())) })
+              .eq("purpose_profile_id", profile.id)
+              .eq("level_number", 5);
+          }
+        }
         return { error: error ? error.message : null };
       }
 

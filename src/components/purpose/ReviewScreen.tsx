@@ -5,7 +5,7 @@
 
 import { useState } from "react";
 import type { AnswerMap } from "@/lib/purpose/types";
-import { REVIEW_SECTIONS, REVIEW_COPY } from "@/data/purpose-workshop-content";
+import { ERROR_COPY, REVIEW_SECTIONS, REVIEW_COPY } from "@/data/purpose-workshop-content";
 import { requiredProfileComplete } from "@/lib/purpose/engine";
 import { ALL_STEPS } from "@/data/purpose-workshop-content";
 import { useSubmitPurpose } from "@/hooks/usePurposeProfile";
@@ -44,7 +44,8 @@ export function ReviewScreen({
   onEditStep: (stepKey: string) => void;
   onBack: () => void;
   onSubmitted: () => void;
-  flush: () => Promise<void>;
+  /** True barrier — resolves false when answers are still stuck on-device. */
+  flush: () => Promise<boolean>;
 }) {
   const [ack, setAck] = useState(profile.workshop_completed);
   const [error, setError] = useState<string | null>(null);
@@ -118,14 +119,20 @@ export function ReviewScreen({
             onClick={() => {
               setError(null);
               void flush()
-                .then(() => submit.mutateAsync())
+                .then((drained) => {
+                  // Never submit over answers still stuck on this device —
+                  // the RPC would reject with a raw "Incomplete" error for
+                  // work the rep actually finished.
+                  if (!drained) throw new Error(ERROR_COPY.save_failure);
+                  return submit.mutateAsync();
+                })
                 .then(() => onSubmitted())
                 .catch((e: unknown) => {
                   setError(e instanceof Error ? e.message : "Could not save right now — try again.");
                 });
             }}
           >
-            {submit.isPending ? "Saving…" : "Save My Purpose"}
+            {submit.isPending ? "Saving…" : REVIEW_COPY.primaryCta}
           </PurposeButton>
         </div>
       </div>

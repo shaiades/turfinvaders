@@ -101,19 +101,37 @@ export function PurposeReminderCard({
   // Eligibility + sequencing: show once the intro releases us AND the data
   // is real. Not submitted / flag off / no profile → render nothing, stamp
   // nothing (the reminder earns its slot only after the workshop is done).
-  const eligible =
-    forced ||
-    (profile?.status === "submitted" &&
-      configQuery.data?.sales_rep_feature_enabled === true &&
-      !!answersQuery.data);
-
+  //
+  // Settle ORDER matters: answersQuery is a dependent query (it only enables
+  // after the profile row arrives), so "config and profile settled" is NOT
+  // "everything settled" — deciding 'done' there would cancel the card on
+  // every cold open while the five-table answers fetch is still in flight.
+  // Each query gets its own definitive verdict; loading always means WAIT.
   useEffect(() => {
     if (phase !== "ready" || heldBack) return;
-    if (!eligible) {
-      // Definitive "not today" once the queries settle.
-      if (!profileQuery.isLoading && !configQuery.isLoading && !forced) setPhase("done");
-      return;
+
+    if (!forced) {
+      // Config: null = missing migration (treat as feature-off), false = off.
+      if (configQuery.isLoading) return;
+      if (configQuery.isError || configQuery.data == null || !configQuery.data.sales_rep_feature_enabled) {
+        setPhase("done");
+        return;
+      }
+      // Profile: must exist and be submitted.
+      if (profileQuery.isLoading) return;
+      const p = profileQuery.data?.row ?? null;
+      if (profileQuery.isError || !p || p.status !== "submitted") {
+        setPhase("done");
+        return;
+      }
+      // Answers: the card is the rep's own words — wait for them.
+      if (answersQuery.isError) {
+        setPhase("done");
+        return;
+      }
+      if (!answersQuery.data) return;
     }
+
     if (!stampedRef.current) {
       stampedRef.current = true;
       if (!forced) {
@@ -123,7 +141,20 @@ export function PurposeReminderCard({
       }
     }
     setPhase("showing");
-  }, [phase, heldBack, eligible, profileQuery.isLoading, configQuery.isLoading, forced, userId]);
+  }, [
+    phase,
+    heldBack,
+    forced,
+    userId,
+    configQuery.isLoading,
+    configQuery.isError,
+    configQuery.data,
+    profileQuery.isLoading,
+    profileQuery.isError,
+    profileQuery.data,
+    answersQuery.isError,
+    answersQuery.data,
+  ]);
 
   const dismiss = useCallback(() => setPhase("done"), []);
 

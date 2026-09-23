@@ -20,6 +20,7 @@ import {
   detectCrisis,
   detectExternalOnly,
   detectIDontKnow,
+  detectMaterialOnly,
   detectNonObservable,
   detectPredictiveIdentity,
   detectRepeatsGoal,
@@ -115,6 +116,20 @@ expectTrue("idk: 'I don't know'", detectIDontKnow("I don't know"));
 expectTrue("idk: 'idk'", detectIDontKnow("idk"));
 expectTrue("idk: near-empty", detectIDontKnow("meh"));
 expectEq("idk: real sentence passes", detectIDontKnow("Because my daughter watches what I do"), false);
+
+expectTrue("material-only: 'I can buy a car'", detectMaterialOnly("I can buy a car"));
+expectEq(
+  "material-only: acquisition + value words passes",
+  detectMaterialOnly("buy a home where my kids feel safe"),
+  false,
+);
+expectEq(
+  "material-only: long specific answer passes",
+  detectMaterialOnly(
+    "I could buy a duplex, rent half of it out, and use the difference to stop worrying about every slow week",
+  ),
+  false,
+);
 
 expectTrue("crisis: direct phrase", detectCrisis("some days I want to die"));
 expectTrue("crisis: self harm", detectCrisis("I've been thinking about self-harm again"));
@@ -356,9 +371,46 @@ for (const s of emptySteps) {
 }
 console.log("✓ every step's prompt/options resolve on an empty map");
 
+// §20.2 low-ceiling believability branch — present at ≤75k, absent above.
+const lowBand: AnswerMap = { [QK.m2_ceiling_amount]: { number: 60_000 } };
+expectTrue(
+  "low band injects the believability ask",
+  resolveSteps(ALL_STEPS, lowBand).some((s) => s.key === QK.m2_ceiling_believe),
+);
+expectEq(
+  "mid band omits the believability ask",
+  resolveSteps(ALL_STEPS, { [QK.m2_ceiling_amount]: { number: 100_000 } }).some(
+    (s) => s.key === QK.m2_ceiling_believe,
+  ),
+  false,
+);
+
+// §20.3 fear-constraint asks — gated, with the right variant per constraint.
+const fearFail: AnswerMap = { [QK.m2_belief_categories]: { json: ["fear_of_failure"] } };
+const fearSuccess: AnswerMap = { [QK.m2_belief_categories]: { json: ["fear_of_success"] } };
+const fearFailStep = resolveSteps(ALL_STEPS, fearFail).find((s) => s.key === QK.m2_fear_cost);
+expectTrue("fear_of_failure injects the fear ask", !!fearFailStep);
+expectTrue(
+  "fear_of_failure prompt asks what failure would mean",
+  (fearFailStep ? resolveDyn(fearFailStep.prompt, fearFail) : "").includes("afraid that would mean"),
+);
+const fearSuccessStep = resolveSteps(ALL_STEPS, fearSuccess).find((s) => s.key === QK.m2_fear_cost);
+expectTrue(
+  "fear_of_success prompt asks about cost/change",
+  (fearSuccessStep ? resolveDyn(fearSuccessStep.prompt, fearSuccess) : "").includes("cost or change"),
+);
+expectEq(
+  "skill constraint omits the fear ask",
+  resolveSteps(ALL_STEPS, { [QK.m2_belief_categories]: { json: ["skill_doubt"] } }).some(
+    (s) => s.key === QK.m2_fear_cost,
+  ),
+  false,
+);
+
 // Contradictory edit: ceiling answered for band C, then edited into band A —
-// the band-A reason options must resolve and the old selection goes stale
-// without stranding resolution.
+// the band-A reason options must resolve, and the stale band-C selection must
+// read as UNANSWERED (single_select completeness now checks option
+// membership) so the flow revisits it instead of shipping a wrong reason.
 const contradictory: AnswerMap = {
   [QK.m2_ceiling_amount]: { number: 50_000 },
   [QK.m2_ceiling_reason]: { text: "earned_before" }, // a band-C option
@@ -367,6 +419,12 @@ expectEq("contradictory edit still resolves band", ceilingBand(contradictory), "
 expectTrue(
   "contradictory map still resolves steps",
   resolveSteps(ALL_STEPS, contradictory).length > 20,
+);
+const staleReasonStep = ALL_STEPS.find((s) => s.key === QK.m2_ceiling_reason)!;
+expectEq(
+  "stale cross-band selection reads unanswered",
+  isStepComplete(staleReasonStep, contradictory),
+  false,
 );
 
 // Resume semantics: stale persisted key → first incomplete; valid key with a

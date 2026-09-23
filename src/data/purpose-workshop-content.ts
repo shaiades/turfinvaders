@@ -33,6 +33,7 @@ import {
   detectPredictiveIdentity,
   detectVague,
   detectExternalOnly,
+  detectMaterialOnly,
   detectNonObservable,
   hasRecognizableEvidence,
   detectRepeatsGoal,
@@ -913,6 +914,20 @@ export const ALL_STEPS: StepDef[] = [
     },
   },
   {
+    // §20.2 low-ceiling minimum branch: "ask what would make a higher
+    // possibility more believable" — the spec's own instruction phrased as
+    // the question, no invented framing.
+    key: QK.m2_ceiling_believe,
+    module: "ceiling",
+    kind: "text",
+    required: true,
+    answerType: "text",
+    when: (a) => ceilingBand(a) === "low",
+    prompt: "What would make a higher possibility more believable?",
+    helper:
+      "Not what would guarantee it — what would you need to see, learn, or experience to take a bigger number seriously?",
+  },
+  {
     // 2.2 — What makes it a ceiling. text, min 20 chars.
     key: QK.m2_ceiling_story,
     module: "ceiling",
@@ -1008,6 +1023,31 @@ export const ALL_STEPS: StepDef[] = [
     prompt:
       "Which of the things you just named are you not yet doing consistently, not yet skilled enough to do, or avoiding?",
     options: PERSONAL_GAP_OPTIONS,
+  },
+  {
+    // §20.3 fear-of-failure / fear-of-success minimum asks. Gated on the
+    // named constraint; prompts phrase the spec's own instructions ("ask what
+    // failure would mean" / "ask what success might cost or change; let user
+    // name tradeoffs"), and the helpers carry §20.3's mandated framing
+    // (testable experiment, not identity verdict / tradeoffs named, not
+    // pathologized).
+    key: QK.m2_fear_cost,
+    module: "ceiling",
+    kind: "text",
+    required: true,
+    answerType: "text",
+    when: (a) => {
+      const c = primaryConstraint(a);
+      return c === "fear_of_failure" || c === "fear_of_success";
+    },
+    prompt: (a) =>
+      primaryConstraint(a) === "fear_of_success"
+        ? "What might success cost or change for you?"
+        : "If you went after this and it did not work, what are you afraid that would mean?",
+    helper: (a) =>
+      primaryConstraint(a) === "fear_of_success"
+        ? "Name the tradeoffs. You do not have to solve them today."
+        : "The next 90 days are a test worth running, not a verdict on who you are.",
   },
   {
     // 2.8 — Personalized reflection card (headline + body from REFLECTION_CARDS).
@@ -1354,7 +1394,9 @@ export const ALL_STEPS: StepDef[] = [
       "Think about values such as security, freedom, responsibility, growth, self-respect, contribution, family, courage, discipline, reliability, leadership, or peace.",
     validate: (v) => {
       const text = (v?.text ?? "").trim();
-      if (text && detectVague(text)) {
+      // §16 Level 3: a material-outcome-only answer ("I can buy a car") earns
+      // the deeper ask; so does a plain vague one.
+      if (text && (detectVague(text) || detectMaterialOnly(text))) {
         return {
           level: "coach",
           message: "What would having that make you feel, protect, prove, or allow in your life?",
@@ -1767,3 +1809,11 @@ export const ERROR_COPY = {
 export const SCOREBOARD_COPY = {
   feedbackLine: "These numbers are not your identity. They are feedback you can use.",
 } as const;
+
+/** §16 Levels 4–5 privacy affordance — the spec quotes this exact string. */
+export const KEEP_PRIVATE_AFFORDANCE = "I want to keep this private.";
+
+/** Gap-fill (no spec copy exists): the ask that pairs a private Level 4/5
+ *  answer with its leadership-visible category. */
+export const PRIVATE_CATEGORY_PROMPT =
+  "Keep the words private — just give Tyler and Shai the category";

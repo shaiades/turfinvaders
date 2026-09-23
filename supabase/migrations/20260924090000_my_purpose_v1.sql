@@ -30,6 +30,59 @@
 -- Apply via: supabase db query --linked --file <this file>
 -- ═══════════════════════════════════════════════════════════════════════════
 
+-- ── 0) purpose_admin_config: the singleton switchboard ───────────────────────
+-- Created FIRST: the purpose_profiles INSERT policy below references this
+-- table in a subquery, and CREATE POLICY resolves relations at definition
+-- time — config must already exist or the file cannot apply once.
+-- company_settings pattern: boolean-TRUE primary key, one row, ever.
+-- sales_rep_feature_enabled ships FALSE — the owners walk the workshop
+-- first, then open the doors.
+
+CREATE TABLE IF NOT EXISTS public.purpose_admin_config (
+  id boolean PRIMARY KEY DEFAULT TRUE,
+  sales_rep_feature_enabled boolean NOT NULL DEFAULT false,
+  workshop_launch_mode text NOT NULL DEFAULT 'pre_launch'
+    CHECK (workshop_launch_mode IN ('pre_launch','live','ongoing')),
+  enable_post_workshop_edits boolean NOT NULL DEFAULT true,
+  show_existing_crm_summary boolean NOT NULL DEFAULT true,
+  show_optional_weekly_reflection boolean NOT NULL DEFAULT true,
+  leadership_visibility_notice text NOT NULL
+    DEFAULT 'Tyler and Shai can review your professional plan to mentor you better. Anything you mark "Private to me" stays private.',
+  workshop_version int NOT NULL DEFAULT 1,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT purpose_admin_config_singleton CHECK (id)
+);
+
+GRANT SELECT, UPDATE ON public.purpose_admin_config TO authenticated;
+GRANT ALL ON public.purpose_admin_config TO service_role;
+ALTER TABLE public.purpose_admin_config ENABLE ROW LEVEL SECURITY;
+
+-- Reps need the row to read the launch flag + the visibility notice verbatim.
+DROP POLICY IF EXISTS "purpose_config read" ON public.purpose_admin_config;
+CREATE POLICY "purpose_config read"
+  ON public.purpose_admin_config FOR SELECT TO authenticated
+  USING (
+    public.has_role(auth.uid(), 'sales_rep'::app_role)
+    OR public.has_role(auth.uid(), 'owner'::app_role)
+  );
+
+DROP POLICY IF EXISTS "purpose_config owner update" ON public.purpose_admin_config;
+CREATE POLICY "purpose_config owner update"
+  ON public.purpose_admin_config FOR UPDATE TO authenticated
+  USING (public.has_role(auth.uid(), 'owner'::app_role))
+  WITH CHECK (public.has_role(auth.uid(), 'owner'::app_role));
+-- No INSERT/DELETE policies: the singleton is seeded below and never moves.
+
+DROP TRIGGER IF EXISTS purpose_admin_config_touch_updated_at ON public.purpose_admin_config;
+CREATE TRIGGER purpose_admin_config_touch_updated_at
+  BEFORE UPDATE ON public.purpose_admin_config
+  FOR EACH ROW EXECUTE FUNCTION public.touch_updated_at();
+
+INSERT INTO public.purpose_admin_config (id) VALUES (TRUE)
+ON CONFLICT (id) DO NOTHING;
+
+
 -- ── 1) purpose_profiles: one workshop per person ─────────────────────────────
 -- UNIQUE (id, user_id) exists purely as the composite-FK anchor: every child
 -- table references (purpose_profile_id, user_id) against it, so a child row's
@@ -90,6 +143,7 @@ CREATE POLICY "purpose_profiles own insert"
     AND status = 'in_progress'
     AND workshop_completed = false
     AND completed_at IS NULL
+    AND version_number = 1
     AND last_reviewed_at IS NULL
     AND leadership_follow_up_date IS NULL
     AND leadership_status IS NULL
@@ -177,13 +231,16 @@ CREATE POLICY "purpose_answers own read"
   ON public.purpose_answers FOR SELECT TO authenticated
   USING (user_id = auth.uid());
 
--- Owners read shared answers only; private_to_rep rows are invisible to them.
+-- Owners read shared CURRENT answers only: private_to_rep rows are invisible
+-- to them, and so are superseded versions — edit history is the rep's (the
+-- same doctrine that keeps purpose_revision_log owner-free below).
 DROP POLICY IF EXISTS "purpose_answers owner read shared" ON public.purpose_answers;
 CREATE POLICY "purpose_answers owner read shared"
   ON public.purpose_answers FOR SELECT TO authenticated
   USING (
     public.has_role(auth.uid(), 'owner'::app_role)
     AND visibility = 'leadership_shared'
+    AND is_current
   );
 
 DROP TRIGGER IF EXISTS purpose_answers_touch_updated_at ON public.purpose_answers;
@@ -526,11 +583,21 @@ CREATE POLICY "purpose_notes owner insert"
     AND author_user_id = auth.uid()
   );
 
+-- Edit-own-notes-only: author_user_id is the accountability trail, so an
+-- owner can neither rewrite the other owner's note nor reattribute one
+-- (USING pins whose notes you may touch; WITH CHECK pins that the author
+-- column still names you after the write).
 DROP POLICY IF EXISTS "purpose_notes owner update" ON public.purpose_leadership_notes;
 CREATE POLICY "purpose_notes owner update"
   ON public.purpose_leadership_notes FOR UPDATE TO authenticated
-  USING (public.has_role(auth.uid(), 'owner'::app_role))
-  WITH CHECK (public.has_role(auth.uid(), 'owner'::app_role));
+  USING (
+    public.has_role(auth.uid(), 'owner'::app_role)
+    AND author_user_id = auth.uid()
+  )
+  WITH CHECK (
+    public.has_role(auth.uid(), 'owner'::app_role)
+    AND author_user_id = auth.uid()
+  );
 
 DROP POLICY IF EXISTS "purpose_notes owner delete" ON public.purpose_leadership_notes;
 CREATE POLICY "purpose_notes owner delete"
@@ -554,55 +621,6 @@ CREATE TRIGGER purpose_leadership_notes_touch_updated_at
   BEFORE UPDATE ON public.purpose_leadership_notes
   FOR EACH ROW EXECUTE FUNCTION public.touch_updated_at();
 
--- ── 9) purpose_admin_config: the singleton switchboard ───────────────────────
--- company_settings pattern: boolean-TRUE primary key, one row, ever.
--- sales_rep_feature_enabled ships FALSE — the owners walk the workshop
--- first, then open the doors.
-
-CREATE TABLE IF NOT EXISTS public.purpose_admin_config (
-  id boolean PRIMARY KEY DEFAULT TRUE,
-  sales_rep_feature_enabled boolean NOT NULL DEFAULT false,
-  workshop_launch_mode text NOT NULL DEFAULT 'pre_launch'
-    CHECK (workshop_launch_mode IN ('pre_launch','live','ongoing')),
-  enable_post_workshop_edits boolean NOT NULL DEFAULT true,
-  show_existing_crm_summary boolean NOT NULL DEFAULT true,
-  show_optional_weekly_reflection boolean NOT NULL DEFAULT true,
-  leadership_visibility_notice text NOT NULL
-    DEFAULT 'Tyler and Shai can review your professional plan to mentor you better. Anything you mark "Private to me" stays private.',
-  workshop_version int NOT NULL DEFAULT 1,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT purpose_admin_config_singleton CHECK (id)
-);
-
-GRANT SELECT, UPDATE ON public.purpose_admin_config TO authenticated;
-GRANT ALL ON public.purpose_admin_config TO service_role;
-ALTER TABLE public.purpose_admin_config ENABLE ROW LEVEL SECURITY;
-
--- Reps need the row to read the launch flag + the visibility notice verbatim.
-DROP POLICY IF EXISTS "purpose_config read" ON public.purpose_admin_config;
-CREATE POLICY "purpose_config read"
-  ON public.purpose_admin_config FOR SELECT TO authenticated
-  USING (
-    public.has_role(auth.uid(), 'sales_rep'::app_role)
-    OR public.has_role(auth.uid(), 'owner'::app_role)
-  );
-
-DROP POLICY IF EXISTS "purpose_config owner update" ON public.purpose_admin_config;
-CREATE POLICY "purpose_config owner update"
-  ON public.purpose_admin_config FOR UPDATE TO authenticated
-  USING (public.has_role(auth.uid(), 'owner'::app_role))
-  WITH CHECK (public.has_role(auth.uid(), 'owner'::app_role));
--- No INSERT/DELETE policies: the singleton is seeded below and never moves.
-
-DROP TRIGGER IF EXISTS purpose_admin_config_touch_updated_at ON public.purpose_admin_config;
-CREATE TRIGGER purpose_admin_config_touch_updated_at
-  BEFORE UPDATE ON public.purpose_admin_config
-  FOR EACH ROW EXECUTE FUNCTION public.touch_updated_at();
-
-INSERT INTO public.purpose_admin_config (id) VALUES (TRUE)
-ON CONFLICT (id) DO NOTHING;
-
 -- ── 10) purpose_safety_flags: metadata-only wellbeing pings ──────────────────
 -- NEVER any answer-text column — this table is metadata ONLY, by owner
 -- decision. The client-side keyword screen files WHERE (module/question) and
@@ -617,8 +635,10 @@ CREATE TABLE IF NOT EXISTS public.purpose_safety_flags (
   purpose_profile_id uuid NOT NULL,
   user_id uuid NOT NULL,
   source text NOT NULL DEFAULT 'keyword_client' CHECK (source IN ('keyword_client')),
-  module_key text,
-  question_key text,
+  -- Length-capped: these render on the owner dashboard and a rep can insert
+  -- them freely, so they must stay short slugs, not free prose.
+  module_key text CHECK (module_key IS NULL OR char_length(module_key) <= 64),
+  question_key text CHECK (question_key IS NULL OR char_length(question_key) <= 64),
   flagged_at timestamptz NOT NULL DEFAULT now(),
   acknowledged_at timestamptz,
   acknowledged_by uuid REFERENCES public.profiles(id),
@@ -731,17 +751,25 @@ BEGIN
     RAISE EXCEPTION 'leadership review columns are owner-only';
   END IF;
 
-  -- Workshop progress columns: the rep's own, and only the rep's own —
-  -- owners mentor, they don't move someone else's cursor or mark them done.
+  -- Resume-position columns: the rep's own, and only the rep's own —
+  -- owners mentor, they don't move someone else's cursor.
+  IF (NEW.current_module IS DISTINCT FROM OLD.current_module
+      OR NEW.current_step IS DISTINCT FROM OLD.current_step)
+     AND OLD.user_id <> auth.uid() THEN
+    RAISE EXCEPTION 'workshop progress can only be changed by its own rep';
+  END IF;
+
+  -- Lifecycle columns: ONLY the submit RPC moves these (it flags itself via
+  -- a transaction-local GUC — the time-clock app.edit_reason idiom). Without
+  -- this, a rep could PATCH status='submitted'/workshop_completed=true over
+  -- PostgREST and skip every completeness check in submit_purpose_profile.
   IF (NEW.status IS DISTINCT FROM OLD.status
-      OR NEW.current_module IS DISTINCT FROM OLD.current_module
-      OR NEW.current_step IS DISTINCT FROM OLD.current_step
       OR NEW.workshop_completed IS DISTINCT FROM OLD.workshop_completed
       OR NEW.started_at IS DISTINCT FROM OLD.started_at
       OR NEW.completed_at IS DISTINCT FROM OLD.completed_at
       OR NEW.version_number IS DISTINCT FROM OLD.version_number)
-     AND OLD.user_id <> auth.uid() THEN
-    RAISE EXCEPTION 'workshop progress can only be changed by its own rep';
+     AND COALESCE(current_setting('purpose.internal', true), '') <> '1' THEN
+    RAISE EXCEPTION 'submission state moves only through submit_purpose_profile()';
   END IF;
 
   RETURN NEW;
@@ -1054,10 +1082,17 @@ BEGIN
     _missing := _missing || 'ceiling work (fact statement, story statement, belief-to-question)';
   END IF;
 
-  -- Seven whys, all seven, with level 7 the written Core Why.
+  -- Seven whys, all seven, each carrying SUBSTANCE — either written text or
+  -- (for a privacy-marked level) at least its high-level category. Counting
+  -- bare rows would let seven empty inserts through PostgREST satisfy QA #9;
+  -- level 5 is the spec's named "cost of staying the same".
   SELECT COUNT(*) INTO _why_count
   FROM public.purpose_whys w
-  WHERE w.purpose_profile_id = _profile.id;
+  WHERE w.purpose_profile_id = _profile.id
+    AND (
+      COALESCE(btrim(w.answer_text), '') <> ''
+      OR COALESCE(btrim(w.answer_category), '') <> ''
+    );
 
   SELECT bool_or(w.is_core_why AND COALESCE(btrim(w.answer_text), '') <> '')
   INTO _core_ok
@@ -1092,6 +1127,10 @@ BEGIN
   IF array_length(_missing, 1) > 0 THEN
     RAISE EXCEPTION 'Incomplete: %', array_to_string(_missing, '; ');
   END IF;
+
+  -- Unlock the guard trigger's lifecycle gate for THIS transaction only —
+  -- direct PostgREST updates to these columns stay blocked.
+  PERFORM set_config('purpose.internal', '1', true);
 
   -- workshop_completed in the SET expressions reads the OLD value: a first
   -- submit stays version 1; a re-submit after post-workshop edits bumps it.

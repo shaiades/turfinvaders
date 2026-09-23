@@ -3,21 +3,22 @@
 import { Link } from "@tanstack/react-router";
 import type { AnswerMap } from "@/lib/purpose/types";
 import { COMPLETION_COPY, REVIEW_SECTIONS } from "@/data/purpose-workshop-content";
+import { QK } from "@/lib/purpose/questionKeys";
 import { PurposeCard, PurposeLabel } from "./kit";
 
-const SHOWN_LABELS = new Set([
-  "MY ONE-YEAR TARGET",
-  "MY CORE WHY",
-  "MY 90-DAY MISSION",
-  "THE STORY I AM QUESTIONING",
-  "MY IF–THEN PLAN",
-]);
-
+/** §17: target, Core Why, mission, the belief being questioned (the 3.5
+ *  answer — not the 2.4 story), and the if–then plan. */
 export function CompletionScreen({ answers }: { answers: AnswerMap }) {
-  const rows = REVIEW_SECTIONS.map((s) => ({
-    label: s.label,
-    value: s.render(answers, { maskPrivate: false }),
-  })).filter((r) => SHOWN_LABELS.has(r.label) && r.value);
+  const bySection = new Map(REVIEW_SECTIONS.map((s) => [s.label, s]));
+  const fromReview = (label: string) =>
+    bySection.get(label)?.render(answers, { maskPrivate: false }) ?? null;
+  const rows = [
+    { label: "MY ONE-YEAR TARGET", value: fromReview("MY ONE-YEAR TARGET") },
+    { label: "MY CORE WHY", value: fromReview("MY CORE WHY") },
+    { label: "MY 90-DAY MISSION", value: fromReview("MY 90-DAY MISSION") },
+    { label: "THE BELIEF I AM QUESTIONING", value: answers[QK.m3_belief_to_question]?.text ?? null },
+    { label: "MY IF–THEN PLAN", value: fromReview("MY IF–THEN PLAN") },
+  ].filter((r): r is { label: string; value: string } => !!r.value);
 
   return (
     <div className="purpose-surface min-h-dvh">

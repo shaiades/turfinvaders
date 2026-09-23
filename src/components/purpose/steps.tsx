@@ -11,6 +11,8 @@ import {
   CORE_WHY_SCAFFOLD,
   FACT_STORY_COPY,
   IF_PREFILLS,
+  KEEP_PRIVATE_AFFORDANCE,
+  PRIVATE_CATEGORY_PROMPT,
   SCALE_ANCHORS,
   SUPPORT_CONTEXT_PROMPT,
   ifThenQuestion,
@@ -42,16 +44,19 @@ export type StepProps = {
 export function VisibilityToggle({
   visibility,
   onChange,
+  privateLabel,
 }: {
   visibility: Visibility;
   onChange: (v: Visibility) => void;
+  /** Why Levels 4–5 use the spec's exact affordance string. */
+  privateLabel?: string;
 }) {
   return (
     <div className="mt-4">
       <PurposeLabel className="mb-2">Who can see this</PurposeLabel>
       <div className="flex flex-wrap gap-2">
         <PurposeChip selected={visibility === "private_to_rep"} onClick={() => onChange("private_to_rep")}>
-          Private to me
+          {privateLabel ?? "Private to me"}
         </PurposeChip>
         <PurposeChip
           selected={visibility === "leadership_shared"}
@@ -148,6 +153,11 @@ export function SingleSelectStep({ step, value, answers, onChange }: StepProps) 
   const options = step.options ? resolveDyn(step.options, answers) : [];
   const selected = value?.text;
   const otherText = (asObj(value?.json).otherText as string | undefined) ?? "";
+  // The focus selects route to purpose_goals, which has no home for an
+  // otherText — and both have a dedicated follow-up question that captures
+  // the detail anyway. Showing a field whose text would be silently dropped
+  // on save is worse than not showing it.
+  const supportsOtherText = step.key !== QK.m4_pro_focus && step.key !== QK.m4_personal_focus;
   return (
     <div className="mt-6 space-y-2.5">
       {options.map((o) => (
@@ -159,7 +169,7 @@ export function SingleSelectStep({ step, value, answers, onChange }: StepProps) 
           {o.label}
         </PurposeOptionCard>
       ))}
-      {selected === "other" && (
+      {selected === "other" && supportsOtherText && (
         <PurposeInput
           value={otherText}
           onChange={(e) => onChange({ ...value, text: selected, json: { otherText: e.target.value } })}
@@ -570,13 +580,15 @@ export function WhyStep({ step, value, answers, onChange }: StepProps) {
       )}
       <Helper text={step.helper ? resolveDyn(step.helper, answers) : undefined} />
       {step.visibilityToggle && (
-        <VisibilityToggle visibility={visibility} onChange={(v) => emit({ visibility: v })} />
+        <VisibilityToggle
+          visibility={visibility}
+          onChange={(v) => emit({ visibility: v })}
+          privateLabel={step.privateCategoryOptions ? KEEP_PRIVATE_AFFORDANCE : undefined}
+        />
       )}
       {step.privateCategoryOptions && visibility === "private_to_rep" && (
         <div className="mt-4">
-          <PurposeLabel className="mb-2">
-            Keep the words private — just give Tyler and Shai the category
-          </PurposeLabel>
+          <PurposeLabel className="mb-2">{PRIVATE_CATEGORY_PROMPT}</PurposeLabel>
           <div className="flex flex-wrap gap-2">
             {step.privateCategoryOptions.map((o: Option) => (
               <PurposeChip

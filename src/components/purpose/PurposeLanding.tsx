@@ -92,7 +92,7 @@ export function PurposeResumeCard({ profile, pct }: { profile: PurposeProfileRow
       <div className="mx-auto w-full max-w-xl px-4 pt-safe pb-16">
         <PurposeCard className="mt-12 text-center">
           <PurposeLabel className="justify-center">My Purpose</PurposeLabel>
-          <h1 className="mt-3 text-2xl leading-snug">You're right where you left off.</h1>
+          <h1 className="mt-3 text-2xl leading-snug">{LANDING_COPY.resumeHeadline}</h1>
           <p className="mt-3 text-sm leading-relaxed text-[var(--purpose-ink-dim)]">
             {EMPTY_STATE_COPY.in_progress}
           </p>
@@ -104,7 +104,7 @@ export function PurposeResumeCard({ profile, pct }: { profile: PurposeProfileRow
           </p>
           <div className="mt-7">
             <PurposeButton onClick={() => void navigate({ to: "/my-purpose/workshop" })} className="min-w-56">
-              Continue My Purpose
+              {LANDING_COPY.resumeCta}
             </PurposeButton>
           </div>
         </PurposeCard>
