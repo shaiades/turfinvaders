@@ -372,7 +372,7 @@ function TakeHomeWidget({
       </div>
       {weeklyGoal > 0 && (
         <div className="mt-4">
-          <NeonBar pct={pct * 100} accent="var(--victory)" />
+          <NeonBar pct={pct} accent="var(--victory)" />
           <div className="mt-1.5 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
             {toGo > 0 ? (
               <>

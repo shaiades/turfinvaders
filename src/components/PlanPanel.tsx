@@ -566,7 +566,7 @@ function DailyAction({
       </div>
 
       <div className="mt-4">
-        <NeonBar pct={pct * 100} accent="var(--neon)" />
+        <NeonBar pct={pct} accent="var(--neon)" />
         <div className="mt-1.5 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
           Today ·{" "}
           <span className={todayDoors >= doors ? "text-victory" : "text-neon"}>
