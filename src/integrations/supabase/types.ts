@@ -28,6 +28,7 @@ export type Database = {
           lat: number | null
           lead_name: string | null
           lng: number | null
+          missing_from_report: boolean | null
           monday_item_id: string
           office_location: string
           ol: string | null
@@ -55,6 +56,7 @@ export type Database = {
           lat?: number | null
           lead_name?: string | null
           lng?: number | null
+          missing_from_report?: boolean | null
           monday_item_id: string
           office_location?: string
           ol?: string | null
@@ -82,6 +84,7 @@ export type Database = {
           lat?: number | null
           lead_name?: string | null
           lng?: number | null
+          missing_from_report?: boolean | null
           monday_item_id?: string
           office_location?: string
           ol?: string | null

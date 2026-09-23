@@ -139,6 +139,12 @@ export type BlockCard = {
   lat?: number | null;
   lng?: number | null;
   address?: string | null;
+  /** Sold card proven ABSENT from the walked monthly Sales Report boards
+   *  (owner, 2026-09-23): Shark Tank — and the Month/Year book money here —
+   *  doesn't count it. Stamped ONLY by the sync's Sales-Report pass (same
+   *  contract as wcc/report_reps); NULL = never proven either way. Optional
+   *  so pre-existing fixtures keep compiling. */
+  missing_from_report?: boolean | null;
 };
 
 /** Sale-column values that mean sold — keep in sync with SOLD_VALUES in
@@ -422,7 +428,7 @@ export type RepStats = {
 
 export type KombatTotals = Omit<RepStats, "rep">;
 
-const emptyStats = (): Omit<RepStats, "rep"> => ({
+export const emptyStats = (): Omit<RepStats, "rep"> => ({
   appts: 0,
   noShow: 0,
   noDemo: 0,
@@ -812,6 +818,7 @@ export type AttentionKind =
   | "orphan_save"
   | "no_reps"
   | "blank_price"
+  | "missing_report_row"
   | "rep_mismatch"
   | "unresolved"
   | "no_weekday_group";
@@ -989,6 +996,21 @@ export function auditBlockCards(
     } else if (
       !consumedSave &&
       !canSave &&
+      !excluded &&
+      outcome === "sold" &&
+      c.missing_from_report === true
+    ) {
+      // The five September 2026 cards (Aunger/Nguyen/Hamilton/Kaufman/Morgan,
+      // $43,953) that explained the whole Month-vs-Shark-Tank gap. The stamp
+      // comes from the sync's proof-of-absence pass; the outcome re-check
+      // here keeps a card whose WCC died after the stamp quiet until the
+      // next covered sync clears the stale true.
+      kind = "missing_report_row";
+      detail =
+        "sold on the Block board but not on the monthly Sales Report — Shark Tank and the Month/Year money here don't count this sale until the office adds the report row and syncs (a past month needs Full history)";
+    } else if (
+      !consumedSave &&
+      !canSave &&
       // Mirror the aggregate's gate exactly: an excluded card still counts
       // (and still routes volume through report_reps) when the report
       // stamped it dead — so the drift must stay visible there too.
@@ -1051,9 +1073,13 @@ export function auditBlockCards(
     orphan_save: 2,
     no_reps: 3,
     blank_price: 4,
-    rep_mismatch: 5,
-    unresolved: 6,
-    no_weekday_group: 7,
+    // Below blank_price (both are Monday fixes, but a blank price zeroes the
+    // card's LIVE money everywhere while a missing row only zeroes the book),
+    // above rep_mismatch (there the money still counts somewhere).
+    missing_report_row: 5,
+    rep_mismatch: 6,
+    unresolved: 7,
+    no_weekday_group: 8,
   };
   items.sort(
     (a, b) =>
@@ -1146,4 +1172,79 @@ export function aggregateReportYear(rows: ReportSaleRow[]): YearAggregate {
     (a, b) => b.revenue - a.revenue || b.sold - a.sold || a.rep.localeCompare(b.rep),
   );
   return { reps, totals };
+}
+
+// ── The official book: MONTH tab helpers (owner, 2026-09-23) ───────────────
+// The Month tab is a HYBRID: funnel results stay on the Block-card engine
+// (live), while every dollar mirrors the monthly Sales Report book — the
+// same aggregateReportYear math over that one month's rows, so the Month
+// tab matches the monthly Shark Tank dashboards to the cent. Diagnosed
+// live 2026-09-23: September's whole $43,953 gap was five sold Block cards
+// the office never entered on the report boards (see missing_report_row).
+// Day/Week stay fully card-based; Month/Year are the book.
+
+/** Narrow report rows to one book month and (optionally) one office.
+ *  officeBlind: the month's rows carry NO office at all — the un-prefixed
+ *  Jan–Apr 2026 single books — so an office filter is unanswerable and the
+ *  month shows combined money whatever the pill says. NEVER route report
+ *  rows through OfficeFilterContext.matches(): its null→San Diego coercion
+ *  would silently dump those books into one office. */
+export function filterReportRows(
+  rows: ReportSaleRow[],
+  f: { month?: string; office?: string },
+): { rows: ReportSaleRow[]; officeBlind: boolean } {
+  const monthRows = f.month ? rows.filter((r) => r.report_month === f.month) : rows;
+  const officeBlind = monthRows.length > 0 && monthRows.every((r) => r.office === null);
+  if (!f.office || f.office === "All" || officeBlind) return { rows: monthRows, officeBlind };
+  return { rows: monthRows.filter((r) => r.office === f.office), officeBlind };
+}
+
+/** Same trim/lowercase/collapse rule as normalizeName in @/lib/utils —
+ *  inlined because this module stays import-free (pure test path). */
+const nameKey = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
+
+/** Month standings = the card rows (funnel intact) with each rep's revenue
+ *  REPLACED by their report-book volume, ordered by that volume. Reps the
+ *  book pays but the boards don't name this month join as zero-stat stubs
+ *  (their pcts stay null → "—"); reps with cards but no book money show $0.
+ *  Map entries are consumed on first match so two card names normalizing
+ *  identically can never both take the money. */
+export function mergeMonthStandings(cardReps: RepStats[], report: YearAggregate): RepStats[] {
+  const byName = new Map<string, YearRepRow>();
+  for (const r of report.reps) byName.set(nameKey(r.rep), r);
+  const merged: RepStats[] = cardReps.map((r) => {
+    const book = byName.get(nameKey(r.rep));
+    if (book) byName.delete(nameKey(r.rep));
+    return { ...r, revenue: book ? book.revenue : 0 };
+  });
+  for (const leftover of byName.values()) {
+    // No all-zero rows (same doctrine as both aggregates): a book rep whose
+    // month netted $0 has nothing to stand on.
+    if (leftover.revenue <= 0) continue;
+    merged.push({ rep: leftover.rep, ...emptyStats(), revenue: leftover.revenue });
+  }
+  // The card engine's exact comparator, now ranking by BOOK volume.
+  merged.sort(
+    (a, b) =>
+      b.revenue - a.revenue ||
+      b.sold + b.reloads - (a.sold + a.reloads) ||
+      b.appts - a.appts ||
+      a.rep.localeCompare(b.rep),
+  );
+  return merged;
+}
+
+/** The missing_from_report write decision (sync side), kept pure for the
+ *  verify suite (chooseReportReps precedent). null = leave the stored value
+ *  untouched: an uncovered window proves nothing, and a quick sync (current
+ *  + previous books only) must never wipe a Full-history flag — the same
+ *  boundary doctrine as the report_reps heal. */
+export function decideMissingFlag(i: {
+  matched: boolean;
+  covered: boolean;
+  soldAlive: boolean;
+}): boolean | null {
+  if (i.matched) return false;
+  if (!i.covered) return null;
+  return i.soldAlive ? true : false;
 }

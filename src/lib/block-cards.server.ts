@@ -24,6 +24,7 @@ import {
   SOLD_VALUES,
   chooseReportReps,
   cleanReps,
+  decideMissingFlag,
   isCanSave,
   phoneKey,
   preferAmountMatch,
@@ -252,6 +253,11 @@ export type SyncSummary = {
      *  removals + orphan heals). Kept separate so a mass-clear can never
      *  masquerade as a mass credit grant in the UI. */
     reps_cleared: number;
+    /** Sold cards newly proven ABSENT from the walked Sales Report books
+     *  this pass (owner, 2026-09-23) / stale flags cleared. Diffed writes —
+     *  counts move only when a card's flag actually changed. */
+    missing_flagged: number;
+    missing_cleared: number;
     errors: string[];
   };
 };
@@ -503,6 +509,8 @@ export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSumm
     updated: 0,
     reps_updated: 0,
     reps_cleared: 0,
+    missing_flagged: 0,
+    missing_cleared: 0,
     errors: [],
   };
   try {
@@ -538,7 +546,7 @@ export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSumm
       );
     }
     if (reportBoards.length > 0) {
-      const { cards: soldCards, repsAvailable } = await fetchCandidateCards();
+      const { cards: soldCards, repsAvailable, missingAvailable } = await fetchCandidateCards();
       if (!repsAvailable) {
         // Column missing (deploy raced the migration, or a rollback): the
         // reps pass stands down for this run; the wcc cancel heal continues
@@ -753,6 +761,89 @@ export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSumm
           }
         }
       }
+
+      // ── Not-on-Sales-Report flag ── (owner, 2026-09-23) same proof-of-
+      // absence doctrine as the report_reps heal: only (office, month) spans
+      // that walked successfully WITH rows may testify that a sale's row is
+      // absent — but reps_column_missing is deliberately not required here,
+      // because row EXISTENCE doesn't need the Sales Rep column to resolve.
+      // Uncovered windows write NOTHING: a quick sync (current + previous
+      // books only) must never wipe a Full-history flag, so clearing an old
+      // month's flag after the office adds the row takes a Full history run
+      // — the Needs Attention copy says so. Diffed writes only, so a no-op
+      // pass never churns updated_at/realtime.
+      if (missingAvailable) {
+        const flagSpans = wcc.reports
+          .filter(
+            (r) =>
+              r.month_start !== null && r.month_end !== null && r.office !== null && r.rows > 0,
+          )
+          .map((r) => ({
+            office: r.office as string,
+            start: r.month_start as string,
+            end: r.month_end as string,
+          }));
+        const flagCovered = (office: string, day: string) =>
+          flagSpans.some((s) => s.office === office && day >= s.start && day < s.end);
+        const wantTrue: SoldCardLite[] = [];
+        const toFalse: string[] = [];
+        for (const card of soldCards) {
+          if (card.card_date === null) continue;
+          const lo = addDaysISO(card.card_date, -SALE_DATE_WINDOW_DAYS);
+          const hi = addDaysISO(card.card_date, SALE_DATE_WINDOW_DAYS);
+          const covered =
+            flagCovered(card.office_location, lo) &&
+            flagCovered(card.office_location, card.card_date) &&
+            flagCovered(card.office_location, hi);
+          const want = decideMissingFlag({
+            matched: matches.has(card.monday_item_id),
+            covered,
+            soldAlive: card.sold && !isDeadLabel(card.wcc),
+          });
+          if (want === null || want === (card.missing_from_report ?? null)) continue;
+          if (want) wantTrue.push(card);
+          else toFalse.push(card.monday_item_id);
+        }
+        // Can/Save exemption: a landed save card is sold-labeled and priced,
+        // but its deal lives on the ORIGINAL sale's report row — never flag
+        // it. Comments aren't in SoldCardLite (long free text); the would-be
+        // flagged set is tiny, so look them up (the canSaveIds pattern).
+        const toTrue: string[] = [];
+        for (const batch of chunks(
+          wantTrue.map((c) => c.monday_item_id),
+          CHUNK,
+        )) {
+          const { data: rows, error } = await supabaseAdmin
+            .from("block_cards")
+            .select("monday_item_id, comments")
+            .in("monday_item_id", batch);
+          if (error) {
+            wcc.errors.push(`missing-flag can/save lookup: ${error.message}`);
+            continue; // conservative: an unreadable batch flags nothing
+          }
+          for (const r of rows ?? []) {
+            if (!isCanSave({ comments: r.comments })) toTrue.push(r.monday_item_id);
+          }
+        }
+        for (const [ids, value] of [
+          [toTrue, true],
+          [toFalse, false],
+        ] as const) {
+          for (const batch of chunks(ids, CHUNK)) {
+            const { error } = await supabaseAdmin
+              .from("block_cards")
+              .update({ missing_from_report: value })
+              .in("monday_item_id", batch);
+            if (error) {
+              wcc.errors.push(`missing_from_report ×${batch.length}: ${error.message}`);
+            } else if (value) {
+              wcc.missing_flagged += batch.length;
+            } else {
+              wcc.missing_cleared += batch.length;
+            }
+          }
+        }
+      }
     }
   } catch (err) {
     wcc.errors.push(err instanceof Error ? err.message : String(err));
@@ -839,6 +930,10 @@ type SoldCardLite = {
   /** phoneKey of the card's phone ("" when none) — the last-resort match
    *  when the two sides spell the customer differently (Bunzal/Punzal). */
   _phone: string;
+  /** Current Not-on-Sales-Report stamp — the flag pass diffs against it so
+   *  no-op writes never churn realtime. Always null when the pass runs with
+   *  missingAvailable=false. */
+  missing_from_report: boolean | null;
 };
 
 /** EVERY Block card, paged past PostgREST's 1000-row cap. Non-cancel report
@@ -852,9 +947,15 @@ type SoldCardLite = {
 async function fetchCandidateCards(): Promise<{
   cards: SoldCardLite[];
   repsAvailable: boolean;
+  missingAvailable: boolean;
 }> {
   const soldSet = new Set(SOLD_VALUES as readonly string[]);
+  // Each optional column degrades INDEPENDENTLY on an error naming it (a
+  // deploy that raced its migration, or a rollback): report_reps loss costs
+  // the reps pass, missing_from_report loss costs the flag pass — neither
+  // may ever take the wcc cancel heal down with it.
   let repsAvailable = true;
+  let missingAvailable = true;
   type PageRow = Pick<
     BlockCard,
     | "monday_item_id"
@@ -865,38 +966,35 @@ async function fetchCandidateCards(): Promise<{
     | "sale_price"
     | "wcc"
     | "phone"
-  > & { report_reps?: string[] | null };
+  > & { report_reps?: string[] | null; missing_from_report?: boolean | null };
   const out: SoldCardLite[] = [];
+  const BASE_COLUMNS =
+    "monday_item_id, lead_name, office_location, card_date, sale, sale_price, wcc, phone";
   for (let from = 0; ; from += 1000) {
     let rows: PageRow[] | null = null;
-    if (repsAvailable) {
+    while (rows === null) {
+      const sel =
+        BASE_COLUMNS +
+        (repsAvailable ? ", report_reps" : "") +
+        (missingAvailable ? ", missing_from_report" : "");
       const { data, error } = await supabaseAdmin
         .from("block_cards")
-        .select(
-          "monday_item_id, lead_name, office_location, card_date, sale, sale_price, wcc, phone, report_reps",
-        )
+        .select(sel)
         .order("monday_item_id")
         .range(from, from + 999);
-      if (error && /report_reps/i.test(error.message)) {
-        repsAvailable = false; // fall through to the reps-less select below
-      } else if (error) {
-        throw new Error(error.message);
-      } else {
-        rows = data;
+      if (error && missingAvailable && /missing_from_report/i.test(error.message)) {
+        missingAvailable = false;
+        continue;
       }
-    }
-    if (!repsAvailable) {
-      const { data, error } = await supabaseAdmin
-        .from("block_cards")
-        .select(
-          "monday_item_id, lead_name, office_location, card_date, sale, sale_price, wcc, phone",
-        )
-        .order("monday_item_id")
-        .range(from, from + 999);
+      if (error && repsAvailable && /report_reps/i.test(error.message)) {
+        repsAvailable = false;
+        continue;
+      }
       if (error) throw new Error(error.message);
-      rows = data;
+      // The dynamic column list defeats supabase-js's literal-type parsing.
+      rows = (data ?? []) as unknown as PageRow[];
     }
-    for (const r of rows ?? []) {
+    for (const r of rows) {
       out.push({
         monday_item_id: r.monday_item_id,
         lead_name: r.lead_name,
@@ -909,11 +1007,12 @@ async function fetchCandidateCards(): Promise<{
         _norm: normalizeCustomer(r.lead_name ?? ""),
         _tkey: customerTokens(r.lead_name ?? "").join(" "),
         _phone: phoneKey(r.phone),
+        missing_from_report: missingAvailable ? (r.missing_from_report ?? null) : null,
       });
     }
-    if (!rows || rows.length < 1000) break;
+    if (rows.length < 1000) break;
   }
-  return { cards: out, repsAvailable };
+  return { cards: out, repsAvailable, missingAvailable };
 }
 
 /** How far a card's date may sit from the report row's Date Sold and still be

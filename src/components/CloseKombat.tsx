@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { isAdminRole, privilegeRole } from "@/lib/roles";
 import { buildRepMatcher } from "@/lib/rep-identity";
-import { DEFAULT_OFFICE, OFFICE_FILTER_OPTIONS } from "@/lib/offices";
+import { DEFAULT_OFFICE, OFFICE_FILTER_OPTIONS, OFFICE_LOCATIONS } from "@/lib/offices";
 import {
   OfficeFilterProvider,
   OfficeFilterToggle,
@@ -40,7 +40,9 @@ import {
   aggregateReportYear,
   auditBlockCards,
   countReps,
+  filterReportRows,
   isReload,
+  mergeMonthStandings,
   resolveCards,
   volumeReps,
   type AttentionItem,
@@ -264,6 +266,14 @@ function CloseKombatInner({
   // data source and different math from every other range. See the report
   // query below.
   const isYearTab = tab === "year";
+  // The Month tab is a HYBRID (owner, 2026-09-23): funnel results stay on
+  // the live Block-card engine, every DOLLAR mirrors the monthly Sales
+  // Report book so Month matches the monthly Shark Tank dashboards. Day and
+  // Week stay fully card-based — the live board vs the official book.
+  const isMonthTab = tab === "month";
+  // One report fetch serves both book tabs, keyed by the year it covers —
+  // Month↔Year flips inside a calendar year share the cache.
+  const bookYear = isMonthTab ? Number(monthStart.slice(0, 4)) : year;
 
   const range: ResolvedRange = useMemo(() => {
     if (tab === "day") {
@@ -332,7 +342,7 @@ function CloseKombatInner({
   const CARD_COLUMNS =
     "monday_item_id, board_id, office_location, card_date, group_title, lead_name, reps, " +
     "iss, bo, ol, rs, pm, sale, sale_price, products, canvass_stats, wcc, comments, phone, " +
-    "report_reps";
+    "report_reps, missing_from_report";
   const cardsQuery = useQuery({
     queryKey: ["block_cards", fetchStart, fetchEnd],
     // The abort signal MUST reach every page request (2026-09-02): a
@@ -375,8 +385,8 @@ function CloseKombatInner({
   // pills hide on this tab. cardsQuery stays enabled on Year: Money/My Deals
   // and the KA-CHING detector still run on cards.
   const reportQuery = useQuery({
-    queryKey: ["report_sales", year],
-    enabled: isYearTab,
+    queryKey: ["report_sales", bookYear],
+    enabled: isYearTab || isMonthTab,
     queryFn: async ({ signal }) => {
       const PAGE = 1000;
       const all: ReportSaleRow[] = [];
@@ -386,8 +396,8 @@ function CloseKombatInner({
           .select(
             "monday_item_id, office, report_month, date_sold, sale_amt, cancel_amt, wcc, sales_count, reps",
           )
-          .gte("report_month", `${year}-01-01`)
-          .lte("report_month", `${year}-12-31`)
+          .gte("report_month", `${bookYear}-01-01`)
+          .lte("report_month", `${bookYear}-12-31`)
           .order("monday_item_id")
           .range(from, from + PAGE - 1)
           .abortSignal(signal);
@@ -439,6 +449,33 @@ function CloseKombatInner({
   // dispatch board also dropped that day in PR #141): Today shows today's
   // volume, never yesterday's sale riding along on the week.
 
+  // --- Month book (owner, 2026-09-23): the viewed month's Sales Report
+  // rows, office-filtered by STRICT equality — never OfficeFilterContext's
+  // matches(), whose null→San Diego coercion would dump the un-prefixed
+  // Jan–Apr books into one office. officeBlind = that month's book records
+  // no offices at all, so money shows combined whatever the pill says.
+  const monthBook = useMemo(() => {
+    if (!isMonthTab) return null;
+    const { rows, officeBlind } = filterReportRows(reportQuery.data ?? [], {
+      month: monthStart,
+      office: office === "All" ? undefined : office,
+    });
+    return { agg: aggregateReportYear(rows), officeBlind, hasRows: rows.length > 0 };
+  }, [isMonthTab, reportQuery.data, monthStart, office]);
+  // Month standings = card funnel rows with revenue REPLACED by the book's
+  // number (and ranked by it); other tabs pass through untouched. The book
+  // is never faked from cards while it loads — dim states cover the gap.
+  const displayReps = useMemo(
+    () => (monthBook ? mergeMonthStandings(reps, monthBook.agg) : reps),
+    [monthBook, reps],
+  );
+  const displayTotals: KombatTotals = useMemo(
+    () => (monthBook ? { ...totals, revenue: monthBook.agg.totals.revenue } : totals),
+    [monthBook, totals],
+  );
+  const bookPending =
+    isMonthTab && (reportQuery.isPlaceholderData || reportQuery.isLoading);
+
   // Board-hygiene callouts. Admins get the full office queue (realRole, so
   // "View as" previews don't hide it from the owner); reps get ONLY the flags
   // on cards bearing their own name (R-3) — blank_price counts their sale as
@@ -473,9 +510,18 @@ function CloseKombatInner({
     () => buildRepMatcher(displayName, allBoardNames),
     [displayName, allBoardNames],
   );
-  const myIdx = useMemo(() => reps.findIndex((r) => matcher.isMe(r.rep)), [reps, matcher]);
-  const myRow = myIdx >= 0 ? reps[myIdx] : null;
-  const ahead = myIdx > 0 ? reps[myIdx - 1] : null;
+  // Self rows read the DISPLAY standings, so on Month the hero's money,
+  // rank and gap follow the book while its funnel strip stays card-based
+  // (the merge preserves those fields). Limitation, accepted: a rep whose
+  // name appears ONLY in the month book (zero cards in the ±42d fetch)
+  // won't self-highlight — the matcher pool stays card-names so its
+  // ambiguity guard can't flap across tab switches.
+  const myIdx = useMemo(
+    () => displayReps.findIndex((r) => matcher.isMe(r.rep)),
+    [displayReps, matcher],
+  );
+  const myRow = myIdx >= 0 ? displayReps[myIdx] : null;
+  const ahead = myIdx > 0 ? displayReps[myIdx - 1] : null;
 
   // --- Goals tab: a WEEK-PINNED row, independent of the Stats tab's range
   // (owner, 2026-09-17). Goals are inherently weekly, so browsing Stats to a
@@ -702,6 +748,20 @@ function CloseKombatInner({
       ).totals.revenue,
     }));
   }, [cardsQuery.data, range.start, range.end]);
+  // Month war runs on the BOOK (owner, 2026-09-23) — summing sale_amt per
+  // office equals the dashboard's own "SD Sales"/"OC Sales" tiles (the
+  // per-rep split cancels out). null = no book rows yet, or an office-blind
+  // month (the Jan–Apr combined books) — either way a race would understate
+  // or zero a lane, so the panel hides, same rationale as the Year hide.
+  const officeRaceMonth = useMemo(() => {
+    if (!isMonthTab) return null;
+    const monthRows = (reportQuery.data ?? []).filter((r) => r.report_month === monthStart);
+    if (monthRows.length === 0 || monthRows.every((r) => r.office === null)) return null;
+    return OFFICE_LOCATIONS.map((o) => ({
+      office: o as string,
+      revenue: aggregateReportYear(monthRows.filter((r) => r.office === o)).totals.revenue,
+    }));
+  }, [isMonthTab, reportQuery.data, monthStart]);
 
   // Today's closers (R-10): every rep with a kept sale today, any range view
   // that includes today. Celebration, not accounting — but only sales the
@@ -826,7 +886,12 @@ function CloseKombatInner({
       }
       const mirrored = res.wcc.reports.reduce((s, r) => s + (r.captured ?? 0), 0);
       if (mirrored > 0) {
-        toast.info(`Year book: ${mirrored} Sales Report rows mirrored`);
+        toast.info(`Book: ${mirrored} Sales Report rows mirrored`);
+      }
+      if (res.wcc.missing_flagged > 0) {
+        toast.warning(
+          `${res.wcc.missing_flagged} sold card${res.wcc.missing_flagged === 1 ? " isn't" : "s aren't"} on the Sales Reports — see Needs Attention`,
+        );
       }
       qc.invalidateQueries({ queryKey: ["block_cards"] });
       qc.invalidateQueries({ queryKey: ["report_sales"] });
@@ -1040,13 +1105,13 @@ function CloseKombatInner({
             <RepHero
               row={myRow}
               rank={myIdx}
-              repCount={reps.length}
+              repCount={displayReps.length}
               ahead={ahead}
               rangeLabel={range.label}
               matched={matcher.matched}
               hasNames={allBoardNames.length > 0}
               flash={heroFlash}
-              dim={cardsQuery.isPlaceholderData}
+              dim={cardsQuery.isPlaceholderData || bookPending}
             />
           )}
           {isRep && isYearTab && (
@@ -1095,8 +1160,9 @@ function CloseKombatInner({
                 ))}
               </ul>
               <p className="mt-2 text-[10px] text-muted-foreground">
-                These can shift your numbers — a blank price counts as $0 and an unlinked save
-                counts nowhere until the boards are fixed and synced.
+                These can shift your numbers — a blank price counts as $0, an unlinked save counts
+                nowhere, and a sale missing from the Sales Report doesn&apos;t count in the official
+                Month/Year money — until the boards are fixed and synced.
               </p>
             </ArcadePanel>
           )}
@@ -1167,7 +1233,7 @@ function CloseKombatInner({
           cards and can take seconds, and full-brightness stale numbers under
           a new label read as the new range's truth. */}
           {!isRep && !isYearTab && (
-            <CompanyTiles totals={totals} dim={cardsQuery.isPlaceholderData} />
+            <CompanyTiles totals={displayTotals} dim={cardsQuery.isPlaceholderData || bookPending} />
           )}
           {!isRep && isYearTab && (
             <YearTiles totals={yearAgg.totals} dim={reportQuery.isPlaceholderData} />
@@ -1263,7 +1329,7 @@ function CloseKombatInner({
               faction="kombat"
               title={`Kombat Standings · ${range.label}`}
               action={
-                cardsQuery.isPlaceholderData ? (
+                cardsQuery.isPlaceholderData || bookPending ? (
                   <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground animate-pulse">
                     Counting…
                   </span>
@@ -1275,15 +1341,34 @@ function CloseKombatInner({
               }
             >
               {/* Stamp freshness (R-5): the Live chip is about the RANGE — cancels
-            and report splits only move when the office runs a sync. */}
-              <p className="mb-3 text-[10px] text-muted-foreground">
-                Results land live from the boards · cancels &amp; rep splits update when the office
-                syncs
-                {syncInfo.data ? ` — last sync ${relTime(syncInfo.data.lastSyncedAt)}` : ""}.
-              </p>
-              {cardsQuery.isLoading ? (
+            and report splits only move when the office runs a sync. On Month
+            the MONEY is the book, so the caption must not claim it's live. */}
+              {isMonthTab ? (
+                <p className="mb-3 text-[10px] text-muted-foreground">
+                  Funnel results land live from the boards · money mirrors the monthly Sales Report
+                  book — the Shark Tank number — and moves when the office syncs
+                  {syncInfo.data ? ` — last sync ${relTime(syncInfo.data.lastSyncedAt)}` : ""}.
+                  {monthBook?.officeBlind
+                    ? " This month's book doesn't record offices — money shows both offices combined."
+                    : ""}
+                  {reportQuery.isSuccess && !reportQuery.isPlaceholderData && !monthBook?.hasRows
+                    ? ` No Sales Report rows for ${range.label} yet — money shows $0 until the office syncs the book.`
+                    : ""}
+                </p>
+              ) : (
+                <p className="mb-3 text-[10px] text-muted-foreground">
+                  Results land live from the boards · cancels &amp; rep splits update when the
+                  office syncs
+                  {syncInfo.data ? ` — last sync ${relTime(syncInfo.data.lastSyncedAt)}` : ""}.
+                </p>
+              )}
+              {cardsQuery.isLoading || (isMonthTab && reportQuery.isLoading) ? (
                 <p className="text-sm text-muted-foreground">Loading the bracket…</p>
-              ) : reps.length === 0 ? (
+              ) : isMonthTab && reportQuery.isError ? (
+                <p className="text-sm text-destructive">
+                  Couldn&apos;t load the Sales Report rows — try again in a minute.
+                </p>
+              ) : displayReps.length === 0 ? (
                 <div className="text-sm text-muted-foreground space-y-1">
                   <p>No Block cards with reps in this range yet.</p>
                   {isAdmin && (
@@ -1296,7 +1381,10 @@ function CloseKombatInner({
                 </div>
               ) : (
                 <div
-                  className={cn("transition-opacity", cardsQuery.isPlaceholderData && "opacity-50")}
+                  className={cn(
+                    "transition-opacity",
+                    (cardsQuery.isPlaceholderData || bookPending) && "opacity-50",
+                  )}
                 >
                   {/* Desktop table (Monday's column language) */}
                   <div className="hidden md:block overflow-x-auto">
@@ -1328,14 +1416,18 @@ function CloseKombatInner({
                           <th className="text-right py-2 px-2 font-normal">Leads / Sale</th>
                           <th
                             className="text-right py-2 pl-2 font-normal"
-                            title="Sale volume over the range on screen — Today shows today's money only"
+                            title={
+                              isMonthTab
+                                ? "Sale Amt from the monthly Sales Report, split by its Sales Rep column — the Shark Tank number"
+                                : "Sale volume over the range on screen — Today shows today's money only"
+                            }
                           >
                             Volume
                           </th>
                         </tr>
                       </thead>
                       <tbody>
-                        {reps.map((r, i) => (
+                        {displayReps.map((r, i) => (
                           <tr
                             key={r.rep}
                             className={`border-b border-border/40 transition-colors duration-200 hover:bg-surface-elevated ${
@@ -1497,7 +1589,7 @@ function CloseKombatInner({
                             {fmtRatio(totals.leadsToSale)}
                           </td>
                           <td className="py-2.5 pl-2 text-right tabular-nums">
-                            {fmtMoney(totals.revenue)}
+                            {fmtMoney(displayTotals.revenue)}
                           </td>
                         </tr>
                       </tfoot>
@@ -1506,7 +1598,7 @@ function CloseKombatInner({
 
                   {/* Mobile cards — same precomputed rows */}
                   <MobileCardList>
-                    {reps.map((r, i) => (
+                    {displayReps.map((r, i) => (
                       <MobileCard
                         key={r.rep}
                         className={
@@ -1542,7 +1634,7 @@ function CloseKombatInner({
                             All cards
                           </span>
                         }
-                        right={<span className="text-victory">{fmtMoney(totals.revenue)}</span>}
+                        right={<span className="text-victory">{fmtMoney(displayTotals.revenue)}</span>}
                       />
                       <MobileStatBlock s={totals} />
                     </MobileCard>
@@ -1554,31 +1646,39 @@ function CloseKombatInner({
           )}
 
           {/* Office war (R-15): SD vs OC over the range on screen. Ignores the
-          office filter on purpose — a race needs both lanes. Hidden on Year:
-          the report book can't lane the Jan–Apr months (no office recorded),
-          so the race would understate both sides. */}
-          {!isYearTab && (
+          office filter on purpose — a race needs both lanes. Hidden on Year
+          (the book can't lane Jan–Apr — no office recorded) and on a Month
+          whose book is missing or office-blind, for the same reason. On
+          Month the lanes are the BOOK's sums — the dashboard's own SD/OC
+          Sales tiles. */}
+          {!isYearTab && !(isMonthTab && officeRaceMonth === null) && (
           <ArcadePanel
             faction="kombat"
             title={`Office War · ${range.label}`}
             action={
-              cardsQuery.isPlaceholderData ? (
+              (isMonthTab ? bookPending : cardsQuery.isPlaceholderData) ? (
                 <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground animate-pulse">
                   Counting…
                 </span>
               ) : undefined
             }
           >
+            {isMonthTab && (
+              <p className="mb-2 text-[10px] text-muted-foreground">
+                From the monthly Sales Report book.
+              </p>
+            )}
             <div
               className={cn(
                 "space-y-3 transition-opacity",
-                cardsQuery.isPlaceholderData && "opacity-50",
+                (isMonthTab ? bookPending : cardsQuery.isPlaceholderData) && "opacity-50",
               )}
             >
               {(() => {
-                const max = Math.max(1, ...officeRace.map((o) => o.revenue));
-                const top = Math.max(...officeRace.map((o) => o.revenue));
-                return officeRace.map((o) => {
+                const race = isMonthTab && officeRaceMonth ? officeRaceMonth : officeRace;
+                const max = Math.max(1, ...race.map((o) => o.revenue));
+                const top = Math.max(...race.map((o) => o.revenue));
+                return race.map((o) => {
                   const leads = o.revenue === top && o.revenue > 0;
                   return (
                     <div key={o.office} className="min-w-0">
@@ -1623,7 +1723,10 @@ function CloseKombatInner({
               {isYearTab ? (
                 <YearTiles totals={yearAgg.totals} dim={reportQuery.isPlaceholderData} />
               ) : (
-                <CompanyTiles totals={totals} dim={cardsQuery.isPlaceholderData} />
+                <CompanyTiles
+                  totals={displayTotals}
+                  dim={cardsQuery.isPlaceholderData || bookPending}
+                />
               )}
             </div>
           )}
@@ -1762,7 +1865,7 @@ const KOMBAT_GLOSSARY: GlossarySections = [
     terms: [
       [
         "Volume",
-        "Sale dollars over the RANGE ON SCREEN — Today shows today's money only, the Week tab that week's, and so on.",
+        "Sale dollars over the RANGE ON SCREEN — Today shows today's money only, the Week tab that week's. On the Month and Year tabs, Volume is the monthly Sales Report book's number instead — see The official book.",
       ],
       [
         "Splits",
@@ -1779,11 +1882,11 @@ const KOMBAT_GLOSSARY: GlossarySections = [
     ],
   },
   {
-    heading: "The Year tab",
+    heading: "The official book (Month & Year)",
     terms: [
       [
         "Source",
-        "The Year tab mirrors the monthly Sales Report boards — the same math as the office's Shark Tank dashboard: Sale Amt split evenly across the report's Sales Rep column, counted in the board's month.",
+        "The Month and Year tabs' MONEY mirrors the monthly Sales Report boards — the same math as the office's Shark Tank dashboards: Sale Amt split evenly across the report's Sales Rep column, counted in the board's month. The Month tab's funnel counts (Appts through Close %) still come live from the Block boards.",
       ],
       [
         "Cancels",
@@ -1791,15 +1894,15 @@ const KOMBAT_GLOSSARY: GlossarySections = [
       ],
       [
         "Reloads & upsells",
-        "Count toward Year volume — the report book records every dollar written for the rep.",
+        "Count toward book volume — the report records every dollar written for the rep.",
       ],
       [
         "Offices",
-        "Company-wide by design: the Jan–Apr books don't record an office, and the Shark Tank YTD is combined — the office filter doesn't apply on this tab.",
+        "The Year tab is company-wide (the Jan–Apr 2026 books carry no office and the YTD is combined). The Month tab's money follows the office pills once the books are office-prefixed (May 2026 on); an earlier month shows combined money whatever the pill says.",
       ],
       [
-        "Vs. Month",
-        "Day/Week/Month run on the Block boards (saves, FTDs, appointment dates), so summing months won't exactly equal the Year — the Year tab is the official Sales Report number.",
+        "Vs. Day & Week",
+        "Day and Week are the live board — money straight from the Block cards' Sale Price, saves and all, the moment a result lands. The book's money only moves when the office syncs, a sale counts in its board's month, and weeks won't exactly sum to the month. A sold card the book doesn't carry shows as a Not on Sales Report flag until the office adds the row.",
       ],
     ],
   },
@@ -2420,6 +2523,9 @@ const ATTENTION_META: Record<AttentionKind, { label: string; className: string }
   orphan_save: { label: "Unlinked Save", className: "text-destructive" },
   no_reps: { label: "No Reps", className: "text-destructive" },
   blank_price: { label: "Blank Price", className: "text-destructive" },
+  // A sale the office never wrote into the monthly Sales Report book —
+  // Shark Tank (and the Month/Year money here) doesn't count it.
+  missing_report_row: { label: "Not on Sales Report", className: "text-destructive" },
   // Amber, not red: volume already follows the Sales Report, so nothing
   // counts wrong — but the boards CONTRADICT each other on who sat the deal.
   // (A report row that only ADDS names is the office's save split — the
