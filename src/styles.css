@@ -745,3 +745,42 @@
     animation: none;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MY PURPOSE — the calm surface. The workshop is deliberately NOT the arcade:
+   deep tidal navy, warm off-white text, restrained sand for emphasis, sans
+   headings (the Press Start 2P h1–h3 rule is overridden inside this scope).
+   Everything purpose-facing sits inside `.purpose-surface`; the tokens are
+   local so the arcade palette and this one can never bleed into each other.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.purpose-surface {
+  /* Palette (spec §7.2): deep navy ocean, tidal blue accent, warm white,
+     restrained gold/sand for milestones only. Constant across light/dark —
+     the workshop is one intentional place, like Kombat's red/gold. */
+  --purpose-navy: oklch(0.205 0.045 250);
+  --purpose-navy-deep: oklch(0.16 0.04 255);
+  --purpose-tide: oklch(0.68 0.13 235);
+  --purpose-ink: oklch(0.95 0.008 90);
+  --purpose-ink-dim: oklch(0.76 0.015 250);
+  --purpose-sand: oklch(0.82 0.09 85);
+  --purpose-line: color-mix(in oklab, var(--purpose-tide) 22%, transparent);
+  --purpose-card: color-mix(in oklab, var(--purpose-navy) 88%, white 4%);
+
+  background: linear-gradient(168deg, var(--purpose-navy) 0%, var(--purpose-navy-deep) 100%);
+  color: var(--purpose-ink);
+  font-family: var(--font-sans);
+}
+.purpose-surface h1,
+.purpose-surface h2,
+.purpose-surface h3 {
+  /* Spec §7: strong clean sans-serif, comfortable reading — not arcade. */
+  font-family: var(--font-sans);
+  letter-spacing: -0.015em;
+  font-weight: 650;
+}
+@utility purpose-card {
+  background-color: var(--purpose-card);
+  border: 1px solid var(--purpose-line);
+  border-radius: 1rem;
+  box-shadow: 0 0 44px -22px color-mix(in oklab, var(--purpose-tide) 55%, transparent);
+}

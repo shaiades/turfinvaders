@@ -29,8 +29,12 @@ import { Route as AuthenticatedCrewMapRouteImport } from './routes/_authenticate
 import { Route as AuthenticatedConfirmationDeskRouteImport } from './routes/_authenticated/confirmation-desk'
 import { Route as AuthenticatedCloseKombatRouteImport } from './routes/_authenticated/close-kombat'
 import { Route as AuthenticatedTeamsIndexRouteImport } from './routes/_authenticated/teams.index'
+import { Route as AuthenticatedPurposeLeadershipIndexRouteImport } from './routes/_authenticated/purpose-leadership.index'
+import { Route as AuthenticatedMyPurposeIndexRouteImport } from './routes/_authenticated/my-purpose.index'
 import { Route as ApiInternalRotateBoardsRouteImport } from './routes/api/internal/rotate-boards'
 import { Route as AuthenticatedTeamsTeamIdRouteImport } from './routes/_authenticated/teams.$teamId'
+import { Route as AuthenticatedPurposeLeadershipUserIdRouteImport } from './routes/_authenticated/purpose-leadership.$userId'
+import { Route as AuthenticatedMyPurposeWorkshopRouteImport } from './routes/_authenticated/my-purpose.workshop'
 import { Route as AuthenticatedCanvassersCanvasserIdRouteImport } from './routes/_authenticated/canvassers.$canvasserId'
 import { Route as AuthenticatedCanvassersCanvasserIdFieldRouteImport } from './routes/_authenticated/canvassers.$canvasserId.field'
 
@@ -137,6 +141,18 @@ const AuthenticatedTeamsIndexRoute = AuthenticatedTeamsIndexRouteImport.update({
   path: '/teams/',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedPurposeLeadershipIndexRoute =
+  AuthenticatedPurposeLeadershipIndexRouteImport.update({
+    id: '/purpose-leadership/',
+    path: '/purpose-leadership/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedMyPurposeIndexRoute =
+  AuthenticatedMyPurposeIndexRouteImport.update({
+    id: '/my-purpose/',
+    path: '/my-purpose/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const ApiInternalRotateBoardsRoute = ApiInternalRotateBoardsRouteImport.update({
   id: '/api/internal/rotate-boards',
   path: '/api/internal/rotate-boards',
@@ -146,6 +162,18 @@ const AuthenticatedTeamsTeamIdRoute =
   AuthenticatedTeamsTeamIdRouteImport.update({
     id: '/teams/$teamId',
     path: '/teams/$teamId',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedPurposeLeadershipUserIdRoute =
+  AuthenticatedPurposeLeadershipUserIdRouteImport.update({
+    id: '/purpose-leadership/$userId',
+    path: '/purpose-leadership/$userId',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedMyPurposeWorkshopRoute =
+  AuthenticatedMyPurposeWorkshopRouteImport.update({
+    id: '/my-purpose/workshop',
+    path: '/my-purpose/workshop',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedCanvassersCanvasserIdRoute =
@@ -181,8 +209,12 @@ export interface FileRoutesByFullPath {
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/welcome': typeof AuthWelcomeRoute
   '/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRouteWithChildren
+  '/my-purpose/workshop': typeof AuthenticatedMyPurposeWorkshopRoute
+  '/purpose-leadership/$userId': typeof AuthenticatedPurposeLeadershipUserIdRoute
   '/teams/$teamId': typeof AuthenticatedTeamsTeamIdRoute
   '/api/internal/rotate-boards': typeof ApiInternalRotateBoardsRoute
+  '/my-purpose/': typeof AuthenticatedMyPurposeIndexRoute
+  '/purpose-leadership/': typeof AuthenticatedPurposeLeadershipIndexRoute
   '/teams/': typeof AuthenticatedTeamsIndexRoute
   '/canvassers/$canvasserId/field': typeof AuthenticatedCanvassersCanvasserIdFieldRoute
 }
@@ -206,8 +238,12 @@ export interface FileRoutesByTo {
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/welcome': typeof AuthWelcomeRoute
   '/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRouteWithChildren
+  '/my-purpose/workshop': typeof AuthenticatedMyPurposeWorkshopRoute
+  '/purpose-leadership/$userId': typeof AuthenticatedPurposeLeadershipUserIdRoute
   '/teams/$teamId': typeof AuthenticatedTeamsTeamIdRoute
   '/api/internal/rotate-boards': typeof ApiInternalRotateBoardsRoute
+  '/my-purpose': typeof AuthenticatedMyPurposeIndexRoute
+  '/purpose-leadership': typeof AuthenticatedPurposeLeadershipIndexRoute
   '/teams': typeof AuthenticatedTeamsIndexRoute
   '/canvassers/$canvasserId/field': typeof AuthenticatedCanvassersCanvasserIdFieldRoute
 }
@@ -233,8 +269,12 @@ export interface FileRoutesById {
   '/auth_/callback': typeof AuthCallbackRoute
   '/auth_/welcome': typeof AuthWelcomeRoute
   '/_authenticated/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRouteWithChildren
+  '/_authenticated/my-purpose/workshop': typeof AuthenticatedMyPurposeWorkshopRoute
+  '/_authenticated/purpose-leadership/$userId': typeof AuthenticatedPurposeLeadershipUserIdRoute
   '/_authenticated/teams/$teamId': typeof AuthenticatedTeamsTeamIdRoute
   '/api/internal/rotate-boards': typeof ApiInternalRotateBoardsRoute
+  '/_authenticated/my-purpose/': typeof AuthenticatedMyPurposeIndexRoute
+  '/_authenticated/purpose-leadership/': typeof AuthenticatedPurposeLeadershipIndexRoute
   '/_authenticated/teams/': typeof AuthenticatedTeamsIndexRoute
   '/_authenticated/canvassers/$canvasserId/field': typeof AuthenticatedCanvassersCanvasserIdFieldRoute
 }
@@ -260,8 +300,12 @@ export interface FileRouteTypes {
     | '/auth/callback'
     | '/auth/welcome'
     | '/canvassers/$canvasserId'
+    | '/my-purpose/workshop'
+    | '/purpose-leadership/$userId'
     | '/teams/$teamId'
     | '/api/internal/rotate-boards'
+    | '/my-purpose/'
+    | '/purpose-leadership/'
     | '/teams/'
     | '/canvassers/$canvasserId/field'
   fileRoutesByTo: FileRoutesByTo
@@ -285,8 +329,12 @@ export interface FileRouteTypes {
     | '/auth/callback'
     | '/auth/welcome'
     | '/canvassers/$canvasserId'
+    | '/my-purpose/workshop'
+    | '/purpose-leadership/$userId'
     | '/teams/$teamId'
     | '/api/internal/rotate-boards'
+    | '/my-purpose'
+    | '/purpose-leadership'
     | '/teams'
     | '/canvassers/$canvasserId/field'
   id:
@@ -311,8 +359,12 @@ export interface FileRouteTypes {
     | '/auth_/callback'
     | '/auth_/welcome'
     | '/_authenticated/canvassers/$canvasserId'
+    | '/_authenticated/my-purpose/workshop'
+    | '/_authenticated/purpose-leadership/$userId'
     | '/_authenticated/teams/$teamId'
     | '/api/internal/rotate-boards'
+    | '/_authenticated/my-purpose/'
+    | '/_authenticated/purpose-leadership/'
     | '/_authenticated/teams/'
     | '/_authenticated/canvassers/$canvasserId/field'
   fileRoutesById: FileRoutesById
@@ -469,6 +521,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedTeamsIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/purpose-leadership/': {
+      id: '/_authenticated/purpose-leadership/'
+      path: '/purpose-leadership'
+      fullPath: '/purpose-leadership/'
+      preLoaderRoute: typeof AuthenticatedPurposeLeadershipIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/my-purpose/': {
+      id: '/_authenticated/my-purpose/'
+      path: '/my-purpose'
+      fullPath: '/my-purpose/'
+      preLoaderRoute: typeof AuthenticatedMyPurposeIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/api/internal/rotate-boards': {
       id: '/api/internal/rotate-boards'
       path: '/api/internal/rotate-boards'
@@ -481,6 +547,20 @@ declare module '@tanstack/react-router' {
       path: '/teams/$teamId'
       fullPath: '/teams/$teamId'
       preLoaderRoute: typeof AuthenticatedTeamsTeamIdRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/purpose-leadership/$userId': {
+      id: '/_authenticated/purpose-leadership/$userId'
+      path: '/purpose-leadership/$userId'
+      fullPath: '/purpose-leadership/$userId'
+      preLoaderRoute: typeof AuthenticatedPurposeLeadershipUserIdRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/my-purpose/workshop': {
+      id: '/_authenticated/my-purpose/workshop'
+      path: '/my-purpose/workshop'
+      fullPath: '/my-purpose/workshop'
+      preLoaderRoute: typeof AuthenticatedMyPurposeWorkshopRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/canvassers/$canvasserId': {
@@ -530,7 +610,11 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedPlaybookRoute: typeof AuthenticatedPlaybookRoute
   AuthenticatedUsersRoute: typeof AuthenticatedUsersRoute
   AuthenticatedCanvassersCanvasserIdRoute: typeof AuthenticatedCanvassersCanvasserIdRouteWithChildren
+  AuthenticatedMyPurposeWorkshopRoute: typeof AuthenticatedMyPurposeWorkshopRoute
+  AuthenticatedPurposeLeadershipUserIdRoute: typeof AuthenticatedPurposeLeadershipUserIdRoute
   AuthenticatedTeamsTeamIdRoute: typeof AuthenticatedTeamsTeamIdRoute
+  AuthenticatedMyPurposeIndexRoute: typeof AuthenticatedMyPurposeIndexRoute
+  AuthenticatedPurposeLeadershipIndexRoute: typeof AuthenticatedPurposeLeadershipIndexRoute
   AuthenticatedTeamsIndexRoute: typeof AuthenticatedTeamsIndexRoute
 }
 
@@ -550,7 +634,13 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedUsersRoute: AuthenticatedUsersRoute,
   AuthenticatedCanvassersCanvasserIdRoute:
     AuthenticatedCanvassersCanvasserIdRouteWithChildren,
+  AuthenticatedMyPurposeWorkshopRoute: AuthenticatedMyPurposeWorkshopRoute,
+  AuthenticatedPurposeLeadershipUserIdRoute:
+    AuthenticatedPurposeLeadershipUserIdRoute,
   AuthenticatedTeamsTeamIdRoute: AuthenticatedTeamsTeamIdRoute,
+  AuthenticatedMyPurposeIndexRoute: AuthenticatedMyPurposeIndexRoute,
+  AuthenticatedPurposeLeadershipIndexRoute:
+    AuthenticatedPurposeLeadershipIndexRoute,
   AuthenticatedTeamsIndexRoute: AuthenticatedTeamsIndexRoute,
 }
 

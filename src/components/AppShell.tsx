@@ -21,6 +21,11 @@ import { CanvasserTutorial, startCanvasserTutorial } from "@/components/tutorial
 import { WelcomeAnimation, isWelcomeAnimationForced } from "@/components/WelcomeAnimation";
 import { CloseKombatIntro, isCloseKombatIntroForced } from "@/components/CloseKombatIntro";
 import { EodRecapFx, isEodRecapForced } from "@/components/EodRecapFx";
+import {
+  PurposeReminderCard,
+  isPurposeReminderForced,
+} from "@/components/purpose/PurposeReminderCard";
+import { usePurposeConfig, readCachedPurposeEnabled } from "@/hooks/usePurposeConfig";
 import { CLOSE_KOMBAT_ROLES, ROLE_LABEL, canUseViewAs, privilegeRole } from "@/lib/roles";
 import {
   LogOut,
@@ -36,6 +41,7 @@ import {
   Swords,
   GraduationCap,
   CircleHelp,
+  Compass,
   Menu,
   Sun,
   Moon,
@@ -84,17 +90,34 @@ const CANVASSER_ALLOWED = [
   "/learn",
   "/leaderboard",
   "/daily-wrap",
+  // A canvasser who deep-links into My Purpose must SEE the spec's "coming
+  // later" message — this guard fires before the route could render it, so
+  // the path has to be allowed through; the route shows the message.
+  "/my-purpose",
 ];
 
-// Sales reps (closers) get exactly one screen: Close Kombat (owner decision
-// 2026-07-29). Anything else → redirect there.
-const SALES_REP_ALLOWED = ["/close-kombat"];
+// Sales reps (closers) get two screens: Close Kombat (owner decision
+// 2026-07-29) and My Purpose (owner decision 2026-09-23). /my-purpose stays
+// on this list UNCONDITIONALLY — gating it on the launch flag here would
+// race the flag query on a deep link and bounce a legitimate rep; the route
+// itself redirects pre-launch reps.
+const SALES_REP_ALLOWED = ["/close-kombat", "/my-purpose"];
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, role, realRole, displayName, accessRevoked } = useAuth();
   const { theme, toggleTheme } = useTheme();
   // Dojo submissions awaiting review — 0 for everyone outside the Admin tier.
   const pendingDojo = usePendingDojoCount();
+  // My Purpose launch flag — only reps (and owners, incl. View-As previews)
+  // pay this query. The localStorage warm cache keeps a launched rep's
+  // 2-item bottom bar from popping in on every cold load; pre-launch the
+  // cached false means zero layout change.
+  const purposeConfig = usePurposeConfig(!!user && (role === "sales_rep" || canUseViewAs(realRole)));
+  const purposeEnabled =
+    canUseViewAs(realRole) || // owners always see it — they're the test crew
+    (purposeConfig.data != null
+      ? purposeConfig.data.sales_rep_feature_enabled === true
+      : readCachedPurposeEnabled());
   // Removed players lose the app in-session, not just at next login: the DB
   // trigger (20260916100000) bans their auth account, and this live watch
   // swaps the shell for the lockout screen the moment a manager archives
@@ -106,6 +129,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   // First-sign-in arcade intro: while it's checking/playing, hold the page
   // tour back so the two first-open moments can't stack.
   const [introActive, setIntroActive] = useState(false);
+  const [purposeReminderActive, setPurposeReminderActive] = useState(false);
   // End-of-day recap cutscene: same hold for the tour. Play order on a
   // morning open that owes both: intro → EOD recap → page tour.
   const [eodActive, setEodActive] = useState(false);
@@ -180,7 +204,14 @@ export function AppShell({ children }: { children: ReactNode }) {
     // account the LEADERSHIP nav, which read as broken admin clutter.
     if (user && !role) return [];
     if (role === "sales_rep") {
-      return [{ to: "/close-kombat", label: "Close Kombat", icon: Swords }];
+      return [
+        { to: "/close-kombat", label: "Close Kombat", icon: Swords },
+        // My Purpose appears once the owners flip the launch flag (or in an
+        // owner's View-As preview). Two items also switches on the mobile
+        // bottom bar for reps — that's intentional: the workshop must be one
+        // obvious tap from anywhere (owner ask 2026-09-23).
+        ...(purposeEnabled ? [{ to: "/my-purpose", label: "My Purpose", icon: Compass }] : []),
+      ];
     }
     if (role === "canvasser") {
       // Chronological day order, map merged (2026-09-08): Active Run now IS
@@ -602,6 +633,20 @@ export function AppShell({ children }: { children: ReactNode }) {
           <EodRecapFx userId={user.id} heldBack={introActive} onActiveChange={setEodActive} />
         )}
 
+      {/* Daily "remember your why" — reps only, once per LA day, and ONLY
+          after their Purpose Profile is submitted (the card itself checks
+          and stays silent otherwise). Sequenced after the door-kick intro
+          via heldBack; gated on the REAL role so a View-As preview can't
+          burn the owner's daily flag (`?purpose_reminder=1` previews without
+          stamping, same contract as the other overlays). */}
+      {user && (isPurposeReminderForced() || privilegeRole(realRole) === "sales_rep") && (
+        <PurposeReminderCard
+          userId={user.id}
+          heldBack={introActive}
+          onActiveChange={setPurposeReminderActive}
+        />
+      )}
+
       {/* Per-page discovery tips: each screen's mini-tour auto-pops the first
           time this account opens it; the header "?" replays the current
           screen's tips. Canvasser tier + captains + sales reps (the kombat
@@ -615,7 +660,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           return (
             (tourRole === "canvasser" || tourRole === "captain" || tourRole === "sales_rep") &&
             !introActive &&
-            !eodActive && (
+            !eodActive &&
+            !purposeReminderActive && (
               <CanvasserTutorial
                 userId={user.id}
                 missionRoute={tourRole === "captain" ? "/mission" : "/dashboard"}
