@@ -39,7 +39,20 @@ function WorkshopPage() {
   // No profile yet → the landing card owns profile creation.
   if (!profile) return <Navigate to="/my-purpose" replace />;
 
+  // purpose_admin_config.enable_post_workshop_edits: when the owners turn it
+  // off, a submitted profile becomes read-only — the review still opens, but
+  // ?step= edit entries are ignored and the Edit buttons hide.
+  const editsAllowed =
+    !profile.workshop_completed || configQuery.data?.enable_post_workshop_edits !== false;
+
   // ?review=1 → jump straight to the final review step in the normal flow;
   // the engine resumes at review because everything before it is complete.
-  return <PurposeWorkshop profile={profile} editStepKey={step} jumpToReview={review === true} />;
+  return (
+    <PurposeWorkshop
+      profile={profile}
+      editStepKey={editsAllowed ? step : undefined}
+      jumpToReview={review === true || (!editsAllowed && !!step)}
+      allowEdits={editsAllowed}
+    />
+  );
 }

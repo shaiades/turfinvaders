@@ -69,7 +69,14 @@ export function PurposeLanding({ userId }: { userId: string }) {
             >
               {LANDING_COPY.primaryCta}
             </PurposeButton>
-            <PurposeButton tone="quiet" onClick={() => window.history.back()}>
+            <PurposeButton
+              tone="quiet"
+              onClick={() => {
+                // A deep link has no history to go back to — home covers both.
+                if (window.history.length > 1) window.history.back();
+                else void navigate({ to: "/" });
+              }}
+            >
               {LANDING_COPY.secondaryCta}
             </PurposeButton>
           </div>

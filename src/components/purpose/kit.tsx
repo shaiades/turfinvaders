@@ -120,7 +120,7 @@ export function PurposeChip({
       onClick={onClick}
       aria-pressed={!!selected}
       className={cn(
-        "min-h-9 rounded-full border px-3.5 py-1.5 text-sm transition-colors",
+        "min-h-10 rounded-full border px-3.5 py-1.5 text-sm transition-colors",
         selected
           ? "border-[var(--purpose-sand)] text-[var(--purpose-sand)] bg-[color-mix(in_oklab,var(--purpose-sand)_12%,transparent)]"
           : "border-[var(--purpose-line)] text-[var(--purpose-ink-dim)] hover:text-[var(--purpose-ink)]",

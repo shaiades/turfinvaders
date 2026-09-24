@@ -109,10 +109,12 @@ export function PurposeWorkshop({
   profile,
   editStepKey,
   jumpToReview,
+  allowEdits = true,
 }: {
   profile: PurposeProfileRow;
   editStepKey?: string;
   jumpToReview?: boolean;
+  allowEdits?: boolean;
 }) {
   const navigate = useNavigate();
   const [completed, setCompleted] = useState(false);
@@ -193,6 +195,7 @@ export function PurposeWorkshop({
     return (
       <ReviewScreen
         profile={profile}
+        canEdit={allowEdits}
         answers={ws.answers}
         // Real edit mode (?step=): one step, "Save changes", then straight
         // back here — never a 25-tap march through the remaining flow.

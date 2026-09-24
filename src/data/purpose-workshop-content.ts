@@ -178,6 +178,31 @@ export function primaryObstacle(a: AnswerMap): ObstacleKey {
 
 /** why_2's fallback chips appear when the rep's draft reads as "I don't know"
  *  (§16 Level 2). Component behavior — the chips themselves live on the step. */
+/** §20.6: chips seed an answer, they never ARE the answer — "offer relevant
+ *  choice chips and require one original sentence." Blocks when the text is
+ *  chip labels (one or several) with fewer than ~a dozen characters of the
+ *  rep's own words around them; text containing no chip label at all is
+ *  someone writing freely and passes untouched. */
+export function chipOnlyIssue(
+  text: string | undefined,
+  chips: Option[],
+): { level: "block"; message: string } | null {
+  const t = (text ?? "").trim().toLowerCase().replace(/[.!\s]+$/, "");
+  if (!t) return null;
+  let rest = t;
+  for (const c of chips) {
+    const label = c.label.toLowerCase().replace(/[.!\s]+$/, "");
+    if (label) rest = rest.split(label).join(" ");
+  }
+  if (rest === t) return null; // no chip label present — their own words
+  const original = rest.replace(/[,\s]+/g, " ").trim();
+  if (original.length >= 12) return null;
+  return {
+    level: "block",
+    message: "Take the chip one step further — one sentence in your own words.",
+  };
+}
+
 export function shouldOfferWhyFallbackChips(draft: string): boolean {
   return detectIDontKnow(draft);
 }
@@ -1366,6 +1391,7 @@ export const ALL_STEPS: StepDef[] = [
         fallback: "your one-year target",
       })}.” Why is reaching this important to you right now?`,
     chips: (a) => WHY1_CHIPS[primaryLifeArea(a)],
+    validate: (v, a) => chipOnlyIssue(v?.text, WHY1_CHIPS[primaryLifeArea(a)]),
   },
   {
     // Level 2 — Personal impact. Chips appear only when the draft reads as
@@ -1379,6 +1405,7 @@ export const ALL_STEPS: StepDef[] = [
     prompt: (a) =>
       `You said “${whyQuote(a, 1)}.” If that became true, what would it change about the way you live, feel, or show up every day?`,
     chips: WHY2_FALLBACK_CHIPS,
+    validate: (v) => chipOnlyIssue(v?.text, WHY2_FALLBACK_CHIPS),
   },
   {
     // Level 3 — Values and identity. The spec's material-only deeper question
@@ -1454,6 +1481,7 @@ export const ALL_STEPS: StepDef[] = [
     chips: CORE_VALUE_CHIPS,
     // maxSelections semantics for the chip picker (component enforces ≤3).
     maxSelections: 3,
+    validate: (v) => chipOnlyIssue(v?.text, CORE_VALUE_CHIPS),
   },
   {
     // Level 7 — Core Why statement. User-authored; scaffold blanks must be

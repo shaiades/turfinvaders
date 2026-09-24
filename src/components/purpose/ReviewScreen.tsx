@@ -33,6 +33,7 @@ const EDIT_TARGETS: Record<string, string | undefined> = {
 
 export function ReviewScreen({
   profile,
+  canEdit = true,
   answers,
   onEditStep,
   onBack,
@@ -40,6 +41,8 @@ export function ReviewScreen({
   flush,
 }: {
   profile: PurposeProfileRow;
+  /** false = post-workshop edits disabled in purpose_admin_config. */
+  canEdit?: boolean;
   answers: AnswerMap;
   onEditStep: (stepKey: string) => void;
   onBack: () => void;
@@ -72,11 +75,11 @@ export function ReviewScreen({
             <PurposeCard key={r.label} className="p-4 md:p-5">
               <div className="flex items-start justify-between gap-3">
                 <PurposeLabel>{r.label}</PurposeLabel>
-                {r.stepKey && (
+                {r.stepKey && canEdit && (
                   <button
                     type="button"
                     onClick={() => onEditStep(r.stepKey!)}
-                    className="shrink-0 text-xs text-[var(--purpose-tide)] hover:underline"
+                    className="-m-2 shrink-0 p-2 text-sm text-[var(--purpose-tide)] hover:underline"
                   >
                     Edit
                   </button>

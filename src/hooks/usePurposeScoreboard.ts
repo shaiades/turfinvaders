@@ -37,6 +37,57 @@ export type PurposeScoreboard = {
   weekEndISO: string;
 };
 
+/** Leadership-table variant: ONE aggregation pass over the same shared
+ *  block_cards fetch, then a conservative matcher per roster name. Names the
+ *  matcher can't safely place simply aren't in the map — the table shows a
+ *  dash, never a fabricated zero. */
+export function useWeekCrmByName(names: readonly string[], enabled: boolean) {
+  const week = useWeekSelector({ endOffsetDays: 6 });
+  const fetchStart = addDaysISO(week.weekStartISO, -SAVE_LINK_PAD_DAYS);
+  const fetchEnd = addDaysISO(week.weekEndISO, SAVE_LINK_PAD_DAYS);
+  const cardsQuery = useQuery({
+    queryKey: ["block_cards", fetchStart, fetchEnd],
+    enabled: enabled && names.length > 0,
+    staleTime: 15_000,
+    queryFn: async ({ signal }) => {
+      const PAGE = 1000;
+      const all: BlockCard[] = [];
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await supabase
+          .from("block_cards")
+          .select(CARD_COLUMNS)
+          .gte("card_date", fetchStart)
+          .lte("card_date", fetchEnd)
+          .order("monday_item_id")
+          .range(from, from + PAGE - 1)
+          .abortSignal(signal);
+        if (error) throw error;
+        all.push(...((data ?? []) as unknown as BlockCard[]));
+        if (!data || data.length < PAGE) break;
+      }
+      return all;
+    },
+  });
+  const nameKey = names.join("|");
+  return useMemo(() => {
+    const cards = cardsQuery.data;
+    if (!cards) return null;
+    const { reps } = aggregateCloseKombat(cards, {
+      start: week.weekStartISO,
+      end: week.weekEndISO,
+    });
+    const pool = reps.map((r) => r.rep);
+    const map = new Map<string, { sold: number; revenue: number }>();
+    for (const name of nameKey.split("|")) {
+      if (!name) continue;
+      const matcher = buildRepMatcher(name, pool);
+      const row = matcher.matched ? reps.find((r) => matcher.isMe(r.rep)) : undefined;
+      if (row) map.set(name, { sold: row.sold, revenue: row.revenue });
+    }
+    return map;
+  }, [cardsQuery.data, nameKey, week.weekStartISO, week.weekEndISO]);
+}
+
 export function usePurposeScoreboard(displayName: string | null, enabled: boolean): PurposeScoreboard {
   const week = useWeekSelector({ endOffsetDays: 6 });
   const fetchStart = addDaysISO(week.weekStartISO, -SAVE_LINK_PAD_DAYS);

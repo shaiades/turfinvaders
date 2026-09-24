@@ -14,6 +14,7 @@ import {
   type LeadershipListRow,
 } from "@/hooks/usePurposeLeadership";
 import { usePurposeConfig, useSavePurposeConfig } from "@/hooks/usePurposeConfig";
+import { useWeekCrmByName } from "@/hooks/usePurposeScoreboard";
 import type { PurposeProfileRow } from "@/hooks/usePurposeTable";
 import {
   CONSTRAINT_LABELS,
@@ -126,7 +127,7 @@ const CONSTRAINT_FILTER_OPTIONS: Option[] = Object.entries(CONSTRAINT_LABELS).ma
 
 type CompletionFilter = "all" | RepCompletion;
 type FollowUpFilter = "any" | "scheduled" | "overdue" | "none";
-type SortKey = "name" | "status" | "target_date" | "follow_up" | "last_reviewed";
+type SortKey = "name" | "status" | "target_date" | "follow_up" | "last_reviewed" | "week_volume";
 
 const STATUS_CHIPS: { value: CompletionFilter; label: string }[] = [
   { value: "all", label: "All" },
@@ -148,6 +149,7 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: "target_date", label: "Target date" },
   { value: "follow_up", label: "Follow-up date" },
   { value: "last_reviewed", label: "Last reviewed" },
+  { value: "week_volume", label: "This week's volume" },
 ];
 
 /** Small stat tile for the §19.1 summary grid. */
@@ -232,6 +234,8 @@ type DisplayRow = {
   barrier: string | null;
   proFocus: string | null;
   ceiling: number | null;
+  weekSold: number | null;
+  weekVolume: number | null;
   followUp: string | null;
   lastReviewed: string | null;
 };
@@ -245,6 +249,14 @@ const statusRank: Record<RepCompletion, number> = {
 export function PurposeLeadership() {
   const list = usePurposeLeadershipList(true);
   const configQuery = usePurposeConfig(true);
+  // §19.2's CRM summary column: one aggregation over the shared block_cards
+  // fetch, matched per roster name — a dash where the matcher can't place
+  // someone, never a fabricated zero.
+  const rosterNames = useMemo(
+    () => (list.data?.rows ?? []).map((r) => r.rep.displayName),
+    [list.data],
+  );
+  const weekCrm = useWeekCrmByName(rosterNames, true);
   const saveConfig = useSavePurposeConfig();
 
   const [showTest, setShowTest] = useState(false);
@@ -334,6 +346,8 @@ export function PurposeLeadership() {
         barrier: constraintLabel(r.beliefs?.primary_constraint_category ?? null),
         proFocus: optionLabel(PRO_FOCUS_OPTIONS, proFocus?.life_area ?? null),
         ceiling: r.beliefs?.current_ceiling_amount ?? null,
+        weekSold: weekCrm?.get(r.rep.displayName)?.sold ?? null,
+        weekVolume: weekCrm?.get(r.rep.displayName)?.revenue ?? null,
         followUp: r.profile?.leadership_follow_up_date ?? null,
         lastReviewed: r.profile?.last_reviewed_at ?? null,
       };
@@ -352,6 +366,7 @@ export function PurposeLeadership() {
       else if (sortKey === "follow_up") c = cmpNullableAsc(a.followUp, b.followUp);
       // never-reviewed first — they're the ones waiting on you
       else if (sortKey === "last_reviewed") c = cmpNullableAsc(a.lastReviewed, b.lastReviewed, false);
+      else if (sortKey === "week_volume") c = (b.weekVolume ?? -1) - (a.weekVolume ?? -1);
       return c !== 0 ? c : a.name.localeCompare(b.name);
     });
     return out;
@@ -366,6 +381,7 @@ export function PurposeLeadership() {
     supportFilter,
     sortKey,
     today,
+    weekCrm,
   ]);
 
   const config = configQuery.data;
@@ -610,10 +626,7 @@ export function PurposeLeadership() {
                           {[
                             "Rep",
                             "Status",
-                            /* "This week" column deliberately omitted: per-rep
-                               CRM numbers live on the profile page (Section E),
-                               where the Close Kombat matcher runs once for that
-                               rep — never fabricate per-row numbers here. */
+                            "This week",
                             "One-year target",
                             "Target date",
                             "Primary life area",
@@ -647,6 +660,11 @@ export function PurposeLeadership() {
                                   {r.leadershipStatus}
                                 </div>
                               )}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-3 tabular-nums">
+                              {r.weekVolume != null
+                                ? `${r.weekSold ?? 0} sold · ${fmtMoney(r.weekVolume)}`
+                                : "—"}
                             </td>
                             <td className="px-3 py-3">
                               <div className="max-w-[240px] truncate" title={r.target ?? undefined}>
@@ -713,7 +731,7 @@ export function PurposeLeadership() {
                           left={r.name}
                           right={<PurposeStatusPill completion={r.completion} />}
                         />
-                        <MobileStatGrid cols={3}>
+                        <MobileStatGrid cols={2}>
                           <MobileStat label="Target date" value={fmtDate(r.targetDate)} />
                           <MobileStat
                             label="Follow-up"
@@ -725,6 +743,10 @@ export function PurposeLeadership() {
                           <MobileStat
                             label="Ceiling"
                             value={r.ceiling != null ? fmtMoney(r.ceiling) : "—"}
+                          />
+                          <MobileStat
+                            label="This week"
+                            value={r.weekVolume != null ? fmtMoney(r.weekVolume) : "—"}
                           />
                         </MobileStatGrid>
                         {r.target && (

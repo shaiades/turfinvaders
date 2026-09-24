@@ -436,13 +436,33 @@ export function PurposeRepProfile({ userId }: { userId: string }) {
                         </span>
                       )}
                     </>
-                  ) : (
+                  ) : detail.profile?.workshop_completed ? (
+                    // A submitted profile always answered 4.6 — an invisible
+                    // row here means the rep marked it private.
                     <span className="italic text-[var(--purpose-ink-dim)]">
                       {EMPTY_STATE_COPY.private_field}
                     </span>
+                  ) : (
+                    // Mid-workshop it simply hasn't been reached yet.
+                    <Dash />
                   )
                 }
               />
+              {/* "Share with Tyler and Shai" has to land somewhere: these two
+                  rows exist only when the rep chose to share them (owner RLS
+                  filters private rows out before they reach this component). */}
+              {answers["m4_personal_focus_change"]?.answer_value_text && (
+                <Field
+                  label="30-day change they're willing to make (shared)"
+                  value={answers["m4_personal_focus_change"].answer_value_text}
+                />
+              )}
+              {answers["m1_life_context"]?.answer_value_text && (
+                <Field
+                  label="Life context (shared)"
+                  value={answers["m1_life_context"].answer_value_text}
+                />
+              )}
               <Field
                 label="Internal obstacle"
                 value={<Bullets slugs={obstacles} opts={OBSTACLE_OPTIONS} />}
