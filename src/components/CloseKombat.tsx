@@ -39,10 +39,12 @@ import {
   aggregateCloseKombat,
   aggregateReportYear,
   auditBlockCards,
+  buildPendingReportCheck,
   countReps,
   filterReportRows,
   isReload,
   mergeMonthStandings,
+  mergeYearStandings,
   resolveCards,
   volumeReps,
   type AttentionItem,
@@ -394,7 +396,7 @@ function CloseKombatInner({
         const { data, error } = await supabase
           .from("report_sales")
           .select(
-            "monday_item_id, office, report_month, date_sold, sale_amt, cancel_amt, wcc, sales_count, reps",
+            "monday_item_id, office, report_month, date_sold, sale_amt, cancel_amt, wcc, sales_count, reps, customer_name, phone",
           )
           .gte("report_month", `${bookYear}-01-01`)
           .lte("report_month", `${bookYear}-12-31`)
@@ -410,21 +412,53 @@ function CloseKombatInner({
     staleTime: 15_000,
     placeholderData: (prev) => prev,
   });
+  // Pending-report check (owner, 2026-09-23): just-sold cards the book
+  // doesn't carry yet count at their Block price on Month/Year until the
+  // office adds the row and syncs. Built from the WHOLE loaded book year so
+  // a row that landed on a neighbouring month's board still claims its card.
+  const pendingCheck = useMemo(
+    () => buildPendingReportCheck(reportQuery.data ?? []),
+    [reportQuery.data],
+  );
   const yearAgg: YearAggregate = useMemo(
     () => aggregateReportYear(reportQuery.data ?? []),
     [reportQuery.data],
   );
+  // Year pending money runs the card engine over the UNFILTERED fetch —
+  // the Year tab is company-wide and its office pills hide, but the sticky
+  // pill value still narrows officeCards. The year of cards is already
+  // paged in for Money/My Deals; this only adds compute.
+  const yearPending = useMemo(
+    () =>
+      isYearTab
+        ? aggregateCloseKombat(
+            cardsQuery.data ?? [],
+            { start: `${year}-01-01`, end: `${year}-12-31` },
+            { pendingReport: pendingCheck },
+          )
+        : null,
+    [isYearTab, cardsQuery.data, year, pendingCheck],
+  );
+  const displayYearAgg: YearAggregate = useMemo(
+    () =>
+      yearPending
+        ? mergeYearStandings(yearAgg, yearPending.reps, yearPending.totals.pendingRevenue)
+        : yearAgg,
+    [yearAgg, yearPending],
+  );
   // Year identity runs against the REPORT pool — the page matcher is built
   // from the card fetch, which the Year standings don't use (same isolation
-  // rationale as goalsMatcher below).
+  // rationale as goalsMatcher below). Pending-only closers join the pool so
+  // a rep whose sale hasn't reached the book yet still self-highlights.
   const yearMatcher = useMemo(() => {
     const names = new Set<string>();
     for (const r of reportQuery.data ?? []) for (const n of r.reps) names.add(n);
+    for (const r of yearPending?.reps ?? []) if (r.pendingRevenue > 0) names.add(r.rep);
     return buildRepMatcher(displayName, [...names]);
-  }, [displayName, reportQuery.data]);
+  }, [displayName, reportQuery.data, yearPending]);
   const myYearIdx = useMemo(
-    () => yearAgg.reps.findIndex((r) => yearMatcher.isMe(r.rep)),
-    [yearAgg.reps, yearMatcher],
+    () => displayYearAgg.reps.findIndex((r) => yearMatcher.isMe(r.rep)),
+    [displayYearAgg.reps, yearMatcher],
   );
 
   useRealtimeInvalidate({
@@ -439,10 +473,17 @@ function CloseKombatInner({
   );
   // The whole padded fetch goes in; the window says what counts. Context
   // cards outside it only serve save→original linking (a July 30 sale saved
-  // Aug 5 pays out in July at the save's price — owner, 2026-08-28).
+  // Aug 5 pays out in July at the save's price — owner, 2026-08-28). On
+  // Month the engine also tallies each rep's pending-report slice, which
+  // the merge below adds to the book; Day/Week never consult the check.
   const { reps, totals } = useMemo(
-    () => aggregateCloseKombat(officeCards, { start: range.start, end: range.end }),
-    [officeCards, range.start, range.end],
+    () =>
+      aggregateCloseKombat(
+        officeCards,
+        { start: range.start, end: range.end },
+        isMonthTab ? { pendingReport: pendingCheck } : undefined,
+      ),
+    [officeCards, range.start, range.end, isMonthTab, pendingCheck],
   );
   // The standings' far-right money is the view's OWN range (owner,
   // 2026-09-08, superseding the 2026-08-04 week-in-progress convention the
@@ -463,14 +504,22 @@ function CloseKombatInner({
     return { agg: aggregateReportYear(rows), officeBlind, hasRows: rows.length > 0 };
   }, [isMonthTab, reportQuery.data, monthStart, office]);
   // Month standings = card funnel rows with revenue REPLACED by the book's
-  // number (and ranked by it); other tabs pass through untouched. The book
-  // is never faked from cards while it loads — dim states cover the gap.
+  // number PLUS each rep's pending-report slice (just-sold deals the book
+  // doesn't carry yet — owner, 2026-09-23), ranked by the sum; other tabs
+  // pass through untouched. The book is never faked from cards while it
+  // loads — dim states cover the gap.
   const displayReps = useMemo(
     () => (monthBook ? mergeMonthStandings(reps, monthBook.agg) : reps),
     [monthBook, reps],
   );
   const displayTotals: KombatTotals = useMemo(
-    () => (monthBook ? { ...totals, revenue: monthBook.agg.totals.revenue } : totals),
+    () =>
+      monthBook
+        ? {
+            ...totals,
+            revenue: Math.round((monthBook.agg.totals.revenue + totals.pendingRevenue) * 100) / 100,
+          }
+        : totals,
     [monthBook, totals],
   );
   const bookPending =
@@ -750,18 +799,41 @@ function CloseKombatInner({
   }, [cardsQuery.data, range.start, range.end]);
   // Month war runs on the BOOK (owner, 2026-09-23) — summing sale_amt per
   // office equals the dashboard's own "SD Sales"/"OC Sales" tiles (the
-  // per-rep split cancels out). null = no book rows yet, or an office-blind
-  // month (the Jan–Apr combined books) — either way a race would understate
-  // or zero a lane, so the panel hides, same rationale as the Year hide.
+  // per-rep split cancels out) — PLUS each office's pending-report money
+  // (just-sold cards awaiting a row, 2026-09-23), so a live month's fresh
+  // sales race immediately. null = an office-blind month (the Jan–Apr
+  // combined books — a race would dump both lanes into one), or nothing at
+  // all to race: no book rows AND no pending dollars. The old "no rows →
+  // hide" alone would blank a live month whose sales are all still pending.
   const officeRaceMonth = useMemo(() => {
     if (!isMonthTab) return null;
     const monthRows = (reportQuery.data ?? []).filter((r) => r.report_month === monthStart);
-    if (monthRows.length === 0 || monthRows.every((r) => r.office === null)) return null;
-    return OFFICE_LOCATIONS.map((o) => ({
-      office: o as string,
-      revenue: aggregateReportYear(monthRows.filter((r) => r.office === o)).totals.revenue,
-    }));
-  }, [isMonthTab, reportQuery.data, monthStart]);
+    if (monthRows.length > 0 && monthRows.every((r) => r.office === null)) return null;
+    const win = { start: range.start, end: range.end };
+    const lanes = OFFICE_LOCATIONS.map((o) => {
+      const book = aggregateReportYear(monthRows.filter((r) => r.office === o)).totals.revenue;
+      const pending = aggregateCloseKombat(
+        (cardsQuery.data ?? []).filter((c) => (c.office_location ?? DEFAULT_OFFICE) === o),
+        win,
+        { pendingReport: pendingCheck },
+      ).totals.pendingRevenue;
+      return {
+        office: o as string,
+        revenue: Math.round((book + pending) * 100) / 100,
+        pending,
+      };
+    });
+    if (monthRows.length === 0 && lanes.every((l) => l.revenue === 0)) return null;
+    return lanes;
+  }, [
+    isMonthTab,
+    reportQuery.data,
+    monthStart,
+    cardsQuery.data,
+    range.start,
+    range.end,
+    pendingCheck,
+  ]);
 
   // Today's closers (R-10): every rep with a kept sale today, any range view
   // that includes today. Celebration, not accounting — but only sales the
@@ -890,7 +962,7 @@ function CloseKombatInner({
       }
       if (res.wcc.missing_flagged > 0) {
         toast.warning(
-          `${res.wcc.missing_flagged} sold card${res.wcc.missing_flagged === 1 ? " isn't" : "s aren't"} on the Sales Reports — see Needs Attention`,
+          `${res.wcc.missing_flagged} sold card${res.wcc.missing_flagged === 1 ? " isn't" : "s aren't"} on the Sales Reports — counting at Block price; see Needs Attention`,
         );
       }
       qc.invalidateQueries({ queryKey: ["block_cards"] });
@@ -1116,10 +1188,10 @@ function CloseKombatInner({
           )}
           {isRep && isYearTab && (
             <YearHero
-              row={myYearIdx >= 0 ? yearAgg.reps[myYearIdx] : null}
+              row={myYearIdx >= 0 ? displayYearAgg.reps[myYearIdx] : null}
               rank={myYearIdx}
-              repCount={yearAgg.reps.length}
-              ahead={myYearIdx > 0 ? yearAgg.reps[myYearIdx - 1] : null}
+              repCount={displayYearAgg.reps.length}
+              ahead={myYearIdx > 0 ? displayYearAgg.reps[myYearIdx - 1] : null}
               rangeLabel={range.label}
               matched={yearMatcher.matched}
               hasNames={(reportQuery.data ?? []).length > 0}
@@ -1161,8 +1233,8 @@ function CloseKombatInner({
               </ul>
               <p className="mt-2 text-[10px] text-muted-foreground">
                 These can shift your numbers — a blank price counts as $0, an unlinked save counts
-                nowhere, and a sale missing from the Sales Report doesn&apos;t count in the official
-                Month/Year money — until the boards are fixed and synced.
+                nowhere, and a sale missing from the Sales Report counts at its Block price only
+                until the office adds the row and syncs — then the book&apos;s number takes over.
               </p>
             </ArcadePanel>
           )}
@@ -1236,7 +1308,7 @@ function CloseKombatInner({
             <CompanyTiles totals={displayTotals} dim={cardsQuery.isPlaceholderData || bookPending} />
           )}
           {!isRep && isYearTab && (
-            <YearTiles totals={yearAgg.totals} dim={reportQuery.isPlaceholderData} />
+            <YearTiles totals={displayYearAgg.totals} dim={reportQuery.isPlaceholderData} />
           )}
 
           {!isYearTab && attention.length > 0 && (
@@ -1297,6 +1369,9 @@ function CloseKombatInner({
                   Mirrors the office&apos;s Shark Tank YTD — straight from the monthly Sales Report
                   boards · updates when the office syncs
                   {syncInfo.data ? ` — last sync ${relTime(syncInfo.data.lastSyncedAt)}` : ""}.
+                  {yearPending && yearPending.totals.pendingDeals > 0
+                    ? ` Includes ${fmtMoney(yearPending.totals.pendingRevenue)} from ${yearPending.totals.pendingDeals} just-sold ${yearPending.totals.pendingDeals === 1 ? "deal" : "deals"} not on the Sales Report yet — each swaps to the book's number when its row lands.`
+                    : ""}
                 </p>
                 {reportQuery.isLoading ? (
                   <p className="text-sm text-muted-foreground">Loading the year book…</p>
@@ -1304,7 +1379,7 @@ function CloseKombatInner({
                   <p className="text-sm text-destructive">
                     Couldn&apos;t load the Sales Report rows — try again in a minute.
                   </p>
-                ) : yearAgg.reps.length === 0 ? (
+                ) : displayYearAgg.reps.length === 0 ? (
                   <div className="text-sm text-muted-foreground space-y-1">
                     <p>No Sales Report rows for {range.label} yet.</p>
                     {isAdmin && (
@@ -1316,7 +1391,7 @@ function CloseKombatInner({
                   </div>
                 ) : (
                   <YearStandings
-                    agg={yearAgg}
+                    agg={displayYearAgg}
                     dim={reportQuery.isPlaceholderData}
                     isMe={yearMatcher.isMe}
                   />
@@ -1348,11 +1423,16 @@ function CloseKombatInner({
                   Funnel results land live from the boards · money mirrors the monthly Sales Report
                   book — the Shark Tank number — and moves when the office syncs
                   {syncInfo.data ? ` — last sync ${relTime(syncInfo.data.lastSyncedAt)}` : ""}.
+                  {totals.pendingDeals > 0
+                    ? ` Includes ${fmtMoney(totals.pendingRevenue)} from ${totals.pendingDeals} just-sold ${totals.pendingDeals === 1 ? "deal" : "deals"} not on the Sales Report yet — each swaps to the book's number when its row lands.`
+                    : ""}
                   {monthBook?.officeBlind
                     ? " This month's book doesn't record offices — money shows both offices combined."
                     : ""}
                   {reportQuery.isSuccess && !reportQuery.isPlaceholderData && !monthBook?.hasRows
-                    ? ` No Sales Report rows for ${range.label} yet — money shows $0 until the office syncs the book.`
+                    ? totals.pendingDeals > 0
+                      ? ` No Sales Report rows for ${range.label} yet — money shows the Block boards' live dollars until the office syncs the book.`
+                      : ` No Sales Report rows for ${range.label} yet — money shows $0 until the office syncs the book.`
                     : ""}
                 </p>
               ) : (
@@ -1665,7 +1745,10 @@ function CloseKombatInner({
           >
             {isMonthTab && (
               <p className="mb-2 text-[10px] text-muted-foreground">
-                From the monthly Sales Report book.
+                From the monthly Sales Report book
+                {officeRaceMonth?.some((l) => l.pending > 0)
+                  ? ", plus just-sold cards awaiting a report row."
+                  : "."}
               </p>
             )}
             <div
@@ -1721,7 +1804,7 @@ function CloseKombatInner({
                 Company · {range.label}
               </div>
               {isYearTab ? (
-                <YearTiles totals={yearAgg.totals} dim={reportQuery.isPlaceholderData} />
+                <YearTiles totals={displayYearAgg.totals} dim={reportQuery.isPlaceholderData} />
               ) : (
                 <CompanyTiles
                   totals={displayTotals}
@@ -1886,7 +1969,7 @@ const KOMBAT_GLOSSARY: GlossarySections = [
     terms: [
       [
         "Source",
-        "The Month and Year tabs' MONEY mirrors the monthly Sales Report boards — the same math as the office's Shark Tank dashboards: Sale Amt split evenly across the report's Sales Rep column, counted in the board's month. The Month tab's funnel counts (Appts through Close %) still come live from the Block boards.",
+        "The Month and Year tabs' MONEY mirrors the monthly Sales Report boards — the same math as the office's Shark Tank dashboards: Sale Amt split evenly across the report's Sales Rep column, counted in the board's month. A just-sold card the book doesn't carry yet counts at its Block-board Sale Price until its report row lands. The Month tab's funnel counts (Appts through Close %) still come live from the Block boards.",
       ],
       [
         "Cancels",
@@ -1902,7 +1985,7 @@ const KOMBAT_GLOSSARY: GlossarySections = [
       ],
       [
         "Vs. Day & Week",
-        "Day and Week are the live board — money straight from the Block cards' Sale Price, saves and all, the moment a result lands. The book's money only moves when the office syncs, a sale counts in its board's month, and weeks won't exactly sum to the month. A sold card the book doesn't carry shows as a Not on Sales Report flag until the office adds the row.",
+        "Day and Week are the live board — money straight from the Block cards' Sale Price, saves and all, the moment a result lands. The book's money only moves when the office syncs, a sale counts in its board's month, and weeks won't exactly sum to the month. A just-sold card the book doesn't carry yet counts at its Block price (flagged Not on Sales Report) until the office adds the row — then the book's number replaces it, so the amount can visibly shift if the report writes a different Sale Amt.",
       ],
     ],
   },
@@ -2523,9 +2606,12 @@ const ATTENTION_META: Record<AttentionKind, { label: string; className: string }
   orphan_save: { label: "Unlinked Save", className: "text-destructive" },
   no_reps: { label: "No Reps", className: "text-destructive" },
   blank_price: { label: "Blank Price", className: "text-destructive" },
-  // A sale the office never wrote into the monthly Sales Report book —
-  // Shark Tank (and the Month/Year money here) doesn't count it.
-  missing_report_row: { label: "Not on Sales Report", className: "text-destructive" },
+  // A sale the office never wrote into the monthly Sales Report book.
+  // Amber since 2026-09-23: the Month/Year money here counts it at the
+  // Block price meanwhile (pending-report hybrid), so nothing is missing
+  // from THIS page — but Shark Tank itself still misses the sale, and this
+  // flag is the office's "enter the row" chase list.
+  missing_report_row: { label: "Not on Sales Report", className: "text-warning" },
   // Amber, not red: volume already follows the Sales Report, so nothing
   // counts wrong — but the boards CONTRADICT each other on who sat the deal.
   // (A report row that only ADDS names is the office's save split — the

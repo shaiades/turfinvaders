@@ -247,6 +247,44 @@ export function customerKey(s: string | null | undefined): string {
     .join(" ");
 }
 
+/** Customer-name key: lowercase, "(copy)" suffixes and punctuation dropped,
+ *  whitespace collapsed — report items and Block cards name the same
+ *  customer with small formatting differences. Distinct from customerKey
+ *  above on purpose: customerKey is the save→original linker (sorted, its
+ *  own noise list); this one preserves word order for the report matcher's
+ *  exact/prefix tiers. Shared with the Sales-Report pass in
+ *  block-cards.server.ts, which imports it from here. */
+export function normalizeCustomer(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/\(copy(\s+\d+)?\)/g, " ")
+    .replace(/[^a-z0-9&]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+/** Words that carry no customer identity: joiners plus the canvass-side
+ *  annotations the office tacks onto card names ("RJ Smith sho",
+ *  "Robbie Montgomery (Widow)") — the report never writes them. */
+const NOISE_TOKENS = new Set(["and", "&", "sho", "widow", "widowed", "widower"]);
+
+/** Order-insensitive name tokens: the report writes "Muilwyk, Wolfgang &
+ *  Trudi" while the Block card says "Wolfgang and Trudi Muilwyk". Noise
+ *  words drop; the rest sort. */
+export function customerTokens(s: string): string[] {
+  return normalizeCustomer(s)
+    .split(" ")
+    .filter((w) => w !== "" && !NOISE_TOKENS.has(w))
+    .sort();
+}
+
+/** How far a card's date may sit from the report row's Date Sold and still be
+ *  considered the same sale. Deliberately tighter than a week: repeat
+ *  customers get a fresh card most weeks, and 3 days is enough slack for the
+ *  office writing the report a day or two after the appointment (owner,
+ *  2026-07-30 — see matchReportRow in block-cards.server.ts). */
+export const SALE_DATE_WINDOW_DAYS = 3;
+
 /** Trim, collapse internal runs of whitespace (house rule — see normalizeName
  *  in utils.ts; "Daniel  Figueiredo" and "Daniel Figueiredo" are one person),
  *  drop blanks, dedupe — a Reps cell of "Sam, Sam" is one Sam, not a double
@@ -424,6 +462,16 @@ export type RepStats = {
    *  when the Sales-Report pass stamped them, else the Block card's reps —
    *  owner, 2026-08-25); includes office-appt upsales. */
   revenue: number;
+  /** The slice of `revenue` from sold cards still awaiting a Sales Report
+   *  row (missing_from_report ≠ false and no client-side row match — owner,
+   *  2026-09-23: just-sold deals count immediately; the book takes over once
+   *  the office adds the row and syncs). Always ≤ revenue. Zero unless the
+   *  aggregate ran with a pendingReport check. */
+  pendingRevenue: number;
+  /** Count of pending-report cards carrying real dollars — tallied on the
+   *  TOTALS row only (display transparency, not credit); per-rep rows stay
+   *  0. Blank-price cards add $0 and no tick (blank_price flags them). */
+  pendingDeals: number;
 };
 
 export type KombatTotals = Omit<RepStats, "rep">;
@@ -451,6 +499,8 @@ export const emptyStats = (): Omit<RepStats, "rep"> => ({
   cancelPct: null,
   leadsToSale: null,
   revenue: 0,
+  pendingRevenue: 0,
+  pendingDeals: 0,
 });
 
 /** A cancelled sale lands in PM (owner, 2026-07-30): the rep sat the demo, so
@@ -534,9 +584,19 @@ export type KombatWindow = { start: string; end: string };
 const inWindow = (c: Pick<BlockCard, "card_date">, w: KombatWindow | undefined): boolean =>
   !w || (c.card_date !== null && c.card_date >= w.start && c.card_date <= w.end);
 
+export type KombatOptions = {
+  /** Consulted only for cards the engine pays as sold — i.e. after the
+   *  save-revival, Can/Save, excluded-card and window gates, so cancelled
+   *  cards, consumed saves and padded context cards can never be pending.
+   *  true = the card's money is ALSO tallied as pendingRevenue (a just-sold
+   *  deal awaiting its Sales Report row — see buildPendingReportCheck). */
+  pendingReport?: (card: BlockCard) => boolean;
+};
+
 export function aggregateCloseKombat(
   cards: BlockCard[],
   window?: KombatWindow,
+  opts?: KombatOptions,
 ): {
   reps: RepStats[];
   totals: KombatTotals;
@@ -645,7 +705,17 @@ export function aggregateCloseKombat(
     // half. Result credit stays with the card's own reps: the saver earns
     // volume, not a Sold.
     if (cardOutcome(card) === "sold") {
-      totals.revenue += save ? save.price : (card.sale_price ?? 0);
+      // Pending-report check (owner, 2026-09-23): a sold card the book
+      // doesn't carry yet ALSO tallies its money as pendingRevenue — same
+      // amounts, same splits — so the Month/Year merges can add it to the
+      // book instead of showing $0 until the office enters the row.
+      const isPending = opts?.pendingReport?.(card) === true;
+      const effectivePrice = save ? save.price : (card.sale_price ?? 0);
+      totals.revenue += effectivePrice;
+      if (isPending) {
+        totals.pendingRevenue += effectivePrice;
+        if (effectivePrice > 0) totals.pendingDeals += 1;
+      }
       const volNames = volumeReps(card);
       if (save) {
         // saverReps comes out of linkSaves already cleaned/deduped.
@@ -654,7 +724,10 @@ export function aggregateCloseKombat(
         // the originals split the whole re-priced deal instead.
         const saverPool = savers.length > 0 ? save.price / 2 : 0;
         const originalPool = save.price - saverPool;
-        for (const name of savers) repRow(name).revenue += saverPool / savers.length;
+        for (const name of savers) {
+          repRow(name).revenue += saverPool / savers.length;
+          if (isPending) repRow(name).pendingRevenue += saverPool / savers.length;
+        }
         // A saver who reached volNames only through the REPORT STAMP already
         // took the save half above — drop them from the originals' half, or
         // the office writing the split into the report pair pays them twice
@@ -669,11 +742,16 @@ export function aggregateCloseKombat(
         const originalNames = originals.length > 0 ? originals : volNames;
         // No original reps recorded: their half stays uncredited (company
         // totals keep the whole price) — never invent a recipient.
-        for (const name of originalNames)
+        for (const name of originalNames) {
           repRow(name).revenue += originalPool / originalNames.length;
+          if (isPending) repRow(name).pendingRevenue += originalPool / originalNames.length;
+        }
       } else {
         const price = card.sale_price ?? 0;
-        for (const name of volNames) repRow(name).revenue += price / volNames.length;
+        for (const name of volNames) {
+          repRow(name).revenue += price / volNames.length;
+          if (isPending) repRow(name).pendingRevenue += price / volNames.length;
+        }
       }
     }
   }
@@ -702,6 +780,7 @@ export function aggregateCloseKombat(
     s.cancelPct = written > 0 ? s.cancels / written : null;
     s.leadsToSale = s.sold > 0 ? s.appts / s.sold : null;
     s.revenue = Math.round(s.revenue * 100) / 100;
+    s.pendingRevenue = Math.round(s.pendingRevenue * 100) / 100;
   };
   finalize(totals);
 
@@ -1004,10 +1083,13 @@ export function auditBlockCards(
       // $43,953) that explained the whole Month-vs-Shark-Tank gap. The stamp
       // comes from the sync's proof-of-absence pass; the outcome re-check
       // here keeps a card whose WCC died after the stamp quiet until the
-      // next covered sync clears the stale true.
+      // next covered sync clears the stale true. Since 2026-09-23 the money
+      // counts at the Block price meanwhile (pending-report hybrid) — the
+      // flag is the office's "enter this row" chase list, and Shark Tank
+      // itself still misses the sale until they do.
       kind = "missing_report_row";
       detail =
-        "sold on the Block board but not on the monthly Sales Report — Shark Tank and the Month/Year money here don't count this sale until the office adds the report row and syncs (a past month needs Full history)";
+        "sold on the Block board but not on the monthly Sales Report — counting at the Block card's Sale Price for now; the book's number (and Shark Tank) takes over once the office adds the report row and syncs (a past month needs Full history)";
     } else if (
       !consumedSave &&
       !canSave &&
@@ -1124,6 +1206,10 @@ export type ReportSaleRow = {
   wcc: string | null;
   sales_count: string | null;
   reps: string[];
+  /** Only the client-side pending matcher (buildPendingReportCheck) reads
+   *  these two; fixtures and the aggregates may omit them. */
+  customer_name?: string | null;
+  phone?: string | null;
 };
 
 export type YearRepRow = { rep: string; sold: number; revenue: number };
@@ -1204,18 +1290,24 @@ export function filterReportRows(
 const nameKey = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
 
 /** Month standings = the card rows (funnel intact) with each rep's revenue
- *  REPLACED by their report-book volume, ordered by that volume. Reps the
- *  book pays but the boards don't name this month join as zero-stat stubs
- *  (their pcts stay null → "—"); reps with cards but no book money show $0.
- *  Map entries are consumed on first match so two card names normalizing
- *  identically can never both take the money. */
+ *  REPLACED by their report-book volume PLUS their pending slice — the money
+ *  from just-sold cards the book doesn't carry yet (owner, 2026-09-23:
+ *  count them immediately; the book's number takes over when the row lands,
+ *  and the WCC cancel pipeline pulls a dead one back out). Reps the book
+ *  pays but the boards don't name this month join as zero-stat stubs (their
+ *  pcts stay null → "—"); reps with cards but neither book nor pending
+ *  money show $0. Map entries are consumed on first match so two card names
+ *  normalizing identically can never both take the book money. */
 export function mergeMonthStandings(cardReps: RepStats[], report: YearAggregate): RepStats[] {
   const byName = new Map<string, YearRepRow>();
   for (const r of report.reps) byName.set(nameKey(r.rep), r);
   const merged: RepStats[] = cardReps.map((r) => {
     const book = byName.get(nameKey(r.rep));
     if (book) byName.delete(nameKey(r.rep));
-    return { ...r, revenue: book ? book.revenue : 0 };
+    return {
+      ...r,
+      revenue: Math.round(((book?.revenue ?? 0) + r.pendingRevenue) * 100) / 100,
+    };
   });
   for (const leftover of byName.values()) {
     // No all-zero rows (same doctrine as both aggregates): a book rep whose
@@ -1247,4 +1339,132 @@ export function decideMissingFlag(i: {
   if (i.matched) return false;
   if (!i.covered) return null;
   return i.soldAlive ? true : false;
+}
+
+// ── Pending-report money (owner, 2026-09-23) ───────────────────────────────
+// Just-sold cards count in the Month/Year money IMMEDIATELY at their Block
+// price; the book takes over when the office adds the report row and syncs,
+// and the WCC cancel pipeline pulls a dead one back out. A card is pending
+// when the sync hasn't proven it's in the book (missing_from_report ≠ false
+// — true is proof of absence, null is a sale the sync hasn't seen yet) AND
+// no loaded report row claims it client-side. The client match is the
+// double-count guard for stale nulls: rows already mirrored whose card the
+// flag pass hasn't stamped (pre-Full-history months; the office-blind
+// Jan–Apr books, whose flags can NEVER stamp — the flag pass skips
+// office-less reports).
+
+/** What one report row proves for the client-side pending match. */
+type PendingRowLite = {
+  office: string | null;
+  soldMs: number | null;
+  /** Cents of sale_amt / cancel_amt, POSITIVE amounts only — a $0 or blank
+   *  amount proves nothing (preferAmountMatch precedent). */
+  amtCents: Set<number>;
+};
+
+/** Build the "is this sold card still awaiting its Sales Report row?" check
+ *  from the loaded report rows (the whole book year — month-boundary rows
+ *  land on the neighbouring book sometimes). Deliberately CONSERVATIVE the
+ *  safe way round: a match (→ not pending) needs a name or phone hit AND
+ *  date-or-amount corroboration — a bare name hit with neither is not
+ *  identity evidence, and a false "pending" self-heals at the next sync
+ *  while a false match would silently drop a live sale to $0. Matching is
+ *  many-cards-to-one-row on purpose: a duplicate_sale copy-twin must match
+ *  its sibling's row rather than newly double-count. */
+export function buildPendingReportCheck(
+  rows: ReportSaleRow[],
+): (
+  card: Pick<
+    BlockCard,
+    "lead_name" | "phone" | "office_location" | "card_date" | "sale_price" | "missing_from_report"
+  >,
+) => boolean {
+  const byNorm = new Map<string, PendingRowLite[]>();
+  const byTkey = new Map<string, PendingRowLite[]>();
+  const byPhone = new Map<string, PendingRowLite[]>();
+  const push = (m: Map<string, PendingRowLite[]>, k: string, r: PendingRowLite) => {
+    if (k === "") return;
+    const arr = m.get(k);
+    if (arr) arr.push(r);
+    else m.set(k, [r]);
+  };
+  for (const row of rows) {
+    const amtCents = new Set<number>();
+    for (const a of [row.sale_amt, row.cancel_amt])
+      if (typeof a === "number" && a > 0) amtCents.add(Math.round(a * 100));
+    const soldParsed = row.date_sold ? Date.parse(row.date_sold) : NaN;
+    const lite: PendingRowLite = {
+      office: row.office,
+      soldMs: Number.isNaN(soldParsed) ? null : soldParsed,
+      amtCents,
+    };
+    const name = row.customer_name ?? "";
+    push(byNorm, normalizeCustomer(name), lite);
+    push(byTkey, customerTokens(name).join(" "), lite);
+    push(byPhone, phoneKey(row.phone), lite);
+  }
+  const SPAN = SALE_DATE_WINDOW_DAYS * 86_400_000;
+  return (card) => {
+    // The sync already proved this card is in the book — the book owns it.
+    if (card.missing_from_report === false) return false;
+    const cardMs = card.card_date ? Date.parse(card.card_date) : NaN;
+    const priceCents =
+      card.sale_price !== null && card.sale_price !== undefined && card.sale_price > 0
+        ? Math.round(card.sale_price * 100)
+        : null;
+    const candidates: PendingRowLite[] = [];
+    const name = card.lead_name ?? "";
+    for (const [m, k] of [
+      [byNorm, normalizeCustomer(name)],
+      [byTkey, customerTokens(name).join(" ")],
+      [byPhone, phoneKey(card.phone)],
+    ] as const) {
+      if (k !== "") candidates.push(...(m.get(k) ?? []));
+    }
+    for (const row of candidates) {
+      // The un-prefixed Jan–Apr books carry no office — they may claim any
+      // card; an office-prefixed row only claims its own office's cards.
+      if (row.office !== null && row.office !== card.office_location) continue;
+      const dateHit =
+        row.soldMs !== null && !Number.isNaN(cardMs) && Math.abs(cardMs - row.soldMs) <= SPAN;
+      const amtHit = priceCents !== null && row.amtCents.has(priceCents);
+      if (dateHit || amtHit) return false;
+    }
+    return true;
+  };
+}
+
+/** Year standings = the book with each rep's pending slice added (nameKey
+ *  join, same rule as mergeMonthStandings), pending-only reps appended as
+ *  sold:0 stubs. totals.revenue adds pendingTotal — the engine's
+ *  full-price-once figure, so a repless pending card still counts exactly
+ *  once. sold and cancelAmt stay book-only (owner: the immediate count is
+ *  MONEY only; Sales stays Shark Tank parity). */
+export function mergeYearStandings(
+  book: YearAggregate,
+  pendingReps: RepStats[],
+  pendingTotal: number,
+): YearAggregate {
+  const cents = (n: number) => Math.round(n * 100) / 100;
+  const reps: YearRepRow[] = book.reps.map((r) => ({ ...r }));
+  const byName = new Map<string, YearRepRow>();
+  for (const r of reps) byName.set(nameKey(r.rep), r);
+  for (const p of pendingReps) {
+    if (p.pendingRevenue <= 0) continue;
+    const row = byName.get(nameKey(p.rep));
+    if (row) {
+      // Additive, so two card spellings landing on one book rep both stack —
+      // unlike the month merge there's no book number to take twice.
+      row.revenue = cents(row.revenue + p.pendingRevenue);
+    } else {
+      const stub: YearRepRow = { rep: p.rep, sold: 0, revenue: cents(p.pendingRevenue) };
+      reps.push(stub);
+      byName.set(nameKey(p.rep), stub);
+    }
+  }
+  reps.sort((a, b) => b.revenue - a.revenue || b.sold - a.sold || a.rep.localeCompare(b.rep));
+  return {
+    reps,
+    totals: { ...book.totals, revenue: cents(book.totals.revenue + pendingTotal) },
+  };
 }
