@@ -1075,7 +1075,7 @@ function FleetDispatchInner({
             so captains get it on the leaderboard and their Command embed;
             the webhook/office controls stay page-gated behind !readOnly. */}
         {(canEditRows || !readOnly) && (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {canEditRows && (
               <Button
                 size="sm"
