@@ -66,17 +66,33 @@ export function useOfficeFilter(): Ctx {
 
 export function OfficeFilterToggle({ className = "", compact = false }: { className?: string; compact?: boolean }) {
   const { office, setOffice } = useOfficeFilter();
+  // max-w-full + overflow-x-auto: a scroll container's automatic minimum
+  // size is 0, so the pills can never push their row wider than the phone
+  // and get clipped by the shell's overflow-x-hidden (the PR #83 trap).
   return (
-    <div className={`inline-flex rounded-md border border-neon/40 bg-surface p-0.5 ${className}`}>
+    <div
+      className={`inline-flex max-w-full overflow-x-auto scrollbar-hide rounded-md border border-neon/40 bg-surface p-0.5 ${className}`}
+    >
       {OFFICE_FILTER_OPTIONS.map((o) => (
         <button
           key={o}
           onClick={() => setOffice(o)}
-          className={`min-h-11 ${compact ? "px-2 py-1" : "px-3 py-1.5"} text-[10px] font-display uppercase tracking-widest rounded-sm transition ${
+          className={`min-h-11 shrink-0 whitespace-nowrap ${compact ? "px-2 py-1" : "px-2 py-1.5 md:px-3"} text-[10px] font-display uppercase tracking-widest rounded-sm transition ${
             office === o ? "bg-neon text-background" : "text-muted-foreground hover:text-foreground"
           }`}
         >
-          {o === "All" ? (compact ? "All" : "All Offices") : o}
+          {o === "All" ? (
+            compact ? (
+              "All"
+            ) : (
+              <>
+                <span className="md:hidden">All</span>
+                <span className="hidden md:inline">All Offices</span>
+              </>
+            )
+          ) : (
+            o
+          )}
         </button>
       ))}
     </div>
