@@ -11,12 +11,16 @@ import {
   aggregateCloseKombat,
   aggregateReportYear,
   auditBlockCards,
+  buildPendingReportCheck,
   cardOutcome,
   chooseReportReps,
+  customerTokens,
   decideMissingFlag,
   emptyStats,
   filterReportRows,
   mergeMonthStandings,
+  mergeYearStandings,
+  normalizeCustomer,
   phoneKey,
   preferAmountMatch,
   type BlockCard,
@@ -24,12 +28,7 @@ import {
   type ReportSaleRow,
   type RepStats,
 } from "../src/lib/close-kombat";
-import {
-  bestSoldMatch,
-  customerTokens,
-  matchReportRow,
-  normalizeCustomer,
-} from "../src/lib/block-cards.server";
+import { bestSoldMatch, matchReportRow } from "../src/lib/block-cards.server";
 
 let n = 0;
 const card = (over: Partial<BlockCard>): BlockCard => ({
@@ -1706,6 +1705,306 @@ eq("flag: covered+dead → false", decideMissingFlag({ matched: false, covered: 
     { start: "2026-07-01", end: "2026-07-31" },
   );
   eq("audit: window hides out-of-range missing card", windowed.length, 0);
+}
+
+// ---- Pending-report money (owner, 2026-09-23) ----------------------------
+// Just-sold cards count in Month/Year money immediately at the Block price;
+// the book takes over when the row lands. buildPendingReportCheck is the
+// double-count guard: flag false OR a corroborated client match → not
+// pending.
+{
+  const check = buildPendingReportCheck([
+    rrow({
+      customer_name: "Kevin & Terry James",
+      phone: "(619) 555-0101",
+      office: "San Diego",
+      sale_amt: 12000,
+      date_sold: "2026-09-22",
+    }),
+    rrow({
+      customer_name: "Muilwyk, Wolfgang & Trudi",
+      phone: null,
+      office: "San Diego",
+      sale_amt: 9800,
+      date_sold: null,
+    }),
+    rrow({
+      customer_name: "Punzal",
+      phone: "760-555-0202",
+      office: "San Diego",
+      sale_amt: 0,
+      cancel_amt: 4500,
+      date_sold: null,
+    }),
+    rrow({
+      customer_name: "No Evidence",
+      phone: null,
+      office: "San Diego",
+      sale_amt: 0,
+      date_sold: null,
+    }),
+    rrow({
+      customer_name: "Wrong Office",
+      phone: null,
+      office: "Orange County",
+      sale_amt: 700,
+      date_sold: "2026-09-22",
+    }),
+    rrow({
+      customer_name: "Blind Book",
+      phone: null,
+      office: null,
+      sale_amt: 300,
+      date_sold: "2026-01-10",
+      report_month: "2026-01-01",
+    }),
+    rrow({ customer_name: "", phone: null, sale_amt: 50, date_sold: "2026-09-22" }),
+  ]);
+  const base = {
+    lead_name: "Nobody Similar",
+    phone: null as string | null,
+    office_location: "San Diego",
+    card_date: "2026-09-23",
+    sale_price: 500 as number | null,
+    missing_from_report: null as boolean | null,
+  };
+  eq("pending: flag true + unmatched", check({ ...base, missing_from_report: true }), true);
+  eq("pending: flag null + unmatched (fresh sale)", check(base), true);
+  eq(
+    "pending: flag false → the book owns it",
+    check({ ...base, missing_from_report: false }),
+    false,
+  );
+  eq(
+    "pending: exact name + ≤3d date matches (copy stripped)",
+    check({ ...base, lead_name: "Kevin & Terry James (copy)", missing_from_report: true }),
+    false,
+  );
+  eq(
+    "pending: token-order name + amount matches",
+    check({ ...base, lead_name: "Wolfgang and Trudi Muilwyk", sale_price: 9800 }),
+    false,
+  );
+  eq(
+    "pending: phone + cancel amount matches a misspelled name",
+    check({ ...base, lead_name: "Bunzal", phone: "(760) 555-0202", sale_price: 4500 }),
+    false,
+  );
+  eq(
+    "pending: name hit with no date/amount stays pending",
+    check({ ...base, lead_name: "No Evidence" }),
+    true,
+  );
+  eq(
+    "pending: other-office row never claims the card",
+    check({ ...base, lead_name: "Wrong Office", sale_price: 700 }),
+    true,
+  );
+  eq(
+    "pending: office-blind (null-office) row claims any office",
+    check({ ...base, lead_name: "Blind Book", card_date: "2026-01-12", sale_price: 300 }),
+    false,
+  );
+  eq(
+    "pending: blank card name never matches blank-keyed rows",
+    check({ ...base, lead_name: null }),
+    true,
+  );
+  // Copy twins: matching is many-cards-to-one-row, so BOTH the original and
+  // its duplicate match the sibling's row — the twin can't newly double count.
+  eq(
+    "pending: copy twin matches the sibling's row too",
+    check({ ...base, lead_name: "Kevin & Terry James", missing_from_report: true }),
+    false,
+  );
+}
+{
+  // Engine: pendingRevenue mirrors revenue for pending cards only.
+  const win = { start: "2026-07-27", end: "2026-07-27" };
+  const always = () => true;
+  const one = aggregateCloseKombat(
+    [card({ sale: "Sold", sale_price: 1000, reps: ["Rep A"], missing_from_report: true })],
+    win,
+    { pendingReport: always },
+  );
+  eq("engine: pending per rep", one.reps.find((r) => r.rep === "Rep A")?.pendingRevenue, 1000);
+  eq("engine: pending totals", one.totals.pendingRevenue, 1000);
+  eq("engine: pending deal counted once", one.totals.pendingDeals, 1);
+  eq("engine: pending ≤ revenue", one.totals.pendingRevenue <= one.totals.revenue, true);
+  eq("engine: per-rep pendingDeals stays 0", one.reps[0]?.pendingDeals, 0);
+  // Split follows report_reps, exactly like revenue.
+  const split = aggregateCloseKombat(
+    [card({ sale: "Sold", sale_price: 1000, reps: ["Rep A"], report_reps: ["Rep B", "Rep C"] })],
+    win,
+    { pendingReport: always },
+  );
+  eq(
+    "engine: pending split follows report_reps B",
+    split.reps.find((r) => r.rep === "Rep B")?.pendingRevenue,
+    500,
+  );
+  eq(
+    "engine: pending split follows report_reps C",
+    split.reps.find((r) => r.rep === "Rep C")?.pendingRevenue,
+    500,
+  );
+  // A WCC-cancelled card pays nothing anywhere — the cancel pipeline is
+  // exactly what lets pending sales count immediately.
+  const dead = aggregateCloseKombat(
+    [card({ sale: "Sold", sale_price: 1000, wcc: "Cancelled", missing_from_report: true })],
+    win,
+    { pendingReport: always },
+  );
+  eq("engine: cancelled card pays no pending", dead.totals.pendingRevenue, 0);
+  eq("engine: cancelled card pays no revenue", dead.totals.revenue, 0);
+  // A landed save rides pending at the re-priced 50/50 split.
+  const saved = aggregateCloseKombat(
+    [
+      card({
+        sale: "Sold",
+        sale_price: 1000,
+        reps: ["Rep A"],
+        phone: "555",
+        card_date: "2026-07-27",
+      }),
+      card({
+        comments: "Can/Save",
+        sale_price: 800,
+        reps: ["Saver"],
+        phone: "555",
+        card_date: "2026-07-28",
+      }),
+    ],
+    win,
+    { pendingReport: always },
+  );
+  eq(
+    "engine: save pending saver half",
+    saved.reps.find((r) => r.rep === "Saver")?.pendingRevenue,
+    400,
+  );
+  eq(
+    "engine: save pending original half",
+    saved.reps.find((r) => r.rep === "Rep A")?.pendingRevenue,
+    400,
+  );
+  eq("engine: save pending totals once", saved.totals.pendingRevenue, 800);
+  // Padded context outside the window never leaks into pending.
+  const outside = aggregateCloseKombat(
+    [card({ sale: "Sold", sale_price: 1000, card_date: "2026-08-30" })],
+    win,
+    { pendingReport: always },
+  );
+  eq("engine: window gate keeps context out of pending", outside.totals.pendingRevenue, 0);
+  // Blank price = $0 (never invent numbers): no dollars, no deal tick.
+  const blank = aggregateCloseKombat(
+    [card({ sale: "Sold", sale_price: null, missing_from_report: true })],
+    win,
+    { pendingReport: always },
+  );
+  eq("engine: blank price adds $0 pending", blank.totals.pendingRevenue, 0);
+  eq("engine: blank price no pending deal", blank.totals.pendingDeals, 0);
+  // Day/Week never pass the check — pending stays zero without opts.
+  const dayWeek = aggregateCloseKombat(
+    [card({ sale: "Sold", sale_price: 1000, missing_from_report: true })],
+    win,
+  );
+  eq("engine: no opts → no pending", dayWeek.totals.pendingRevenue, 0);
+}
+{
+  // Month merge: revenue = book + pending; a pending-only rep still ranks.
+  const cardRow = (rep: string, over: Partial<RepStats>): RepStats => ({
+    rep,
+    ...emptyStats(),
+    ...over,
+  });
+  const book = aggregateReportYear([rrow({ sale_amt: 7777, reps: ["Rep A"] })]);
+  const merged = mergeMonthStandings(
+    [
+      cardRow("Rep A", { appts: 10, sold: 3, revenue: 8000, pendingRevenue: 223 }),
+      cardRow("Fresh Closer", { appts: 1, sold: 1, revenue: 900, pendingRevenue: 900 }),
+      cardRow("Old Card", { appts: 4, sold: 1, revenue: 2500 }),
+    ],
+    book,
+  );
+  eq("merge: book + pending", merged.find((r) => r.rep === "Rep A")?.revenue, 8000);
+  eq(
+    "merge: pending-only rep keeps its money",
+    merged.find((r) => r.rep === "Fresh Closer")?.revenue,
+    900,
+  );
+  eq(
+    "merge: no-pending card rep shows the book's $0",
+    merged.find((r) => r.rep === "Old Card")?.revenue,
+    0,
+  );
+  eq("merge: ranked by the sum", merged[0]?.rep, "Rep A");
+  eq("merge: pending-only rep ranks second", merged[1]?.rep, "Fresh Closer");
+}
+{
+  // Year merge: book + pending slices, money only.
+  const cardRow = (rep: string, over: Partial<RepStats>): RepStats => ({
+    rep,
+    ...emptyStats(),
+    ...over,
+  });
+  const book = aggregateReportYear([
+    rrow({ sale_amt: 1000, reps: ["Rep A"] }),
+    rrow({ sale_amt: 0, cancel_amt: 250, sales_count: "Cancelled", reps: ["Rep A"] }),
+  ]);
+  const merged = mergeYearStandings(
+    book,
+    [
+      cardRow("REP  A", { revenue: 500, pendingRevenue: 500 }), // nameKey join
+      cardRow("Fresh Closer", { revenue: 900, pendingRevenue: 900 }),
+      cardRow("No Pending", { revenue: 100 }),
+    ],
+    1400,
+  );
+  eq(
+    "year merge: pending adds onto the book row",
+    merged.reps.find((r) => r.rep === "Rep A")?.revenue,
+    1500,
+  );
+  eq("year merge: book sold untouched", merged.reps.find((r) => r.rep === "Rep A")?.sold, 1);
+  const stub = merged.reps.find((r) => r.rep === "Fresh Closer");
+  eq("year merge: pending-only stub appended", stub?.revenue, 900);
+  eq("year merge: stub sold 0 (money only)", stub?.sold, 0);
+  eq(
+    "year merge: no-pending rep not invented",
+    merged.reps.some((r) => r.rep === "No Pending"),
+    false,
+  );
+  eq("year merge: totals add pendingTotal once", merged.totals.revenue, 2400);
+  eq("year merge: totals sold book-only", merged.totals.sold, 1);
+  eq("year merge: cancelAmt untouched", merged.totals.cancelAmt, 250);
+  eq("year merge: ranked by the sum", merged.reps[0]?.rep, "Rep A");
+}
+{
+  // End-to-end no-double-count: a flag-null card whose row IS in the book
+  // is claimed by the client match, so the Month total equals the book alone.
+  const rows = [
+    rrow({
+      customer_name: "Settled Deal",
+      office: "HQ",
+      sale_amt: 6000,
+      date_sold: "2026-07-27",
+      reps: ["Rep A"],
+    }),
+  ];
+  const check = buildPendingReportCheck(rows);
+  const { reps, totals } = aggregateCloseKombat(
+    [card({ sale: "Sold", sale_price: 6000, lead_name: "Settled Deal", reps: ["Rep A"] })],
+    { start: "2026-07-27", end: "2026-07-27" },
+    { pendingReport: check },
+  );
+  eq("e2e: matched card not pending", totals.pendingRevenue, 0);
+  const merged = mergeMonthStandings(reps, aggregateReportYear(rows));
+  eq(
+    "e2e: month total = book alone",
+    merged.reduce((s, r) => s + r.revenue, 0),
+    6000,
+  );
 }
 
 console.log(`checks run, ${fails.length} failure(s)`);

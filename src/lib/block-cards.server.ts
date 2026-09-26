@@ -21,11 +21,14 @@ import {
   nextMonthStartISO,
 } from "@/lib/dates";
 import {
+  SALE_DATE_WINDOW_DAYS,
   SOLD_VALUES,
   chooseReportReps,
   cleanReps,
+  customerTokens,
   decideMissingFlag,
   isCanSave,
+  normalizeCustomer,
   phoneKey,
   preferAmountMatch,
   sameRepSet,
@@ -883,32 +886,9 @@ function recentMonthLabels(): string[] {
   return [cur, prev];
 }
 
-/** Customer-name key: lowercase, "(copy)" suffixes and punctuation dropped,
- *  whitespace collapsed — report items and Block cards name the same
- *  customer with small formatting differences. */
-export function normalizeCustomer(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/\(copy(\s+\d+)?\)/g, " ")
-    .replace(/[^a-z0-9&]+/g, " ")
-    .trim()
-    .replace(/\s+/g, " ");
-}
-
-/** Words that carry no customer identity: joiners plus the canvass-side
- *  annotations the office tacks onto card names ("RJ Smith sho",
- *  "Robbie Montgomery (Widow)") — the report never writes them. */
-const NOISE_TOKENS = new Set(["and", "&", "sho", "widow", "widowed", "widower"]);
-
-/** Order-insensitive name tokens: the report writes "Muilwyk, Wolfgang &
- *  Trudi" while the Block card says "Wolfgang and Trudi Muilwyk". Noise
- *  words drop; the rest sort. */
-export function customerTokens(s: string): string[] {
-  return normalizeCustomer(s)
-    .split(" ")
-    .filter((w) => w !== "" && !NOISE_TOKENS.has(w))
-    .sort();
-}
+// normalizeCustomer / customerTokens moved to @/lib/close-kombat
+// (2026-09-23): the pending-report client match needs them browser-side,
+// and this pass imports them back from there.
 
 type SoldCardLite = {
   monday_item_id: string;
@@ -1015,12 +995,8 @@ async function fetchCandidateCards(): Promise<{
   return { cards: out, repsAvailable, missingAvailable };
 }
 
-/** How far a card's date may sit from the report row's Date Sold and still be
- *  considered the same sale. Deliberately tighter than a week: repeat
- *  customers get a fresh card most weeks, and 3 days is enough slack for the
- *  office writing the report a day or two after the appointment (owner,
- *  2026-07-30 — see matchReportRow). */
-export const SALE_DATE_WINDOW_DAYS = 3;
+// SALE_DATE_WINDOW_DAYS moved to @/lib/close-kombat (2026-09-23) — the
+// client-side pending match uses the same ±3-day identity window.
 
 /** Cards that ran within `days` of `aroundISO`. Cards with no date can't be
  *  proven near it, so they only survive the unrestricted fallback pass. */
