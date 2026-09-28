@@ -507,6 +507,9 @@ export function ActiveRun({
               houseBubbles
               zipTints={isCaptain ? zipZones.tints : undefined}
               onHouseTap={(h) => setHouseTarget(h)}
+              // Captains get Turf Tools on the map rail too (owner ask
+              // 2026-09-28) — the header copy vanishes in fullscreen.
+              onOpenTurfTools={isCaptain ? onOpenTurfTools : undefined}
               mode={{
                 kind: "pin",
                 onDrop: (ll: LatLng) => pins.guardedMapDrop(ll, active),

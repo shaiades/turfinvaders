@@ -4,6 +4,7 @@
  *  sheet, never insta-drop the armed result) plus the street/number adoption
  *  rules the address display depends on. */
 import {
+  houseAtPoint,
   houseCache,
   ingestAddrNode,
   ingestBuilding,
@@ -204,6 +205,63 @@ ingestBuilding({
     "way inherited number, street AND zip",
     h?.num === "5" && h?.street === "Loop Road" && h?.zip === "92013",
     h,
+  );
+}
+
+// ---- houseAtPoint: the ⓘ house-info tool -----------------------------------
+resetHouseCache();
+building(60, 0, 0, { "addr:housenumber": "42", "addr:street": "Vine Street" });
+{
+  const tap = at(6, 0); // near-miss on the bubbled house
+  const hit = houseAtPoint(tap.lat, tap.lng, []);
+  check("info tap near a bubble opens that house", hit.id === "w60", hit.id);
+}
+{
+  const tap = at(60, 0); // the unmapped home down the street — no circle
+  const hit = houseAtPoint(tap.lat, tap.lng, []);
+  check("info tap on an unmapped spot mints a point-house", hit.id.startsWith("pt:"), hit.id);
+  check(
+    "point-house id is coordinate-stable (geocode cache key)",
+    hit.id === houseAtPoint(tap.lat, tap.lng, []).id,
+    hit.id,
+  );
+  check(
+    "point-house carries no address (the sheet reverse-geocodes)",
+    hit.num === "" && hit.street === "" && hit.zip === "",
+    hit,
+  );
+  check("point-house never enters the cache", !houseCache.has(hit.id), [...houseCache.keys()]);
+
+  // A free-roam pin dropped at this same unmapped home rides along…
+  const mine: SnapPin = {
+    id: "fr",
+    pin_type: "go_back",
+    ...at(58, 0),
+    created_at: "2026-09-28T18:00:00Z",
+  };
+  const hit2 = houseAtPoint(tap.lat, tap.lng, [mine]);
+  check(
+    "unowned free-roam pin attaches to the point-house",
+    hit2.currentPinId === "fr" && hit2.currentType === "go_back",
+    hit2,
+  );
+}
+{
+  // …but a pin OWNED by the real bubble next door is never adopted by a
+  // nearby unmapped tap (same no-neighbor-adoption rule as snap).
+  const owned: SnapPin = {
+    id: "own",
+    pin_type: "not_home",
+    ...at(10, 0), // 10 m from w60 → w60 owns it
+    created_at: "2026-09-28T18:10:00Z",
+  };
+  const tap = at(20, 0); // beyond snap range of w60, within 14 m of the pin
+  const hit = houseAtPoint(tap.lat, tap.lng, [owned]);
+  check("info tap past snap range mints a point-house", hit.id.startsWith("pt:"), hit.id);
+  check(
+    "a bubble-owned pin is NOT adopted by a point-house",
+    hit.currentPinId === undefined,
+    hit.currentPinId,
   );
 }
 

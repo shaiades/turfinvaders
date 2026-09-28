@@ -306,6 +306,55 @@ export function snapTapToHouse(
   return best ? { ...house, currentPinId: best.id, currentType: best.pin_type } : { ...house };
 }
 
+/**
+ * The house-info tool's lookup (owner ask 2026-09-28, RepCard parity: arm
+ * the ⓘ button, tap ANY house — bubbled or not — to see its address and
+ * today's result). Snap first, with the same forgiveness as pin-mode taps;
+ * where OSM has nothing (unmapped tracts, new builds — exactly the homes
+ * that never got a circle) return a synthetic point-house so the result
+ * sheet can reverse-geocode an approximate address. The id is
+ * coordinate-stable so the sheet's one-geocode-per-house session cache and
+ * the ±MATCH_METERS notes box behave like any other house. Deliberately
+ * NEVER cached: a synthetic point in the grid would eat future real
+ * ingests via dedupe and hijack normal pin-mode snap taps into info-less
+ * sheets.
+ */
+export function houseAtPoint(
+  lat: number,
+  lng: number,
+  pins: SnapPin[],
+  maxM = MATCH_METERS,
+): OsmHouse {
+  const snapped = snapTapToHouse(lat, lng, pins, maxM);
+  if (snapped) return snapped;
+  const h: OsmHouse = {
+    id: `pt:${lat.toFixed(6)},${lng.toFixed(6)}`,
+    lat,
+    lng,
+    pos: [lat, lng],
+    num: "",
+    street: "",
+    zip: "",
+    kind: "addr",
+  };
+  // Same latest-valid-pin attach as the snap path, for pins that belong to
+  // no cached house (the free-roam drops made on these same unmapped homes)
+  // — a pin owned by a real neighbor's bubble is never adopted.
+  let best: SnapPin | null = null;
+  let bestAt = "";
+  for (const p of pins) {
+    if (p.is_remote_drop || p.pending) continue;
+    if (haversineM(lat, lng, p.lat, p.lng) > MATCH_METERS) continue;
+    if (nearestAny(p.lat, p.lng, MATCH_METERS)) continue;
+    const at = p.created_at ?? "";
+    if (!best || at >= bestAt) {
+      best = p;
+      bestAt = at;
+    }
+  }
+  return best ? { ...h, currentPinId: best.id, currentType: best.pin_type } : h;
+}
+
 /** Re-insert a house persisted by src/lib/house-store.ts. The full ingest
  *  dedupe already ran before it was stored, so this only re-mints the
  *  transient fields: the stable pos tuple, and no pin match (pins are
