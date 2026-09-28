@@ -44,7 +44,11 @@ export function isManagerRole(role: AppRole | string | null | undefined): boolea
 
 /** Admin tier: owner and office_staff ONLY — captains are deliberately
  *  excluded. Gates the owner dashboard, the confirmation desk, and
- *  admin-only editing. Never widen a check from this to MANAGER_ROLES. */
+ *  admin-only editing. Never widen a check from this to MANAGER_ROLES
+ *  without an owner decision — the one recorded widening is area
+ *  assignment (ZIP command + historical-ring promote, owner decision
+ *  2026-09-28, migration 20260928120000); the direct history-outline
+ *  delete stays admin-only. */
 export const ADMIN_ROLES: readonly AppRole[] = ["owner", "office_staff"] as const;
 
 export function isAdminRole(role: AppRole | string | null | undefined): boolean {
