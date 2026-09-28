@@ -966,7 +966,7 @@ function NeonMapInner({
   onOpenTurfTools?: () => void;
   /** ZIP → captain tint (color + name pill) for assigned ZIP codes. */
   zipTints?: Record<string, ZipTint>;
-  /** Admin assign mode: ZIP polygons become tappable (forces the layer on). */
+  /** Manager assign mode: ZIP polygons become tappable (forces the layer on). */
   onZipTap?: (zip: string) => void;
   /** Crew Map: live rep positions as pulsing avatar markers (default pane —
    *  custom panes render displaced under leaflet-rotate). */

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { isManagerRole } from "@/lib/roles";
 import { useGeoWatch } from "@/hooks/useFieldPins";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { assigneeColor } from "@/lib/assignee-colors";
@@ -105,8 +106,9 @@ async function lookupPlace(query: string): Promise<PlaceHit | null> {
 
 // Role fan-out (dashboard.tsx pattern). Since the Active Run merge
 // (2026-09-08) canvassing lives on /field — canvassers bounce there, captains
-// get the canvass screen with a Turf Tools escape hatch, and only the Admin
-// tier keeps the manager drawing/assignment view below.
+// get the canvass screen with a Turf Tools escape hatch, and the Admin tier
+// defaults to the manager drawing/assignment view below with an opt-in
+// Canvass Mode (owner decision 2026-09-28: owners mark their own doors too).
 function MyTerritoryPage() {
   const { role, loading } = useAuth();
   if (loading) return <div className="text-sm text-muted-foreground">Loading…</div>;
@@ -133,21 +135,44 @@ function CaptainTerritory() {
   );
 }
 
-// Admin tier gets the same crew map from the Turf Tools toolbar — the audit's
-// parity rule: a leadership feature mounted only inside ActiveRun is
-// invisible to owner/office_staff (they never render the canvass screen).
+// Admin tier defaults to Turf Tools; marking their own doors is OPT-IN behind
+// one deliberate tap (owner decision 2026-09-28). This keeps the /field
+// stray-tap protection intact (commit 6e74c2d — field.tsx still redirects
+// admins here, and this default screen never drops pins), while an owner who
+// actually canvasses gets the same ActiveRun captains use. Plain state: a
+// reload lands back on Turf Tools, the right default for admins — the inverse
+// of the captain rationale above.
 function AdminTerritory() {
-  const [crew, setCrew] = useState(false);
-  if (crew) return <CrewMap onBack={() => setCrew(false)} />;
-  return <ManagerTerritoryView onOpenCrewMap={() => setCrew(true)} />;
+  const [view, setView] = useState<"tools" | "run" | "crew">("tools");
+  if (view === "run")
+    return (
+      <ActiveRun
+        variant="captain"
+        onOpenTurfTools={() => setView("tools")}
+        onOpenCrewMap={() => setView("crew")}
+      />
+    );
+  if (view === "crew") return <CrewMap onBack={() => setView("tools")} />;
+  return (
+    <ManagerTerritoryView
+      onOpenCrewMap={() => setView("crew")}
+      onStartCanvassing={() => setView("run")}
+    />
+  );
 }
 
 function ManagerTerritoryView({
   onBackToCanvassing,
   onOpenCrewMap,
+  onStartCanvassing,
 }: {
+  // Captain entry: "Back to Canvassing" returns to their default screen.
   onBackToCanvassing?: () => void;
   onOpenCrewMap?: () => void;
+  // Admin entry: "Canvass Mode" is the opt-in door-marking flip — mutually
+  // exclusive with onBackToCanvassing by construction (AdminTerritory vs
+  // CaptainTerritory), so each button keeps its own copy.
+  onStartCanvassing?: () => void;
 }) {
   const { user, role, teamId } = useAuth();
   const qc = useQueryClient();
@@ -159,11 +184,14 @@ function ManagerTerritoryView({
   const [listDeleteId, setListDeleteId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [searchBusy, setSearchBusy] = useState(false);
-  // ZIP command: admins tap a ZIP's label pill to hand the zone to a captain
-  // (owner ask 2026-09-19: pill only — zone interiors must never steal taps
-  // from turfs); captains see the zones read-only and chunk their ZIPs into
-  // turfs with the drawing flow below.
+  // ZIP command: tap a ZIP's label pill to hand the zone to a captain (owner
+  // ask 2026-09-19: pill only — zone interiors must never steal taps from
+  // turfs). Assignment tools are manager-tier since 2026-09-28 (owner
+  // decision, superseding the 2026-09-11 admin-only ZIP doctrine): captains
+  // assign ZIPs and promote historical rings too. isAdmin remains for the
+  // blast-radius holdout below (direct history-outline delete).
   const isAdmin = role === "owner" || role === "office_staff";
+  const canAssign = isManagerRole(role);
   const [zipTarget, setZipTarget] = useState<string | null>(null);
   // Historical coverage (RepCard 2026) visibility — per device, default on.
   // Hiding it also skips the paged fetch below (cellular kindness); the
@@ -982,6 +1010,11 @@ function ManagerTerritoryView({
               <Zap className="w-3.5 h-3.5" /> Back to Canvassing
             </Button>
           )}
+          {onStartCanvassing && (
+            <Button variant="outline" onClick={onStartCanvassing} className="ml-auto gap-2">
+              <Zap className="w-3.5 h-3.5" /> Canvass Mode
+            </Button>
+          )}
         </div>
 
         <div className="relative scroll-mt-20" ref={mapAnchorRef}>
@@ -1012,7 +1045,7 @@ function ManagerTerritoryView({
             pendingPolygon={pendingPolygon}
             mode={mapMode}
             zipTints={zipZones.tints}
-            onZipTap={isAdmin ? (zip) => setZipTarget(zip) : undefined}
+            onZipTap={canAssign ? (zip) => setZipTarget(zip) : undefined}
             onTerritoryClick={
               !drawing
                 ? (id) => {
@@ -1024,10 +1057,12 @@ function ManagerTerritoryView({
                   }
                 : undefined
             }
-            // Historical-coverage actions are admin tier only (owner ask
-            // 2026-09-22): captains keep the read-only explainer, matching
-            // the zip_assignments doctrine. RLS enforces the same line.
-            onHistoricalAssign={isAdmin && !drawing ? startHistoricalAssign : undefined}
+            // Historical-coverage assign is manager tier (owner decision
+            // 2026-09-28, superseding the 2026-09-22 admin-only ask): a
+            // captain promoting a ring also needs the RLS DELETE widening in
+            // 20260928120000 — the promote flow retires the dashed source
+            // ring. The DIRECT delete button stays admin-only (blast radius).
+            onHistoricalAssign={canAssign && !drawing ? startHistoricalAssign : undefined}
             onHistoricalDelete={isAdmin && !drawing ? startHistoricalDelete : undefined}
             // Tapping a turf opens an on-map card (current assignee + recent
             // history + an edit button) rather than jumping straight to the
@@ -1063,8 +1098,9 @@ function ManagerTerritoryView({
         </div>
 
         {/* Captain-first batch assignment: "Assigning to captain" + "ZIP codes
-            you want assigned to that captain" (owner's sections, 2026-09-11). */}
-        {isAdmin && (
+            you want assigned to that captain" (owner's sections, 2026-09-11).
+            Manager tier since 2026-09-28 — captains batch-assign too. */}
+        {canAssign && (
           <ZipCaptainAssigner
             captains={captains}
             assignments={zipZones.data ?? []}
@@ -1073,15 +1109,16 @@ function ManagerTerritoryView({
           />
         )}
 
-        {/* ZIP zones: which captain owns which ZIP. Admins manage (tap a chip
-            to fly there, ✕ to unassign); captains read their zones here and
-            chunk them into turfs with Draw New Area. */}
+        {/* ZIP zones: which captain owns which ZIP. Managers (admin tier +
+            captains since 2026-09-28) manage — tap a chip to fly there, ✕ to
+            unassign; captains chunk their zones into turfs with Draw New
+            Area. */}
         <ArcadePanel title="ZIP Zones">
           {zipByCaptain.length === 0 ? (
             <div className="text-sm text-muted-foreground">
-              {isAdmin
+              {canAssign
                 ? "No ZIPs assigned yet. Tap “Assign ZIPs”, then tap a ZIP boundary on the map to hand it to a captain."
-                : "No ZIPs assigned yet — an admin hands ZIPs to captains here."}
+                : "No ZIPs assigned yet — a manager hands ZIPs to captains here."}
             </div>
           ) : (
             <ul className="space-y-2">
@@ -1119,7 +1156,7 @@ function ManagerTerritoryView({
                           >
                             {z}
                           </button>
-                          {isAdmin && (
+                          {canAssign && (
                             <button
                               type="button"
                               aria-label={`Unassign ZIP ${z}`}
