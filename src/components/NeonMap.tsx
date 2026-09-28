@@ -1690,11 +1690,16 @@ function NeonMapInner({
           </div>
         )}
 
-        {/* ONE status pill, bottom-center (free on every screen: armed chips
-          sit bottom-3, trophy bottom-16 left, controls bottom-16 right).
-          resolveMapStatus owns the priority stack — offline > turf data >
-          tiles > circles-down > zoom hint — so a bad-service moment reads
-          as one honest sentence instead of a silently black or empty map.
+        {/* ONE status pill, bottom-center. Its band (bottom-16) is SHARED:
+          trophy at left-3, the control rail at right-3 (armed chips sit
+          below at bottom-3) — so the width clamp reserves a 4rem column on
+          each side (44px button + 12px inset + breathing room) and long
+          copy wraps upward instead of sliding under the buttons (owner
+          report 2026-09-28: the zoom pill overlapped trophy + ZIP on
+          phones). resolveMapStatus owns the priority stack — offline >
+          turf data > tiles > circles-down > zoom hint — so a bad-service
+          moment reads as one honest sentence instead of a silently black
+          or empty map.
           Passive pills are pointer-events-none: logging still works under
           any of them (a result chip is always armed, a bare-map tap drops
           it — the circles-down fallback from PR #243). Actionable pills
@@ -1705,7 +1710,7 @@ function NeonMapInner({
           existed; tearing it down per state would skip announcements. */}
         <div
           aria-live="polite"
-          className="absolute bottom-16 left-1/2 -translate-x-1/2 z-[1000] max-w-[calc(100%-1.5rem)] empty:hidden"
+          className="absolute bottom-16 left-1/2 -translate-x-1/2 z-[1000] max-w-[calc(100%-8rem)] empty:hidden"
         >
           {!drawingNow && mapStatus && (
             mapStatus.kind === "zoom-hint" ? (
@@ -1718,7 +1723,7 @@ function NeonMapInner({
                     ? mapRef.current?.setView([me.lat, me.lng], HOUSE_MIN_ZOOM)
                     : mapRef.current?.setZoom(HOUSE_MIN_ZOOM)
                 }
-                className="min-h-11 whitespace-nowrap rounded-full border border-neon/60 bg-surface/90 backdrop-blur px-4 font-display text-[10px] uppercase tracking-widest text-neon"
+                className="min-h-11 rounded-full border border-neon/60 bg-surface/90 backdrop-blur px-4 py-2 text-center font-display text-[10px] uppercase tracking-widest text-neon"
               >
                 Zoom in for house circles
               </button>
