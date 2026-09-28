@@ -11,7 +11,7 @@ import {
 } from "react-leaflet";
 import L from "leaflet";
 import "leaflet-rotate";
-import { LocateFixed, Maximize2, Minimize2, Navigation2 } from "lucide-react";
+import { Info, LocateFixed, Maximize2, Minimize2, Navigation2, Pencil } from "lucide-react";
 import { viewBounds } from "@/lib/map-bounds";
 import {
   resolveMapStatus,
@@ -23,7 +23,7 @@ import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { PIN_COLORS, type PinType } from "@/lib/pin-results";
 import { ZipBordersLayer, ZIP_MIN_ZOOM, type ZipTint } from "@/components/ZipBorders";
 import { HouseBubblesLayer, HOUSE_MIN_ZOOM, type OsmHouse } from "@/components/HouseBubbles";
-import { snapTapToHouse } from "@/lib/house-cache";
+import { houseAtPoint, snapTapToHouse } from "@/lib/house-cache";
 import { CustomerHomesLayer } from "@/components/CustomerHomes";
 
 // Canonical copy lives in lib/pin-results (SSR-safe); re-exported here so map
@@ -913,6 +913,7 @@ function NeonMapInner({
   territoryPopups = false,
   houseBubbles = false,
   onHouseTap,
+  onOpenTurfTools,
   zipTints,
   onZipTap,
   crew,
@@ -959,6 +960,10 @@ function NeonMapInner({
   houseBubbles?: boolean;
   /** Makes house bubbles tappable — the canvass screen's one-tap result sheet. */
   onHouseTap?: (house: OsmHouse) => void;
+  /** Renders a Turf Tools button at the top of the map rail (owner ask
+   *  2026-09-28, RepCard parity: the tool lives with the other map buttons,
+   *  and the header copy is unreachable once the map goes fullscreen). */
+  onOpenTurfTools?: () => void;
   /** ZIP → captain tint (color + name pill) for assigned ZIP codes. */
   zipTints?: Record<string, ZipTint>;
   /** Admin assign mode: ZIP polygons become tappable (forces the layer on). */
@@ -1003,6 +1008,16 @@ function NeonMapInner({
       return !on;
     });
   }
+
+  // House-info tool (owner ask 2026-09-28, RepCard parity): armed, EVERY map
+  // tap answers "what's this house?" — the result sheet with its address —
+  // instead of dropping the armed result. Covers the homes OSM never mapped
+  // (no circle to tap): a bubble-less tap gets a synthetic point-house the
+  // sheet reverse-geocodes. Session state, not persisted: a mode that
+  // silently survives reloads would eat the next shift's logging taps.
+  const [inspectOn, setInspectOn] = useState(false);
+  const canInspect = mode.kind === "pin" && houseBubbles && !!onHouseTap;
+  const inspecting = inspectOn && canInspect;
 
   // A search fly-away is a deliberate departure — the next GPS tick must not
   // yank the map back to the dot.
@@ -1193,6 +1208,13 @@ function NeonMapInner({
   function handleClick(ll: LatLng) {
     if (Date.now() - justDrewRef.current < 400) return;
     if (mode.kind === "draw") setDraft((d) => [...d, ll]);
+    // Info tool armed: open the tapped house's sheet (synthetic point-house
+    // where OSM has none) and never drop a pin. Before the disabled gate on
+    // purpose — reading an address needs no GPS fix.
+    if (inspecting && onHouseTap) {
+      onHouseTap(houseAtPoint(ll.lat, ll.lng, pins));
+      return;
+    }
     if (mode.kind === "pin" && !mode.disabled) {
       // Near-miss forgiveness (rep feedback 2026-09-15: "if I don't click it
       // perfectly on the circle it automatically puts not home"): a tap
@@ -1645,8 +1667,14 @@ function NeonMapInner({
         )}
 
         {/* Pin mode legend — shows the armed result so a scrolled-away picker
-          can't silently mislabel a street of doors */}
-        {mode.kind === "pin" && (
+          can't silently mislabel a street of doors. While the info tool is
+          armed it narrates THAT instead: taps read addresses, nothing logs. */}
+        {inspecting ? (
+          <div className="absolute top-3 right-3 z-[1000] flex items-center gap-2 rounded border border-[#00e5ff]/60 bg-surface/90 backdrop-blur px-3 py-2 font-display text-[10px] uppercase tracking-widest text-[#00e5ff]">
+            <Info className="h-3.5 w-3.5 shrink-0" />
+            House info: tap any house
+          </div>
+        ) : mode.kind === "pin" && (
           <div className="absolute top-3 right-3 z-[1000] flex items-center gap-2 rounded border border-neon/60 bg-surface/90 backdrop-blur px-3 py-2 font-display text-[10px] uppercase tracking-widest text-neon">
             {mode.armed ? (
               <>
@@ -1732,9 +1760,46 @@ function NeonMapInner({
           )}
         </div>
 
-        {/* Map controls: fullscreen + compass + ZIP borders toggle + recenter,
-          bottom-right */}
+        {/* Map controls: Turf Tools + house info + fullscreen + compass +
+          ZIP borders toggle + recenter, bottom-right (owner ask 2026-09-28:
+          the tools live ABOVE the other map buttons, RepCard-style) */}
         <div className="absolute bottom-16 right-3 z-[1000] flex flex-col items-center gap-2">
+          {onOpenTurfTools && !drawingNow && (
+            <button
+              type="button"
+              aria-label="Open Turf Tools — draw and assign areas"
+              title="Turf Tools — draw & assign areas"
+              onClick={onOpenTurfTools}
+              className="flex h-11 w-11 items-center justify-center rounded-full border bg-surface/90 backdrop-blur"
+              style={{
+                color: "var(--neon)",
+                borderColor: "color-mix(in oklab, var(--neon) 60%, var(--border))",
+              }}
+            >
+              <Pencil className="h-5 w-5" />
+            </button>
+          )}
+          {canInspect && (
+            <button
+              type="button"
+              aria-label={
+                inspectOn
+                  ? "Turn off house info — map taps log results again"
+                  : "House info — tap any house for its address"
+              }
+              aria-pressed={inspectOn}
+              title="House info — tap any house for its address"
+              onClick={() => setInspectOn((v) => !v)}
+              className="flex h-11 w-11 items-center justify-center rounded-full border bg-surface/90 backdrop-blur"
+              style={
+                inspectOn
+                  ? { color: "#00e5ff", borderColor: "#00e5ff99", boxShadow: "0 0 10px -2px #00e5ff" }
+                  : { color: "var(--muted-foreground)", borderColor: "var(--border)" }
+              }
+            >
+              <Info className="h-5 w-5" />
+            </button>
+          )}
           <button
             type="button"
             aria-label={isFull ? "Exit full screen" : "View map full screen"}
