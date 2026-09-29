@@ -144,18 +144,26 @@ function CaptainTerritory() {
 // of the captain rationale above.
 function AdminTerritory() {
   const [view, setView] = useState<"tools" | "run" | "crew">("tools");
+  // Crew Map is reachable from BOTH other views; Back must return to the one
+  // the admin came from — a mid-run detour to check the vans shouldn't dump
+  // them on Turf Tools and reset ActiveRun's armed chip/sheet state.
+  const [crewReturn, setCrewReturn] = useState<"tools" | "run">("tools");
+  const openCrew = (from: "tools" | "run") => {
+    setCrewReturn(from);
+    setView("crew");
+  };
   if (view === "run")
     return (
       <ActiveRun
         variant="captain"
         onOpenTurfTools={() => setView("tools")}
-        onOpenCrewMap={() => setView("crew")}
+        onOpenCrewMap={() => openCrew("run")}
       />
     );
-  if (view === "crew") return <CrewMap onBack={() => setView("tools")} />;
+  if (view === "crew") return <CrewMap onBack={() => setView(crewReturn)} />;
   return (
     <ManagerTerritoryView
-      onOpenCrewMap={() => setView("crew")}
+      onOpenCrewMap={() => openCrew("tools")}
       onStartCanvassing={() => setView("run")}
     />
   );
@@ -764,8 +772,10 @@ function ManagerTerritoryView({
 
   /** Promote cleanup: retire the historical source ring once its live turf
    *  saved. Fire-and-forget from saveTurf.onSuccess — the assignment already
-   *  succeeded, so a failure here only leaves a ghost dashed ring, which is
-   *  now user-fixable via the ring's own Delete action. 0 deleted rows =
+   *  succeeded, so a failure here only leaves a ghost dashed ring. Admins can
+   *  clear it via the ring's own Delete action; captains can promote (since
+   *  2026-09-28) but the popup Delete stays admin-only, so their copy points
+   *  at an admin instead of a button they don't have. 0 deleted rows =
    *  another manager already removed it; equally fine. */
   async function removePromotedHistoryRow(id: string) {
     const { error } = await supabase
@@ -775,7 +785,9 @@ function ManagerTerritoryView({
       .select("id");
     if (error) {
       toast.info(
-        "Area is live, but the old historical outline couldn't be removed — delete it from its popup.",
+        isAdmin
+          ? "Area is live, but the old historical outline couldn't be removed — delete it from its popup."
+          : "Area is live, but the old historical outline couldn't be removed — an admin can delete it from its popup (don't assign it again; that would duplicate the area).",
         { duration: 8000 },
       );
     }
@@ -1116,8 +1128,10 @@ function ManagerTerritoryView({
         <ArcadePanel title="ZIP Zones">
           {zipByCaptain.length === 0 ? (
             <div className="text-sm text-muted-foreground">
+              {/* PR #247 removed Assign-ZIPs mode — the real flow is the map
+                  rail's ZIP-borders toggle, then the ZIP's label pill. */}
               {canAssign
-                ? "No ZIPs assigned yet. Tap “Assign ZIPs”, then tap a ZIP boundary on the map to hand it to a captain."
+                ? "No ZIPs assigned yet. Turn on ZIP code borders (map controls), zoom in until the ZIP label pills appear, then tap a pill to hand that ZIP to a captain."
                 : "No ZIPs assigned yet — a manager hands ZIPs to captains here."}
             </div>
           ) : (
