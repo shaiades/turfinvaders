@@ -26,6 +26,12 @@ import {
 import { AssignZipSheet, type AssignableCaptain } from "@/components/AssignZipSheet";
 import { ZipCaptainAssigner } from "@/components/ZipCaptainAssigner";
 import { useZipTints, useZipAssignmentActions } from "@/hooks/useZipAssignments";
+import {
+  fetchAllRepcardTerritoryRows,
+  fetchZctaBoundaries,
+  historyRowsInsideZip,
+  matchHistoryRowsToZips,
+} from "@/lib/zip-history-sweep";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
@@ -35,16 +41,6 @@ export const Route = createFileRoute("/_authenticated/my-territory")({
   head: () => ({ meta: [{ title: "My Territory — Turf Invaders" }] }),
   component: MyTerritoryPage,
 });
-
-type RepcardTerritoryRow = {
-  // uuid PK — the stable key for popup actions (repcard_area_id is nullable).
-  id: string;
-  rep_name: string | null;
-  team: string | null;
-  color: string | null;
-  assigned_at: string | null;
-  polygon_coordinates: LatLng[];
-};
 
 type TurfRow = {
   id: string;
@@ -198,7 +194,9 @@ function ManagerTerritoryView({
   // try/catch mirrors ti_zip_borders: private mode must not take the map down.
   const [showHistory, setShowHistory] = useState(() => {
     try {
-      return typeof window !== "undefined" && localStorage.getItem("ti_show_repcard_history") !== "0";
+      return (
+        typeof window !== "undefined" && localStorage.getItem("ti_show_repcard_history") !== "0"
+      );
     } catch {
       return true;
     }
@@ -384,29 +382,22 @@ function ManagerTerritoryView({
     queryKey: ["repcard_territory"],
     staleTime: 60 * 60 * 1000,
     gcTime: 60 * 60 * 1000,
-    queryFn: async () => {
-      const PAGE = 1000;
-      const rows: RepcardTerritoryRow[] = [];
-      for (let from = 0; from < 20000; from += PAGE) {
-        const { data, error } = await supabase
-          .from("repcard_territory_history")
-          .select("id, rep_name, team, color, assigned_at, polygon_coordinates")
-          .order("assigned_at", { ascending: true })
-          .range(from, from + PAGE - 1);
-        if (error) throw error;
-        const batch = (data ?? []) as unknown as RepcardTerritoryRow[];
-        rows.push(...batch);
-        if (batch.length < PAGE) break;
-      }
-      return rows;
-    },
+    queryFn: fetchAllRepcardTerritoryRows,
   });
 
   // Managers see reassignments live (requires turfs in the realtime publication)
   useRealtimeInvalidate({
     channel: "my-territory-turfs",
     tables: ["turfs", "zip_assignments", "repcard_territory_history"],
-    invalidateKeys: [["turfs"], ["turf_history"], ["zip_assignments"], ["repcard_territory"]],
+    invalidateKeys: [
+      ["turfs"],
+      ["turf_history"],
+      ["zip_assignments"],
+      ["repcard_territory"],
+      // The open ZIP sheet's sweep count goes stale the moment another
+      // device promotes or deletes a ring.
+      ["zip_history_count"],
+    ],
     enabled: !!user?.id,
   });
 
@@ -808,6 +799,135 @@ function ManagerTerritoryView({
     onError: (e: Error) => toast.error(`Failed to delete: ${e.message}`, { duration: 8000 }),
   });
 
+  // ZIP hand-off cascade (owner ask 2026-09-28, part 2: "when I assign a zip
+  // code, all of the pre-assigned areas/historic areas get assigned to the
+  // person I assigned the zip code to"). Same promote-and-retire semantics as
+  // the one-ring popup flow, batched per ZIP. Each chunk retires its source
+  // rings right after its insert lands, so a mid-batch failure leaves a clean
+  // prefix — a retry only re-sweeps what's still dashed, never duplicates.
+  const SWEEP_TOAST = "zip-history-sweep";
+  const sweepHistory = useMutation({
+    mutationFn: async (vars: { zips: string[]; captain_id: string; captain_name: string }) => {
+      const { data: authData } = await supabase.auth.getUser();
+      const uid = authData.user?.id;
+      if (!uid) throw new Error("Not signed in — please refresh and sign in again.");
+      // Shares the map layer's cache key: with History On this is a no-op
+      // read; with History Off it fetches once for the sweep.
+      const rows = await qc.fetchQuery({
+        queryKey: ["repcard_territory"],
+        queryFn: fetchAllRepcardTerritoryRows,
+        staleTime: 60 * 60 * 1000,
+      });
+      const boundaries = await fetchZctaBoundaries(vars.zips);
+      const missing = vars.zips.filter((z) => !boundaries.has(z));
+      const matches = matchHistoryRowsToZips(rows, boundaries);
+      let promoted = 0;
+      let removed = 0;
+      const counters = new Map<string, number>();
+      const CHUNK = 100;
+      for (let i = 0; i < matches.length; i += CHUNK) {
+        const slice = matches.slice(i, i + CHUNK);
+        const inserts = slice.map(({ zip, row }) => {
+          const n = (counters.get(zip) ?? 0) + 1;
+          counters.set(zip, n);
+          return {
+            // Per-ZIP numbering: "92117 · history 3" is a stable handle in
+            // the Assigned Areas list without leaking the old rep's name.
+            name: `${zip} · history ${n}`,
+            color: assigneeColor(vars.captain_id),
+            polygon_coordinates: (row.polygon_coordinates ?? []).map((p) => ({
+              lat: p.lat,
+              lng: p.lng,
+            })),
+            assigned_user_id: vars.captain_id,
+            created_by: uid,
+          };
+        });
+        const { data: ins, error } = await supabase.from("turfs").insert(inserts).select("id");
+        if (error) {
+          throw new Error(
+            promoted > 0
+              ? `${error.message} — ${promoted} area(s) were assigned before the failure; assign the ZIP again to sweep the rest.`
+              : error.message,
+          );
+        }
+        promoted += (ins ?? []).length;
+        // `.select("id")`: an RLS-blocked DELETE "succeeds" with 0 rows — the
+        // shortfall is reported below instead of read as done.
+        const { data: del, error: delErr } = await supabase
+          .from("repcard_territory_history")
+          .delete()
+          .in(
+            "id",
+            slice.map((m) => m.row.id),
+          )
+          .select("id");
+        if (!delErr) removed += (del ?? []).length;
+      }
+      return { promoted, removed, missing };
+    },
+    onMutate: () => {
+      toast.loading("Sweeping historic areas in the ZIP…", { id: SWEEP_TOAST });
+    },
+    onSuccess: (res, vars) => {
+      if (res.promoted === 0) {
+        toast.info(
+          res.missing.length > 0
+            ? `Couldn't load the boundary for ZIP ${res.missing.join(", ")} — no historic areas were moved. Try again from the ZIP pill.`
+            : "No historic areas inside — the ZIP is assigned, nothing else to move.",
+          { id: SWEEP_TOAST, duration: 8000 },
+        );
+      } else {
+        toast.success(
+          `🗺️ ${res.promoted} historic area${res.promoted === 1 ? "" : "s"} assigned to ${vars.captain_name}`,
+          { id: SWEEP_TOAST, duration: 8000 },
+        );
+        if (res.removed < res.promoted) {
+          toast.info(
+            `${res.promoted - res.removed} old dashed outline(s) couldn't be retired — delete them from their popups.`,
+            { duration: 8000 },
+          );
+        }
+        if (res.missing.length > 0) {
+          toast.info(
+            `ZIP ${res.missing.join(", ")}: boundary unavailable, historic areas there weren't swept.`,
+            { duration: 8000 },
+          );
+        }
+      }
+      qc.invalidateQueries({ queryKey: ["turfs"] });
+      qc.invalidateQueries({ queryKey: ["turf_history"] });
+      qc.invalidateQueries({ queryKey: ["repcard_territory"] });
+      qc.invalidateQueries({ queryKey: ["zip_history_count"] });
+    },
+    onError: (e: Error) => {
+      toast.error(`History sweep failed: ${e.message}`, { id: SWEEP_TOAST, duration: 10000 });
+      // A partial sweep still moved rows — keep the map honest.
+      qc.invalidateQueries({ queryKey: ["turfs"] });
+      qc.invalidateQueries({ queryKey: ["repcard_territory"] });
+      qc.invalidateQueries({ queryKey: ["zip_history_count"] });
+    },
+  });
+
+  // How many historic rings the open ZIP sheet would sweep — drives its
+  // checkbox row. null = boundary unavailable (the sweep would no-op).
+  const zipHistoryCountQuery = useQuery({
+    enabled: !!zipTarget && canAssign,
+    queryKey: ["zip_history_count", zipTarget],
+    staleTime: 5 * 60_000,
+    queryFn: async () => {
+      const rows = await qc.fetchQuery({
+        queryKey: ["repcard_territory"],
+        queryFn: fetchAllRepcardTerritoryRows,
+        staleTime: 60 * 60 * 1000,
+      });
+      const boundaries = await fetchZctaBoundaries([zipTarget!]);
+      const polys = boundaries.get(zipTarget!);
+      if (!polys) return null;
+      return historyRowsInsideZip(rows, polys).length;
+    },
+  });
+
   /** Historical ring → live turf: re-enter the post-draw assign flow with the
    *  row's RAW ring — the rendered Territory polygon is RDP-simplified for
    *  canvas speed, and a permanent turf boundary shouldn't inherit that ~12m
@@ -1104,8 +1224,18 @@ function ManagerTerritoryView({
           <ZipCaptainAssigner
             captains={captains}
             assignments={zipZones.data ?? []}
-            saving={zipActions.assignMany.isPending}
-            onAssign={(zips, captain_id) => zipActions.assignMany.mutateAsync({ zips, captain_id })}
+            saving={zipActions.assignMany.isPending || sweepHistory.isPending}
+            onAssign={async (zips, captain_id, includeHistory) => {
+              await zipActions.assignMany.mutateAsync({ zips, captain_id });
+              if (includeHistory) {
+                sweepHistory.mutate({
+                  zips,
+                  captain_id,
+                  captain_name:
+                    captains.find((c) => c.id === captain_id)?.display_name ?? "the captain",
+                });
+              }
+            }}
           />
         )}
 
@@ -1301,9 +1431,35 @@ function ManagerTerritoryView({
         currentCaptainName={zipTargetRow?.captain?.display_name ?? null}
         captains={captains}
         saving={zipActions.assign.isPending || zipActions.unassign.isPending}
-        onAssign={(captainId) => {
+        historyCount={
+          zipHistoryCountQuery.isPending ? undefined : (zipHistoryCountQuery.data ?? null)
+        }
+        onAssign={(captainId, includeHistory) => {
           if (!zipTarget) return;
-          zipActions.assign.mutate({ zip: zipTarget, captain_id: captainId });
+          const zip = zipTarget;
+          const captain_name =
+            captains.find((c) => c.id === captainId)?.display_name ?? "the captain";
+          zipActions.assign.mutate(
+            { zip, captain_id: captainId },
+            {
+              onSuccess: () => {
+                if (includeHistory) {
+                  sweepHistory.mutate({ zips: [zip], captain_id: captainId, captain_name });
+                }
+              },
+            },
+          );
+          setZipTarget(null);
+        }}
+        // Pre-cascade ZIPs: hand the historic areas to the EXISTING zone
+        // captain without an unassign/reassign dance.
+        onSweepHistory={() => {
+          if (!zipTarget || !zipTargetRow?.captain_id) return;
+          sweepHistory.mutate({
+            zips: [zipTarget],
+            captain_id: zipTargetRow.captain_id,
+            captain_name: zipTargetRow.captain?.display_name ?? "the captain",
+          });
           setZipTarget(null);
         }}
         onUnassign={() => {

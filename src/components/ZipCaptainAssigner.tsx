@@ -4,7 +4,7 @@
 // for dispatch mornings where the ZIP list is already known. Admin tier only.
 
 import { useMemo, useState } from "react";
-import { Plus, Send, X } from "lucide-react";
+import { Check, History, Plus, Send, X } from "lucide-react";
 import { ArcadePanel } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,12 +22,15 @@ export function ZipCaptainAssigner({
   captains: AssignableCaptain[];
   assignments: ZipAssignmentRow[];
   saving: boolean;
-  /** Batch-assign; resolves on commit so the staged list only clears on success. */
-  onAssign: (zips: string[], captainId: string) => Promise<unknown>;
+  /** Batch-assign; resolves on commit so the staged list only clears on
+   *  success. includeHistory = also sweep each ZIP's historic RepCard rings
+   *  to the captain (owner ask 2026-09-28). */
+  onAssign: (zips: string[], captainId: string, includeHistory: boolean) => Promise<unknown>;
 }) {
   const [captainId, setCaptainId] = useState<string | null>(null);
   const [entry, setEntry] = useState("");
   const [staged, setStaged] = useState<string[]>([]);
+  const [withHistory, setWithHistory] = useState(true);
 
   const byZip = useMemo(() => new Map(assignments.map((r) => [r.zip, r])), [assignments]);
   const countByCaptain = useMemo(() => {
@@ -62,7 +65,7 @@ export function ZipCaptainAssigner({
 
   async function submit() {
     if (!captainId || toWrite.length === 0) return;
-    await onAssign(toWrite, captainId);
+    await onAssign(toWrite, captainId, withHistory);
     setStaged([]);
   }
 
@@ -187,6 +190,37 @@ export function ZipCaptainAssigner({
               })}
             </div>
           )}
+
+          {/* Cascade opt-out: each assigned ZIP's historic RepCard rings
+              become live areas for the captain (owner default: on). */}
+          <button
+            type="button"
+            role="checkbox"
+            aria-checked={withHistory}
+            disabled={saving}
+            onClick={() => setWithHistory((v) => !v)}
+            className={`w-full min-h-11 flex items-center gap-3 px-3 py-1.5 rounded border text-left transition-colors ${
+              withHistory
+                ? "border-neon bg-neon/10"
+                : "border-border bg-surface hover:border-neon/60"
+            } disabled:opacity-50`}
+          >
+            <span
+              aria-hidden
+              className={`shrink-0 w-5 h-5 rounded border flex items-center justify-center ${
+                withHistory ? "border-neon bg-neon text-background" : "border-muted-foreground/50"
+              }`}
+            >
+              {withHistory && <Check className="w-3.5 h-3.5" />}
+            </span>
+            <span className="min-w-0 flex-1 text-sm">
+              Also assign the historic areas inside these ZIPs
+              <span className="block text-[10px] uppercase tracking-widest text-muted-foreground">
+                Dashed RepCard rings become their live areas
+              </span>
+            </span>
+            <History className="h-4 w-4 shrink-0 text-muted-foreground" />
+          </button>
 
           <Button
             onClick={() => void submit()}
