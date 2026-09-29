@@ -8,8 +8,8 @@ import { clamp01, easeInOut, easeOutBack, makeBeeper, popText, rr } from "./intr
  * END-OF-DAY RECAP (owner ask 2026-09-22): a two-act cutscene that auto-plays
  * once per COMPLETED report day, on the next app open after the 6 PM PT lock
  * — the guaranteed delivery channel (push only reaches subscribed devices).
- * Act 1 (~4s): "TOP CANVASSERS" — the day's top 3 by leads on a podium of
- * gold/silver/bronze cards, counts ticking up, confetti on #1. Act 2 (~3.5s,
+ * Act 1 (~6s): "TOP CANVASSERS" — the day's top 3 by leads on a podium of
+ * gold/silver/bronze cards, counts ticking up, confetti on #1. Act 2 (~6s,
  * immediately after): "THE DOUGHNUT ZONE" — a 🍩 rain and name chips for
  * everyone who clocked in and put up a zero, in the app's donut-club dialect
  * (frozen ❄ = second straight zero, matching the Wrap's freezer).
@@ -124,7 +124,9 @@ function buildTimeline(winnerCount: number, donutCount: number, act2: boolean) {
   const popAt = (rankIdx: number) => 950 + (winnerCount - 1 - rankIdx) * 600;
   const T_TOP = winnerCount > 0 ? popAt(0) : 0; // #1 lands, confetti + fanfare
   const T_SHINE = T_TOP + 750; // counts finish ticking, gleam sweeps
-  const T_ACT1_OUT = winnerCount > 0 ? T_SHINE + 700 : 1600;
+  // Settled holds (owner ask 2026-09-29): each act lingers a few seconds
+  // after its last beat so the summary is actually readable, not a flash.
+  const T_ACT1_OUT = winnerCount > 0 ? T_SHINE + 3200 : 3000;
   if (!act2) {
     // Donut list unknown (presence failed): Act 1 only — never an
     // affirmative "zero doughnuts" claim the data can't back.
@@ -141,7 +143,7 @@ function buildTimeline(winnerCount: number, donutCount: number, act2: boolean) {
   const T_NAMES = T_ACT2 + 800;
   const chipCount = Math.min(donutCount, MAX_CHIP_NAMES) + (donutCount > MAX_CHIP_NAMES ? 1 : 0);
   const T_TAG = donutCount > 0 ? T_NAMES + chipCount * CHIP_STEP + 350 : T_ACT2 + 600;
-  const T_FADE = T_TAG + (donutCount > 0 ? 900 : 1300);
+  const T_FADE = T_TAG + (donutCount > 0 ? 3400 : 3000);
   const DURATION = T_FADE + 450;
   return { T_TITLE, popAt, T_TOP, T_SHINE, T_ACT1_OUT, T_ACT2, T_RAIN, T_NAMES, chipCount, T_TAG, T_FADE, DURATION, act2 };
 }
