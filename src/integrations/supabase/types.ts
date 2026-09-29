@@ -627,6 +627,8 @@ export type Database = {
           status: Database["public"]["Enums"]["canvasser_status"]
           team_id: string | null
           updated_at: string
+          van_locked_at: string | null
+          van_locked_by: string | null
           weekly_income_goal: number
           weekly_volume_goal: number | null
           xp: number
@@ -658,6 +660,8 @@ export type Database = {
           status?: Database["public"]["Enums"]["canvasser_status"]
           team_id?: string | null
           updated_at?: string
+          van_locked_at?: string | null
+          van_locked_by?: string | null
           weekly_income_goal?: number
           weekly_volume_goal?: number | null
           xp?: number
@@ -689,6 +693,8 @@ export type Database = {
           status?: Database["public"]["Enums"]["canvasser_status"]
           team_id?: string | null
           updated_at?: string
+          van_locked_at?: string | null
+          van_locked_by?: string | null
           weekly_income_goal?: number
           weekly_volume_goal?: number | null
           xp?: number

@@ -11,6 +11,9 @@ export type RosterProfile = {
   is_active: boolean | null;
   is_placeholder: boolean | null;
   suspension_tracked: boolean;
+  /** Pinned in-app (Monday's Van sync skips them) when non-null. */
+  van_locked_at: string | null;
+  van_locked_by: string | null;
   created_at: string;
 };
 
@@ -35,7 +38,7 @@ export function useDispatchRoster(opts?: { enabled?: boolean }) {
         supabase
           .from("profiles")
           .select(
-            "id, display_name, office_location, team_id, is_active, is_placeholder, suspension_tracked, created_at, teams:team_id(office_location)",
+            "id, display_name, office_location, team_id, is_active, is_placeholder, suspension_tracked, van_locked_at, van_locked_by, created_at, teams:team_id(office_location)",
           )
           .order("display_name"),
         supabase.from("user_roles").select("user_id, role"),
@@ -57,6 +60,8 @@ export function useDispatchRoster(opts?: { enabled?: boolean }) {
           is_active: boolean | null;
           is_placeholder: boolean | null;
           suspension_tracked: boolean;
+          van_locked_at: string | null;
+          van_locked_by: string | null;
           created_at: string;
           teams: { office_location: string | null } | null;
         }>
@@ -68,6 +73,8 @@ export function useDispatchRoster(opts?: { enabled?: boolean }) {
         is_active: p.is_active,
         is_placeholder: p.is_placeholder,
         suspension_tracked: p.suspension_tracked,
+        van_locked_at: p.van_locked_at,
+        van_locked_by: p.van_locked_by,
         created_at: p.created_at,
         team_office: p.teams?.office_location ?? null,
       }));

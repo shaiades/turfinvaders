@@ -30,6 +30,7 @@ import {
   Pencil,
   UserPlus,
   Lock,
+  LockOpen,
   Merge,
   ArrowRightLeft,
   Users,
@@ -40,7 +41,7 @@ import { RenameCanvasserDialog, type NameGroupRef } from "@/components/RenameCan
 import { MergeCanvasserDialog } from "@/components/MergeCanvasserDialog";
 import { isLeadSourceName } from "@/lib/lead-sources";
 import { useAuth } from "@/hooks/useAuth";
-import { useMoveAgents } from "@/hooks/useRosterActions";
+import { useMoveAgents, useSetVanLock } from "@/hooks/useRosterActions";
 import { isAdminRole, isManagerRole } from "@/lib/roles";
 import { canManageTarget } from "@/lib/role-policy";
 import { normalizeName } from "@/lib/utils";
@@ -101,18 +102,39 @@ export function FleetDispatchManage({
   });
 
   const moveAgents = useMoveAgents(vans);
+  const setVanLock = useSetVanLock();
 
   // Move the WHOLE name group (every non-archived same-name duplicate), like
   // the board's row menu — moving only the clicked profile used to strand a
   // duplicate on the old van.
-  const moveGroup = (profile: RosterProfile, vanId: string | null) => {
+  const groupIds = (profile: RosterProfile) => {
     const key = normalizeName(profile.display_name) || `id:${profile.id}`;
-    const ids = allProfiles
+    return allProfiles
       .filter(
         (p) => p.is_active !== false && (normalizeName(p.display_name) || `id:${p.id}`) === key,
       )
       .map((p) => p.id);
-    moveAgents.mutate({ ids, vanId, name: profile.display_name ?? "Agent" });
+  };
+  const moveGroup = (profile: RosterProfile, vanId: string | null) => {
+    moveAgents.mutate({ ids: groupIds(profile), vanId, name: profile.display_name ?? "Agent" });
+  };
+  // Lock semantics mirror the board: ANY non-archived same-name duplicate
+  // pinned shows the padlock; toggling writes the whole group.
+  const groupLocked = (profile: RosterProfile) => {
+    const key = normalizeName(profile.display_name) || `id:${profile.id}`;
+    return allProfiles.some(
+      (p) =>
+        p.is_active !== false &&
+        !!p.van_locked_at &&
+        (normalizeName(p.display_name) || `id:${p.id}`) === key,
+    );
+  };
+  const toggleGroupLock = (profile: RosterProfile) => {
+    setVanLock.mutate({
+      ids: groupIds(profile),
+      locked: !groupLocked(profile),
+      name: profile.display_name ?? "Agent",
+    });
   };
 
   const archiveAgent = useMutation({
@@ -320,6 +342,8 @@ export function FleetDispatchManage({
                                   vans={canModify ? vanOptions : undefined}
                                   currentVanId={v.id}
                                   onMove={canModify ? (vanId) => moveGroup(r, vanId) : undefined}
+                                  locked={groupLocked(r)}
+                                  onToggleLock={canModify ? () => toggleGroupLock(r) : undefined}
                                   onArchive={
                                     canArchive
                                       ? () => {
@@ -464,6 +488,8 @@ export function FleetDispatchManage({
                     vans={canModify ? vanOptions : undefined}
                     currentVanId={p.team_id}
                     onMove={canModify ? (vanId) => moveGroup(p, vanId) : undefined}
+                    locked={groupLocked(p)}
+                    onToggleLock={canModify ? () => toggleGroupLock(p) : undefined}
                     onArchive={
                       canArchive
                         ? () => {
@@ -517,7 +543,7 @@ export function FleetDispatchManage({
           </div>
           <p className="text-[10px] text-muted-foreground">
             {canManage
-              ? "Tap Move on a row — or Move Players to search and place several at once. New Monday.com agents land here automatically and follow their card's Van column."
+              ? "Tap Move on a row — or Move Players to search and place several at once. Moves here pin players (🔒) so Monday can't override them; new Monday.com agents still land here automatically until their first in-app move."
               : "Free Agents auto-populate from Monday.com webhooks."}
           </p>
         </div>
@@ -655,6 +681,8 @@ function RosterRow({
   onRename,
   onMerge,
   isCaptain = false,
+  locked = false,
+  onToggleLock,
 }: {
   id: string;
   name: string;
@@ -668,6 +696,9 @@ function RosterRow({
   onRename?: () => void;
   onMerge?: () => void;
   isCaptain?: boolean;
+  /** Pinned in-app — Monday's Van sync won't move them. */
+  locked?: boolean;
+  onToggleLock?: () => void;
 }) {
   const isGhost = points === 0 && volume === 0;
   return (
@@ -682,6 +713,14 @@ function RosterRow({
             Captain
           </span>
         )}
+        {locked && (
+          <span
+            title="Pinned in-app — Monday's Van column won't move them"
+            className="shrink-0 text-muted-foreground"
+          >
+            <Lock className="w-3 h-3" />
+          </span>
+        )}
       </span>
       {vans && onMove && (
         // Sentinel-value Select: the trigger always reads "Move to…"/"Assign
@@ -694,6 +733,7 @@ function RosterRow({
             if (val === "current") return;
             if (val === "__rename") return onRename?.();
             if (val === "__merge") return onMerge?.();
+            if (val === "__lock") return onToggleLock?.();
             onMove(val === "free" ? null : val);
           }}
         >
@@ -725,6 +765,21 @@ function RosterRow({
               <SelectItem value="__merge">
                 <span className="inline-flex items-center gap-2">
                   <Merge className="w-3.5 h-3.5" /> Combine with another player…
+                </span>
+              </SelectItem>
+            )}
+            {onToggleLock && (
+              <SelectItem value="__lock">
+                <span className="inline-flex items-center gap-2">
+                  {locked ? (
+                    <>
+                      <LockOpen className="w-3.5 h-3.5" /> Unlock — Monday takes over
+                    </>
+                  ) : (
+                    <>
+                      <Lock className="w-3.5 h-3.5" /> Pin to van — block Monday
+                    </>
+                  )}
                 </span>
               </SelectItem>
             )}

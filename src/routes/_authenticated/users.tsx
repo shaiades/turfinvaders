@@ -100,6 +100,9 @@ function UsersPage() {
 
   // ---- Name groups: one row per person, all duplicates riding together ----
   const groups = useMemo<PlayerGroup[]>(() => {
+    // For resolving van_locked_by → a human name on the PlayerSheet.
+    const nameById = new Map<string, string | null>();
+    for (const p of profiles) nameById.set(p.id, p.display_name);
     const byKey = new Map<string, RosterProfile[]>();
     for (const p of profiles) {
       const key = normalizeName(p.display_name) || `id:${p.id}`;
@@ -131,6 +134,14 @@ function UsersPage() {
         active[0];
       const vanId = archivedOnly ? null : (vanRep?.team_id ?? null);
       const van = vanId ? vanById.get(vanId) : null;
+      // Latest pin among active members — ANY-locked shows the padlock (a
+      // half-locked group's unlocked duplicate is the one Monday can still
+      // drag; one toggle/move writes all activeIds and heals the mix).
+      let lockRep: RosterProfile | undefined;
+      for (const m of active) {
+        if (!m.van_locked_at) continue;
+        if (!lockRep || m.van_locked_at > lockRep.van_locked_at!) lockRep = m;
+      }
       out.push({
         key,
         display_name: rep.display_name,
@@ -145,6 +156,11 @@ function UsersPage() {
         archivedOnly,
         noLogin: members.every((m) => m.is_placeholder === true),
         suspensionTracked: active.some((m) => m.suspension_tracked !== false),
+        vanLocked: !!lockRep,
+        vanLockedAt: lockRep?.van_locked_at ?? null,
+        vanLockedByName: lockRep?.van_locked_by
+          ? (nameById.get(lockRep.van_locked_by) ?? null)
+          : null,
         createdAt: rep.created_at ?? null,
         canModify: canManageTarget(realRole, roles),
       });
@@ -483,8 +499,9 @@ function UsersPage() {
         </div>
         <p className="text-[10px] text-muted-foreground mt-3">
           Lead-source channels (Self Gen, Upsell, …) aren't people, so they don't appear here —
-          their production stays on the dispatch board. Monday.com's Van column keeps final say on
-          van rides.
+          their production stays on the dispatch board. Monday.com's Van column places players
+          automatically until someone moves them in-app — a move pins them (🔒), and unlocking from
+          their sheet hands them back to Monday.
         </p>
       </ArcadePanel>
 
