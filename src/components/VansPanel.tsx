@@ -320,8 +320,9 @@ export function VansPanel({
         </div>
       )}
       <p className="text-[10px] text-muted-foreground mt-3">
-        Changing a van's office moves its whole roster to that office. Monday.com's Van column keeps
-        final say over who rides where — a move here can be overridden by the next card.
+        Changing a van's office moves its whole roster to that office. Monday.com's Van column
+        auto-places unpinned players — an in-app move pins someone (🔒) so the next card can't
+        override it.
       </p>
     </ArcadePanel>
   );

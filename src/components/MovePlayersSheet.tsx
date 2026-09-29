@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check } from "lucide-react";
+import { Check, Lock } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/select";
 import { useAuth } from "@/hooks/useAuth";
 import { useDispatchRoster, useDispatchVans, type Van } from "@/hooks/useFleetRoster";
-import { useMoveAgents } from "@/hooks/useRosterActions";
+import { useMoveAgents, useSetVanLock } from "@/hooks/useRosterActions";
 import { canManageTarget } from "@/lib/role-policy";
 import { normalizeName } from "@/lib/utils";
 import { isLeadSourceKey } from "@/lib/lead-sources";
@@ -49,6 +49,8 @@ type MoveGroup = {
   vanId: string | null;
   office: string;
   isCaptain: boolean;
+  /** ANY movable member pinned in-app (Monday's Van sync skips them). */
+  locked: boolean;
   canMove: boolean;
 };
 
@@ -63,6 +65,7 @@ export function MovePlayersSheet({
   const roster = useDispatchRoster({ enabled: open });
   const { data: vans = [] } = useDispatchVans({ enabled: open });
   const moveAgents = useMoveAgents(vans);
+  const setVanLock = useSetVanLock();
 
   const [search, setSearch] = useState("");
   const [officeChip, setOfficeChip] = useState<OfficeChip>("All");
@@ -129,6 +132,7 @@ export function MovePlayersSheet({
         vanId,
         office: van?.office_location ?? vanRep.office_location ?? DEFAULT_OFFICE,
         isCaptain: roles.has("captain"),
+        locked: movable.some((m) => !!m.van_locked_at),
         canMove: canManageTarget(realRole, Array.from(roles)),
       });
     }
@@ -171,6 +175,28 @@ export function MovePlayersSheet({
       return next;
     });
 
+  // Unlock right here so every role that can PIN (a move auto-pins) can also
+  // UNPIN: captains reach this sheet from their Command board and can move
+  // any non-privileged player fleet-wide, but /users (PlayerSheet) is
+  // admin-only and their board row menu only covers their own van.
+  const doUnlock = () => {
+    const lockedChosen = groups.filter((g) => selected.has(g.key) && g.canMove && g.locked);
+    if (lockedChosen.length === 0) return;
+    setVanLock.mutate(
+      {
+        ids: lockedChosen.flatMap((g) => g.movableIds),
+        locked: false,
+        name:
+          lockedChosen.length === 1
+            ? (lockedChosen[0].display_name ?? "Player")
+            : `${lockedChosen.length} players`,
+      },
+      {
+        onSuccess: () => setSelected(new Set()),
+      },
+    );
+  };
+
   const doMove = () => {
     if (!destId) return;
     // Resolve ids from the LIVE groups at click time, never from stored state.
@@ -201,9 +227,10 @@ export function MovePlayersSheet({
             Move Players
           </SheetTitle>
           <SheetDescription className="text-xs">
-            Tap players to select, then pick a destination. Players on Monday cards follow the
-            card&apos;s Van column — a move here can be overridden by the next card that names a
-            different van.
+            Tap players to select, then pick a destination. A move here pins them (🔒) to the app —
+            Monday&apos;s Van column can no longer override it. To hand someone back to Monday,
+            select them here and tap Unlock (also on their sheet in Manage Players and the
+            board&apos;s row menu, where available).
           </SheetDescription>
         </SheetHeader>
 
@@ -299,7 +326,7 @@ export function MovePlayersSheet({
 
         {selected.size > 0 && (
           <SheetFooter data-tour="move-players-action" className="border-t border-border">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="text-[11px] font-display uppercase tracking-widest text-neon shrink-0">
                 {selected.size} selected
               </span>
@@ -311,6 +338,18 @@ export function MovePlayersSheet({
               >
                 Clear
               </Button>
+              {groups.some((g) => selected.has(g.key) && g.canMove && g.locked) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={setVanLock.isPending}
+                  className="shrink-0 h-11 md:h-9 text-xs gap-1"
+                  title="Unpin the selected players — Monday's Van column takes over"
+                  onClick={doUnlock}
+                >
+                  <Lock className="w-3 h-3" /> Unlock
+                </Button>
+              )}
               <Select value={destId ?? undefined} onValueChange={(v) => setDestId(v)}>
                 <SelectTrigger className="flex-1 min-w-0 h-11 text-xs font-display uppercase tracking-wider bg-background border-[color:var(--neon-blue)]/50 hover:border-[color:var(--neon-blue)]">
                   <SelectValue placeholder="Move to…" />
@@ -386,6 +425,14 @@ function GroupRow({
         {g.isCaptain && (
           <span className="shrink-0 text-[9px] font-display uppercase tracking-widest px-1.5 py-0.5 rounded border border-accent/60 text-accent bg-accent/10">
             Captain
+          </span>
+        )}
+        {g.locked && (
+          <span
+            title="Pinned in-app — Monday's Van column won't move them"
+            className="shrink-0 text-muted-foreground"
+          >
+            <Lock className="w-3 h-3" />
           </span>
         )}
       </span>

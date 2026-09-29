@@ -17,12 +17,17 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Archive, ArchiveRestore, History, Merge, Pencil, Send, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, History, Lock, Merge, Pencil, Send, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { deleteProfile } from "@/lib/fleet.functions";
 import { getInviteTarget } from "@/lib/invites.functions";
 import { useSetUserRole } from "@/hooks/useSetUserRole";
-import { ROSTER_KEYS, useArchiveAgents, useMoveAgents } from "@/hooks/useRosterActions";
+import {
+  ROSTER_KEYS,
+  useArchiveAgents,
+  useMoveAgents,
+  useSetVanLock,
+} from "@/hooks/useRosterActions";
 import { useAuth } from "@/hooks/useAuth";
 import {
   assignableRolesFor,
@@ -52,6 +57,11 @@ export type PlayerGroup = {
   archivedOnly: boolean;
   noLogin: boolean;
   suspensionTracked: boolean;
+  /** ANY active member pinned in-app (Monday's Van sync skips them). */
+  vanLocked: boolean;
+  vanLockedAt: string | null;
+  /** Display name of whoever pinned them, when resolvable. */
+  vanLockedByName: string | null;
   createdAt: string | null;
   canModify: boolean;
 };
@@ -85,6 +95,7 @@ export function PlayerSheet({
   const setRole = useSetUserRole();
   const moveAgents = useMoveAgents(vans);
   const archiveAgents = useArchiveAgents();
+  const setVanLock = useSetVanLock();
   const deleteProfileFn = useServerFn(deleteProfile);
   const getInviteTargetFn = useServerFn(getInviteTarget);
   const assignable = group?.canModify ? assignableRolesFor(realRole) : [];
@@ -182,6 +193,14 @@ export function PlayerSheet({
             {g.archivedOnly && (
               <span className="text-muted-foreground font-display uppercase tracking-widest text-[9px] border border-border rounded px-1.5 py-0.5">
                 Archived
+              </span>
+            )}
+            {g.vanLocked && (
+              <span
+                title="Pinned in-app — Monday's Van column won't move them"
+                className="inline-flex items-center gap-1 text-muted-foreground font-display uppercase tracking-widest text-[9px] border border-border rounded px-1.5 py-0.5"
+              >
+                <Lock className="w-2.5 h-2.5" /> Pinned
               </span>
             )}
           </SheetDescription>
@@ -302,6 +321,41 @@ export function PlayerSheet({
               disabled={setSuspension.isPending || !g.canModify || g.archivedOnly}
               onChange={(e) =>
                 setSuspension.mutate({ ids: g.activeIds, tracked: e.target.checked })
+              }
+              className="h-5 w-5 accent-[var(--neon)]"
+            />
+          </label>
+
+          {/* Van lock — moves auto-pin; unticking hands the person back to
+              Monday's Van column on their next card event. */}
+          <label className="flex items-center justify-between gap-3 rounded-md border border-border bg-surface px-3 py-2.5 cursor-pointer select-none">
+            <span className="text-xs">
+              <span className="font-display uppercase tracking-widest text-[10px] text-muted-foreground block">
+                Van lock
+              </span>
+              {g.vanLocked ? (
+                <>
+                  Pinned
+                  {g.vanLockedByName ? ` by ${g.vanLockedByName}` : ""}
+                  {g.vanLockedAt
+                    ? ` · ${new Date(g.vanLockedAt).toLocaleDateString("en-US", {
+                        timeZone: "America/Los_Angeles",
+                        month: "short",
+                        day: "numeric",
+                      })}`
+                    : ""}{" "}
+                  — Monday&apos;s Van column can&apos;t move them. Untick to let Monday drive.
+                </>
+              ) : (
+                <>Unpinned — Monday&apos;s Van column places them. Any in-app move pins them.</>
+              )}
+            </span>
+            <input
+              type="checkbox"
+              checked={g.vanLocked}
+              disabled={setVanLock.isPending || !g.canModify || g.archivedOnly}
+              onChange={(e) =>
+                setVanLock.mutate({ ids: g.activeIds, locked: e.target.checked, name })
               }
               className="h-5 w-5 accent-[var(--neon)]"
             />

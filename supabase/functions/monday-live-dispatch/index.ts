@@ -1051,11 +1051,14 @@ serve(async (req) => {
       data: { canvasserName, matchedId: match.id, matchedName: match.display_name, autoCreated },
     })
 
-    // ── Van sync ── Monday's Van column is authoritative for van membership
-    // (owner, 2026-07-28): every card names the rep's van, so each event
-    // refreshes profiles.team_id. Real reps only — pseudo lead-sources
-    // (suspension_tracked=false) never join vans. Unknown van names are
-    // logged for the owner to add in Fleet, never auto-created.
+    // ── Van sync ── Monday's Van column places UNPINNED people (owner,
+    // 2026-09-29, superseding "Monday authoritative", owner 2026-07-28):
+    // an in-app move stamps profiles.van_locked_at, and locked profiles are
+    // skipped here (step 'Van_Locked') so Fleet moves stick until a manager
+    // unlocks them. New/unlocked people still auto-place from their cards.
+    // Real reps only — pseudo lead-sources (suspension_tracked=false) never
+    // join vans. Unknown van names are logged for the owner to add in Fleet,
+    // never auto-created.
     try {
       const vanCol =
         cols.find((c) => c.id === 'dropdown__1' || c.column?.id === 'dropdown__1') ??
@@ -1072,16 +1075,59 @@ serve(async (req) => {
             data: { pulseId: String(pulseId), vanName, canvasser: match.display_name },
           })
         } else if (match.team_id !== team.id) {
-          const { error: vanErr } = await supabaseAdmin
-            .from('profiles')
-            .update({ team_id: team.id })
-            .eq('id', match.id)
-          if (!vanErr) {
+          // Van lock: fail-soft like the alias lookup — if the column doesn't
+          // exist yet (edge deployed before the hand-applied migration) or the
+          // read errors, Monday keeps winning. Never read it in the main
+          // profile select: a missing column there would null ALL matches and
+          // flood Bouncer placeholders.
+          let vanLockedAt: string | null = null
+          let lockReadOk = false
+          try {
+            const { data: lockRow, error: lockErr } = await supabaseAdmin
+              .from('profiles')
+              .select('van_locked_at')
+              .eq('id', match.id)
+              .maybeSingle()
+            if (!lockErr) {
+              lockReadOk = true
+              vanLockedAt = (lockRow as { van_locked_at?: string | null } | null)?.van_locked_at ?? null
+            }
+          } catch (_) { /* lock read must never break the pipeline */ }
+          if (vanLockedAt) {
+            // Pinned in-app: keep match.team_id as-is so write-time history
+            // snapshots (leads / daily_logs / daily_metrics) stamp the
+            // locked team, not the card's van.
             await supabaseAdmin.from('webhook_logs').insert({
-              step: 'Van_Synced',
-              data: { pulseId: String(pulseId), canvasser: match.display_name, vanName, from: match.team_id, to: team.id },
+              step: 'Van_Locked',
+              data: {
+                pulseId: String(pulseId),
+                canvasser: match.display_name,
+                vanName,
+                keptTeam: match.team_id,
+                mondayTeam: team.id,
+                lockedSince: vanLockedAt,
+              },
             })
-            match.team_id = team.id
+          } else {
+            // Once the lock column provably exists (the read succeeded),
+            // re-check it INSIDE the update so an in-app move committing
+            // between our read and this write can't be overwritten while
+            // leaving the person "pinned" on Monday's van. When the read
+            // failed (column not yet migrated), keep the plain update —
+            // the .is() filter would 400 and freeze Van sync entirely.
+            let upd = supabaseAdmin
+              .from('profiles')
+              .update({ team_id: team.id })
+              .eq('id', match.id)
+            if (lockReadOk) upd = upd.is('van_locked_at', null)
+            const { data: vanRows, error: vanErr } = await upd.select('id')
+            if (!vanErr && (vanRows?.length ?? 0) > 0) {
+              await supabaseAdmin.from('webhook_logs').insert({
+                step: 'Van_Synced',
+                data: { pulseId: String(pulseId), canvasser: match.display_name, vanName, from: match.team_id, to: team.id },
+              })
+              match.team_id = team.id
+            }
           }
         }
       }

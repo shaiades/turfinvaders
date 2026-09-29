@@ -152,10 +152,14 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
     const errors: { row: number; reason: string }[] = [];
-    const profileCache = new Map<string, { id: string; team_id: string | null; office_location: string }>();
+    const profileCache = new Map<
+      string,
+      { id: string; team_id: string | null; office_location: string; van_locked_at: string | null }
+    >();
     let created_profiles = 0;
     let updated_logs = 0;
     let inserted_sales = 0;
+    let van_lock_skips = 0;
 
     // NUCLEAR WIPE — before any inserts, scrub every daily_logs and confirmed
     // sale-leads row whose date falls inside the uploaded CSV's [min, max]
@@ -251,17 +255,27 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
 
 
     // Resolve / create profiles.
-    async function resolveProfile(name: string): Promise<{ id: string; team_id: string | null; office_location: string } | null> {
+    async function resolveProfile(name: string): Promise<{
+      id: string;
+      team_id: string | null;
+      office_location: string;
+      van_locked_at: string | null;
+    } | null> {
       const k = name.toLowerCase();
       const cached = profileCache.get(k);
       if (cached) return cached;
       const { data: existing } = await supabaseAdmin
         .from("profiles")
-        .select("id, team_id, display_name, office_location")
+        .select("id, team_id, display_name, office_location, van_locked_at")
         .ilike("display_name", name)
         .maybeSingle();
       if (existing) {
-        const v = { id: existing.id, team_id: existing.team_id, office_location: existing.office_location ?? DEFAULT_OFFICE };
+        const v = {
+          id: existing.id,
+          team_id: existing.team_id,
+          office_location: existing.office_location ?? DEFAULT_OFFICE,
+          van_locked_at: existing.van_locked_at ?? null,
+        };
         profileCache.set(k, v);
         return v;
       }
@@ -282,7 +296,12 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
         await supabaseAdmin.from("profiles").update({ team_id: data.team_id }).eq("id", created.user.id);
       }
       created_profiles += 1;
-      const v = { id: created.user.id, team_id: data.team_id ?? null, office_location: DEFAULT_OFFICE };
+      const v = {
+        id: created.user.id,
+        team_id: data.team_id ?? null,
+        office_location: DEFAULT_OFFICE,
+        van_locked_at: null,
+      };
       profileCache.set(k, v);
       return v;
     }
@@ -321,8 +340,23 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
       const teamId = await resolveTeamId(vanName);
       if (!teamId) continue;
       if (profile.team_id !== teamId) {
+        // Pinned in-app (van lock, 2026-09-29): the CSV's Van column never
+        // re-homes a locked player — unlock them first if that's really
+        // wanted. Only a genuinely blocked write counts (a CSV naming the
+        // van they're already on is a no-op either way), and only on the
+        // first batch: it carries the FULL file's refresh rows, so every
+        // agent is seen there and later batches would just double-count.
+        if (profile.van_locked_at) {
+          if (data.refresh_existing) van_lock_skips += 1;
+          continue;
+        }
         await supabaseAdmin.from("profiles").update({ team_id: teamId }).eq("id", profile.id);
-        profileCache.set(agentKey, { id: profile.id, team_id: teamId, office_location: profile.office_location });
+        profileCache.set(agentKey, {
+          id: profile.id,
+          team_id: teamId,
+          office_location: profile.office_location,
+          van_locked_at: profile.van_locked_at,
+        });
       }
     }
 
@@ -488,6 +522,8 @@ export const importHistoricalCsv = createServerFn({ method: "POST" })
       created_profiles,
       updated_logs,
       inserted_sales,
+      /** Locked (pinned) players whose Van column was ignored. */
+      van_lock_skips,
       bucket_count: buckets.size,
       parsed_rows: data.rows.length,
       errors: errors.slice(0, 50),

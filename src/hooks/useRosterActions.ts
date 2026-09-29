@@ -15,7 +15,11 @@ export const ROSTER_KEYS = [
  *  list (a person's same-name duplicates ride together); `count` is how many
  *  PEOPLE that represents — pass it >1 for a bulk move so the toast counts
  *  humans, not profile rows. Assigning to a van cascades the van's office
- *  onto each person. */
+ *  onto each person. Every move also PINS the person (van_locked_at) so the
+ *  Monday webhook's Van sync can't bounce them back — including moves to
+ *  Free Agents, so a deliberate benching sticks too. The guard trigger
+ *  re-stamps now()/auth.uid() server-side, so the ISO value here is just a
+ *  non-null signal. */
 export function useMoveAgents(vans: VanLite[]) {
   const qc = useQueryClient();
   return useMutation({
@@ -28,7 +32,10 @@ export function useMoveAgents(vans: VanLite[]) {
       name?: string;
       count?: number;
     }) => {
-      const patch: { team_id: string | null; office_location?: string } = { team_id: vanId };
+      const patch: { team_id: string | null; office_location?: string; van_locked_at: string } = {
+        team_id: vanId,
+        van_locked_at: new Date().toISOString(),
+      };
       if (vanId) {
         const van = vans.find((v) => v.id === vanId);
         if (van?.office_location) patch.office_location = van.office_location;
@@ -49,8 +56,8 @@ export function useMoveAgents(vans: VanLite[]) {
       const dest = van ? van.name : "Free Agents";
       toast.success(
         (vars.count ?? 1) > 1
-          ? `${vars.count} players → ${dest}`
-          : `${vars.name ?? "Agent"} moved to ${dest}`,
+          ? `${vars.count} players → ${dest} — pinned`
+          : `${vars.name ?? "Agent"} moved to ${dest} — pinned (Monday can't move them)`,
       );
       // Partial landing (RLS filtered some rows, e.g. a privileged duplicate):
       // the move succeeded for the rest — warn, don't error.
@@ -62,6 +69,48 @@ export function useMoveAgents(vans: VanLite[]) {
       for (const key of ROSTER_KEYS) qc.invalidateQueries({ queryKey: key });
     },
     onError: (e: Error) => toast.error(e.message),
+  });
+}
+
+/** Pin/unpin a person's van without moving them. Pinned (van_locked_at set)
+ *  means the Monday webhook's Van sync leaves them alone; unpinning hands
+ *  them back to Monday on their NEXT card event. The guard trigger stamps
+ *  now()/auth.uid() server-side and silently reverts non-manager writers, so
+ *  send any non-null ISO to lock and null to unlock. */
+export function useSetVanLock() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ ids, locked }: { ids: string[]; locked: boolean; name?: string }) => {
+      const patch = locked
+        ? { van_locked_at: new Date().toISOString() }
+        : { van_locked_at: null, van_locked_by: null };
+      // .select() so an RLS-blocked update (0 rows) errors instead of
+      // silently toasting success.
+      const { data, error } = await supabase
+        .from("profiles")
+        .update(patch)
+        .in("id", ids)
+        .select("id");
+      if (error) throw error;
+      if (!data?.length) throw new Error("No permission for this player");
+      return { skipped: ids.length - data.length };
+    },
+    onSuccess: (res, vars) => {
+      toast.success(
+        vars.locked
+          ? `${vars.name ?? "Player"} pinned — Monday's Van column can't move them`
+          : `${vars.name ?? "Player"} unlocked — Monday's Van column takes over`,
+      );
+      // Partial landing (RLS filtered some rows, e.g. a privileged
+      // duplicate): the rest changed — warn, don't error, like useMoveAgents.
+      if (res.skipped > 0) {
+        toast.warning(
+          `${res.skipped} ${res.skipped === 1 ? "profile" : "profiles"} couldn't be changed — you may not have permission for them`,
+        );
+      }
+      for (const key of ROSTER_KEYS) qc.invalidateQueries({ queryKey: key });
+    },
+    onError: (e: Error) => toast.error(e.message ?? "Failed to update van lock"),
   });
 }
 

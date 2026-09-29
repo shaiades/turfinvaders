@@ -25,6 +25,8 @@ type ImportResult = {
   created_profiles: number;
   updated_logs: number;
   inserted_sales: number;
+  /** Locked (pinned) players whose Van column was ignored. */
+  van_lock_skips?: number;
   bucket_count: number;
   parsed_rows: number;
   errors?: { row: number; reason: string }[];
@@ -118,6 +120,7 @@ function mergeImportResult(total: ImportResult, next: ImportResult): ImportResul
     created_profiles: total.created_profiles + (next.created_profiles ?? 0),
     updated_logs: total.updated_logs + (next.updated_logs ?? 0),
     inserted_sales: total.inserted_sales + (next.inserted_sales ?? 0),
+    van_lock_skips: (total.van_lock_skips ?? 0) + (next.van_lock_skips ?? 0),
     bucket_count: total.bucket_count + (next.bucket_count ?? 0),
     parsed_rows: total.parsed_rows + (next.parsed_rows ?? 0),
     errors: [...(total.errors ?? []), ...(next.errors ?? [])].slice(0, 50),
@@ -307,6 +310,12 @@ export function HistoricalImporter({
         toast.success("Database write complete", {
           description: `+${res.created_profiles} canvassers · ${res.updated_logs} daily_logs rows · ${res.inserted_sales} sales`,
         });
+        if ((res.van_lock_skips ?? 0) > 0) {
+          toast.warning(
+            `${res.van_lock_skips} pinned player${res.van_lock_skips === 1 ? "" : "s"} kept their in-app van — the CSV's Van column was ignored for them. Unlock first to re-home via CSV.`,
+            { duration: 12000 },
+          );
+        }
         // Auto-close the import modal/panel only on a real write.
         setPreview(null);
         setFilename(null);

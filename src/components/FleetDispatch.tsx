@@ -34,6 +34,8 @@ import {
   Merge,
   Info,
   RefreshCw,
+  Lock,
+  LockOpen,
 } from "lucide-react";
 import {
   Select,
@@ -78,7 +80,7 @@ import { FormerBadge } from "@/components/FormerBadge";
 import { AddPlayerDialog } from "@/components/AddPlayerDialog";
 import { RenameCanvasserDialog, type NameGroupRef } from "@/components/RenameCanvasserDialog";
 import { MergeCanvasserDialog } from "@/components/MergeCanvasserDialog";
-import { useMoveAgents, useArchiveAgents } from "@/hooks/useRosterActions";
+import { useMoveAgents, useArchiveAgents, useSetVanLock } from "@/hooks/useRosterActions";
 import { ExecutiveSection } from "@/components/ExecutiveDashboard";
 import {
   useDispatchRoster,
@@ -744,6 +746,16 @@ function FleetDispatchInner({
       team_office: string | null;
       role: "canvasser" | "captain";
       tracked: boolean;
+      /** ANY non-archived member pinned — a half-locked group shows the
+       *  padlock (the unlocked duplicate is the one Monday can still drag;
+       *  any lock toggle writes all lockIds, healing the mix). Uses the
+       *  is_active !== false union like MovePlayersSheet / Manage Fleet /
+       *  Manage Players, NOT the board's stricter former predicate — a
+       *  legacy null-is_active duplicate can still be webhook-matched, so
+       *  its lock state matters. */
+      vanLocked: boolean;
+      /** The lock toggle's write set: every is_active !== false member. */
+      lockIds: string[];
       oldestCreated: string;
       team_id: string | null;
       teamFromActive: boolean;
@@ -767,6 +779,8 @@ function FleetDispatchInner({
           // banner — the former gate below skips them anyway).
           role: c.former ? "canvasser" : c.role,
           tracked: c.former ? true : c.suspension_tracked,
+          vanLocked: c.is_active !== false && !!c.van_locked_at,
+          lockIds: c.is_active !== false ? [c.id] : [],
           oldestCreated: c.former ? "9999-12-31" : created,
           team_id: c.team_id,
           teamFromActive: !c.former && !!c.team_id,
@@ -776,6 +790,10 @@ function FleetDispatchInner({
         g.ids.push(c.id);
         if (!g.office_location && c.office_location) g.office_location = c.office_location;
         if (!g.team_office && c.team_office) g.team_office = c.team_office;
+        if (c.is_active !== false) {
+          g.lockIds.push(c.id);
+          if (c.van_locked_at) g.vanLocked = true;
+        }
         if (!c.former) {
           g.activeIds.push(c.id);
           if (c.role === "captain") g.role = "captain";
@@ -1388,6 +1406,10 @@ type FunnelRow = {
     display_name: string | null;
     role: "canvasser" | "captain";
     team_id: string | null;
+    vanLocked: boolean;
+    /** Lock-toggle write set: is_active !== false members (union semantics
+     *  shared with MovePlayersSheet / Manage Fleet). */
+    lockIds: string[];
     former: boolean;
   };
   /** The van this row buckets/slices under: live team for current members,
@@ -1629,7 +1651,10 @@ type RowManage = {
   vans: Van[];
   currentVanId: string | null;
   busy: boolean;
+  /** Pinned in-app — Monday's Van sync won't move them. */
+  locked: boolean;
   onMove: (vanId: string | null) => void;
+  onToggleLock: () => void;
   onArchive: () => void;
   onRename: () => void;
   onMerge: () => void;
@@ -1777,6 +1802,14 @@ function DispatchRow({
             Captain
           </span>
         )}
+        {r.g.vanLocked && !r.g.former && (
+          <span
+            title="Pinned in-app — Monday's Van column won't move them"
+            className="shrink-0 text-muted-foreground"
+          >
+            <Lock className="w-3 h-3" />
+          </span>
+        )}
         {r.g.former && <FormerBadge />}
       </span>
       <DispatchStatCells s={r} />
@@ -1789,12 +1822,13 @@ function DispatchRow({
               if (val === "current") return;
               if (val === "__rename") return manage.onRename();
               if (val === "__merge") return manage.onMerge();
+              if (val === "__lock") return manage.onToggleLock();
               manage.onMove(val === "free" ? null : val);
             }}
           >
             <SelectTrigger
               disabled={manage.busy}
-              title="Move · Rename · Combine"
+              title="Move · Rename · Combine · Pin"
               className="h-7 w-11 px-1.5 justify-center bg-background border-[color:var(--neon-blue)]/50 hover:border-[color:var(--neon-blue)]"
             >
               <ArrowRightLeft className="w-3.5 h-3.5" />
@@ -1824,6 +1858,19 @@ function DispatchRow({
               <SelectItem value="__merge">
                 <span className="inline-flex items-center gap-2">
                   <Merge className="w-3.5 h-3.5" /> Combine with another player…
+                </span>
+              </SelectItem>
+              <SelectItem value="__lock">
+                <span className="inline-flex items-center gap-2">
+                  {manage.locked ? (
+                    <>
+                      <LockOpen className="w-3.5 h-3.5" /> Unlock — Monday takes over
+                    </>
+                  ) : (
+                    <>
+                      <Lock className="w-3.5 h-3.5" /> Pin to van — block Monday
+                    </>
+                  )}
                 </span>
               </SelectItem>
             </SelectContent>
@@ -1967,12 +2014,13 @@ function DispatchFleet({
   const { realRole } = useAuth();
   const moveAgents = useMoveAgents(vans);
   const archiveAgents = useArchiveAgents();
+  const setVanLock = useSetVanLock();
   const [addOpen, setAddOpen] = useState(false);
   const [addVanId, setAddVanId] = useState<string | null>(null);
   const [renameTarget, setRenameTarget] = useState<NameGroupRef | null>(null);
   const [mergeSource, setMergeSource] = useState<NameGroupRef | null>(null);
   const [mergePreset, setMergePreset] = useState<string | null>(null);
-  const busy = moveAgents.isPending || archiveAgents.isPending;
+  const busy = moveAgents.isPending || archiveAgents.isPending || setVanLock.isPending;
 
   /** Row controls for a manager-tier viewer — or undefined (spacer only) for
    *  pseudo lead-source rows and targets above the viewer's pay grade. */
@@ -1992,8 +2040,15 @@ function DispatchFleet({
       vans,
       currentVanId,
       busy,
+      locked: r.g.vanLocked,
       onMove: (vanId) =>
         moveAgents.mutate({ ids: r.g.activeIds, vanId, name: r.g.display_name ?? "Agent" }),
+      onToggleLock: () =>
+        setVanLock.mutate({
+          ids: r.g.lockIds.length ? r.g.lockIds : r.g.activeIds,
+          locked: !r.g.vanLocked,
+          name: r.g.display_name ?? "Agent",
+        }),
       onArchive: () => {
         if (
           confirm(
@@ -2174,9 +2229,10 @@ function DispatchFleet({
 
       {looseActive.length > 0 && (
         // No Free Agents pen — van membership auto-syncs from Monday's Van
-        // column. What remains here are lead sources (referral, Self Gen…)
-        // and the rare unassigned rep, shown only when they have numbers in
-        // range so the totals tiles keep reconciling.
+        // column for unpinned players (an in-app move pins them, van_locked_at).
+        // What remains here are lead sources (referral, Self Gen…) and the
+        // rare unassigned rep, shown only when they have numbers in range so
+        // the totals tiles keep reconciling.
         <ArcadeCard className="space-y-3">
           <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
             Lead Sources · Unassigned ({looseActive.length})
