@@ -208,7 +208,13 @@ const COMPANY_TILES: TileDef[] = [
     accent: "destructive",
     sub: { label: "Cancel %", value: (t) => fmtPct(t.cancelPct), accent: "destructive" },
   },
-  { label: "Sit %", value: (t) => fmtPct(t.sitPct), accent: "accent" },
+  {
+    // Sit count = lead demos (PM + Sold), the exact numerator of sitPct.
+    label: "Sits",
+    value: (t) => fmtCount(t.pm + t.sold),
+    accent: "accent",
+    sub: { label: "Sit %", value: (t) => fmtPct(t.sitPct), accent: "accent" },
+  },
   { label: "Leads / Sale", value: (t) => fmtRatio(t.leadsToSale), accent: "neon" },
   { label: "Revenue", value: (t) => fmtMoney(t.revenue), accent: "victory" },
 ];
