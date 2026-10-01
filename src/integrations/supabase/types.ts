@@ -1869,6 +1869,22 @@ export type Database = {
         Args: { _week_start: string }
         Returns: string
       }
+      crew_clock_in: {
+        Args: { _user_ids: string[] }
+        Returns: Json
+      }
+      crew_clock_out: {
+        Args: { _user_ids: string[] }
+        Returns: Json
+      }
+      crew_start_lunch: {
+        Args: { _user_ids: string[] }
+        Returns: Json
+      }
+      crew_end_lunch: {
+        Args: { _user_ids: string[] }
+        Returns: Json
+      }
       evaluate_canvasser_suspension: {
         Args: { _canvasser_id: string }
         Returns: undefined

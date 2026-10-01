@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { rewardToast } from "@/lib/reward-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useOpenShift, useTodayShifts } from "@/hooks/useTimeClockSelf";
+import { invalidatePunchCaches } from "@/lib/time-clock-keys";
 
 import { ArcadePanel } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
@@ -167,8 +168,7 @@ export function TimeClock({ userId }: { userId: string }) {
       } else {
         rewardToast("Clocked in — game on");
       }
-      qc.invalidateQueries({ queryKey: ["time-clock-open", userId] });
-      qc.invalidateQueries({ queryKey: ["time-clock-today", userId] });
+      invalidatePunchCaches(qc);
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -185,7 +185,7 @@ export function TimeClock({ userId }: { userId: string }) {
     },
     onSuccess: () => {
       toast.success("Lunch started — enjoy");
-      qc.invalidateQueries({ queryKey: ["time-clock-meals", openEntry?.id] });
+      invalidatePunchCaches(qc);
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -201,9 +201,7 @@ export function TimeClock({ userId }: { userId: string }) {
     },
     onSuccess: () => {
       toast.success("Back on the clock");
-      qc.invalidateQueries({ queryKey: ["time-clock-meals", openEntry?.id] });
-      qc.invalidateQueries({ queryKey: ["time-clock-open", userId] });
-      qc.invalidateQueries({ queryKey: ["time-clock-today", userId] });
+      invalidatePunchCaches(qc);
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -233,13 +231,7 @@ export function TimeClock({ userId }: { userId: string }) {
         toast.success("Clocked out");
       }
       setAttesting(false);
-      qc.invalidateQueries({ queryKey: ["time-clock-open", userId] });
-      qc.invalidateQueries({ queryKey: ["time-clock-today", userId] });
-      // Pay-engine reads: the RPC-backed month figure and the weekly paycheck.
-      qc.invalidateQueries({ queryKey: ["takehome_volume_bonus"] });
-      qc.invalidateQueries({ queryKey: ["earnings"] });
-      // Weekly pay projection is driven by clocked hours now — refresh it.
-      qc.invalidateQueries({ queryKey: ["my_clocked_hours"] });
+      invalidatePunchCaches(qc);
     },
     onError: (e: Error) => toast.error(e.message),
   });
