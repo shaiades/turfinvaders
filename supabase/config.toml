@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.notify-owner-digest]
 verify_jwt = false
+
+[functions.notify-day-off]
+verify_jwt = false

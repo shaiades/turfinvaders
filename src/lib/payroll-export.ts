@@ -260,6 +260,62 @@ export async function buildPunchDetailCsvLines(
   return lines;
 }
 
+export const ABSENCE_HEADERS = [
+  "Date",
+  "Employee ID",
+  "Name",
+  "Kind",
+  "Status",
+  "Note",
+  "Requested By",
+  "Reviewed By",
+  "Reviewed At (PT)",
+  "Deny Note",
+];
+
+export async function buildAbsenceCsvLines(startISO: string, endISO: string): Promise<string[]> {
+  const lines = [ABSENCE_HEADERS.join(",")];
+  const names = new Map<string, string>();
+  {
+    const { data } = await supabase.from("profiles").select("id, display_name");
+    for (const p of data ?? []) names.set(p.id, p.display_name ?? p.id);
+  }
+  const nameOf = (id: string | null) => (id ? (names.get(id) ?? id) : "");
+  const { data, error } = await supabase
+    .from("day_off_requests")
+    .select("*")
+    .gte("absence_date", startISO)
+    .lte("absence_date", endISO)
+    .order("absence_date", { ascending: true })
+    .limit(5000);
+  if (error) {
+    throw new Error(
+      /day_off_requests/.test(error.message)
+        ? "The day-off table isn't deployed yet — apply migration 20261002180000 first."
+        : error.message,
+    );
+  }
+  for (const r of data ?? []) {
+    lines.push(
+      [
+        r.absence_date,
+        r.user_id,
+        nameOf(r.user_id),
+        r.kind,
+        r.status,
+        r.reason ?? "",
+        nameOf(r.requested_by),
+        nameOf(r.reviewed_by),
+        r.reviewed_at ? laDateTimeLabel(r.reviewed_at) : "",
+        r.deny_reason ?? "",
+      ]
+        .map(csvCell)
+        .join(","),
+    );
+  }
+  return lines;
+}
+
 export const AUDIT_LOG_HEADERS = [
   "Timestamp (PT)",
   "Action",

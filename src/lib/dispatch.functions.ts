@@ -358,7 +358,26 @@ export const getClockPresence = createServerFn({ method: "POST" })
       .limit(1000);
     if (openErr) throw openErr;
     const openNow = [...new Set((openRows ?? []).map((r) => r.user_id as string))];
-    return { byDate, openNow };
+    // Approved absences on the requested days, so dispatch/suspension can
+    // say "excused" instead of letting a day off read as a no-show. Soft:
+    // the table ships with migration 20261002180000 — any error means no
+    // labels, never a failed presence fetch. Presence-only contract kept:
+    // the kind ('sick'/'day_off'/…) is a label, not punch data.
+    const excusedByDate: Record<string, Array<{ user_id: string; kind: string }>> = {};
+    try {
+      const { data: absRows } = await supabaseAdmin
+        .from("day_off_requests")
+        .select("user_id, absence_date, kind")
+        .in("absence_date", data.dates)
+        .eq("status", "approved")
+        .limit(2000);
+      for (const r of absRows ?? []) {
+        (excusedByDate[r.absence_date] ??= []).push({ user_id: r.user_id, kind: r.kind });
+      }
+    } catch {
+      /* table not deployed yet — no labels */
+    }
+    return { byDate, openNow, excusedByDate };
   });
 
 /**

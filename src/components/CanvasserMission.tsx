@@ -15,6 +15,7 @@ import { RankPill, RANK_PERKS } from "@/components/RankPill";
 import { PushAlertsCard } from "@/components/PushAlertsCard";
 import { TimeClock } from "@/components/TimeClock";
 import { WeekAttestationCard } from "@/components/WeekAttestationCard";
+import { DayOffRequestCard } from "@/components/DayOffRequestCard";
 import { PlanPanel } from "@/components/PlanPanel";
 import { DailyLogPanel } from "@/components/DailyLogPanel";
 import { CanvasserStats, GrindCounter } from "@/components/CanvasserStats";
@@ -124,6 +125,9 @@ export function CanvasserMission({
           captain-entered punches). Renders nothing until the attestation
           table ships, when the week was empty, or once signed. */}
       <WeekAttestationCard userId={userId} />
+      {/* Self-serve day-off requests (captain approves). Ships dark until
+          the day_off_requests table lands. */}
+      <DayOffRequestCard userId={userId} />
       <div data-tour="mission-pay">
         <TakeHomeWidget
           userId={userId}

@@ -43,6 +43,7 @@ import { CanvasserMission, isCanvasserTab, type CanvasserTab } from "@/component
 import { TimeClock } from "@/components/TimeClock";
 import { TimeClockReviewQueue } from "@/components/TimeClockReviewQueue";
 import { VanClockConsole } from "@/components/VanClockConsole";
+import { DayOffQueue } from "@/components/DayOffQueue";
 import { PushAlertsCard } from "@/components/PushAlertsCard";
 import { FormerBadge } from "@/components/FormerBadge";
 import { useTodayLeads } from "@/hooks/useTodayLeads";
@@ -519,6 +520,9 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
           (owner directive 2026-08-24). Renders nothing when clean; the
           alerts card below it stays so push can be enabled any time. */}
       <TimeClockReviewQueue teamId={teamId} />
+      {/* Crew day-off requests awaiting this captain (approve/deny with a
+          note; the RPC blocks self-review). Silent when empty. */}
+      <DayOffQueue teamId={teamId} />
       {/* Crew time corrections — the same audited editor the office uses,
           scoped to this van (own team only, never the captain's own entries;
           the RPCs enforce both). Collapsed: edits are the exception. */}

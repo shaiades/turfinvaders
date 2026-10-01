@@ -33,6 +33,8 @@ import { TimeClockBackfill } from "@/components/TimeClockBackfill";
 import { TimeClockExceptions } from "@/components/TimeClockExceptions";
 import { ReasonDialog } from "@/components/ReasonDialog";
 import { TimeEntryAuditSheet } from "@/components/TimeEntryAuditSheet";
+import { DayOffQueue } from "@/components/DayOffQueue";
+import { DayOffWeekStrip } from "@/components/DayOffWeekStrip";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { laTimeHM, laWallFromISO, laWallToUtcISO } from "@/lib/dates";
@@ -632,6 +634,9 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
       {/* Flagged punches — approve here, or fix the row below. Captains see
           their own van's queue; admins see everyone. */}
       {!scope && <TimeClockReviewQueue />}
+      {/* Pending day-off requests, all vans (captains review theirs on
+          Command). Silent when empty or pre-deploy. */}
+      {!scope && <DayOffQueue />}
 
       <ArcadePanel
         title={scope ? "Crew Timesheets" : "Timesheets"}
@@ -762,6 +767,10 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
             auto-closed shifts need resolving before payroll can freeze the week.
           </span>
         </div>
+
+        {/* Approved absences this week — a missing timesheet day with a chip
+            here is excused, not a no-show. */}
+        <DayOffWeekStrip weekStartISO={start} teamId={scope?.teamId} />
 
         {isLoading ? (
           <div className="text-sm text-muted-foreground">Loading time entries…</div>

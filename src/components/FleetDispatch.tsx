@@ -540,6 +540,32 @@ function FleetDispatchInner({
     },
     [clockedByDay],
   );
+  // Approved absences (day-off system, 20261002180000): an excused person
+  // shows on the Day roster dimmed with an EXCUSED chip instead of reading
+  // as a silent no-show. Fail-open contract kept: no data → no chips, and
+  // nobody is hidden because of it.
+  const excusedByDay = useMemo(() => {
+    const m = new Map<string, Map<string, string>>();
+    const raw = (clockQ.data as { excusedByDate?: Record<string, Array<{ user_id: string; kind: string }>> } | undefined)
+      ?.excusedByDate;
+    for (const [d, list] of Object.entries(raw ?? {})) {
+      m.set(d, new Map(list.map((e) => [e.user_id, e.kind])));
+    }
+    return m;
+  }, [clockQ.data]);
+  const excusedKind = useCallback(
+    (r: FunnelRow): string | null => {
+      if (tab !== "day") return null;
+      const m = excusedByDay.get(dayISO);
+      if (!m) return null;
+      for (const id of r.g.activeIds) {
+        const k = m.get(id);
+        if (k) return k;
+      }
+      return null;
+    },
+    [tab, dayISO, excusedByDay],
+  );
 
   // Field activity today (owner ask 2026-09-17): a rep who's actively
   // dropping pins but hasn't punched in yet — or forgot to — must still show
@@ -922,7 +948,13 @@ function FleetDispatchInner({
     const gated = enrichedRows.filter((r) => {
       if (r.g.former) return hasProduction(r);
       if (tab === "day" && clockReady && !clockedOn(r.g.activeIds, dayISO)) {
-        return hasProduction(r) || r.g.activeIds.some((id) => activeToday.has(id));
+        // Excused people stay on the board (dim + chip): an approved day
+        // off must never read as a silent no-show.
+        return (
+          hasProduction(r) ||
+          r.g.activeIds.some((id) => activeToday.has(id)) ||
+          excusedKind(r) !== null
+        );
       }
       return true;
     });
@@ -931,7 +963,7 @@ function FleetDispatchInner({
       if (b.conf !== a.conf) return b.conf - a.conf;
       return (a.g.display_name ?? "").localeCompare(b.g.display_name ?? "");
     });
-  }, [enrichedRows, tab, dayISO, clockReady, clockedOn, activeToday]);
+  }, [enrichedRows, tab, dayISO, clockReady, clockedOn, activeToday, excusedKind]);
 
   // Dimmed-row signal for DispatchRow (owner ask 2026-09-17): bright = clocked
   // in today, dim = showing only from production/field-activity. Former rows
@@ -1345,6 +1377,7 @@ function FleetDispatchInner({
         <DispatchFleet
           clockStateFor={clockStateFor}
           isDim={isDim}
+          excusedFor={excusedKind}
           rows={rows}
           vans={vans}
           crossOfficeVanIds={crossOfficeVanIds}
@@ -1722,6 +1755,7 @@ function DispatchRow({
   gridManage = false,
   clockState = null,
   dim = false,
+  excused = null,
 }: {
   r: FunnelRow;
   manage?: RowManage;
@@ -1731,6 +1765,8 @@ function DispatchRow({
   /** No clock-in today — row shows only from production/field activity
    *  (owner ask 2026-09-17): render dimmer than a punched-in row. */
   dim?: boolean;
+  /** Approved absence kind for the viewed day — show EXCUSED, not no-show. */
+  excused?: string | null;
 }) {
   const { realRole, user } = useAuth();
   // Your own line glows (audit C-9) — the ladder does it for reps; the
@@ -1797,6 +1833,14 @@ function DispatchRow({
           </>
         ) : (
           <span className="truncate">{name}</span>
+        )}
+        {excused && clockState !== "on" && (
+          <span
+            title={`Approved ${excused.replace("_", "-")} today`}
+            className="shrink-0 text-[8px] font-display uppercase tracking-widest text-victory border border-victory/40 rounded px-1"
+          >
+            excused
+          </span>
         )}
         {r.g.role === "captain" && !r.g.former && (
           <span className="shrink-0 text-[9px] font-display uppercase tracking-widest px-1.5 py-0.5 rounded border border-accent/60 text-accent bg-accent/10">
@@ -1994,6 +2038,7 @@ function DispatchFleet({
   leadsDateLabel,
   clockStateFor,
   isDim,
+  excusedFor,
 }: {
   rows: FunnelRow[];
   vans: Van[];
@@ -2010,6 +2055,9 @@ function DispatchFleet({
   /** No clock-in today but showing from production/field activity (owner ask
    *  2026-09-17) — undefined off Day, same lifecycle as clockStateFor. */
   isDim?: (r: FunnelRow) => boolean;
+  /** Approved absence kind for the viewed day (day-off system) — the row
+   *  renders an EXCUSED chip instead of reading as a no-show. */
+  excusedFor?: (r: FunnelRow) => string | null;
 }) {
   const { office: activeOffice, matches } = useOfficeFilter();
   const { realRole } = useAuth();
@@ -2215,6 +2263,7 @@ function DispatchFleet({
                               gridManage={canEditRows}
                               clockState={clockStateFor?.(r.g.ids) ?? null}
                               dim={isDim?.(r) ?? false}
+                              excused={excusedFor?.(r) ?? null}
                             />
                           ))}
                         </div>
@@ -2258,6 +2307,7 @@ function DispatchFleet({
                   gridManage={canEditRows}
                   clockState={clockStateFor?.(r.g.ids) ?? null}
                   dim={isDim?.(r) ?? false}
+                  excused={excusedFor?.(r) ?? null}
                 />
               ))}
             </div>

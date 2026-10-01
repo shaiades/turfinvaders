@@ -13,6 +13,9 @@ import { Button } from "@/components/ui/button";
 import { ArcadePanel } from "@/components/arcade";
 import { useDispatchRoster } from "@/hooks/useFleetRoster";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
+import { CrewAbsenceSheet } from "@/components/CrewAbsenceSheet";
+import { DayOffWeekStrip } from "@/components/DayOffWeekStrip";
+import { laWeekStartISO } from "@/lib/dates";
 import {
   useCrewAction,
   useVanClockStatus,
@@ -92,6 +95,7 @@ export function VanClockConsole({ teamId }: { teamId: string }) {
   const selected = memberIds.filter((id) => !unchecked.has(id));
 
   const [confirming, setConfirming] = useState<CrewAction | null>(null);
+  const [absenceFor, setAbsenceFor] = useState<{ id: string; name: string } | null>(null);
   const [lastAction, setLastAction] = useState<{
     action: CrewAction;
     at: string;
@@ -229,8 +233,20 @@ export function VanClockConsole({ teamId }: { teamId: string }) {
                   Off · {LA_TIME(s.lastOut)} · {s.todayHours.toFixed(1)}h
                 </span>
               ) : (
-                <span className="text-[9px] font-display uppercase tracking-widest text-muted-foreground">
-                  Not in yet
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="text-[9px] font-display uppercase tracking-widest text-muted-foreground">
+                    Not in yet
+                  </span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setAbsenceFor({ id: m.id, name: m.name });
+                    }}
+                    className="text-[9px] font-display uppercase tracking-widest text-warning/80 hover:text-warning underline-offset-2 hover:underline"
+                  >
+                    absent?
+                  </button>
                 </span>
               )}
             </label>
@@ -286,6 +302,15 @@ export function VanClockConsole({ teamId }: { teamId: string }) {
           </div>
         </div>
       )}
+
+      {/* Approved days off this week — explains an empty seat at a glance. */}
+      <DayOffWeekStrip weekStartISO={laWeekStartISO()} teamId={teamId} />
+
+      <CrewAbsenceSheet
+        open={!!absenceFor}
+        onOpenChange={(o) => !o && setAbsenceFor(null)}
+        member={absenceFor}
+      />
 
       <Dialog open={!!confirming} onOpenChange={(o) => !o && setConfirming(null)}>
         <DialogContent className="max-w-md">
