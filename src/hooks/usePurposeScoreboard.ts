@@ -10,7 +10,9 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
   aggregateCloseKombat,
+  CARD_COLUMNS,
   countReps,
+  SAVE_LINK_PAD_DAYS,
   volumeReps,
   type BlockCard,
   type RepStats,
@@ -19,12 +21,10 @@ import { buildRepMatcher } from "@/lib/rep-identity";
 import { addDaysISO } from "@/lib/dates";
 import { useWeekSelector } from "@/hooks/useWeekSelector";
 
-// Mirrors CloseKombat.tsx (goals fetch): pad for save-linking context.
-const SAVE_LINK_PAD_DAYS = 42;
-const CARD_COLUMNS =
-  "monday_item_id, board_id, office_location, card_date, group_title, lead_name, reps, " +
-  "iss, bo, ol, rs, pm, sale, sale_price, products, canvass_stats, wcc, comments, phone, " +
-  "report_reps";
+// CARD_COLUMNS + SAVE_LINK_PAD_DAYS are the shared constants from
+// close-kombat.ts: this hook rides the same ["block_cards", start, end]
+// query key as Close Kombat's goals fetch, so select + pad must stay
+// byte-identical with it.
 
 export type PurposeScoreboard = {
   loading: boolean;
