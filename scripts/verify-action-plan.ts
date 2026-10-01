@@ -26,6 +26,7 @@ import {
   type PlanJob,
 } from "../src/lib/action-plan";
 import { planWeekStartISO } from "../src/lib/dates";
+import { buildRepMatcher } from "../src/lib/rep-identity";
 
 const fails: string[] = [];
 const eq = (label: string, got: unknown, want: unknown) => {
@@ -658,6 +659,14 @@ eq(
 );
 
 // ---- 11. Row-builder spot checks ----------------------------------------
+
+// Matcher: an iOS curly-apostrophe profile ("Josh O’Connor ") must reach
+// the board's "Josh OConnor" (tier 2 token-set match after stripping ’).
+eq(
+  "curly-apostrophe profile matches board name",
+  buildRepMatcher("Josh O’Connor ", ["Josh OConnor", "Josiah Haas"]).matched,
+  "Josh OConnor",
+);
 
 eq("zip from address", zipFromAddress("8953 Gold Coast Dr, San Diego, CA 92126, USA"), "92126");
 eq("zip missing", zipFromAddress("somewhere with no zip"), null);

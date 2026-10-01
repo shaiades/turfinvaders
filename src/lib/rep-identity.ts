@@ -21,8 +21,11 @@ import { normalizeName } from "@/lib/utils";
  * no match, never a guess.
  */
 
+// Curly quotes included: iOS smart punctuation types ’, and a profile saved
+// as "Josh O’Connor" must still match the board's "Josh OConnor" (Weekly
+// Action Plan rollout 2026-10-01 — his 8 jobs were invisible without this).
 const tokens = (s: string): string[] =>
-  normalizeName(s).replace(/[.']/g, "").split(" ").filter(Boolean);
+  normalizeName(s).replace(/[.'’‘]/g, "").split(" ").filter(Boolean);
 
 const sortedKey = (s: string): string => tokens(s).sort().join(" ");
 
