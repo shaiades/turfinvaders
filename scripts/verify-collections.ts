@@ -7,6 +7,10 @@
 
 import {
   aggregateCollections,
+  buildCashCurve,
+  buildForwardOutlook,
+  heatStep,
+  monthlyCollectionsTrend,
   buildCollectionRow,
   colTextByIdOrTitle,
   isSettledRow,
@@ -299,6 +303,108 @@ eq(
 const empty = aggregateCollections([], { todayISO: TODAY });
 eq("agg empty: pct null when nothing anticipated", empty.pct, null);
 eq("agg empty: zero rows", empty.rows, 0);
+
+// ---- 6. Cash curve (endpoints MUST reconcile with aggregateCollections) --
+{
+  const curveRows = [
+    r({
+      planned_amount: 1000,
+      actual_amount: 1000,
+      anticipated_date: "2026-09-05",
+      collected_date: "2026-09-06",
+    }),
+    // Before-month anticipated date -> day 0 bucket.
+    r({
+      planned_amount: 500,
+      actual_amount: 500,
+      anticipated_date: "2026-08-31",
+      collected_date: "2026-09-01",
+    }),
+    // After-month collected date -> last-day bucket.
+    r({
+      planned_amount: 200,
+      actual_amount: 200,
+      anticipated_date: "2026-09-28",
+      collected_date: "2026-10-02",
+    }),
+    // Undated money -> day 0 + called out.
+    r({ planned_amount: 300, actual_amount: 150 }),
+  ];
+  const curve = buildCashCurve(curveRows, {
+    monthStart: "2026-09-01",
+    monthEnd: "2026-09-30",
+    todayISO: "2026-09-15",
+  });
+  eq("curve: 30 days", curve.days.length, 30);
+  const want = aggregateCollections(curveRows, { todayISO: "2026-09-15" });
+  eq("curve: ant endpoint reconciles", curve.antCum[curve.antCum.length - 1], want.anticipated);
+  eq("curve: col endpoint reconciles", curve.colCum[curve.colCum.length - 1], want.collected);
+  eq("curve: day0 carries undated+early plan", curve.antCum[0], 500 + 300);
+  eq("curve: undated planned called out", curve.undatedPlanned, 300);
+  eq("curve: undated collected called out", curve.undatedCollected, 150);
+  eq("curve: todayIdx", curve.todayIdx, 14);
+  // At Sep 15: collected = 500 (9/1) + 1000 (9/6) + 150 (undated day0) = 1650;
+  // anticipated = 500 + 300 (day0) + 1000 (9/5) = 1800.
+  eq("curve: delta at today", curve.delta, 1650 - 1800);
+  const past = buildCashCurve(curveRows, {
+    monthStart: "2026-09-01",
+    monthEnd: "2026-09-30",
+    todayISO: "2026-10-20",
+  });
+  eq("curve: past month todayIdx -1", past.todayIdx, -1);
+  eq("curve: past month delta at end", past.delta, 1850 - 2000);
+}
+
+// ---- 7. Forward outlook ---------------------------------------------------
+{
+  const fRows = [
+    // Overdue remainder 600.
+    r({ planned_amount: 800, actual_amount: 200, anticipated_date: "2026-09-20" }),
+    // Due inside 7 days.
+    r({ planned_amount: 400, anticipated_date: "2026-10-03" }),
+    // Due inside 30 but outside 7.
+    r({ planned_amount: 900, anticipated_date: "2026-10-20" }),
+    // Beyond 30 days — excluded from both windows.
+    r({ planned_amount: 5000, anticipated_date: "2026-11-15" }),
+    // Settled — contributes nothing.
+    r({ planned_amount: 100, actual_amount: 100, anticipated_date: "2026-10-05" }),
+    // Undated remainder.
+    r({ planned_amount: 250 }),
+  ];
+  const f = buildForwardOutlook(fRows, { todayISO: "2026-09-30" });
+  eq("forward: overdue backlog", f.overdueBacklog, 600);
+  eq("forward: next7", f.next7, 400);
+  eq("forward: next30 includes next7", f.next30, 400 + 900);
+  eq("forward: undated", f.undated, 250);
+}
+
+// ---- 8. Monthly trend -----------------------------------------------------
+{
+  const tRows = [
+    r({ collection_month: "2026-08-01", planned_amount: 100, actual_amount: 90 }),
+    r({ collection_month: "2026-08-01", planned_amount: 50, actual_amount: 50 }),
+    r({ collection_month: "2026-09-01", planned_amount: 300, actual_amount: 200 }),
+  ];
+  const t = monthlyCollectionsTrend(tRows);
+  eq("trend: months sorted", t.map((x) => x.month).join(","), "2026-08-01,2026-09-01");
+  eq("trend: aug anticipated", t[0].anticipated, 150);
+  eq("trend: aug collected", t[0].collected, 140);
+  eq("trend: sep collected", t[1].collected, 200);
+  const sd = monthlyCollectionsTrend(tRows, { office: "Orange County" });
+  eq("trend: office filter empties", sd.length, 0);
+}
+
+// ---- 9. Heat steps ----------------------------------------------------------
+{
+  const sorted = [10, 20, 30, 40, 50, 60, 70, 80];
+  eq("heat: zero", heatStep(0, sorted), 0);
+  eq("heat: bottom quartile", heatStep(10, sorted), 1);
+  eq("heat: second", heatStep(35, sorted), 2);
+  eq("heat: third", heatStep(60, sorted), 3);
+  eq("heat: top", heatStep(80, sorted), 4);
+  eq("heat: empty set", heatStep(99, []), 0);
+  eq("heat: monster day stays step 4 without flattening", heatStep(80000, sorted), 4);
+}
 
 console.log(`checks run, ${fails.length} failure(s)`);
 for (const f of fails) console.log("  FAIL " + f);

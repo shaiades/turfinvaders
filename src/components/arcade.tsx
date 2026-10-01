@@ -228,37 +228,144 @@ export const STAT_TILE_ACCENT: Record<StatTileAccent, string> = {
 
 /** The compact label-over-value stat tile (CloseKombat's KombatTile layout,
  *  generalized for any faction). `sub` = a companion stat sharing the tile
- *  (e.g. Sold + Close %), right-aligned. */
+ *  (e.g. Sold + Close %), right-aligned. `flat` drops the card chrome so a
+ *  panel can lay cells out with hairline dividers instead of box-in-box
+ *  borders; `mono` renders the value in the data face (counts), reserving
+ *  the pixel display font for money leads. */
 export function ArcadeStatTile({
   label,
   value,
   accent,
   sub,
   faction,
+  flat = false,
+  mono = false,
 }: {
   label: string;
   value: number | string;
   accent: StatTileAccent;
   sub?: { label: string; value: number | string; accent: StatTileAccent };
   faction?: keyof typeof ARCADE_CARD_FACTION;
+  flat?: boolean;
+  mono?: boolean;
 }) {
-  return (
-    <ArcadeCard faction={faction}>
+  const body = (
+    <>
       <div className="flex items-baseline justify-between gap-2 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
         <span>{label}</span>
         {sub && <span className="text-right">{sub.label}</span>}
       </div>
       <div className="mt-1 flex items-baseline justify-between gap-2">
-        <span className={cn("font-display text-2xl break-words", STAT_TILE_ACCENT[accent])}>
+        <span
+          className={cn(
+            "break-words tabular-nums",
+            mono ? "font-mono text-lg md:text-xl" : "font-display text-2xl",
+            STAT_TILE_ACCENT[accent],
+            accent === "victory" || accent === "neon" ? "[text-shadow:none]" : undefined,
+          )}
+        >
           {value}
         </span>
         {sub && (
-          <span className={cn("font-display text-lg", STAT_TILE_ACCENT[sub.accent])}>
+          <span
+            className={cn(
+              "tabular-nums",
+              mono ? "font-mono text-sm" : "font-display text-lg",
+              STAT_TILE_ACCENT[sub.accent],
+              sub.accent === "victory" || sub.accent === "neon" ? "[text-shadow:none]" : undefined,
+            )}
+          >
             {sub.value}
           </span>
         )}
       </div>
-    </ArcadeCard>
+    </>
+  );
+  // flat cells carry their own surface so a parent can paint hairlines with
+  // the gap-px / bg-border grid trick (survives wrapping, unlike divide-x).
+  if (flat) return <div className="min-w-0 bg-surface px-3 py-2">{body}</div>;
+  return <ArcadeCard faction={faction}>{body}</ArcadeCard>;
+}
+
+/** CRT-warming skeleton block (God Mode load choreography): neon shimmer
+ *  sweep + scanlines. Size it with className to the final layout shape so
+ *  real values never pop from $0. */
+export function ArcadeSkeleton({ className }: { className?: string }) {
+  return (
+    <div className={cn("skeleton-arcade relative", className)}>
+      <div className="absolute inset-0 scanlines opacity-20 pointer-events-none" />
+    </div>
+  );
+}
+
+/** Tiny month-column strip: solid fill (actual) over an 18% wash track
+ *  (plan), normalized to the shared max. Pure CSS divs. `onPick` makes each
+ *  column a time-travel target (God Mode: tap a month → repoint the page).
+ *  The last column is "current" and glows. */
+export function Sparkbars({
+  points,
+  track,
+  accent = "var(--neon)",
+  height = 32,
+  labels,
+  onPick,
+  className,
+}: {
+  points: number[];
+  track?: number[];
+  accent?: string;
+  height?: number;
+  labels?: string[];
+  onPick?: (i: number) => void;
+  className?: string;
+}) {
+  const max = Math.max(1, ...points, ...(track ?? []));
+  return (
+    <div
+      className={cn("grid grid-flow-col auto-cols-fr items-end gap-[2px]", className)}
+      style={{ height }}
+    >
+      {points.map((v, i) => {
+        const t = track?.[i] ?? 0;
+        const isLast = i === points.length - 1;
+        const cell = (
+          <div className="relative h-full w-full min-w-0 flex items-end">
+            {t > 0 && (
+              <div
+                className="absolute bottom-0 left-0 right-0 rounded-t-[2px]"
+                style={{
+                  height: `${Math.round((t / max) * 100)}%`,
+                  background: `color-mix(in oklab, ${accent} 18%, transparent)`,
+                }}
+              />
+            )}
+            <div
+              className="relative w-full rounded-t-[2px]"
+              style={{
+                height: v > 0 ? `max(${Math.round((v / max) * 100)}%, 2px)` : 0,
+                background: isLast ? accent : `color-mix(in oklab, ${accent} 70%, transparent)`,
+                boxShadow: isLast ? `0 0 8px ${accent}` : undefined,
+              }}
+            />
+          </div>
+        );
+        return onPick ? (
+          <button
+            key={i}
+            type="button"
+            onClick={() => onPick(i)}
+            className="h-full min-w-0 cursor-pointer"
+            aria-label={labels?.[i] ?? `bar ${i + 1}`}
+          >
+            {cell}
+          </button>
+        ) : (
+          <div key={i} className="h-full min-w-0" aria-label={labels?.[i]}>
+            {cell}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -343,21 +450,43 @@ export function MobileStat({
   );
 }
 
-/** Glowing progress bar shared by the Paycheck Engine and Goal Bar. */
-export function NeonBar({ pct, accent, tall = false }: { pct: number; accent: string; tall?: boolean }) {
+/** Glowing progress bar shared by the Paycheck Engine and Goal Bar.
+ *  `sheen` (opt-in): when the bar is full, a periodic diagonal light sweep
+ *  keeps "100%" reading as earning rather than inert (God Mode hero). */
+export function NeonBar({
+  pct,
+  accent,
+  tall = false,
+  sheen = false,
+}: {
+  pct: number;
+  accent: string;
+  tall?: boolean;
+  sheen?: boolean;
+}) {
   const w = Math.max(0, Math.min(1, pct)) * 100;
   return (
     <div
       className={`mt-4 relative ${tall ? "h-4" : "h-3"} w-full rounded-full overflow-hidden border border-border bg-[color-mix(in_oklab,var(--foreground)_4%,transparent)]`}
     >
       <div
-        className="h-full rounded-full transition-[width] duration-700 ease-out"
+        className="relative h-full rounded-full overflow-hidden transition-[width] duration-700 ease-out"
         style={{
           width: `${w}%`,
           background: `linear-gradient(90deg, color-mix(in oklab, ${accent} 70%, transparent), ${accent})`,
           boxShadow: `0 0 14px ${accent}, 0 0 28px color-mix(in oklab, ${accent} 60%, transparent)`,
         }}
-      />
+      >
+        {sheen && pct >= 1 && (
+          <div
+            className="bar-sheen absolute inset-y-0 w-1/3"
+            style={{
+              background:
+                "linear-gradient(105deg, transparent, rgba(255,255,255,0.35), transparent)",
+            }}
+          />
+        )}
+      </div>
       <div className="absolute inset-0 pointer-events-none scanlines opacity-30" />
     </div>
   );

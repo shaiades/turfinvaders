@@ -746,6 +746,101 @@
   }
 }
 
+/* ── God Mode "Command Bridge" (owner directive 2026-10-01) ──────────────── */
+
+/* CRT-warming skeleton: sweeping neon-tinted shimmer; pair with a scanlines
+   overlay. Replaces gray bones AND the $0-before-data flash. */
+@keyframes arcade-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+@utility skeleton-arcade {
+  border-radius: var(--radius-md);
+  background: linear-gradient(
+    100deg,
+    color-mix(in oklab, var(--foreground) 5%, transparent) 40%,
+    color-mix(in oklab, var(--neon) 9%, transparent) 50%,
+    color-mix(in oklab, var(--foreground) 5%, transparent) 60%
+  );
+  background-size: 200% 100%;
+  animation: arcade-shimmer 1.8s linear infinite;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+/* One-shot section rise on first data settle; stagger via animation-delay. */
+@keyframes section-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@utility section-enter {
+  animation: section-enter 0.4s ease-out backwards;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+/* Radial money halo + glass top edge for the Vault hero card. */
+@utility vault-hero {
+  background:
+    radial-gradient(
+      ellipse 55% 70% at 18% 30%,
+      color-mix(in oklab, var(--victory) 10%, transparent),
+      transparent 65%
+    ),
+    var(--color-surface);
+  box-shadow: inset 0 1px 0 color-mix(in oklab, white 7%, transparent);
+}
+
+/* "VAULT SEALED" — the kombat-kaching recipe recolored victory; fires once
+   per LA month when collected covers anticipated. */
+@keyframes vault-sealed {
+  0% {
+    box-shadow: 0 0 0 0 transparent;
+    filter: brightness(1);
+  }
+  20% {
+    box-shadow:
+      0 0 0 3px var(--victory),
+      0 0 42px 4px color-mix(in oklab, var(--victory) 60%, transparent);
+    filter: brightness(1.18);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+    filter: brightness(1);
+  }
+}
+@utility vault-sealed {
+  animation: vault-sealed 1.2s ease-out 2;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+/* Diagonal sheen sweep across a full progress bar — "earning", not "done". */
+@keyframes bar-sheen {
+  0% {
+    transform: translateX(-120%) skewX(-18deg);
+  }
+  40%,
+  100% {
+    transform: translateX(260%) skewX(-18deg);
+  }
+}
+@utility bar-sheen {
+  animation: bar-sheen 2.5s ease-in-out infinite;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    MY PURPOSE — the calm surface. The workshop is deliberately NOT the arcade:
    deep tidal navy, warm off-white text, restrained sand for emphasis, sans

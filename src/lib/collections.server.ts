@@ -10,7 +10,13 @@
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { monday } from "@/lib/monday.server";
-import { laTodayISO, laMonthStartISO, monthStartISO, addDaysISO } from "@/lib/dates";
+import {
+  laTodayISO,
+  laMonthStartISO,
+  monthStartISO,
+  nextMonthStartISO,
+  addDaysISO,
+} from "@/lib/dates";
 import { listAllBoards } from "@/lib/block-cards.server";
 import {
   buildCollectionRow,
@@ -83,11 +89,14 @@ export async function syncCollectionsBoards(
   const results: CollectionsBoardResult[] = [];
   const skipped: CollectionsSyncSummary["skipped"] = [];
 
-  // Quick scope = the current + previous LA month's boards, compared by the
-  // PARSED month (board names are hand-typed; never substring-match labels).
+  // Quick scope = previous + current + NEXT LA month's boards, compared by
+  // the PARSED month (board names are hand-typed; never substring-match
+  // labels). Next month rides along because God Mode's forward-cash outlook
+  // reads payments scheduled on next month's board (owner, 2026-10-01).
   const curMonth = laMonthStartISO();
   const prevMonth = monthStartISO(addDaysISO(curMonth, -1));
-  const activeMonths = new Set([curMonth, prevMonth]);
+  const nextMonth = nextMonthStartISO(curMonth);
+  const activeMonths = new Set([curMonth, prevMonth, nextMonth]);
 
   const targets: Array<{ id: string; name: string; monthISO: string }> = [];
   for (const b of candidates) {

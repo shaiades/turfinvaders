@@ -297,3 +297,175 @@ export function aggregateCollections(
     byOffice,
   };
 }
+
+// ── Cash curve + forward outlook (God Mode v2, owner 2026-10-01) ─────────
+
+type CurveRow = Pick<
+  ReportCollectionRow,
+  "planned_amount" | "actual_amount" | "anticipated_date" | "collected_date" | "office"
+>;
+
+export type CashCurve = {
+  /** monthStart..monthEnd inclusive, ISO days. */
+  days: string[];
+  /** Cumulative Σ planned_amount bucketed by anticipated_date. */
+  antCum: number[];
+  /** Cumulative Σ actual_amount bucketed by collected_date. */
+  colCum: number[];
+  /** Index of todayISO in days; -1 when the month is entirely past/future. */
+  todayIdx: number;
+  /** colCum − antCum at today (current month) or at month end (past). */
+  delta: number;
+  /** Planned $ with no anticipated_date + collected $ with no collected
+   *  date — bucketed into day 0 but called out so the chart can footnote. */
+  undatedPlanned: number;
+  undatedCollected: number;
+};
+
+const dayAddISO = (iso: string, n: number): string => {
+  const [y, m, d] = iso.split("-").map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d + n));
+  return t.toISOString().slice(0, 10);
+};
+
+/** Day-by-day cumulative anticipated vs collected across one month.
+ *  Bucketing: dates before the month (or missing) land on day 0, dates
+ *  after it land on the last day — so BY CONSTRUCTION the curve endpoints
+ *  equal aggregateCollections' anticipated/collected for the same rows
+ *  (owner trust rule: the chart must reconcile with the hero numbers). */
+export function buildCashCurve(
+  rows: CurveRow[],
+  opts: { monthStart: string; monthEnd: string; todayISO: string; office?: string },
+): CashCurve {
+  const mine = opts.office === undefined ? rows : rows.filter((r) => r.office === opts.office);
+  const days: string[] = [];
+  for (let d = opts.monthStart; d <= opts.monthEnd; d = dayAddISO(d, 1)) days.push(d);
+  const n = days.length;
+  const idxOf = (iso: string | null): number => {
+    if (iso === null) return 0;
+    if (iso < opts.monthStart) return 0;
+    if (iso > opts.monthEnd) return n - 1;
+    const i = days.indexOf(iso);
+    return i < 0 ? 0 : i;
+  };
+  const ant = new Array<number>(n).fill(0);
+  const col = new Array<number>(n).fill(0);
+  let undatedPlanned = 0;
+  let undatedCollected = 0;
+  for (const r of mine) {
+    if (r.planned_amount > 0) {
+      ant[idxOf(r.anticipated_date)] += r.planned_amount;
+      if (r.anticipated_date === null) undatedPlanned += r.planned_amount;
+    }
+    if (r.actual_amount > 0) {
+      col[idxOf(r.collected_date)] += r.actual_amount;
+      if (r.collected_date === null) undatedCollected += r.actual_amount;
+    }
+  }
+  const round = (x: number) => Math.round(x * 100) / 100;
+  const antCum: number[] = [];
+  const colCum: number[] = [];
+  let a = 0;
+  let c = 0;
+  for (let i = 0; i < n; i++) {
+    a += ant[i];
+    c += col[i];
+    antCum.push(round(a));
+    colCum.push(round(c));
+  }
+  const todayIdx = days.indexOf(opts.todayISO);
+  const at = todayIdx >= 0 ? todayIdx : n - 1;
+  return {
+    days,
+    antCum,
+    colCum,
+    todayIdx,
+    delta: round(colCum[at] - antCum[at]),
+    undatedPlanned: round(undatedPlanned),
+    undatedCollected: round(undatedCollected),
+  };
+}
+
+export type ForwardOutlook = {
+  /** Uncollected remainder due before today (the backlog to chase). */
+  overdueBacklog: number;
+  /** Remainder with anticipated_date in (today, today+7] / +30. */
+  next7: number;
+  next30: number;
+  /** Remainder with no anticipated_date at all — unschedulable. */
+  undated: number;
+};
+
+/** Expected cash ahead, from every open row's uncollected remainder
+ *  (max(planned − actual, 0)). Feed it the CURRENT + NEXT month's rows —
+ *  next month's payments live on next month's board. */
+export function buildForwardOutlook(
+  rows: CurveRow[],
+  opts: { todayISO: string; office?: string },
+): ForwardOutlook {
+  const mine = opts.office === undefined ? rows : rows.filter((r) => r.office === opts.office);
+  const round = (x: number) => Math.round(x * 100) / 100;
+  let overdueBacklog = 0;
+  let next7 = 0;
+  let next30 = 0;
+  let undated = 0;
+  const d7 = dayAddISO(opts.todayISO, 7);
+  const d30 = dayAddISO(opts.todayISO, 30);
+  for (const r of mine) {
+    const remaining = Math.max(r.planned_amount - r.actual_amount, 0);
+    if (remaining <= 0) continue;
+    const due = r.anticipated_date;
+    if (due === null) {
+      undated += remaining;
+    } else if (due < opts.todayISO) {
+      overdueBacklog += remaining;
+    } else {
+      if (due <= d7) next7 += remaining;
+      if (due <= d30) next30 += remaining;
+    }
+  }
+  return {
+    overdueBacklog: round(overdueBacklog),
+    next7: round(next7),
+    next30: round(next30),
+    undated: round(undated),
+  };
+}
+
+/** Per-month anticipated/collected rollup for the 12-month Sparkbars strip.
+ *  Rows span many collection_months; returns months sorted ascending. */
+export function monthlyCollectionsTrend(
+  rows: Array<
+    Pick<ReportCollectionRow, "collection_month" | "planned_amount" | "actual_amount" | "office">
+  >,
+  opts: { office?: string } = {},
+): Array<{ month: string; anticipated: number; collected: number }> {
+  const mine = opts.office === undefined ? rows : rows.filter((r) => r.office === opts.office);
+  const by = new Map<string, { anticipated: number; collected: number }>();
+  for (const r of mine) {
+    const slot = by.get(r.collection_month) ?? { anticipated: 0, collected: 0 };
+    slot.anticipated += r.planned_amount;
+    slot.collected += r.actual_amount;
+    by.set(r.collection_month, slot);
+  }
+  const round = (x: number) => Math.round(x * 100) / 100;
+  return [...by.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([month, v]) => ({
+      month,
+      anticipated: round(v.anticipated),
+      collected: round(v.collected),
+    }));
+}
+
+/** Quantile step (0–4) for the calendar heatmap ramp: 0 = zero/empty, then
+ *  quartile buckets of the NON-ZERO values (robust to one monster day). */
+export function heatStep(value: number, nonZeroSorted: number[]): 0 | 1 | 2 | 3 | 4 {
+  if (value <= 0 || nonZeroSorted.length === 0) return 0;
+  const q = (p: number) =>
+    nonZeroSorted[Math.min(nonZeroSorted.length - 1, Math.floor(p * nonZeroSorted.length))];
+  if (value <= q(0.25)) return 1;
+  if (value <= q(0.5)) return 2;
+  if (value <= q(0.75)) return 3;
+  return 4;
+}
