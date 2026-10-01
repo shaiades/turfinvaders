@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Download, FileClock, FileSpreadsheet, ScrollText } from "lucide-react";
+import { CalendarOff, Download, FileClock, FileSpreadsheet, ScrollText } from "lucide-react";
 import { ArcadeCard } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PayrollLedger } from "@/components/PayrollLedger";
 import { downloadCsvFile } from "@/lib/csv";
 import {
+  buildAbsenceCsvLines,
   buildAuditCsvLines,
   buildPayrollRangeCsvLines,
   buildPunchDetailCsvLines,
@@ -66,6 +67,8 @@ export function ReportsConsole({
   const [punchTo, setPunchTo] = useState(today);
   const [auditFrom, setAuditFrom] = useState(laMonthStartISO);
   const [auditTo, setAuditTo] = useState(today);
+  const [absFrom, setAbsFrom] = useState(laMonthStartISO);
+  const [absTo, setAbsTo] = useState(today);
 
   const exportMut = useMutation({
     mutationFn: async ({
@@ -190,6 +193,32 @@ export function ReportsConsole({
               >
                 <Download className="w-3.5 h-3.5 mr-1.5" />
                 Export audit CSV
+              </Button>
+            </ArcadeCard>
+
+            <ArcadeCard className="p-5 space-y-3">
+              <div className="flex items-center gap-2">
+                <CalendarOff className="w-4 h-4 text-turf-cyan" />
+                <span className="font-display text-xs uppercase tracking-widest">Absences</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Days off, sick days, no-shows and excused absences — requests and records, with
+                who entered and who approved each one.
+              </p>
+              <RangeInputs from={absFrom} to={absTo} setFrom={setAbsFrom} setTo={setAbsTo} />
+              <Button
+                disabled={running}
+                onClick={() =>
+                  exportMut.mutate({
+                    kind: "absence",
+                    filename: `absences-${absFrom}-to-${absTo}.csv`,
+                    build: () => buildAbsenceCsvLines(absFrom, absTo),
+                  })
+                }
+                className="w-full min-h-11 md:min-h-9 bg-victory text-background hover:bg-victory/90 font-display text-[10px] uppercase tracking-widest"
+              >
+                <Download className="w-3.5 h-3.5 mr-1.5" />
+                Export absences CSV
               </Button>
             </ArcadeCard>
           </div>

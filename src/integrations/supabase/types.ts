@@ -1569,6 +1569,54 @@ export type Database = {
         }
         Relationships: []
       }
+      day_off_requests: {
+        Row: {
+          absence_date: string
+          cancelled_at: string | null
+          cancelled_by: string | null
+          created_at: string
+          deny_reason: string | null
+          id: string
+          kind: string
+          reason: string | null
+          requested_by: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: string
+          user_id: string
+        }
+        Insert: {
+          absence_date: string
+          cancelled_at?: string | null
+          cancelled_by?: string | null
+          created_at?: string
+          deny_reason?: string | null
+          id?: string
+          kind: string
+          reason?: string | null
+          requested_by: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+          user_id: string
+        }
+        Update: {
+          absence_date?: string
+          cancelled_at?: string | null
+          cancelled_by?: string | null
+          created_at?: string
+          deny_reason?: string | null
+          id?: string
+          kind?: string
+          reason?: string | null
+          requested_by?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       time_week_attestations: {
         Row: {
           created_at: string
@@ -1896,6 +1944,18 @@ export type Database = {
       attest_week: {
         Args: { _week_start: string; _confirm: boolean; _note?: string | null }
         Returns: string
+      }
+      submit_day_off: {
+        Args: { _user_id: string; _dates: string[]; _kind: string; _reason?: string | null }
+        Returns: Json
+      }
+      review_day_off: {
+        Args: { _id: string; _approve: boolean; _deny_reason?: string | null }
+        Returns: undefined
+      }
+      cancel_day_off: {
+        Args: { _id: string }
+        Returns: undefined
       }
       reopen_payroll_run: {
         Args: { _run_id: string; _reason: string }
