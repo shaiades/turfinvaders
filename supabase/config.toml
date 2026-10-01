@@ -2,3 +2,6 @@ project_id = "xogitpqeuwalerxygvjw"
 
 [functions.monday-live-dispatch]
 verify_jwt = false
+
+[functions.notify-owner-digest]
+verify_jwt = false

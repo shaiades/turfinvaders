@@ -27,7 +27,16 @@ const fmtMoney = (n: number) =>
     maximumFractionDigits: 0,
   }).format(n);
 
-export function CashCurve({ curve, dimmed }: { curve: Curve; dimmed?: boolean }) {
+export function CashCurve({
+  curve,
+  dimmed,
+  showDelta = true,
+}: {
+  curve: Curve;
+  dimmed?: boolean;
+  /** False when the hero's verdict line already renders the judgment. */
+  showDelta?: boolean;
+}) {
   const [pick, setPick] = useState<number | null>(null);
   const n = curve.days.length;
   const lastColIdx = curve.todayIdx >= 0 ? curve.todayIdx : n - 1;
@@ -69,15 +78,17 @@ export function CashCurve({ curve, dimmed }: { curve: Curve; dimmed?: boolean })
             <span className="h-0 w-3 border-t-2 border-dashed border-turf-cyan" /> Anticipated
           </span>
         </div>
-        <span
-          className={cn(
-            "font-display uppercase tracking-widest tabular-nums",
-            curve.delta >= 0 ? "text-victory [text-shadow:none]" : "text-destructive",
-          )}
-        >
-          {curve.delta >= 0 ? "▲" : "▼"} {fmtShort(Math.abs(curve.delta))}{" "}
-          {curve.delta >= 0 ? "ahead of" : "behind"} plan
-        </span>
+        {showDelta && (
+          <span
+            className={cn(
+              "font-display uppercase tracking-widest tabular-nums",
+              curve.delta >= 0 ? "text-victory [text-shadow:none]" : "text-destructive",
+            )}
+          >
+            {curve.delta >= 0 ? "▲" : "▼"} {fmtShort(Math.abs(curve.delta))}{" "}
+            {curve.delta >= 0 ? "ahead of" : "behind"} plan
+          </span>
+        )}
       </div>
       <svg
         viewBox={`0 0 ${W} ${H}`}

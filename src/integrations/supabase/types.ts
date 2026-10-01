@@ -873,8 +873,33 @@ export type Database = {
         }
         Relationships: []
       }
+      company_costs: {
+        Row: {
+          cogs_pct: number | null
+          month: string
+          office: string
+          office_payroll: number | null
+          updated_at: string
+        }
+        Insert: {
+          cogs_pct?: number | null
+          month: string
+          office: string
+          office_payroll?: number | null
+          updated_at?: string
+        }
+        Update: {
+          cogs_pct?: number | null
+          month?: string
+          office?: string
+          office_payroll?: number | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       company_targets: {
         Row: {
+          annual_goal: number
           id: boolean
           monthly_collected_target: number
           oc_target: number | null
@@ -882,6 +907,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          annual_goal?: number
           id?: boolean
           monthly_collected_target?: number
           oc_target?: number | null
@@ -889,6 +915,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          annual_goal?: number
           id?: boolean
           monthly_collected_target?: number
           oc_target?: number | null
