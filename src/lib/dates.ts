@@ -98,6 +98,60 @@ export function laMidnightUtcISO(isoDate: string): string {
   return new Date(guess.getTime() - laHour * 3_600_000).toISOString(); // 01:00 during PDT → back 1h
 }
 
+/** LA wall time of an instant as a datetime-local value ("YYYY-MM-DDTHH:MM").
+ *  Pairs with laWallToUtcISO so time editors read and write Pacific wall
+ *  clock regardless of the viewer's device timezone. */
+export function laWallFromISO(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const date = new Intl.DateTimeFormat("en-CA", { timeZone: LA_TZ }).format(d);
+  const time = new Intl.DateTimeFormat("en-GB", {
+    timeZone: LA_TZ,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(d);
+  return `${date}T${time}`;
+}
+
+/** "HH:MM" LA wall time of an instant — for time-only inputs. */
+export function laTimeHM(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: LA_TZ,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(d);
+}
+
+/** UTC instant (ISO) of an LA wall time ("YYYY-MM-DDTHH:MM[:SS]"). DST-safe
+ *  via the same guess-and-correct technique as laMidnightUtcISO: start from
+ *  PST (UTC-8), measure how the guess renders in LA, shift by the delta, and
+ *  verify once more for the spring-forward edge. A nonexistent wall time
+ *  (inside the skipped DST hour) resolves to a stable nearby instant. */
+export function laWallToUtcISO(wall: string): string | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(wall);
+  if (!m) return null;
+  const label = (s: string) => {
+    const p = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(s);
+    if (!p) return NaN;
+    return Date.UTC(+p[1], +p[2] - 1, +p[3], +p[4], +p[5]);
+  };
+  const target = label(wall);
+  if (isNaN(target)) return null;
+  let guess = target + 8 * 3_600_000; // 00:00 LA = 08:00 UTC during PST
+  for (let i = 0; i < 2; i++) {
+    const diff = target - label(laWallFromISO(new Date(guess).toISOString()));
+    if (!diff) break;
+    guess += diff;
+  }
+  return new Date(guess).toISOString();
+}
+
 /** "Aug 14, 2026 @ 04:26 PM" in Pacific time — turf provenance lines. */
 export function laDateTimeLabel(iso: string | Date): string {
   const d = typeof iso === "string" ? new Date(iso) : iso;

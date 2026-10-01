@@ -30,25 +30,19 @@ import { useWeekSelector } from "@/hooks/useWeekSelector";
 import { TimeClockReviewQueue } from "@/components/TimeClockReviewQueue";
 import { TimeClockBackfill } from "@/components/TimeClockBackfill";
 import { TimeClockExceptions } from "@/components/TimeClockExceptions";
+import { ReasonDialog } from "@/components/ReasonDialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { laTimeHM, laWallFromISO, laWallToUtcISO } from "@/lib/dates";
+import { invalidatePunchCaches } from "@/lib/time-clock-keys";
 
-// Weeks anchor to the LA Monday (midnight PT reset).
-function toLocalInput(iso: string | null) {
-  if (!iso) return "";
-  const d = new Date(iso);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-function fromLocalInput(s: string): string | null {
-  if (!s) return null;
-  const d = new Date(s);
-  return isNaN(d.getTime()) ? null : d.toISOString();
-}
-function toTimeInput(iso: string | null) {
-  if (!iso) return "";
-  const d = new Date(iso);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
+// Weeks anchor to the LA Monday (midnight PT reset). Every editable field is
+// a PACIFIC wall time (owner directive 2026-07-20) — the old helpers here
+// used the viewer's device timezone, which silently shifted punches for
+// anyone editing from outside LA.
+const toLocalInput = laWallFromISO;
+const fromLocalInput = laWallToUtcISO;
+const toTimeInput = laTimeHM;
 
 type Meal = { id: string; meal_start: string; meal_end: string | null };
 type Entry = {
@@ -166,7 +160,10 @@ function EntryFlags({ e }: { e: Entry }) {
   );
 }
 
-export function TimesheetEditor() {
+/** Admin: the whole crew. Captains mount it with scope={{teamId}} — their
+ *  van only, no Passes (a manager power); the adjust RPCs enforce the same
+ *  team boundary (and never-self) server-side. */
+export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
   const qc = useQueryClient();
   const {
     weekStart,
@@ -180,6 +177,20 @@ export function TimesheetEditor() {
   const [needsReviewOnly, setNeedsReviewOnly] = useState(false);
   const [addEntryOpen, setAddEntryOpen] = useState(false);
   const [passesOpen, setPassesOpen] = useState(false);
+  const [weekPickerOpen, setWeekPickerOpen] = useState(false);
+  // The pending audited change awaiting its reason (ReasonDialog).
+  const [reasonReq, setReasonReq] = useState<
+    | {
+        kind: "save";
+        id: string;
+        clock: { clock_in: string; clock_out: string | null } | null;
+        meal: { start: string; end: string } | null;
+        prompt: string;
+      }
+    | { kind: "void"; id: string; prompt: string }
+    | { kind: "clockout"; id: string; clockIn: string; prompt: string }
+    | null
+  >(null);
   // Lunch fields are HH:MM wall times on the shift's own day; clock fields
   // stay full datetime-local strings.
   const [edits, setEdits] = useState<
@@ -190,26 +201,34 @@ export function TimesheetEditor() {
   >({});
 
   const { data, isLoading } = useQuery({
-    queryKey: ["timesheets", start, end],
+    queryKey: ["timesheets", start, end, scope?.teamId ?? "all"],
     queryFn: async () => {
-      const [entriesRes, profilesRes] = await Promise.all([
-        supabase
-          .from("time_entries")
-          .select(
-            "id, user_id, clock_in, clock_out, log_date, billable_hours, entry_source, needs_correction, meal_status, meal_periods (id, meal_start, meal_end)",
-          )
-          .gte("log_date", start)
-          .lte("log_date", end)
-          .is("voided_at", null)
-          .order("log_date", { ascending: false })
-          .order("clock_in", { ascending: false }),
-        supabase.from("profiles").select("id, display_name"),
-      ]);
-      if (entriesRes.error) throw entriesRes.error;
+      let profilesQ = supabase.from("profiles").select("id, display_name");
+      if (scope) profilesQ = profilesQ.eq("team_id", scope.teamId);
+      const profilesRes = await profilesQ;
       if (profilesRes.error) throw profilesRes.error;
+      const profiles = (profilesRes.data ?? []) as Profile[];
+
+      let entriesQ = supabase
+        .from("time_entries")
+        .select(
+          "id, user_id, clock_in, clock_out, log_date, billable_hours, entry_source, needs_correction, meal_status, meal_periods (id, meal_start, meal_end)",
+        )
+        .gte("log_date", start)
+        .lte("log_date", end)
+        .is("voided_at", null)
+        .order("log_date", { ascending: false })
+        .order("clock_in", { ascending: false });
+      if (scope) {
+        const ids = profiles.map((p) => p.id);
+        if (ids.length === 0) return { entries: [] as Entry[], profiles };
+        entriesQ = entriesQ.in("user_id", ids);
+      }
+      const entriesRes = await entriesQ;
+      if (entriesRes.error) throw entriesRes.error;
       return {
         entries: (entriesRes.data ?? []) as Entry[],
-        profiles: (profilesRes.data ?? []) as Profile[],
+        profiles,
       };
     },
   });
@@ -288,10 +307,7 @@ export function TimesheetEditor() {
         const { [vars.id]: _omit, ...rest } = e;
         return rest;
       });
-      qc.invalidateQueries({ queryKey: ["timesheets"] });
-      qc.invalidateQueries({ queryKey: ["payroll-ledger"] });
-      qc.invalidateQueries({ queryKey: ["time-clock-open"] });
-      qc.invalidateQueries({ queryKey: ["time-clock-today"] });
+      invalidatePunchCaches(qc);
     },
     onError: (e: Error) => toast.error("Update failed", { description: e.message }),
   });
@@ -303,8 +319,7 @@ export function TimesheetEditor() {
     },
     onSuccess: () => {
       toast.success("Time entry voided");
-      qc.invalidateQueries({ queryKey: ["timesheets"] });
-      qc.invalidateQueries({ queryKey: ["payroll-ledger"] });
+      invalidatePunchCaches(qc);
     },
     onError: (e: Error) => toast.error("Void failed", { description: e.message }),
   });
@@ -357,46 +372,47 @@ export function TimesheetEditor() {
         toast.error("Lunch needs both times — out and back in.");
         return;
       }
-      const day = toLocalInput(clockIn).slice(0, 10);
-      const start = new Date(`${day}T${outHM}:00`);
-      const endD = new Date(`${day}T${inHM}:00`);
-      if (isNaN(start.getTime()) || isNaN(endD.getTime())) {
+      // LA wall times on the shift's LA day — never the viewer's timezone.
+      const day = laWallFromISO(clockIn).slice(0, 10);
+      const startISO = laWallToUtcISO(`${day}T${outHM}`);
+      const endISO = laWallToUtcISO(`${day}T${inHM}`);
+      if (!startISO || !endISO) {
         toast.error("Invalid lunch time");
         return;
       }
-      if (endD <= start) {
+      if (endISO <= startISO) {
         toast.error("Lunch end must be after lunch start");
         return;
       }
       if (
-        start.getTime() < new Date(clockIn).getTime() ||
-        (clockOut && endD.getTime() > new Date(clockOut).getTime())
+        new Date(startISO).getTime() < new Date(clockIn).getTime() ||
+        (clockOut && new Date(endISO).getTime() > new Date(clockOut).getTime())
       ) {
         toast.error("Lunch must fall inside the shift", {
           description: "Off by design? Fix the clock-in/out times in the same save.",
         });
         return;
       }
-      meal = { start: start.toISOString(), end: endD.toISOString() };
+      meal = { start: startISO, end: endISO };
     }
 
     if (!clockDirty && !meal) return;
-    const reason = window.prompt("Reason for this change (required — it goes on the audit trail):");
-    if (!reason || !reason.trim()) return;
-    saveMut.mutate({
+    const name = profileById.get(e.user_id)?.display_name ?? "this player";
+    setReasonReq({
+      kind: "save",
       id: e.id,
       clock: clockDirty ? { clock_in: clockIn, clock_out: clockOut } : null,
       meal,
-      reason: reason.trim(),
+      prompt: `Save the corrected times on ${name}'s ${e.log_date} entry.`,
     });
   }
 
   function voidRow(e: Entry, name: string) {
-    const reason = window.prompt(
-      `Void this ${e.log_date} entry for ${name}? Enter the reason (required):`,
-    );
-    if (!reason || !reason.trim()) return;
-    voidMut.mutate({ id: e.id, reason: reason.trim() });
+    setReasonReq({
+      kind: "void",
+      id: e.id,
+      prompt: `Void ${name}'s ${e.log_date} entry — it stops counting toward hours and pay.`,
+    });
   }
 
   // One-tap version of the same reasoned save — ends the shift right now,
@@ -411,16 +427,29 @@ export function TimesheetEditor() {
       });
       return;
     }
-    const reason = window.prompt(
-      `Clock ${name} out as of right now? Enter the reason (required — it goes on the audit trail):`,
-    );
-    if (!reason || !reason.trim()) return;
-    saveMut.mutate({
+    setReasonReq({
+      kind: "clockout",
       id: e.id,
-      clock: { clock_in: e.clock_in, clock_out: new Date().toISOString() },
-      meal: null,
-      reason: reason.trim(),
+      clockIn: e.clock_in,
+      prompt: `Clock ${name} out as of right now.`,
     });
+  }
+
+  function submitReason(reason: string) {
+    if (!reasonReq) return;
+    if (reasonReq.kind === "save") {
+      saveMut.mutate({ id: reasonReq.id, clock: reasonReq.clock, meal: reasonReq.meal, reason });
+    } else if (reasonReq.kind === "void") {
+      voidMut.mutate({ id: reasonReq.id, reason });
+    } else {
+      saveMut.mutate({
+        id: reasonReq.id,
+        clock: { clock_in: reasonReq.clockIn, clock_out: new Date().toISOString() },
+        meal: null,
+        reason,
+      });
+    }
+    setReasonReq(null);
   }
 
   const weekLabel = `${weekStart.toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${weekEnd.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
@@ -461,11 +490,12 @@ export function TimesheetEditor() {
 
   return (
     <div className="space-y-4">
-      {/* All-crew flagged punches — approve here, or fix the row below. */}
-      <TimeClockReviewQueue />
+      {/* Flagged punches — approve here, or fix the row below. Captains see
+          their own van's queue; admins see everyone. */}
+      {!scope && <TimeClockReviewQueue />}
 
       <ArcadePanel
-        title="Timesheets"
+        title={scope ? "Crew Timesheets" : "Timesheets"}
         action={
           <div className="flex items-center gap-2">
             <Dialog open={addEntryOpen} onOpenChange={setAddEntryOpen}>
@@ -495,29 +525,31 @@ export function TimesheetEditor() {
                 />
               </DialogContent>
             </Dialog>
-            <Dialog open={passesOpen} onOpenChange={setPassesOpen}>
-              <DialogTrigger asChild>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="font-display text-[10px] tracking-widest uppercase"
-                >
-                  <KeyRound className="w-3.5 h-3.5 mr-1.5" />
-                  Passes
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-lg">
-                <DialogHeader>
-                  <DialogTitle className="font-display uppercase tracking-widest text-sm">
-                    Early / Late Passes
-                  </DialogTitle>
-                  <DialogDescription>
-                    Pre-approve one day's early clock-in or late finish so it never flags.
-                  </DialogDescription>
-                </DialogHeader>
-                <TimeClockExceptions profiles={data?.profiles ?? []} />
-              </DialogContent>
-            </Dialog>
+            {!scope && (
+              <Dialog open={passesOpen} onOpenChange={setPassesOpen}>
+                <DialogTrigger asChild>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="font-display text-[10px] tracking-widest uppercase"
+                  >
+                    <KeyRound className="w-3.5 h-3.5 mr-1.5" />
+                    Passes
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-lg">
+                  <DialogHeader>
+                    <DialogTitle className="font-display uppercase tracking-widest text-sm">
+                      Early / Late Passes
+                    </DialogTitle>
+                    <DialogDescription>
+                      Pre-approve one day's early clock-in or late finish so it never flags.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <TimeClockExceptions profiles={data?.profiles ?? []} />
+                </DialogContent>
+              </Dialog>
+            )}
           </div>
         }
       >
@@ -526,7 +558,31 @@ export function TimesheetEditor() {
             <Button variant="outline" size="sm" onClick={() => shiftWeek(-1)}>
               <ChevronLeft className="w-4 h-4" />
             </Button>
-            <div className="font-display text-sm text-neon px-2 tabular-nums">{weekLabel}</div>
+            <Popover open={weekPickerOpen} onOpenChange={setWeekPickerOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className="font-display text-sm text-neon px-2 tabular-nums min-h-11 md:min-h-8 hover:underline"
+                  title="Jump to a week"
+                >
+                  {weekLabel}
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={weekStart}
+                  onSelect={(d) => {
+                    if (d) {
+                      goToWeek(d);
+                      setWeekPickerOpen(false);
+                    }
+                  }}
+                  initialFocus
+                  className="p-3 pointer-events-auto"
+                />
+              </PopoverContent>
+            </Popover>
             <Button variant="outline" size="sm" onClick={() => shiftWeek(1)}>
               <ChevronRight className="w-4 h-4" />
             </Button>
@@ -784,6 +840,19 @@ export function TimesheetEditor() {
           </>
         )}
       </ArcadePanel>
+
+      <ReasonDialog
+        open={!!reasonReq}
+        onOpenChange={(o) => !o && setReasonReq(null)}
+        title={reasonReq?.kind === "void" ? "Void entry" : "Reason required"}
+        prompt={reasonReq?.prompt ?? ""}
+        confirmLabel={
+          reasonReq?.kind === "void" ? "Void" : reasonReq?.kind === "clockout" ? "Clock Out" : "Save"
+        }
+        destructive={reasonReq?.kind === "void"}
+        pending={saveMut.isPending || voidMut.isPending}
+        onSubmit={submitReason}
+      />
     </div>
   );
 }

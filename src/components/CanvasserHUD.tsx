@@ -48,9 +48,10 @@ export function CanvasserHUD({ userId }: { userId: string }) {
   const totals = sumLogCounters(logs.data);
   const called = totals.leads_called_in;
 
-  // Mon–Sat week window, matching calc_weekly_paycheck.
+  // Mon–SUN week window, matching calc_weekly_paycheck v6+ (Sundays are
+  // paid when worked — the old Mon–Sat window undercounted week points).
   const wkStart = laWeekStartISO();
-  const wkEnd = addDaysISO(wkStart, 5);
+  const wkEnd = addDaysISO(wkStart, 6);
   const weekRows = (sixty.data ?? []).filter((r) => r.log_date >= wkStart && r.log_date <= wkEnd);
   const wk = sumLogCounters(weekRows);
   const wkPts = weeklyPoints(wk.demos_sits, wk.sales);

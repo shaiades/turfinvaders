@@ -12,14 +12,14 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import { CalendarPlus } from "lucide-react";
+import { laWallToUtcISO } from "@/lib/dates";
+import { invalidatePunchCaches } from "@/lib/time-clock-keys";
 
 type Profile = { id: string; display_name: string };
 
-function isoFromLocal(s: string): string | null {
-  if (!s) return null;
-  const d = new Date(s);
-  return isNaN(d.getTime()) ? null : d.toISOString();
-}
+// Backfill fields are PACIFIC wall times (owner directive 2026-07-20), not
+// the viewer's device timezone.
+const isoFromLocal = laWallToUtcISO;
 
 const FIELD_LABEL = "text-[10px] font-display uppercase tracking-widest text-muted-foreground";
 
@@ -99,11 +99,7 @@ export function TimeClockBackfill({
       setLunchStart("");
       setLunchEnd("");
       setReason("");
-      qc.invalidateQueries({ queryKey: ["timesheets"] });
-      qc.invalidateQueries({ queryKey: ["payroll-ledger"] });
-      qc.invalidateQueries({ queryKey: ["time-review-queue"] });
-      qc.invalidateQueries({ queryKey: ["time-clock-open"] });
-      qc.invalidateQueries({ queryKey: ["time-clock-today"] });
+      invalidatePunchCaches(qc);
       onDone?.();
     },
     onError: (e: Error) => toast.error("Backfill failed", { description: e.message }),

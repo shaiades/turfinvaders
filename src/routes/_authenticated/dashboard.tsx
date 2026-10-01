@@ -42,6 +42,7 @@ import { Button } from "@/components/ui/button";
 import { CanvasserMission, isCanvasserTab, type CanvasserTab } from "@/components/CanvasserMission";
 import { TimeClock } from "@/components/TimeClock";
 import { TimeClockReviewQueue } from "@/components/TimeClockReviewQueue";
+import { VanClockConsole } from "@/components/VanClockConsole";
 import { PushAlertsCard } from "@/components/PushAlertsCard";
 import { FormerBadge } from "@/components/FormerBadge";
 import { useTodayLeads } from "@/hooks/useTodayLeads";
@@ -360,6 +361,7 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
   // The one Add Player dialog (2026-09-16) — defaults new players onto the
   // captain's own van.
   const [addOpen, setAddOpen] = useState(false);
+  const [crewSheetsOpen, setCrewSheetsOpen] = useState(false);
   const { data: dispatchVans = [] } = useDispatchVans({ enabled: addOpen });
   // Day / Week / Month selector — defaults to the pay week, matching the old
   // week-to-date board, and drives every panel below the live counter.
@@ -505,13 +507,30 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
         </div>
       </div>
 
-      {/* Punching lives on Mission — the captain's personal HQ (owner call
-          2026-09-12: Command carried a twin Time Clock one tab away). The
-          crew REVIEW queue stays here: that's a captain power, not a punch. */}
+      {/* The captain's own punching lives on Mission (owner call 2026-09-12);
+          the CREW's clock lives here. Van Clock = one-tap bulk punches for
+          the whole van (owner ask 2026-10-01): clock in, unpaid lunch out/in,
+          clock out — "now"-only, skip-and-report, fully audited. */}
+      {teamId && <VanClockConsole teamId={teamId} />}
       {/* Flagged punches for THIS van — captains approve or escalate
           (owner directive 2026-08-24). Renders nothing when clean; the
           alerts card below it stays so push can be enabled any time. */}
       <TimeClockReviewQueue teamId={teamId} />
+      {/* Crew time corrections — the same audited editor the office uses,
+          scoped to this van (own team only, never the captain's own entries;
+          the RPCs enforce both). Collapsed: edits are the exception. */}
+      {teamId &&
+        (crewSheetsOpen ? (
+          <TimesheetEditor scope={{ teamId }} />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setCrewSheetsOpen(true)}
+            className="w-full min-h-11 rounded border border-border/60 text-[10px] font-display uppercase tracking-widest text-muted-foreground hover:text-neon hover:border-neon/40 transition-colors"
+          >
+            Crew Timesheets · fix punches
+          </button>
+        ))}
       <PushAlertsCard />
 
       {/* Van-level Live Lead Counter */}
