@@ -11,9 +11,12 @@ import { viewBounds } from "@/lib/map-bounds";
  * the pre-May-2026 legacy import) — renders as a company-logo badge on the
  * house. Tapping it shows the homeowner's LAST NAME and the product(s)
  * installed: live social proof at the door ("we did the Hagmanns' roof
- * right there"). The view exposes ONLY last name + products + coords +
- * sold date — never price, phone, reps, or the full customer name — so it
- * is safe for every authenticated role, canvassers included.
+ * right there"). Cancelled customers (WCC cancel/CTC — the view's
+ * cancelled flag) render the same badge tinted RED (owner ask 2026-10-01):
+ * a warning, not social proof. The view exposes ONLY last name + products
+ * + coords + sold date + cancelled — never price, phone, reps, or the
+ * full customer name — so it is safe for every authenticated role,
+ * canvassers included.
  *
  * Mounted unconditionally inside NeonMap's MapContainer, so every surface
  * (Active Run, My Territory, Crew Map, Spectate) shows customers at all
@@ -29,6 +32,7 @@ export type CustomerHome = {
   lng: number;
   address: string | null;
   sold_on: string | null;
+  cancelled: boolean;
 };
 
 /** One badge per HOUSE: copy-family duplicates and repeat jobs (sale +
@@ -43,6 +47,9 @@ type CustomerBadge = {
   address: string | null;
   /** Newest sold_on across the house's jobs (badge popup shows one date). */
   sold_on: string | null;
+  /** Red badge only when EVERY job at the house is cancelled — any live
+   *  job (incl. a landed save card or a legacy row) keeps the house navy. */
+  cancelled: boolean;
 };
 
 const PAGE = 1000; // PostgREST caps un-ranged selects — page explicitly.
@@ -60,7 +67,7 @@ async function fetchCustomerHomes(): Promise<CustomerHome[]> {
         const from = (wave * PAGE_WAVE + i) * PAGE;
         return supabase
           .from("customer_homes")
-          .select("monday_item_id, last_name, products, lat, lng, address, sold_on")
+          .select("monday_item_id, last_name, products, lat, lng, address, sold_on, cancelled")
           .order("monday_item_id")
           .range(from, from + PAGE - 1);
       }),
@@ -78,6 +85,7 @@ async function fetchCustomerHomes(): Promise<CustomerHome[]> {
           lng: r.lng,
           address: r.address,
           sold_on: r.sold_on,
+          cancelled: r.cancelled === true,
         });
       }
       if (!data || data.length < PAGE) {
@@ -124,9 +132,11 @@ function groupByHouse(rows: CustomerHome[]): CustomerBadge[] {
         products,
         address: r.address,
         sold_on: r.sold_on,
+        cancelled: r.cancelled,
       });
       continue;
     }
+    prev.cancelled = prev.cancelled && r.cancelled;
     for (const p of products) {
       if (!prev.products.some((q) => q.toLowerCase() === p.toLowerCase())) prev.products.push(p);
     }
@@ -154,8 +164,8 @@ function soldLabel(iso: string | null): string | null {
 // identity across GPS-tick re-renders or every marker's DOM rebuilds).
 // No dynamic text in the html — the logo is a static asset.
 const badgeIconCache = new Map<string, L.DivIcon>();
-function customerBadgeIcon(size: number, hit: number): L.DivIcon {
-  const key = `${size}|${hit}`;
+function customerBadgeIcon(size: number, hit: number, cancelled: boolean): L.DivIcon {
+  const key = `${size}|${hit}|${cancelled ? "red" : "navy"}`;
   let icon = badgeIconCache.get(key);
   if (!icon) {
     // Glyph-to-circle ratio tuned live by the owner (2026-09-16): 0.8 read
@@ -168,10 +178,20 @@ function customerBadgeIcon(size: number, hit: number): L.DivIcon {
     // the PNG render at natural size — the giant glyph spilling out of the
     // badge (owner screenshot 2026-09-16). overflow:hidden is the backstop.
     const img = Math.round(size * 0.62);
+    // Cancelled homes tint the mark red via CSS mask — the PNG is one solid
+    // navy shape on transparency, and no CSS filter lands on an exact red.
+    // mask-size 100% 100% replicates the img's stretch into its square box.
+    // Reds ≈ theme --destructive (#ef4444) with a darker #991b1b ring.
+    const mark = cancelled
+      ? `<div style="width:${img}px;height:${img}px;background:#ef4444;-webkit-mask:url(/tidal-mark.png) center / 100% 100% no-repeat;mask:url(/tidal-mark.png) center / 100% 100% no-repeat;"></div>`
+      : `<img src="/tidal-mark.png" alt="" style="display:block;width:${img}px;height:${img}px;max-width:none;" />`;
+    const ring = cancelled
+      ? "border:1.5px solid #991b1b;box-shadow:0 0 6px rgba(153,27,27,0.7);"
+      : "border:1.5px solid #12283a;box-shadow:0 0 6px rgba(18,40,58,0.7);";
     const html = `
     <div style="width:${hit}px;height:${hit}px;display:flex;align-items:center;justify-content:center;">
-      <div style="width:${size}px;height:${size}px;border-radius:9999px;background:#f5f7fa;border:1.5px solid #12283a;box-shadow:0 0 6px rgba(18,40,58,0.7);display:flex;align-items:center;justify-content:center;overflow:hidden;">
-        <img src="/tidal-mark.png" alt="" style="display:block;width:${img}px;height:${img}px;max-width:none;" />
+      <div style="width:${size}px;height:${size}px;border-radius:9999px;background:#f5f7fa;${ring}display:flex;align-items:center;justify-content:center;overflow:hidden;">
+        ${mark}
       </div>
     </div>`;
     icon = L.divIcon({
@@ -202,6 +222,14 @@ const DOT_STYLE = {
   color: "#12283a",
   weight: 1.5,
   fillColor: "#f5f7fa",
+  fillOpacity: 0.95,
+} as const;
+/** Cancelled-house dots: literal hexes (canvas renderer — CSS vars can't
+ *  reach it) matching the red badge ring + mark. */
+const CANCELLED_DOT_STYLE = {
+  color: "#991b1b",
+  weight: 1.5,
+  fillColor: "#ef4444",
   fillOpacity: 0.95,
 } as const;
 
@@ -263,7 +291,7 @@ export function CustomerHomesLayer({ tappable = true }: { tappable?: boolean }) 
             key={b.key}
             center={[b.lat, b.lng]}
             radius={radius}
-            pathOptions={DOT_STYLE}
+            pathOptions={b.cancelled ? CANCELLED_DOT_STYLE : DOT_STYLE}
             interactive={false}
           />
         ))}
@@ -278,7 +306,6 @@ export function CustomerHomesLayer({ tappable = true }: { tappable?: boolean }) 
   // house-scale. The hit box stays finger-sized regardless.
   const size = 26;
   const hit = tappable ? Math.max(size, 40) : size;
-  const icon = customerBadgeIcon(size, hit);
 
   return (
     <>
@@ -286,7 +313,7 @@ export function CustomerHomesLayer({ tappable = true }: { tappable?: boolean }) 
         <Marker
           key={b.key}
           position={[b.lat, b.lng]}
-          icon={icon}
+          icon={customerBadgeIcon(size, hit, b.cancelled)}
           interactive={tappable}
           // Below result pins and the me-dot (0) so a badge never steals the
           // tap meant for a same-door pin correction; above house bubbles
@@ -297,7 +324,11 @@ export function CustomerHomesLayer({ tappable = true }: { tappable?: boolean }) 
             <Popup className="turf-popup" minWidth={190}>
               <div className="nm-pop-title">{b.last_name ?? "Tidal customer"}</div>
               <div className="nm-pop-now">
-                Tidal Remodeling customer
+                {b.cancelled ? (
+                  <span style={{ color: "#ef4444" }}>Cancelled Tidal Remodeling customer</span>
+                ) : (
+                  "Tidal Remodeling customer"
+                )}
                 {soldLabel(b.sold_on) ? (
                   <>
                     {" "}

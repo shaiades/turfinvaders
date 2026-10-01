@@ -1756,6 +1756,7 @@ export type Database = {
       customer_homes: {
         Row: {
           address: string | null
+          cancelled: boolean | null
           last_name: string | null
           lat: number | null
           lng: number | null
