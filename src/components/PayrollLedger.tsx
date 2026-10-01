@@ -18,7 +18,18 @@ import {
 } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useAuth } from "@/hooks/useAuth";
 import { RankPill } from "@/components/RankPill";
 import { useOfficeFilter } from "@/components/OfficeFilterContext";
 import { cn } from "@/lib/utils";
@@ -150,9 +161,32 @@ function ExceptionChips({ ex }: { ex: Record<string, unknown> | null | undefined
   );
 }
 
+/** Worker sign-off chip for the run-review eye: silent until the
+ *  attestation table ships. */
+function LedgerAttestChip({ status }: { status: string | null | undefined }) {
+  if (status === undefined) return null;
+  const s = status ?? "none";
+  return (
+    <span
+      className={cn(
+        "ml-2 align-middle text-[9px] font-display uppercase tracking-widest border rounded px-1",
+        s === "confirmed" && "text-victory border-victory/40",
+        s === "disputed" && "text-destructive border-destructive/40",
+        s === "none" && "text-muted-foreground border-border",
+      )}
+    >
+      {s === "confirmed" ? "attested ✓" : s === "disputed" ? "disputed" : "not attested"}
+    </span>
+  );
+}
+
 export function PayrollLedger() {
   const { matches, office } = useOfficeFilter();
+  const { role } = useAuth();
   const qc = useQueryClient();
+  const [reopenOpen, setReopenOpen] = useState(false);
+  const [reopenConfirm, setReopenConfirm] = useState("");
+  const [reopenReason, setReopenReason] = useState("");
   // Default to last week; Mon..Sun workweek (Sundays unscheduled but paid).
   const {
     weekStart,
@@ -226,6 +260,45 @@ export function PayrollLedger() {
       if (error) throw error;
       return rows ?? [];
     },
+  });
+
+  // Worker sign-off per person for this week (silent until the table ships).
+  const attestQ = useQuery({
+    queryKey: ["week-attestations", startStr],
+    queryFn: async () => {
+      const { data: rows, error } = await supabase
+        .from("time_week_attestations")
+        .select("user_id, status")
+        .eq("week_start", startStr)
+        .is("superseded_at", null);
+      if (error) return null;
+      return new Map(rows.map((r) => [r.user_id, r.status]));
+    },
+  });
+  const attestFor = (userId: string): string | null | undefined =>
+    attestQ.data ? (attestQ.data.get(userId) ?? null) : undefined;
+
+  const reopenRun = useMutation({
+    mutationFn: async () => {
+      if (!run) throw new Error("No run to reopen");
+      const { error } = await supabase.rpc("reopen_payroll_run", {
+        _run_id: run.id,
+        _reason: reopenReason.trim(),
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Run reopened", {
+        description:
+          "The week's punches are unlocked. Fix them, create a fresh draft, then approve again.",
+      });
+      setReopenOpen(false);
+      setReopenConfirm("");
+      setReopenReason("");
+      qc.invalidateQueries({ queryKey: ["payroll-run"] });
+      qc.invalidateQueries({ queryKey: ["payroll-ledger"] });
+    },
+    onError: (e: Error) => toast.error("Couldn't reopen", { description: e.message }),
   });
 
   const createRun = useMutation({
@@ -441,6 +514,7 @@ export function PayrollLedger() {
     "Sit Bonus",
     "Monster Bonus",
     "Total Pay ($)",
+    "Attested",
     "Exceptions",
   ];
 
@@ -480,7 +554,10 @@ export function PayrollLedger() {
           Number(l.sit_bonus).toFixed(2),
           Number(l.monster_bonus).toFixed(2),
           Number(l.total_pay).toFixed(2),
-          Object.keys(ex).filter((k) => Number(ex[k]) > 0 || ex[k] === true).join("; "),
+          String(ex["attestation"] ?? ""),
+          Object.keys(ex)
+            .filter((k) => k !== "attestation" && (Number(ex[k]) > 0 || ex[k] === true))
+            .join("; "),
         ];
         lines.push(cells.map(csvCell).join(","));
       }
@@ -511,6 +588,7 @@ export function PayrollLedger() {
         r.sitBonus.toFixed(2),
         r.monster.toFixed(2),
         r.payError ? "ERROR" : r.totalPay.toFixed(2),
+        attestQ.data ? (attestQ.data.get(r.id) ?? "none") : "",
         Object.keys(ex).filter((k) => Number(ex[k]) > 0 || ex[k] === true).join("; "),
       ];
       lines.push(cells.map(csvCell).join(","));
@@ -629,6 +707,16 @@ export function PayrollLedger() {
           )}
         </div>
         <div className="flex items-center gap-2">
+          {run?.status === "approved" && role === "owner" && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setReopenOpen(true)}
+              className="font-display text-[10px] uppercase tracking-widest border-destructive/50 text-destructive"
+            >
+              Reopen run
+            </Button>
+          )}
           {run?.status !== "approved" && (
             <Button
               size="sm"
@@ -655,6 +743,56 @@ export function PayrollLedger() {
           )}
         </div>
       </ArcadeCard>
+
+      {/* Owner-only reopen: unlocks the week's punches for correction. The
+          reopened run stays as history; a fresh draft replaces it. */}
+      <Dialog
+        open={reopenOpen}
+        onOpenChange={(o) => {
+          setReopenOpen(o);
+          if (!o) {
+            setReopenConfirm("");
+            setReopenReason("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-display uppercase tracking-widest text-sm text-destructive">
+              Reopen approved payroll
+            </DialogTitle>
+            <DialogDescription>
+              This unlocks the week's time records for correction. The approved run stays on file
+              as history; after fixing, create a fresh draft and approve it again. Every step is
+              audited.
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            value={reopenReason}
+            onChange={(e) => setReopenReason(e.target.value)}
+            placeholder='Reason (required) — e.g. "Tuesday clock-out wrong for J. Smith, worker disputed"'
+            className="text-base md:text-sm min-h-16"
+          />
+          <Input
+            value={reopenConfirm}
+            onChange={(e) => setReopenConfirm(e.target.value)}
+            placeholder='Type REOPEN to confirm'
+            className="text-base md:text-sm"
+          />
+          <DialogFooter className="gap-2">
+            <Button variant="outline" className="min-h-11 md:min-h-9" onClick={() => setReopenOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={reopenConfirm !== "REOPEN" || !reopenReason.trim() || reopenRun.isPending}
+              onClick={() => reopenRun.mutate()}
+              className="min-h-11 md:min-h-9 bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Reopen run
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {(() => {
         const cancelled = cancelledQuery.data ?? [];
@@ -834,6 +972,9 @@ export function PayrollLedger() {
                   <div className="text-xs text-muted-foreground">
                     <ResultsBreakdown r={r} />
                   </div>
+                  <div>
+                    <LedgerAttestChip status={attestFor(r.id)} />
+                  </div>
                   <ExceptionChips ex={r.exceptions} />
                 </MobileCard>
               ))}
@@ -876,6 +1017,7 @@ export function PayrollLedger() {
                     >
                       <td className="py-2.5 pr-3 font-medium">
                         {r.name}
+                        <LedgerAttestChip status={attestFor(r.id)} />
                         <ExceptionChips ex={r.exceptions} />
                       </td>
                       <td className="py-2.5 pr-3">

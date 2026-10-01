@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel, MobileCard, MobileCardHeader, MobileCardList } from "@/components/arcade";
@@ -18,6 +18,7 @@ import {
   Clock,
   ChevronLeft,
   ChevronRight,
+  History,
   Save,
   Trash2,
   AlertTriangle,
@@ -31,6 +32,7 @@ import { TimeClockReviewQueue } from "@/components/TimeClockReviewQueue";
 import { TimeClockBackfill } from "@/components/TimeClockBackfill";
 import { TimeClockExceptions } from "@/components/TimeClockExceptions";
 import { ReasonDialog } from "@/components/ReasonDialog";
+import { TimeEntryAuditSheet } from "@/components/TimeEntryAuditSheet";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { laTimeHM, laWallFromISO, laWallToUtcISO } from "@/lib/dates";
@@ -89,6 +91,7 @@ function TimeEntryActions({
   deleting,
   onSave,
   onVoid,
+  onHistory,
 }: {
   compact?: boolean;
   dirty: boolean;
@@ -96,6 +99,7 @@ function TimeEntryActions({
   deleting: boolean;
   onSave: () => void;
   onVoid: () => void;
+  onHistory: () => void;
 }) {
   return (
     <div className={compact ? "flex items-center justify-end gap-1" : "flex gap-2"}>
@@ -122,7 +126,36 @@ function TimeEntryActions({
         <Trash2 className="w-3.5 h-3.5 text-destructive" />
         {!compact && "Void"}
       </Button>
+      <Button size="sm" variant="outline" onClick={onHistory} title="Change history (audit trail)">
+        <History className="w-3.5 h-3.5" />
+        {!compact && "History"}
+      </Button>
     </div>
+  );
+}
+
+/** Worker sign-off chip. undefined = attestation table not deployed yet
+ *  (silent); null = no sign-off this week. */
+function AttestChip({ a }: { a: { status: string; note?: string | null } | null | undefined }) {
+  if (a === undefined) return null;
+  if (a === null) {
+    return (
+      <span className="text-[9px] font-display uppercase tracking-widest text-muted-foreground border border-border rounded px-1">
+        not attested
+      </span>
+    );
+  }
+  return a.status === "confirmed" ? (
+    <span className="text-[9px] font-display uppercase tracking-widest text-victory border border-victory/40 rounded px-1">
+      attested ✓
+    </span>
+  ) : (
+    <span
+      className="text-[9px] font-display uppercase tracking-widest text-destructive border border-destructive/40 rounded px-1"
+      title={a.note ?? undefined}
+    >
+      disputed{a.note ? ` · “${a.note}”` : ""}
+    </span>
   );
 }
 
@@ -176,8 +209,10 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
   const [filterUser, setFilterUser] = useState<string>("");
   const [needsReviewOnly, setNeedsReviewOnly] = useState(false);
   const [addEntryOpen, setAddEntryOpen] = useState(false);
+  const [addEntryUserId, setAddEntryUserId] = useState<string | null>(null);
   const [passesOpen, setPassesOpen] = useState(false);
   const [weekPickerOpen, setWeekPickerOpen] = useState(false);
+  const [auditFor, setAuditFor] = useState<{ ids: string[]; title: string } | null>(null);
   // The pending audited change awaiting its reason (ReasonDialog).
   const [reasonReq, setReasonReq] = useState<
     | {
@@ -237,6 +272,22 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
     () => new Map((data?.profiles ?? []).map((p) => [p.id, p])),
     [data?.profiles],
   );
+
+  // Worker sign-off per person for this week. Errors read as "not deployed
+  // yet" (the attestation table ships with migration 20261002130000) — the
+  // chips simply don't render until it lands.
+  const attestQ = useQuery({
+    queryKey: ["week-attestations", start],
+    queryFn: async () => {
+      const { data: rows, error } = await supabase
+        .from("time_week_attestations")
+        .select("user_id, status, note, hours_at_attestation")
+        .eq("week_start", start)
+        .is("superseded_at", null);
+      if (error) return null;
+      return new Map(rows.map((r) => [r.user_id, r]));
+    },
+  });
 
   const visibleEntries = useMemo(() => {
     let list = data?.entries ?? [];
@@ -488,6 +539,94 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
     [visibleEntries, edits, profileById],
   );
 
+  // One section per person: name, week rollup, compliance chips, and the
+  // person-level tools (Add day, History). Day-ordered rows nest inside.
+  const groups = useMemo(() => {
+    const byUser = new Map<string, typeof rows>();
+    for (const r of rows) {
+      const list = byUser.get(r.e.user_id) ?? [];
+      list.push(r);
+      byUser.set(r.e.user_id, list);
+    }
+    return [...byUser.entries()]
+      .map(([userId, list]) => {
+        const dayTotals = new Map<string, number>();
+        for (const r of list) {
+          dayTotals.set(
+            r.e.log_date,
+            (dayTotals.get(r.e.log_date) ?? 0) + Number(r.e.billable_hours ?? 0),
+          );
+        }
+        const weekTotal = totalsByUser.get(userId) ?? 0;
+        return {
+          userId,
+          name: list[0].name,
+          list,
+          weekTotal,
+          otDay: [...dayTotals.values()].some((h) => h > 8),
+          over40: weekTotal > 40,
+          reviewCount: list.filter((r) => r.e.needs_correction).length,
+          mealCount: list.filter((r) => MEAL_ATTENTION[r.e.meal_status]).length,
+          attestation: attestQ.data ? (attestQ.data.get(userId) ?? null) : undefined,
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [rows, totalsByUser, attestQ.data]);
+
+  const groupHeaderChips = (g: (typeof groups)[number]) => (
+    <span className="inline-flex flex-wrap items-center gap-1">
+      {g.otDay && (
+        <span className="text-[9px] font-display uppercase tracking-widest text-neon border border-neon/40 rounded px-1">
+          OT
+        </span>
+      )}
+      {g.over40 && (
+        <span className="text-[9px] font-display uppercase tracking-widest text-neon border border-neon/40 rounded px-1">
+          40h+
+        </span>
+      )}
+      {g.reviewCount > 0 && (
+        <span className="text-[9px] font-display uppercase tracking-widest text-destructive border border-destructive/40 rounded px-1">
+          {g.reviewCount} to review
+        </span>
+      )}
+      {g.mealCount > 0 && (
+        <span className="text-[9px] font-display uppercase tracking-widest text-warning border border-warning/40 rounded px-1">
+          {g.mealCount} meal
+        </span>
+      )}
+      <AttestChip a={g.attestation} />
+    </span>
+  );
+
+  const groupHeaderActions = (g: (typeof groups)[number]) => (
+    <span className="inline-flex items-center gap-1">
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-7 px-2 text-[9px] font-display uppercase tracking-widest text-muted-foreground"
+        onClick={() => {
+          setAddEntryUserId(g.userId);
+          setAddEntryOpen(true);
+        }}
+      >
+        <CalendarPlus className="w-3 h-3 mr-1" />
+        Add day
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-7 px-2 text-[9px] font-display uppercase tracking-widest text-muted-foreground"
+        onClick={() =>
+          setAuditFor({ ids: g.list.map((r) => r.e.id), title: `${g.name} · week history` })
+        }
+      >
+        <History className="w-3 h-3 mr-1" />
+        History
+      </Button>
+    </span>
+  );
+
   return (
     <div className="space-y-4">
       {/* Flagged punches — approve here, or fix the row below. Captains see
@@ -498,7 +637,13 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
         title={scope ? "Crew Timesheets" : "Timesheets"}
         action={
           <div className="flex items-center gap-2">
-            <Dialog open={addEntryOpen} onOpenChange={setAddEntryOpen}>
+            <Dialog
+              open={addEntryOpen}
+              onOpenChange={(o) => {
+                setAddEntryOpen(o);
+                if (!o) setAddEntryUserId(null);
+              }}
+            >
               <DialogTrigger asChild>
                 <Button
                   size="sm"
@@ -521,6 +666,7 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
                 </DialogHeader>
                 <TimeClockBackfill
                   profiles={data?.profiles ?? []}
+                  initialUserId={addEntryUserId ?? undefined}
                   onDone={() => setAddEntryOpen(false)}
                 />
               </DialogContent>
@@ -627,13 +773,25 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
         ) : (
           <>
             <MobileCardList>
-              {rows.map(
+              {groups.map((g) => (
+                <div key={g.userId} className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-1.5 pt-2">
+                    <div className="min-w-0">
+                      <span className="font-display text-sm">{g.name}</span>
+                      <span className="ml-2 font-display text-xs text-victory tabular-nums">
+                        {g.weekTotal.toFixed(2)}h
+                      </span>
+                      <div className="mt-0.5">{groupHeaderChips(g)}</div>
+                    </div>
+                    {groupHeaderActions(g)}
+                  </div>
+                  {g.list.map(
                 ({ e, name, edit, dirty, inVal, outVal, lunchOutVal, lunchInVal, onLunchNow }) => (
                   <MobileCard key={e.id}>
                     <MobileCardHeader
                       left={
                         <>
-                          {name}
+                          <span className="tabular-nums">{e.log_date}</span>
                           <EntryFlags e={e} />
                         </>
                       }
@@ -643,12 +801,6 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
                         </span>
                       }
                     />
-                    <div className="flex items-center justify-between gap-2 text-xs tabular-nums">
-                      <span className="text-muted-foreground">{e.log_date}</span>
-                      <span className="font-display text-victory">
-                        Week {(totalsByUser.get(e.user_id) ?? 0).toFixed(2)}h
-                      </span>
-                    </div>
                     <label className="block space-y-1">
                       <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
                         Clock In
@@ -716,10 +868,15 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
                       deleting={voidMut.isPending}
                       onSave={() => saveRow(e)}
                       onVoid={() => voidRow(e, name)}
+                      onHistory={() =>
+                        setAuditFor({ ids: [e.id], title: `${name} · ${e.log_date}` })
+                      }
                     />
                   </MobileCard>
                 ),
               )}
+                </div>
+              ))}
             </MobileCardList>
             <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-sm">
@@ -737,7 +894,23 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map(
+                  {groups.map((g) => (
+                    <Fragment key={g.userId}>
+                      <tr className="border-b border-border/60 bg-surface-elevated/30">
+                        <td colSpan={9} className="py-1.5 pr-1">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="inline-flex items-center gap-2">
+                              <span className="font-display text-xs">{g.name}</span>
+                              <span className="font-display text-[11px] text-victory tabular-nums">
+                                {g.weekTotal.toFixed(2)}h
+                              </span>
+                              {groupHeaderChips(g)}
+                            </span>
+                            {groupHeaderActions(g)}
+                          </div>
+                        </td>
+                      </tr>
+                      {g.list.map(
                     ({
                       e,
                       name,
@@ -828,12 +1001,17 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
                               deleting={voidMut.isPending}
                               onSave={() => saveRow(e)}
                               onVoid={() => voidRow(e, name)}
+                              onHistory={() =>
+                                setAuditFor({ ids: [e.id], title: `${name} · ${e.log_date}` })
+                              }
                             />
                           </td>
                         </tr>
                       );
                     },
                   )}
+                    </Fragment>
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -852,6 +1030,13 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
         destructive={reasonReq?.kind === "void"}
         pending={saveMut.isPending || voidMut.isPending}
         onSubmit={submitReason}
+      />
+
+      <TimeEntryAuditSheet
+        open={!!auditFor}
+        onOpenChange={(o) => !o && setAuditFor(null)}
+        entryIds={auditFor?.ids ?? []}
+        title={auditFor?.title ?? "Change history"}
       />
     </div>
   );

@@ -14,6 +14,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { RankPill, RANK_PERKS } from "@/components/RankPill";
 import { PushAlertsCard } from "@/components/PushAlertsCard";
 import { TimeClock } from "@/components/TimeClock";
+import { WeekAttestationCard } from "@/components/WeekAttestationCard";
 import { PlanPanel } from "@/components/PlanPanel";
 import { DailyLogPanel } from "@/components/DailyLogPanel";
 import { CanvasserStats, GrindCounter } from "@/components/CanvasserStats";
@@ -119,6 +120,10 @@ export function CanvasserMission({
       <div data-tour="mission-clock">
         <TimeClock userId={userId} />
       </div>
+      {/* Weekly sign-off on LAST week's hours (CA defense for manager /
+          captain-entered punches). Renders nothing until the attestation
+          table ships, when the week was empty, or once signed. */}
+      <WeekAttestationCard userId={userId} />
       <div data-tour="mission-pay">
         <TakeHomeWidget
           userId={userId}
