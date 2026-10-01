@@ -163,8 +163,18 @@ export function RangeChip({ children }: { children: ReactNode }) {
 }
 
 export function StatCard({
-  label, value, sublabel, accent, className,
-}: { label: string; value: ReactNode; sublabel?: string; accent?: "neon" | "victory" | "warning" | "accent"; className?: string }) {
+  label,
+  value,
+  sublabel,
+  accent,
+  className,
+}: {
+  label: string;
+  value: ReactNode;
+  sublabel?: string;
+  accent?: "neon" | "victory" | "warning" | "accent";
+  className?: string;
+}) {
   const accentClass = {
     neon: "text-neon",
     victory: "text-victory",
@@ -173,10 +183,68 @@ export function StatCard({
   }[accent ?? "neon"];
   return (
     <div className={cn("arcade-card p-5", className)}>
-      <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground font-display">{label}</div>
-      <div className={cn("mt-3 text-2xl sm:text-3xl font-display tabular-nums break-words", accentClass)}>{value}</div>
+      <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground font-display">
+        {label}
+      </div>
+      <div
+        className={cn(
+          "mt-3 text-2xl sm:text-3xl font-display tabular-nums break-words",
+          accentClass,
+        )}
+      >
+        {value}
+      </div>
       {sublabel && <div className="mt-1 text-xs text-muted-foreground">{sublabel}</div>}
     </div>
+  );
+}
+
+export type PanelStatus = "good" | "warn" | "alert";
+
+const PANEL_STATUS_COLOR: Record<PanelStatus, string> = {
+  good: "var(--victory)",
+  warn: "var(--warning)",
+  alert: "var(--destructive)",
+};
+
+/** The panel-header status light (God Mode protocol, owner 2026-10-01):
+ *  a dot must be EARNED by a concrete rule — texture panels get none. */
+export function StatusDot({ status }: { status: PanelStatus }) {
+  return (
+    <span
+      aria-label={status}
+      className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
+      style={{
+        background: PANEL_STATUS_COLOR[status],
+        boxShadow: status === "alert" ? `0 0 6px ${PANEL_STATUS_COLOR[status]}` : undefined,
+      }}
+    />
+  );
+}
+
+/** ▲/▼ delta chip vs a baseline; renders nothing without a real baseline.
+ *  Green glow is suppressed — a chip is judgment, not a hero. */
+export function DeltaChip({
+  now,
+  base,
+  label,
+}: {
+  now: number;
+  base: number | null;
+  label: string;
+}) {
+  if (base === null || base <= 0) return null;
+  const pct = (now - base) / base;
+  const up = pct >= 0;
+  return (
+    <span
+      className={cn(
+        "tabular-nums text-[10px] font-display uppercase tracking-widest whitespace-nowrap",
+        up ? "text-victory [text-shadow:none]" : "text-destructive",
+      )}
+    >
+      {up ? "▲" : "▼"} {Math.abs(Math.round(pct * 100))}% {label}
+    </span>
   );
 }
 
@@ -185,12 +253,21 @@ export function ArcadePanel({
   action,
   children,
   faction,
+  status,
+  headline,
+  info,
 }: {
   title: string;
   action?: ReactNode;
   children: ReactNode;
   /** Faction skin: kombat = gold title on deep black with blood-red chrome. */
   faction?: keyof typeof ARCADE_CARD_FACTION;
+  /** Header status light (protocol rule required — omit for texture panels). */
+  status?: PanelStatus;
+  /** Right-aligned judgment slot (a DeltaChip), before `action`. */
+  headline?: ReactNode;
+  /** A small ⓘ affordance (definitions live in a glossary, not captions). */
+  info?: ReactNode;
 }) {
   return (
     <section className={cn("arcade-card", faction && ARCADE_CARD_FACTION[faction].base)}>
@@ -202,13 +279,18 @@ export function ArcadePanel({
       >
         <h2
           className={cn(
-            "min-w-0 font-display text-xs uppercase tracking-widest",
+            "min-w-0 flex items-center gap-2 font-display text-xs uppercase tracking-widest",
             faction === "kombat" ? "text-kombat-gold" : "text-neon",
           )}
         >
+          {status && <StatusDot status={status} />}
           {title}
+          {info}
         </h2>
-        {action}
+        <div className="flex items-center gap-3">
+          {headline}
+          {action}
+        </div>
       </header>
       <div className="p-5">{children}</div>
     </section>
@@ -240,6 +322,7 @@ export function ArcadeStatTile({
   faction,
   flat = false,
   mono = false,
+  spark,
 }: {
   label: string;
   value: number | string;
@@ -248,6 +331,9 @@ export function ArcadeStatTile({
   faction?: keyof typeof ARCADE_CARD_FACTION;
   flat?: boolean;
   mono?: boolean;
+  /** Tiny trend strip under the value (Tufte small-multiple; earn it —
+   *  only metrics with real history). */
+  spark?: { points: number[]; accent: string };
 }) {
   const body = (
     <>
@@ -279,6 +365,9 @@ export function ArcadeStatTile({
           </span>
         )}
       </div>
+      {spark && spark.points.length > 1 && (
+        <Sparkbars className="mt-1.5" height={16} accent={spark.accent} points={spark.points} />
+      )}
     </>
   );
   // flat cells carry their own surface so a parent can paint hairlines with
@@ -373,7 +462,11 @@ export function TeamBadge({ name, color }: { name: string; color: string }) {
   return (
     <span
       className="inline-flex items-center gap-2 rounded-md px-2 py-1 text-xs font-medium border"
-      style={{ borderColor: color, color, background: `color-mix(in oklab, ${color} 10%, transparent)` }}
+      style={{
+        borderColor: color,
+        color,
+        background: `color-mix(in oklab, ${color} 10%, transparent)`,
+      }}
     >
       <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
       {name}
@@ -397,13 +490,21 @@ export function TeamBadge({ name, color }: { name: string; color: string }) {
  *   tfoot totals → trailing <MobileCard className="border-neon/40">.
  */
 
-export function MobileCardList({ children, className }: { children: ReactNode; className?: string }) {
+export function MobileCardList({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
   return <div className={cn("md:hidden space-y-2", className)}>{children}</div>;
 }
 
 export function MobileCard({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div className={cn("rounded-lg border border-border/40 bg-surface/50 p-3 space-y-2.5", className)}>
+    <div
+      className={cn("rounded-lg border border-border/40 bg-surface/50 p-3 space-y-2.5", className)}
+    >
       {children}
     </div>
   );
@@ -419,8 +520,14 @@ export function MobileCardHeader({ left, right }: { left: ReactNode; right?: Rea
 }
 
 export function MobileStatGrid({
-  children, cols = 3, className,
-}: { children: ReactNode; cols?: 2 | 3 | 4; className?: string }) {
+  children,
+  cols = 3,
+  className,
+}: {
+  children: ReactNode;
+  cols?: 2 | 3 | 4;
+  className?: string;
+}) {
   const colsClass = { 2: "grid-cols-2", 3: "grid-cols-3", 4: "grid-cols-4" }[cols];
   return <div className={cn("grid gap-x-3 gap-y-2", colsClass, className)}>{children}</div>;
 }

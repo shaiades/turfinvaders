@@ -112,7 +112,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   // pay this query. The localStorage warm cache keeps a launched rep's
   // 2-item bottom bar from popping in on every cold load; pre-launch the
   // cached false means zero layout change.
-  const purposeConfig = usePurposeConfig(!!user && (role === "sales_rep" || canUseViewAs(realRole)));
+  const purposeConfig = usePurposeConfig(
+    !!user && (role === "sales_rep" || canUseViewAs(realRole)),
+  );
   const purposeEnabled =
     canUseViewAs(realRole) || // owners always see it — they're the test crew
     (purposeConfig.data != null
@@ -137,6 +139,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   // "canvasser" (privilegeRole in useAuth) and must not read as a View As
   // override.
   const isOverridden = role !== privilegeRole(realRole) && realRole !== null;
+  // Chrome diet (owner, 2026-10-01): with no override active the full
+  // View-As bar is dead weight above every page — collapse it to a slim
+  // chip and expand on tap. An active override always shows the full bar.
+  const [viewAsOpen, setViewAsOpen] = useState(false);
 
   // View As rep picker (owner request 2026-09-13): inside a Sales Rep
   // preview, choose WHICH rep — the name is what Close Kombat's matcher
@@ -317,7 +323,21 @@ export function AppShell({ children }: { children: ReactNode }) {
       {/* Owner-only tool (owner decision 2026-08-12): View As never renders
           for captains, Admins, canvassers, or sales reps — and useAuth
           ignores the stored override for them too. */}
-      {user && canUseViewAs(realRole) && (
+      {user && canUseViewAs(realRole) && !isOverridden && !viewAsOpen && (
+        <div className="border-b border-[var(--neon-magenta)]/20 bg-background">
+          <div className="max-w-7xl mx-auto px-3 sm:px-6">
+            <button
+              type="button"
+              onClick={() => setViewAsOpen(true)}
+              title="Preview the app as another role"
+              className="inline-flex min-h-8 items-center gap-1.5 text-[10px] font-display uppercase tracking-widest text-[var(--neon-magenta)]/60 hover:text-[var(--neon-magenta)] transition-colors"
+            >
+              <FlaskConical className="h-3 w-3" /> View As
+            </button>
+          </div>
+        </div>
+      )}
+      {user && canUseViewAs(realRole) && (isOverridden || viewAsOpen) && (
         <div className="border-b border-[var(--neon-magenta)]/30 bg-background text-xs">
           <div className="max-w-7xl mx-auto px-3 sm:px-6 py-1 sm:py-2 flex items-center gap-2 overflow-x-auto scrollbar-hide whitespace-nowrap">
             <FlaskConical className="w-3.5 h-3.5 text-[var(--neon-magenta)] shrink-0" />
@@ -369,6 +389,14 @@ export function AppShell({ children }: { children: ReactNode }) {
                 className="ml-auto min-h-11 md:min-h-9 px-2 rounded border border-[var(--neon-magenta)]/40 text-[10px] uppercase tracking-widest text-[var(--neon-magenta)]"
               >
                 Reset to {realRole}
+              </button>
+            )}
+            {!isOverridden && (
+              <button
+                onClick={() => setViewAsOpen(false)}
+                className="ml-auto min-h-11 md:min-h-9 px-2 text-[10px] uppercase tracking-widest text-muted-foreground hover:text-foreground"
+              >
+                Hide
               </button>
             )}
           </div>
@@ -628,8 +656,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           `?eod_demo=1` previews with canned names from any account and never
           stamps. `heldBack` sequences it after the morning intro. */}
       {user &&
-        (isEodRecapForced() ||
-          (realRole !== null && privilegeRole(realRole) !== "sales_rep")) && (
+        (isEodRecapForced() || (realRole !== null && privilegeRole(realRole) !== "sales_rep")) && (
           <EodRecapFx userId={user.id} heldBack={introActive} onActiveChange={setEodActive} />
         )}
 

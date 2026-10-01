@@ -2,13 +2,14 @@ import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronLeft, ChevronRight, Crown, Eye, Pencil, RefreshCw } from "lucide-react";
+import { ChevronLeft, ChevronRight, CircleHelp, Crown, Eye, RefreshCw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 import {
   addDaysISO,
   dateFromISO,
+  laDateISO,
   laMidnightUtcISO,
   laMonthStartISO,
   laTodayISO,
@@ -28,6 +29,7 @@ import {
   ArcadePill,
   ArcadeSkeleton,
   ArcadeStatTile,
+  DeltaChip,
   MobileCard,
   MobileCardHeader,
   MobileCardList,
@@ -37,8 +39,10 @@ import {
   NeonButton,
   RangeChip,
   Sparkbars,
+  type PanelStatus,
 } from "@/components/arcade";
 import { QueryStateCard } from "@/components/QueryStateCard";
+import { GlossarySheet, type GlossarySections } from "@/components/GlossarySheet";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { useDispatchRoster, useDispatchVans } from "@/hooks/useFleetRoster";
 import { usePendingDojoCount } from "@/hooks/usePendingDojoCount";
@@ -67,10 +71,23 @@ import {
   monthlyCollectionsTrend,
   rowCollectionState,
 } from "@/lib/collections";
+import {
+  agingBuckets,
+  buildCompletionCurve,
+  daysBetween,
+  financingMix,
+  leverSensitivities,
+  matchedSpanCollected,
+  median,
+  projectFromCurve,
+  slipStats,
+  topShare,
+} from "@/lib/capital";
 import { DOORS_TRACKED_SINCE } from "@/lib/funnel";
 import {
   getClockPresence,
   getDispatchProduction,
+  getFunnelBaseline,
   type DispatchResults,
 } from "@/lib/dispatch.functions";
 import { fetchMonthlyPaychecksChunked } from "@/lib/paychecks";
@@ -80,13 +97,13 @@ import { CalendarHeatmap, type HeatDay } from "@/components/godmode/CalendarHeat
 const MiniSalesMap = lazy(() => import("@/components/godmode/MiniSalesMap"));
 
 /**
- * God Mode v2 — the Command Bridge (owner directive 2026-10-01). One month,
- * every axis, with judgment: pace vs the editable target, forward cash from
- * anticipated dates, trends from 40 months of collections history. Three
- * money axes stay separate and labeled (collections vs book vs canvasser
- * volume); the receipts drawer itemizes the headline. Color roles are
- * strict: victory = money, red/amber = fires, neon pink = touchable,
- * everything else neutral.
+ * God Mode v3 — judgment, levers, delivery (owner directives 2026-10-01).
+ * One month, every axis, and now the exchange rates between them: pace vs
+ * the editable target with matched-span deltas, speed of cash, the Path to
+ * the annual goal, concentration risk, and per-panel status lights so the
+ * whole page reads from its headers. Three money axes stay separate (the
+ * ⓘ glossary holds the definitions); the receipts drawer itemizes the
+ * headline; margin is shown only from hand-entered costs — never derived.
  */
 export function GodMode({
   monthParam,
@@ -109,9 +126,9 @@ const fmtMoney = (n: number) =>
     maximumFractionDigits: 0,
   }).format(n);
 const fmtShort = (n: number) =>
-  n >= 1_000_000
+  Math.abs(n) >= 1_000_000
     ? `$${(n / 1_000_000).toFixed(1)}M`
-    : n >= 1_000
+    : Math.abs(n) >= 1_000
       ? `$${Math.round(n / 1_000)}K`
       : `$${Math.round(n)}`;
 /** Floored: the hero must never claim 100% while dollars are still out. */
@@ -129,23 +146,6 @@ const relTime = (iso: string | null): string => {
   if (hours < 24) return `${hours}h ago`;
   return `${Math.floor(hours / 24)}d ago`;
 };
-
-/** ▲/▼ delta chip vs a baseline; null baseline renders nothing. */
-function DeltaChip({ now, base, label }: { now: number; base: number | null; label: string }) {
-  if (base === null || base <= 0) return null;
-  const pct = (now - base) / base;
-  const up = pct >= 0;
-  return (
-    <span
-      className={cn(
-        "tabular-nums text-[10px] font-display uppercase tracking-widest",
-        up ? "text-victory [text-shadow:none]" : "text-destructive",
-      )}
-    >
-      {up ? "▲" : "▼"} {Math.abs(Math.round(pct * 100))}% {label}
-    </span>
-  );
-}
 
 const COLLECTION_COLUMNS =
   "monday_item_id, group_title, office, customer_name, planned_amount, actual_amount, " +
@@ -165,12 +165,60 @@ type CollectionRow = {
   payment_type: string | null;
 };
 
-const TROUBLE_CHIP: Record<string, string> = {
-  urgent: "border-destructive/60 text-destructive",
-  late: "border-destructive/60 text-destructive",
-  "partial collected": "border-warning/60 text-warning",
-  "run card": "border-border text-muted-foreground",
+type TrendRow = {
+  collection_month: string;
+  planned_amount: number;
+  actual_amount: number;
+  office: string | null;
+  anticipated_date: string | null;
+  collected_date: string | null;
 };
+
+// The axis definitions and semantics live here, behind each panel's ⓘ —
+// seven permanent caption paragraphs were glance killers (v3 audit).
+const GOD_GLOSSARY: GlossarySections = [
+  {
+    heading: "The three money axes (they never match)",
+    terms: [
+      ["Vault", "Collections-board dollars — what customers were scheduled to pay vs what landed"],
+      [
+        "Book",
+        "The official Sales Report (Shark Tank parity) plus just-sold cards awaiting a report row",
+      ],
+      [
+        "Field volume",
+        "Confirmed-lead dollars net of WCC cancels — the canvasser pay axis; matches neither board",
+      ],
+    ],
+  },
+  {
+    heading: "Vault fine print",
+    terms: [
+      ["Pace", "Projected month from the typical completion curve of the last 12 months"],
+      ["MoM / YoY", "Matched spans — this month THROUGH TODAY vs the same days of that month"],
+      ["Slip", "Median days between a payment's scheduled date and the day it landed"],
+      ["Coverage", "Next month's board total vs target — a floor; the board is still filling"],
+    ],
+  },
+  {
+    heading: "Field semantics",
+    terms: [
+      ["Funnel days", "Generated/Confirmed count by submission day; Sits/Sales by block day"],
+      ["Field leads", "Leads called in from the field; Next day = confirmed for tomorrow"],
+      ["Vans", "The log-day snapshot — a mid-month van move counts where they actually were"],
+      ["$/door", `Doors tracked since ${DOORS_TRACKED_SINCE} — earlier months have no door data`],
+      ["QR/Internet", "Marketing leads aren't mirrored into the app yet — Monday board only"],
+    ],
+  },
+  {
+    heading: "Crew fine print",
+    terms: [
+      ["Canvasser pay", "The pay engine's month total for canvassers — NOT total company labor"],
+      ["Contribution", "Collected × (1 − job-cost %) − office payroll, from your typed inputs"],
+      ["Field cost/sale", "Canvasser pay ÷ field sales this month"],
+    ],
+  },
+];
 
 /** Section shell: skeleton until ready, then one-shot staggered reveal. */
 function Reveal({
@@ -288,7 +336,7 @@ function GodModeInner({
     [collectionsQuery.data, monthStart, monthEnd, todayISO, officeOrAll],
   );
 
-  // Next month's board feeds the forward outlook (current month only).
+  // Next month's board feeds the forward outlook + coverage (current month).
   const nextMonth = nextMonthStartISO(monthStart);
   const nextMonthQuery = useQuery({
     queryKey: ["report_collections", nextMonth],
@@ -315,18 +363,17 @@ function GodModeInner({
     [isCurrentMonth, collectionsQuery.data, nextMonthQuery.data, todayISO, officeOrAll],
   );
 
-  // 13 months of slim rows → MoM/YoY deltas + the Sparkbars strip.
+  // 13 months of slim rows WITH both dates: trend bars, matched-span
+  // deltas, the completion curve, slip stats, and outstanding aging.
   const trendStart = `${Number(monthStart.slice(0, 4)) - 1}-${monthStart.slice(5, 7)}-01`;
   const trendQuery = useQuery({
     queryKey: ["report_collections", "trend", monthStart],
-    queryFn: paged<
-      Pick<CollectionRow, "planned_amount" | "actual_amount" | "office"> & {
-        collection_month: string;
-      }
-    >((from, to) =>
+    queryFn: paged<TrendRow>((from, to) =>
       supabase
         .from("report_collections")
-        .select("collection_month, planned_amount, actual_amount, office")
+        .select(
+          "collection_month, planned_amount, actual_amount, office, anticipated_date, collected_date",
+        )
         .gte("collection_month", trendStart)
         .lte("collection_month", monthStart)
         .order("monday_item_id")
@@ -335,6 +382,11 @@ function GodModeInner({
     staleTime: 5 * 60_000,
     placeholderData: (prev) => prev,
   });
+  const trendOffice = useMemo(
+    () =>
+      (trendQuery.data ?? []).filter((r) => officeOrAll === undefined || r.office === officeOrAll),
+    [trendQuery.data, officeOrAll],
+  );
   const trend = useMemo(
     () => monthlyCollectionsTrend(trendQuery.data ?? [], { office: officeOrAll }),
     [trendQuery.data, officeOrAll],
@@ -349,16 +401,58 @@ function GodModeInner({
     }
     return months;
   }, [monthStart]);
-  const prevMonthCollected =
-    trendByMonth.get(monthStartISO(addDaysISO(monthStart, -1)))?.collected ?? null;
-  const yoyCollected = trendByMonth.get(trendStart)?.collected ?? null;
 
-  // --- Target (editable; table may predate the migration — fail soft) ---
+  // MATCHED-SPAN deltas (v3 bug fix): this month THROUGH TODAY vs the same
+  // day-span of the prior month / last year — never MTD vs a full month.
+  const dayOfMonth = isCurrentMonth ? Number(todayISO.slice(8, 10)) : 31;
+  const prevMonthStart = monthStartISO(addDaysISO(monthStart, -1));
+  const prevMonthSpan = useMemo(() => {
+    const rows = trendOffice.filter((r) => r.collection_month === prevMonthStart);
+    return rows.length > 0 ? matchedSpanCollected(rows, prevMonthStart, dayOfMonth) : null;
+  }, [trendOffice, prevMonthStart, dayOfMonth]);
+  const yoySpan = useMemo(() => {
+    const rows = trendOffice.filter((r) => r.collection_month === trendStart);
+    return rows.length > 0 ? matchedSpanCollected(rows, trendStart, dayOfMonth) : null;
+  }, [trendOffice, trendStart, dayOfMonth]);
+
+  // Completion-curve pace: collections are lumpy milestone payments —
+  // straight-line whipsaws early in the month; the 12-month median
+  // completion curve says what % is typically banked by day N.
+  const completion = useMemo(
+    () => buildCompletionCurve(trendOffice.filter((r) => r.collection_month !== monthStart)),
+    [trendOffice, monthStart],
+  );
+
+  // Speed of cash: median slip this month vs last; aging on EVERYTHING
+  // outstanding across the loaded 13 months + next month's board.
+  const slipNow = useMemo(
+    () => slipStats(trendOffice.filter((r) => r.collection_month === monthStart)),
+    [trendOffice, monthStart],
+  );
+  const slipPrev = useMemo(
+    () => slipStats(trendOffice.filter((r) => r.collection_month === prevMonthStart)),
+    [trendOffice, prevMonthStart],
+  );
+  const aging = useMemo(
+    () =>
+      agingBuckets(
+        [
+          ...trendOffice,
+          ...(nextMonthQuery.data ?? []).filter(
+            (r) => officeOrAll === undefined || r.office === officeOrAll,
+          ),
+        ],
+        todayISO,
+      ),
+    [trendOffice, nextMonthQuery.data, officeOrAll, todayISO],
+  );
+
+  // --- Target + annual goal (editable; fail soft pre-migration) ---
   const targetQuery = useQuery({
     queryKey: ["company_targets"],
     queryFn: async () => {
       const { data, error } = await supabase.from("company_targets").select("*").maybeSingle();
-      if (error) return null; // table not applied yet → pace shows without a plan
+      if (error) return null; // table/column not applied yet
       return data;
     },
     staleTime: 60_000,
@@ -370,6 +464,8 @@ function GodModeInner({
     if (office === "Orange County") return t.oc_target ?? null;
     return t.monthly_collected_target;
   }, [targetQuery.data, office]);
+  const annualGoal =
+    (targetQuery.data as { annual_goal?: number } | null)?.annual_goal ?? 100_000_000;
   const saveTarget = useMutation({
     mutationFn: async (value: number) => {
       const patch =
@@ -388,19 +484,31 @@ function GodModeInner({
     onError: (e) => toast.error(e instanceof Error ? e.message : "Couldn't save target"),
   });
 
-  // Pace: project the month from run-rate-to-date, annualize the projection.
   const pace = useMemo(() => {
     const daysInMonth = curve.days.length || 30;
-    const elapsed = isCurrentMonth
-      ? Math.max(1, Math.min(daysInMonth, Number(todayISO.slice(8, 10))))
-      : daysInMonth;
-    const projected = isCurrentMonth ? (vault.collected / elapsed) * daysInMonth : vault.collected;
+    const day = Math.max(1, Math.min(daysInMonth, dayOfMonth));
+    const straight = (vault.collected / day) * daysInMonth;
+    const projected = !isCurrentMonth
+      ? vault.collected
+      : completion
+        ? projectFromCurve(vault.collected, day, completion)
+        : straight;
     return {
       projected,
       annualized: projected * 12,
       pctOfTarget: target ? vault.collected / target : null,
+      curveBased: isCurrentMonth && completion !== null,
     };
-  }, [curve.days.length, isCurrentMonth, todayISO, vault.collected, target]);
+  }, [curve.days.length, dayOfMonth, isCurrentMonth, vault.collected, target, completion]);
+
+  // Coverage: next month's booked floor vs target (board still filling).
+  const coverage = useMemo(() => {
+    if (!isCurrentMonth || target === null) return null;
+    const booked = (nextMonthQuery.data ?? [])
+      .filter((r) => officeOrAll === undefined || r.office === officeOrAll)
+      .reduce((s, r) => s + r.planned_amount, 0);
+    return { booked, pct: booked / target };
+  }, [isCurrentMonth, target, nextMonthQuery.data, officeOrAll]);
 
   // --- Close Kombat month book (shared constants from PR #275) ---
   const fetchStart = addDaysISO(monthStart, -SAVE_LINK_PAD_DAYS);
@@ -440,8 +548,11 @@ function GodModeInner({
     () => buildPendingReportCheck(reportQuery.data ?? []),
     [reportQuery.data],
   );
+  const officeCards = useMemo(
+    () => (cardsQuery.data ?? []).filter((c) => matches(c.office_location)),
+    [cardsQuery.data, matches],
+  );
   const kombat = useMemo(() => {
-    const officeCards = (cardsQuery.data ?? []).filter((c) => matches(c.office_location));
     const { totals } = aggregateCloseKombat(
       officeCards,
       { start: monthStart, end: monthEnd },
@@ -457,8 +568,8 @@ function GodModeInner({
       cancelPctOfBook: grossBook > 0 ? agg.totals.cancelAmt / grossBook : null,
       officeBlind: f.officeBlind,
     };
-  }, [cardsQuery.data, reportQuery.data, matches, monthStart, monthEnd, officeOrAll, pendingCheck]);
-  // Book by month (whole loaded year) for the Kombat strip + cancel trend.
+  }, [officeCards, reportQuery.data, monthStart, monthEnd, officeOrAll, pendingCheck]);
+  // Book by month (whole loaded year): strip, cancel trend + sparkline.
   const bookTrend = useMemo(() => {
     const by = new Map<string, { revenue: number; cancel: number }>();
     for (const r of reportQuery.data ?? []) {
@@ -478,6 +589,14 @@ function GodModeInner({
     const can = prior.reduce((s, b) => s + b.cancel, 0);
     return rev + can > 0 ? can / (rev + can) : null;
   }, [bookTrend, monthStart]);
+  const cancelPctSeries = useMemo(
+    () =>
+      bookTrend.map((b) => {
+        const gross = b.revenue + b.cancel;
+        return gross > 0 ? (b.cancel / gross) * 100 : 0;
+      }),
+    [bookTrend],
+  );
   const kombatRace = useMemo(() => {
     const monthRows = (reportQuery.data ?? []).filter((r) => r.report_month === monthStart);
     if (monthRows.length > 0 && monthRows.every((r) => r.office === null)) return null;
@@ -495,7 +614,7 @@ function GodModeInner({
     return lanes;
   }, [reportQuery.data, cardsQuery.data, monthStart, monthEnd, pendingCheck]);
 
-  // --- Ground game ---
+  // --- Ground game (dispatch axis) ---
   const dispatchQuery = useQuery({
     queryKey: ["god_mode", "dispatch", monthStart],
     queryFn: () =>
@@ -515,7 +634,6 @@ function GodModeInner({
     if (!d) return null;
     const results = office === "All" ? d.results : (d.officeResults[office] ?? {});
     const volume = office === "All" ? d.volume : (d.officeVolume[office] ?? {});
-    const points = office === "All" ? d.points : (d.officePoints[office] ?? {});
     const cancels = office === "All" ? d.cancels : (d.officeCancels[office] ?? {});
     const cancelledVol = office === "All" ? d.cancelledVol : (d.officeCancelledVol[office] ?? {});
     const sumR = (f: (r: DispatchResults) => number) =>
@@ -528,18 +646,18 @@ function GodModeInner({
       sits: sumR((r) => r.sit + r.sal),
       sales: sumR((r) => r.sal),
       volume: sumMap(volume),
-      points: sumMap(points),
       cancels: sumMap(cancels),
       cancelledVol: sumMap(cancelledVol),
     };
   }, [dispatchQuery.data, office]);
 
-  // --- Lead factory ---
+  // --- Lead funnel inputs (daily_metrics) + top-van concentration ---
   const leadMetricsQuery = useQuery({
     queryKey: ["god_mode", "lead_metrics", monthStart],
     queryFn: paged<{
       id: string;
       canvasser_id: string;
+      team_id: string | null;
       office_location: string;
       leads_generated: number;
       leads_confirmed: number;
@@ -549,7 +667,7 @@ function GodModeInner({
       supabase
         .from("daily_metrics")
         .select(
-          "id, canvasser_id, office_location, leads_generated, leads_confirmed, future, killed",
+          "id, canvasser_id, team_id, office_location, leads_generated, leads_confirmed, future, killed",
         )
         .gte("metric_date", monthStart)
         .lte("metric_date", monthEnd)
@@ -564,15 +682,11 @@ function GodModeInner({
     const rows = (leadMetricsQuery.data ?? []).filter(
       (r) => office === "All" || (r.office_location ?? DEFAULT_OFFICE) === office,
     );
-    const nameById = new Map(
-      (roster.data?.profiles ?? []).map((p) => [p.id, p.display_name ?? ""]),
-    );
     const sum = (f: (r: (typeof rows)[number]) => number) => rows.reduce((s, r) => s + f(r), 0);
-    const channels = new Map<string, number>();
+    const byVan = new Map<string, number>();
     for (const r of rows) {
-      const name = nameById.get(r.canvasser_id);
-      if (name !== undefined && isLeadSourceName(name) && r.leads_generated > 0) {
-        channels.set(name, (channels.get(name) ?? 0) + r.leads_generated);
+      if (r.team_id && r.leads_confirmed > 0) {
+        byVan.set(r.team_id, (byVan.get(r.team_id) ?? 0) + r.leads_confirmed);
       }
     }
     return {
@@ -580,9 +694,9 @@ function GodModeInner({
       confirmed: sum((r) => r.leads_confirmed),
       future: sum((r) => r.future),
       killed: sum((r) => r.killed),
-      channelCount: channels.size,
+      confirmedByVan: byVan,
     };
-  }, [leadMetricsQuery.data, roster.data, office]);
+  }, [leadMetricsQuery.data, office]);
 
   // --- Rhythm heatmap data ---
   const doorsQuery = useQuery({
@@ -604,12 +718,8 @@ function GodModeInner({
     staleTime: 5 * 60_000,
     placeholderData: (prev) => prev,
   });
-  // --- Field leads per van (owner ask 2026-10-01: leads called in from the
-  // field + how many are next-day confirms, total and per van). Same
-  // columns and semantics as Live Daily Action: leads_called_in = field
-  // leads, next_days = Confirmed Tomorrow, future_leads = Confirmed Future;
-  // the log row's team_id is the van AT THE TIME (snapshot, never the live
-  // roster). ---
+
+  // --- Field leads per van (Live Daily Action semantics; PR #278) ---
   const fieldLeadsQuery = useQuery({
     queryKey: ["god_mode", "field_leads", monthStart],
     queryFn: paged<{
@@ -741,6 +851,226 @@ function GodModeInner({
     todayISO,
   ]);
 
+  // --- This-week + momentum inputs: one slim 28-day daily_logs window ---
+  const recentStart = addDaysISO(todayISO, -27);
+  const recentLogsQuery = useQuery({
+    queryKey: ["god_mode", "recent_logs", todayISO],
+    enabled: isCurrentMonth,
+    queryFn: paged<{
+      id: string;
+      canvasser_id: string | null;
+      team_id: string | null;
+      log_date: string;
+      office_location: string | null;
+      leads_called_in: number | null;
+      doors_knocked: number | null;
+      demos_sits: number | null;
+      sales: number | null;
+    }>((from, to) =>
+      supabase
+        .from("daily_logs")
+        .select(
+          "id, canvasser_id, team_id, log_date, office_location, leads_called_in, doors_knocked, demos_sits, sales",
+        )
+        .gte("log_date", recentStart)
+        .lte("log_date", todayISO)
+        .order("id")
+        .range(from, to),
+    ),
+    staleTime: 60_000,
+    placeholderData: (prev) => prev,
+  });
+  const recentCancelsQuery = useQuery({
+    queryKey: ["god_mode", "recent_cancels", todayISO],
+    enabled: isCurrentMonth,
+    queryFn: paged<{ id: string; sale_amount: number | null; sale_cancelled_at: string }>(
+      (from, to) =>
+        supabase
+          .from("leads")
+          .select("id, sale_amount, sale_cancelled_at")
+          .not("sale_cancelled_at", "is", null)
+          .gte("sale_cancelled_at", laMidnightUtcISO(recentStart))
+          .order("id")
+          .range(from, to),
+    ),
+    staleTime: 5 * 60_000,
+  });
+
+  // This-week strip: Mon–Sun week, every tile vs the SAME ELAPSED SPAN of
+  // last week (Mon-through-same-weekday — never full-vs-partial week).
+  const week = useMemo(() => {
+    if (!isCurrentMonth) return null;
+    const wkStart = weekStartOfISO(todayISO);
+    const spans = {
+      cur: { start: wkStart, end: todayISO },
+      prev: { start: addDaysISO(wkStart, -7), end: addDaysISO(todayISO, -7) },
+    };
+    const inSpan = (d: string | null, s: { start: string; end: string }) =>
+      d !== null && d >= s.start && d <= s.end;
+    const logs = (recentLogsQuery.data ?? []).filter(
+      (r) => office === "All" || (r.office_location ?? DEFAULT_OFFICE) === office,
+    );
+    const logSum = (s: { start: string; end: string }, f: (r: (typeof logs)[number]) => number) =>
+      logs.filter((r) => inSpan(r.log_date, s)).reduce((acc, r) => acc + f(r), 0);
+    // Collected by the day it landed, across the loaded boards (a week can
+    // straddle two months' boards — trend holds ≤ this month, next covers it).
+    const colRows = [
+      ...trendOffice,
+      ...(nextMonthQuery.data ?? []).filter(
+        (r) => officeOrAll === undefined || r.office === officeOrAll,
+      ),
+    ];
+    const colSum = (s: { start: string; end: string }) =>
+      colRows.filter((r) => inSpan(r.collected_date, s)).reduce((a, r) => a + r.actual_amount, 0);
+    // Sold by Date Sold on the book, plus just-sold pending at Block price.
+    const bookRows = (reportQuery.data ?? []).filter(
+      (r) => officeOrAll === undefined || r.office === null || r.office === officeOrAll,
+    );
+    const soldSum = (s: { start: string; end: string }) =>
+      bookRows.filter((r) => inSpan(r.date_sold, s)).reduce((a, r) => a + r.sale_amt, 0) +
+      aggregateCloseKombat(
+        officeCards,
+        { start: s.start, end: s.end },
+        { pendingReport: pendingCheck },
+      ).totals.pendingRevenue;
+    // Cancels by the moment WCC killed them (leads axis — exact timing).
+    const cancelRows = recentCancelsQuery.data ?? [];
+    const cancelSum = (s: { start: string; end: string }) =>
+      cancelRows
+        .filter((r) => inSpan(laDateISO(new Date(r.sale_cancelled_at)), s))
+        .reduce((a, r) => a + (r.sale_amount ?? 0), 0);
+    const tile = (cur: number, prev: number) => ({ cur, prev });
+    return {
+      collected: tile(colSum(spans.cur), colSum(spans.prev)),
+      sold: tile(soldSum(spans.cur), soldSum(spans.prev)),
+      leads: tile(
+        logSum(spans.cur, (r) => r.leads_called_in ?? 0),
+        logSum(spans.prev, (r) => r.leads_called_in ?? 0),
+      ),
+      doors: tile(
+        logSum(spans.cur, (r) => r.doors_knocked ?? 0),
+        logSum(spans.prev, (r) => r.doors_knocked ?? 0),
+      ),
+      sits: tile(
+        logSum(spans.cur, (r) => r.demos_sits ?? 0),
+        logSum(spans.prev, (r) => r.demos_sits ?? 0),
+      ),
+      cancels: tile(cancelSum(spans.cur), cancelSum(spans.prev)),
+    };
+  }, [
+    isCurrentMonth,
+    todayISO,
+    recentLogsQuery.data,
+    recentCancelsQuery.data,
+    trendOffice,
+    nextMonthQuery.data,
+    reportQuery.data,
+    officeCards,
+    pendingCheck,
+    office,
+    officeOrAll,
+  ]);
+
+  // Momentum: SLOPE, not standings — trailing 14d vs the prior 14d.
+  const momentum = useMemo(() => {
+    if (!isCurrentMonth) return null;
+    const winA = { start: addDaysISO(todayISO, -13), end: todayISO };
+    const winB = { start: addDaysISO(todayISO, -27), end: addDaysISO(todayISO, -14) };
+    const repsOf = (w: { start: string; end: string }) =>
+      new Map(aggregateCloseKombat(officeCards, w).reps.map((r) => [r.rep, r]));
+    const a = repsOf(winA);
+    const b = repsOf(winB);
+    type RepMove = { name: string; from: number; to: number; sitsA: number };
+    const repMoves: RepMove[] = [];
+    for (const [name, ra] of a) {
+      const rb = b.get(name);
+      if (!rb) continue;
+      const sitsA = ra.pm + ra.sold;
+      const sitsB = rb.pm + rb.sold;
+      // Min 6 resulted sits in EACH window or the rate is a coin flip.
+      if (sitsA < 6 || sitsB < 6) continue;
+      repMoves.push({ name, from: rb.sold / sitsB, to: ra.sold / sitsA, sitsA });
+    }
+    repMoves.sort((x, y) => y.to - y.from - (x.to - x.from));
+    const logs = (recentLogsQuery.data ?? []).filter(
+      (r) => office === "All" || (r.office_location ?? DEFAULT_OFFICE) === office,
+    );
+    const vanById = new Map((vans.data ?? []).map((v) => [v.id, v]));
+    type VanAgg = { leads: number; days: Set<string> };
+    const vanWin = (w: { start: string; end: string }) => {
+      const m = new Map<string, VanAgg>();
+      for (const r of logs) {
+        if (!r.team_id || r.log_date < w.start || r.log_date > w.end) continue;
+        const active = (r.leads_called_in ?? 0) + (r.doors_knocked ?? 0) + (r.demos_sits ?? 0) > 0;
+        if (!active) continue;
+        const slot = m.get(r.team_id) ?? { leads: 0, days: new Set<string>() };
+        slot.leads += r.leads_called_in ?? 0;
+        slot.days.add(r.log_date);
+        m.set(r.team_id, slot);
+      }
+      return m;
+    };
+    const va = vanWin(winA);
+    const vb = vanWin(winB);
+    type VanMove = { name: string; color: string | null; from: number; to: number };
+    const vanMoves: VanMove[] = [];
+    for (const [id, cur] of va) {
+      const prev = vb.get(id);
+      // Min 5 active days per window — a dark week isn't a slope.
+      if (!prev || cur.days.size < 5 || prev.days.size < 5) continue;
+      vanMoves.push({
+        name: vanById.get(id)?.name ?? "Van",
+        color: vanById.get(id)?.color ?? null,
+        from: prev.leads / prev.days.size,
+        to: cur.leads / cur.days.size,
+      });
+    }
+    vanMoves.sort((x, y) => y.to / Math.max(y.from, 0.1) - x.to / Math.max(x.from, 0.1));
+    return { repMoves, vanMoves };
+  }, [isCurrentMonth, todayISO, officeCards, recentLogsQuery.data, vans.data, office]);
+
+  // --- Risk: fires-later sensors (all from data already on the page) ---
+  const mix = useMemo(
+    () =>
+      financingMix(
+        (collectionsQuery.data ?? []).filter(
+          (r) => officeOrAll === undefined || r.office === officeOrAll,
+        ),
+      ),
+    [collectionsQuery.data, officeOrAll],
+  );
+  const threeMonths = useMemo(() => {
+    const m1 = prevMonthStart;
+    const m2 = monthStartISO(addDaysISO(m1, -1));
+    return new Set([monthStart, m1, m2]);
+  }, [monthStart, prevMonthStart]);
+  const closerShare = useMemo(() => {
+    const rows = (reportQuery.data ?? []).filter(
+      (r) =>
+        threeMonths.has(r.report_month) &&
+        (officeOrAll === undefined || r.office === null || r.office === officeOrAll),
+    );
+    const agg = aggregateReportYear(rows);
+    return topShare(
+      agg.reps.map((r) => ({ name: r.rep, amount: r.revenue })),
+      agg.totals.revenue,
+      2,
+    );
+  }, [reportQuery.data, threeMonths, officeOrAll]);
+  const vanShare = useMemo(() => {
+    const total = [...factory.confirmedByVan.values()].reduce((s, n) => s + n, 0);
+    let topName = null as string | null;
+    let top = 0;
+    const vanById = new Map((vans.data ?? []).map((v) => [v.id, v]));
+    for (const [id, n] of factory.confirmedByVan) {
+      if (n > top) {
+        top = n;
+        topName = vanById.get(id)?.name ?? "Van";
+      }
+    }
+    return { share: total > 0 ? top / total : 0, name: topName };
+  }, [factory.confirmedByVan, vans.data]);
+
   // --- Crew + alerts ---
   const clockQuery = useQuery({
     queryKey: ["god_mode", "clock", todayISO],
@@ -749,16 +1079,26 @@ function GodModeInner({
     staleTime: 30_000,
   });
   const flaggedQuery = useQuery({
-    queryKey: ["god_mode", "flagged_punches_count"],
+    queryKey: ["god_mode", "flagged_punches"],
     refetchInterval: 60_000,
     queryFn: async () => {
-      const { count, error } = await supabase
-        .from("time_entries")
-        .select("id", { count: "exact", head: true })
-        .eq("needs_correction", true)
-        .is("voided_at", null);
-      if (error) throw error;
-      return count ?? 0;
+      const [cnt, oldest] = await Promise.all([
+        supabase
+          .from("time_entries")
+          .select("id", { count: "exact", head: true })
+          .eq("needs_correction", true)
+          .is("voided_at", null),
+        supabase
+          .from("time_entries")
+          .select("log_date")
+          .eq("needs_correction", true)
+          .is("voided_at", null)
+          .order("log_date", { ascending: true })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+      if (cnt.error) throw cnt.error;
+      return { count: cnt.count ?? 0, oldest: oldest.data?.log_date ?? null };
     },
   });
   const pendingLeadsQuery = useQuery({
@@ -826,6 +1166,103 @@ function GodModeInner({
     },
   });
 
+  // --- Costs (hand-entered) → honest contribution; fail soft pre-migration ---
+  const costsQuery = useQuery({
+    queryKey: ["company_costs", monthStart],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("company_costs")
+        .select("*")
+        .eq("month", monthStart);
+      if (error) return null; // table not applied yet
+      return data ?? [];
+    },
+    staleTime: 60_000,
+  });
+  const contribution = useMemo(() => {
+    const rows = costsQuery.data;
+    if (!rows || rows.length === 0) return null;
+    const lanes = rows
+      .filter((c) => officeOrAll === undefined || c.office === officeOrAll)
+      .map((c) => {
+        const lane = vault.byOffice.find((o) => o.office === c.office);
+        const collected = lane?.collected ?? 0;
+        const contrib = collected * (1 - (c.cogs_pct ?? 0)) - (c.office_payroll ?? 0);
+        return { office: c.office, collected, contrib: Math.round(contrib) };
+      });
+    const collected = lanes.reduce((s, l) => s + l.collected, 0);
+    const contrib = lanes.reduce((s, l) => s + l.contrib, 0);
+    return { lanes, collected, contrib, margin: collected > 0 ? contrib / collected : null };
+  }, [costsQuery.data, vault.byOffice, officeOrAll]);
+  const [costsOpen, setCostsOpen] = useState(false);
+  const saveCosts = useMutation({
+    mutationFn: async (input: { office: string; cogs_pct: number; office_payroll: number }) => {
+      const { error } = await supabase
+        .from("company_costs")
+        .upsert({ month: monthStart, ...input }, { onConflict: "month,office" });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Costs saved");
+      qc.invalidateQueries({ queryKey: ["company_costs"] });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Couldn't save costs"),
+  });
+
+  // --- Path to the goal: lever sensitivities from live rates ---
+  const baselineQuery = useQuery({
+    queryKey: ["funnel", "baseline"],
+    staleTime: 15 * 60_000,
+    queryFn: () => getFunnelBaseline(),
+  });
+  const levers = useMemo(() => {
+    const b = baselineQuery.data;
+    if (!b) return null;
+    const { eraDoors, eraConfirmed, confirmed, sits, sales } = b.split;
+    if (eraDoors <= 0 || confirmed <= 0 || sits <= 0 || sales <= 0) return null;
+    const leadPerDoor = eraConfirmed / eraDoors;
+    const sitRate = sits / confirmed;
+    const closeRate = sales / sits;
+    const threeMoRows = (reportQuery.data ?? []).filter((r) => threeMonths.has(r.report_month));
+    const agg = aggregateReportYear(threeMoRows);
+    const gross3 = agg.totals.revenue + agg.totals.cancelAmt;
+    if (agg.totals.sold <= 0 || gross3 <= 0) return null;
+    const grossTicket = gross3 / agg.totals.sold;
+    const cancelRate = agg.totals.cancelAmt / gross3;
+    const annualSold = agg.totals.sold * 4;
+    // Doors/day from the trailing 28 days, era-scoped and active-day based.
+    const logs = (recentLogsQuery.data ?? []).filter((r) => r.log_date >= DOORS_TRACKED_SINCE);
+    const doorDays = new Set(logs.filter((r) => (r.doors_knocked ?? 0) > 0).map((r) => r.log_date));
+    const doors = logs.reduce((s, r) => s + (r.doors_knocked ?? 0), 0);
+    const doorsPerDay = doorDays.size > 0 ? doors / doorDays.size : 0;
+    const medianVan = median([...factory.confirmedByVan.values()]) ?? 0;
+    const result = leverSensitivities({
+      annualGoal,
+      doorsPerDay,
+      workingDaysPerYear: 300,
+      leadPerDoor,
+      sitRate,
+      closeRate,
+      grossTicket,
+      cancelRate,
+      medianVanLeadsPerMonth: medianVan,
+      annualSits: annualSold / closeRate,
+      annualSold,
+      annualGrossBook: gross3 * 4,
+    });
+    return {
+      ...result,
+      inputs: { leadPerDoor, sitRate, closeRate, grossTicket, cancelRate, doorsPerDay },
+    };
+  }, [
+    baselineQuery.data,
+    reportQuery.data,
+    threeMonths,
+    recentLogsQuery.data,
+    factory.confirmedByVan,
+    annualGoal,
+  ]);
+
   // --- Freshness + sync ---
   const collectionsSyncInfo = useQuery({
     queryKey: ["collections_sync_info"],
@@ -839,6 +1276,13 @@ function GodModeInner({
     refetchInterval: 5 * 60_000,
     queryFn: () => getKombatSyncInfo(),
   });
+  const syncStale = useMemo(() => {
+    const ages = [
+      collectionsSyncInfo.data?.lastSyncedAt ?? null,
+      kombatSyncInfo.data?.lastSyncedAt ?? null,
+    ].map((iso) => (iso ? Date.now() - Date.parse(iso) : Infinity));
+    return Math.min(...ages) > 60 * 60_000;
+  }, [collectionsSyncInfo.data, kombatSyncInfo.data]);
   const invalidateAfterSync = () => {
     qc.invalidateQueries({ queryKey: ["report_collections"] });
     qc.invalidateQueries({ queryKey: ["block_cards"] });
@@ -972,6 +1416,7 @@ function GodModeInner({
   const [heroRef, heroInView] = useInView<HTMLDivElement>();
   const [editTarget, setEditTarget] = useState(false);
   const [targetDraft, setTargetDraft] = useState("");
+  const [glossaryOpen, setGlossaryOpen] = useState(false);
 
   if (realRole && realRole !== "owner") {
     return (
@@ -983,7 +1428,10 @@ function GodModeInner({
     );
   }
 
-  // --- Alert rail items (everything actionable lives here, nowhere else) ---
+  // --- Alert rail: every fire-now item, aged, escalated, worst first ---
+  const flaggedOldestDays =
+    flaggedQuery.data?.oldest != null ? daysBetween(flaggedQuery.data.oldest, todayISO) : null;
+  const payrollDaysLate = Math.max(0, daysBetween(addDaysISO(payrollWeek, 7), todayISO));
   const alerts: Array<{
     key: string;
     label: string;
@@ -999,13 +1447,16 @@ function GodModeInner({
       tone: "destructive",
     });
   }
-  if ((flaggedQuery.data ?? 0) > 0) {
+  if ((flaggedQuery.data?.count ?? 0) > 0) {
     alerts.push({
       key: "punches",
-      label: `${flaggedQuery.data} flagged punch${flaggedQuery.data === 1 ? "" : "es"}`,
+      label: `${flaggedQuery.data!.count} flagged punch${flaggedQuery.data!.count === 1 ? "" : "es"}${
+        flaggedOldestDays !== null && flaggedOldestDays > 0 ? ` · oldest ${flaggedOldestDays}d` : ""
+      }`,
       sub: "Time clock review queue",
       to: "/dashboard?tab=timesheets",
-      tone: "warning",
+      // Escalation ladder: 3+ days unworked turns the queue red.
+      tone: flaggedOldestDays !== null && flaggedOldestDays >= 3 ? "destructive" : "warning",
     });
   }
   if (payrollRunQuery.isSuccess && (payrollRunQuery.data?.status ?? "none") !== "approved") {
@@ -1013,8 +1464,37 @@ function GodModeInner({
       key: "payroll",
       label:
         payrollRunQuery.data == null ? "Last week's payroll: no run" : "Last week's payroll: draft",
-      sub: "Draft and approve to freeze the week",
+      sub: `Due Monday${payrollDaysLate > 0 ? ` — ${payrollDaysLate}d late` : ""}`,
       to: "/dashboard?tab=payroll",
+      tone: payrollDaysLate >= 2 ? "destructive" : "warning",
+    });
+  }
+  // Fires-later sensors promoted to fires-now when they cross the line.
+  if (mix.topLenderShare > 0.5 && mix.topLenderLabel) {
+    alerts.push({
+      key: "lender",
+      label: `${mix.topLenderLabel} carries ${fmtPct(mix.topLenderShare)} of collections`,
+      sub: "One lender's credit box is your month",
+      tone: "destructive",
+    });
+  }
+  if (
+    kombat.cancelPctOfBook !== null &&
+    cancelPrev3 !== null &&
+    kombat.cancelPctOfBook - cancelPrev3 >= 0.05
+  ) {
+    alerts.push({
+      key: "cancelspike",
+      label: `Cancels ${(kombat.cancelPctOfBook * 100).toFixed(1)}% of book vs ${(cancelPrev3 * 100).toFixed(1)}% avg`,
+      sub: `${fmtMoney(kombat.cancelAmt)} walking — see the book panel`,
+      tone: "destructive",
+    });
+  }
+  if (coverage !== null && coverage.pct < 0.5) {
+    alerts.push({
+      key: "coverage",
+      label: `Next month booked at ${fmtPctFloor(coverage.pct)} of target`,
+      sub: `${fmtShort(coverage.booked)} on the board — a floor, but a low one`,
       tone: "warning",
     });
   }
@@ -1049,12 +1529,10 @@ function GodModeInner({
       tone: "warning",
     });
   }
+  alerts.sort((a, b) => (a.tone === b.tone ? 0 : a.tone === "destructive" ? -1 : 1));
 
   const vaultDim = collectionsQuery.isPlaceholderData;
   const bookDim = reportQuery.isPlaceholderData || cardsQuery.isPlaceholderData;
-  const troubleChips = vault.byStatus.filter(
-    (s) => TROUBLE_CHIP[s.status.toLowerCase()] !== undefined,
-  );
   const funnelStages = [
     { label: "Generated", value: factory.generated },
     { label: "Confirmed", value: factory.confirmed },
@@ -1062,9 +1540,54 @@ function GodModeInner({
     { label: "Sales", value: ground?.sales ?? 0 },
   ];
 
+  // Panel status rules (the header protocol): every dot is EARNED.
+  const heroStatus: PanelStatus =
+    vault.overdueAmount > 0 ? "alert" : curve.delta < 0 ? "warn" : "good";
+  const kombatStatus: PanelStatus =
+    kombat.cancelPctOfBook !== null && cancelPrev3 !== null
+      ? kombat.cancelPctOfBook - cancelPrev3 >= 0.05
+        ? "alert"
+        : kombat.cancelPctOfBook > cancelPrev3
+          ? "warn"
+          : "good"
+      : "good";
+  const groundStatus: PanelStatus =
+    factory.killed > factory.confirmed
+      ? "warn"
+      : ground &&
+          ground.volume > 0 &&
+          ground.cancelledVol / (ground.volume + ground.cancelledVol) > 0.1
+        ? "warn"
+        : "good";
+  const fieldStatus: PanelStatus =
+    fieldWindow === "today" &&
+    (clockQuery.data?.openNow.length ?? 0) > 0 &&
+    fieldLeads.totals.leads === 0
+      ? "alert"
+      : fieldWindow === "today" && fieldLeads.totals.leads > 0 && fieldLeads.totals.nextDay === 0
+        ? "warn"
+        : "good";
+  const receiptsStatus: PanelStatus =
+    vault.overdueCount > 0
+      ? "alert"
+      : vault.byStatus.some((s) => s.status.toLowerCase() === "partial collected")
+        ? "warn"
+        : "good";
+
+  const infoBtn = (
+    <button
+      type="button"
+      aria-label="What these numbers mean"
+      onClick={() => setGlossaryOpen(true)}
+      className="text-muted-foreground/60 hover:text-neon transition-colors"
+    >
+      <CircleHelp className="h-3.5 w-3.5" />
+    </button>
+  );
+
   return (
     <div className="p-4 pb-20 space-y-3 max-w-6xl mx-auto">
-      {/* ── Header ── */}
+      {/* ── Header: identity + sync (one row) ── */}
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="min-w-0 flex items-center gap-2 font-display text-base md:text-2xl uppercase tracking-widest text-neon">
           <Eye className="w-5 h-5 shrink-0" />
@@ -1079,17 +1602,23 @@ function GodModeInner({
             Live
           </span>
         )}
-        <div className="ml-auto">
+        <div className="ml-auto relative">
           <NeonButton
             tone="turf-cyan"
             disabled={sync.isPending || backfill.isPending}
             onClick={() => sync.mutate()}
-            title="Re-pull the Collections boards (prev/current/next month) and the active Block boards"
+            title={`Collections synced ${relTime(collectionsSyncInfo.data?.lastSyncedAt ?? null)} · Kombat synced ${relTime(kombatSyncInfo.data?.lastSyncedAt ?? null)} — re-pulls prev/current/next Collections boards + active Block boards`}
           >
             <RefreshCw className={cn("w-3.5 h-3.5", sync.isPending && "animate-spin")} />
             <span className="hidden sm:inline">Sync boards</span>
             <span className="sm:hidden">Sync</span>
           </NeonButton>
+          {syncStale && (
+            <span
+              aria-label="Data over an hour old"
+              className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-warning"
+            />
+          )}
         </div>
       </div>
 
@@ -1111,10 +1640,6 @@ function GodModeInner({
           <NeonButton onClick={() => setMonthParam(laMonthStartISO())}>Jump to now</NeonButton>
         )}
         <OfficeFilterToggle className="ml-auto" />
-      </div>
-      <div className="text-[10px] text-muted-foreground">
-        Collections synced {relTime(collectionsSyncInfo.data?.lastSyncedAt ?? null)} · Kombat synced{" "}
-        {relTime(kombatSyncInfo.data?.lastSyncedAt ?? null)}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
@@ -1174,8 +1699,20 @@ function GodModeInner({
             >
               <div className="absolute inset-0 scanlines opacity-[0.06] pointer-events-none" />
               <div className="relative">
-                <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                <div className="flex items-center gap-2 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                  <span
+                    className="inline-block h-1.5 w-1.5 rounded-full"
+                    style={{
+                      background:
+                        heroStatus === "alert"
+                          ? "var(--destructive)"
+                          : heroStatus === "warn"
+                            ? "var(--warning)"
+                            : "var(--victory)",
+                    }}
+                  />
                   Cash · collected {monthLabel}
+                  {infoBtn}
                 </div>
                 <div
                   className={cn(
@@ -1185,40 +1722,18 @@ function GodModeInner({
                 >
                   {fmtMoney(heroMoney.display)}
                 </div>
-                <div className="mt-2 text-sm text-muted-foreground tabular-nums">
-                  of {fmtMoney(vault.anticipated)} anticipated ·{" "}
-                  <span className="text-foreground">{fmtMoney(vault.outstanding)} still out</span>
-                  {vault.overdueCount > 0 && (
-                    <>
-                      {" · "}
-                      <span className="text-destructive">
-                        {fmtMoney(vault.overdueAmount)} overdue
-                      </span>
-                    </>
-                  )}
-                </div>
 
-                {/* PACE */}
-                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs tabular-nums">
-                  <span className="text-muted-foreground">
-                    Pace {fmtShort(pace.projected)} → {fmtShort(pace.annualized)}/yr
+                {/* VERDICT LINE — the judgment, one glance (v3 audit §1) */}
+                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm tabular-nums">
+                  <span
+                    className={cn(
+                      "font-medium",
+                      curve.delta >= 0 ? "text-victory [text-shadow:none]" : "text-destructive",
+                    )}
+                  >
+                    {curve.delta >= 0 ? "▲" : "▼"} {fmtShort(Math.abs(curve.delta))}{" "}
+                    {curve.delta >= 0 ? "ahead of" : "behind"} plan
                   </span>
-                  {pace.pctOfTarget !== null ? (
-                    <span
-                      className={cn(
-                        "font-display text-[10px] uppercase tracking-widest",
-                        pace.pctOfTarget >= 1
-                          ? "text-victory [text-shadow:none]"
-                          : "text-foreground",
-                      )}
-                    >
-                      {fmtPctFloor(pace.pctOfTarget)} of {fmtShort(target ?? 0)} target
-                    </span>
-                  ) : targetQuery.isSuccess && targetQuery.data === null ? (
-                    <span className="text-[10px] text-muted-foreground">
-                      target table not applied yet
-                    </span>
-                  ) : null}
                   {editTarget ? (
                     <form
                       className="inline-flex items-center gap-1"
@@ -1242,41 +1757,35 @@ function GodModeInner({
                         Set
                       </NeonButton>
                     </form>
-                  ) : (
-                    targetQuery.data !== null &&
-                    targetQuery.isSuccess && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setTargetDraft(String(target ?? ""));
-                          setEditTarget(true);
-                        }}
-                        className="inline-flex min-h-11 md:min-h-0 items-center gap-1 text-[10px] font-display uppercase tracking-widest text-neon hover:underline"
-                      >
-                        <Pencil className="h-3 w-3" /> target
-                      </button>
-                    )
-                  )}
-                  <DeltaChip now={vault.collected} base={prevMonthCollected} label="MoM" />
-                  <DeltaChip now={vault.collected} base={yoyCollected} label="YoY" />
+                  ) : pace.pctOfTarget !== null ? (
+                    <button
+                      type="button"
+                      title="Tap to edit the target"
+                      onClick={() => {
+                        setTargetDraft(String(target ?? ""));
+                        setEditTarget(true);
+                      }}
+                      className={cn(
+                        "min-h-11 md:min-h-0 font-display text-[10px] uppercase tracking-widest underline decoration-dotted underline-offset-4 decoration-neon/60",
+                        pace.pctOfTarget >= 1
+                          ? "text-victory [text-shadow:none]"
+                          : "text-foreground",
+                      )}
+                    >
+                      {fmtPctFloor(pace.pctOfTarget)} of {fmtShort(target ?? 0)} target
+                    </button>
+                  ) : targetQuery.isSuccess && targetQuery.data === null ? (
+                    <span className="text-[10px] text-muted-foreground">
+                      target table not applied yet
+                    </span>
+                  ) : null}
+                  <DeltaChip now={vault.collected} base={prevMonthSpan} label="MoM" />
+                  <DeltaChip now={vault.collected} base={yoySpan} label="YoY" />
+                  <span className="text-[11px] text-muted-foreground">
+                    pace {fmtShort(pace.projected)}
+                    {pace.curveBased ? "" : "*"} → {fmtShort(pace.annualized)}/yr
+                  </span>
                 </div>
-
-                {/* NEXT CASH */}
-                {forward && (
-                  <div className="mt-1 text-xs text-muted-foreground tabular-nums">
-                    Next cash · <span className="text-foreground">{fmtShort(forward.next7)}</span>{" "}
-                    in 7d · <span className="text-foreground">{fmtShort(forward.next30)}</span> in
-                    30d
-                    {forward.overdueBacklog > 0 && (
-                      <>
-                        {" · "}
-                        <span className="text-destructive">
-                          {fmtShort(forward.overdueBacklog)} overdue backlog
-                        </span>
-                      </>
-                    )}
-                  </div>
-                )}
 
                 <NeonBar
                   pct={heroInView ? (vault.pct ?? 0) : 0}
@@ -1284,34 +1793,77 @@ function GodModeInner({
                   tall
                   sheen
                 />
-
-                <div className="mt-4">
-                  <CashCurve curve={curve} dimmed={vaultDim} />
+                <div className="mt-1.5 text-xs text-muted-foreground tabular-nums">
+                  of {fmtMoney(vault.anticipated)} anticipated ·{" "}
+                  <span className="text-foreground">{fmtMoney(vault.outstanding)} still out</span>
+                  {vault.overdueCount > 0 && (
+                    <>
+                      {" · "}
+                      <span className="text-destructive">
+                        {fmtMoney(vault.overdueAmount)} overdue
+                      </span>
+                    </>
+                  )}
                 </div>
 
-                {/* Status strip: trouble only */}
-                {troubleChips.length > 0 && (
-                  <div className="mt-3 flex flex-wrap gap-1.5">
-                    {troubleChips.map((s) => (
-                      <span
-                        key={s.status}
-                        className={cn(
-                          "rounded-full border px-2 py-0.5 text-[10px] font-display uppercase tracking-widest tabular-nums",
-                          TROUBLE_CHIP[s.status.toLowerCase()],
-                        )}
-                      >
-                        {s.status} ×{s.count} ·{" "}
-                        {fmtShort(s.planned - s.actual > 0 ? s.planned - s.actual : s.actual)}
-                      </span>
-                    ))}
+                {/* SPEED OF CASH + COVERAGE (v3: velocity is the growth cap) */}
+                <div className="mt-1 text-xs text-muted-foreground tabular-nums">
+                  {slipNow.medianDays !== null && (
+                    <>
+                      Median slip <span className="text-foreground">{slipNow.medianDays}d</span>
+                      {slipPrev.medianDays !== null && (
+                        <span
+                          className={cn(
+                            "ml-1 font-display text-[10px] uppercase tracking-widest",
+                            slipNow.medianDays <= slipPrev.medianDays
+                              ? "text-victory [text-shadow:none]"
+                              : "text-warning",
+                          )}
+                        >
+                          {slipNow.medianDays <= slipPrev.medianDays ? "▼" : "▲"} vs{" "}
+                          {slipPrev.medianDays}d
+                        </span>
+                      )}
+                      {" · "}
+                    </>
+                  )}
+                  aging <span className="text-foreground">{fmtShort(aging.b0_30)}</span> 0-30 /{" "}
+                  <span className={aging.b31_60 > 0 ? "text-warning" : "text-foreground"}>
+                    {fmtShort(aging.b31_60)}
+                  </span>{" "}
+                  31-60 /{" "}
+                  <span className={aging.b61 > 0 ? "text-destructive" : "text-foreground"}>
+                    {fmtShort(aging.b61)}
+                  </span>{" "}
+                  61+
+                </div>
+                {coverage !== null && (
+                  <div className="mt-1 text-xs text-muted-foreground tabular-nums">
+                    Next month booked{" "}
+                    <span className="text-foreground">{fmtShort(coverage.booked)}</span> ={" "}
+                    <span
+                      className={cn(
+                        coverage.pct >= 0.8
+                          ? "text-victory [text-shadow:none]"
+                          : coverage.pct >= 0.5
+                            ? "text-foreground"
+                            : "text-warning",
+                      )}
+                    >
+                      {fmtPctFloor(coverage.pct)} of target
+                    </span>{" "}
+                    <span className="text-muted-foreground/70">(floor — board still filling)</span>
                   </div>
                 )}
 
+                <div className="mt-4">
+                  <CashCurve curve={curve} dimmed={vaultDim} showDelta={false} />
+                </div>
+
                 {/* 12-month strip — tap a bar to time-travel */}
                 <div className="mt-4">
-                  <div className="flex items-baseline justify-between text-[10px] text-muted-foreground">
-                    <span className="font-display uppercase tracking-widest">Last 12 months</span>
-                    <span>tap a month to travel</span>
+                  <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                    Last 12 months
                   </div>
                   <Sparkbars
                     className="mt-1"
@@ -1323,16 +1875,12 @@ function GodModeInner({
                     onPick={(i) => setMonthParam(sparkMonths[i])}
                   />
                 </div>
-                <p className="mt-3 text-[10px] text-muted-foreground/70">
-                  Collections-board dollars — anticipated vs banked. Not the sales book, not
-                  canvasser volume.
-                </p>
               </div>
             </div>
           )}
         </Reveal>
 
-        {/* ── 2 · ALERT RAIL ─────────────────────────────────────── */}
+        {/* ── 2 · ALERT RAIL + RISK ──────────────────────────────── */}
         <Reveal
           ready={!collectionsQuery.isPending}
           i={1}
@@ -1341,7 +1889,7 @@ function GodModeInner({
         >
           <div className="space-y-2">
             <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground px-1">
-              Needs you
+              Needs you{alerts.length > 0 ? ` · ${alerts.length}` : ""}
             </div>
             {alerts.length === 0 ? (
               <ArcadeCard className="flex items-center gap-3 p-4">
@@ -1393,19 +1941,109 @@ function GodModeInner({
                 );
               })
             )}
+
+            {/* RISK — fires later. Its one job is to stay boring. */}
+            <div className="pt-1 text-[10px] font-display uppercase tracking-widest text-muted-foreground px-1">
+              Risk · fires later
+            </div>
+            <ArcadeCard className="p-3 space-y-2">
+              <RiskRow
+                label={
+                  mix.topLenderLabel
+                    ? `${mix.topLenderLabel} share of collections`
+                    : "Lender concentration"
+                }
+                pct={mix.topLenderShare}
+                amber={0.4}
+                red={0.55}
+              />
+              <RiskRow
+                label={`Top 2 closers share of book (3-mo)${closerShare.names.length ? ` · ${closerShare.names.join(" + ")}` : ""}`}
+                pct={closerShare.share}
+                amber={0.4}
+                red={0.55}
+              />
+              <RiskRow
+                label={`Top van share of confirmed leads${vanShare.name ? ` · ${vanShare.name}` : ""}`}
+                pct={vanShare.share}
+                amber={0.35}
+                red={0.5}
+              />
+            </ArcadeCard>
           </div>
         </Reveal>
 
-        {/* ── 3 · CLOSE KOMBAT · THE OFFICIAL BOOK ───────────────── */}
+        {/* ── 3 · THIS WEEK (matched spans, current month only) ──── */}
+        {isCurrentMonth && (
+          <Reveal
+            ready={!recentLogsQuery.isPending}
+            i={2}
+            className="lg:col-span-12"
+            skeleton={<ArcadeSkeleton className="h-20 w-full" />}
+          >
+            {week && (
+              <div className="grid grid-cols-2 md:grid-cols-6 gap-px rounded-lg overflow-hidden border border-border/40 bg-border/40">
+                <WeekCell
+                  label="Collected WTD"
+                  cur={week.collected.cur}
+                  prev={week.collected.prev}
+                  money
+                />
+                <WeekCell label="Sold $ WTD" cur={week.sold.cur} prev={week.sold.prev} money />
+                <WeekCell label="Leads WTD" cur={week.leads.cur} prev={week.leads.prev} />
+                <WeekCell label="Doors WTD" cur={week.doors.cur} prev={week.doors.prev} />
+                <WeekCell label="Sits WTD" cur={week.sits.cur} prev={week.sits.prev} />
+                <WeekCell
+                  label="Cancelled $ WTD"
+                  cur={week.cancels.cur}
+                  prev={week.cancels.prev}
+                  money
+                  badIsUp
+                />
+              </div>
+            )}
+          </Reveal>
+        )}
+
+        {/* ── 4 · PATH TO THE GOAL (the lever price list) ────────── */}
+        <Reveal
+          ready={!baselineQuery.isPending && !reportQuery.isPending}
+          i={3}
+          className="lg:col-span-12"
+          skeleton={<PanelSkeleton rows={3} />}
+        >
+          <PathToGoal
+            levers={levers}
+            annualGoal={annualGoal}
+            contributionMargin={contribution?.margin ?? null}
+          />
+        </Reveal>
+
+        {/* ── 5 · CLOSE KOMBAT · THE OFFICIAL BOOK ───────────────── */}
         <Reveal
           ready={!reportQuery.isPending && !cardsQuery.isPending}
-          i={2}
+          i={4}
           className="lg:col-span-7"
           skeleton={<PanelSkeleton rows={4} />}
         >
           <ArcadePanel
             faction="kombat"
-            title="Close Kombat · The Official Book"
+            title="Close Kombat · The Book"
+            status={kombatStatus}
+            info={infoBtn}
+            headline={
+              kombat.cancelPctOfBook !== null && cancelPrev3 !== null ? (
+                <span
+                  className={cn(
+                    "tabular-nums text-[10px] font-display uppercase tracking-widest",
+                    kombat.cancelPctOfBook <= cancelPrev3 ? "text-kombat-gold" : "text-kombat-red",
+                  )}
+                >
+                  cancels {(kombat.cancelPctOfBook * 100).toFixed(1)}%{" "}
+                  {kombat.cancelPctOfBook <= cancelPrev3 ? "▼" : "▲"}
+                </span>
+              ) : undefined
+            }
             action={
               <NeonButton tone="kombat-gold" asChild className="min-h-9">
                 <Link to="/close-kombat" search={{ tab: "stats" }}>
@@ -1440,13 +2078,13 @@ function GodModeInner({
                     </div>
                   )}
                 </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-px rounded-lg overflow-hidden border border-kombat-red/30 bg-kombat-red/20">
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-px rounded-lg overflow-hidden border border-kombat-red/30 bg-kombat-red/20">
                   <ArcadeStatTile
                     flat
                     mono
                     label="Sold"
                     value={fmtCount(kombat.totals.sold)}
-                    accent="muted"
+                    accent="neon"
                     sub={{
                       label: "Close %",
                       value: fmtPct(kombat.totals.closePct),
@@ -1460,6 +2098,17 @@ function GodModeInner({
                     value={fmtCount(kombat.totals.appts)}
                     accent="muted"
                     sub={{ label: "Sit %", value: fmtPct(kombat.totals.sitPct), accent: "muted" }}
+                  />
+                  <ArcadeStatTile
+                    flat
+                    mono
+                    label="$/sit"
+                    value={
+                      kombat.totals.pm + kombat.totals.sold > 0
+                        ? fmtShort(kombat.bookRevenue / (kombat.totals.pm + kombat.totals.sold))
+                        : "—"
+                    }
+                    accent="muted"
                   />
                   <ArcadeStatTile
                     flat
@@ -1486,7 +2135,7 @@ function GodModeInner({
                     }}
                   />
                 </div>
-                {/* Cancels: the bleed — full-width, loud */}
+                {/* Cancels: the bleed — full-width, loud, with its shape */}
                 <div className="rounded-lg border border-kombat-red/50 bg-kombat-red/10 p-3">
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <div>
@@ -1519,6 +2168,15 @@ function GodModeInner({
                       <div>{fmtCount(kombat.totals.cancels)} cancels on cards</div>
                     </div>
                   </div>
+                  {cancelPctSeries.length > 1 && (
+                    <Sparkbars
+                      className="mt-2"
+                      height={16}
+                      accent="var(--kombat-red)"
+                      points={cancelPctSeries}
+                      labels={bookTrend.map((b) => b.month)}
+                    />
+                  )}
                 </div>
                 {/* Book by month strip */}
                 {bookTrend.length > 1 && (
@@ -1576,69 +2234,25 @@ function GodModeInner({
                     </div>
                   )}
                 </div>
-                <p className="text-[10px] text-muted-foreground/70">
-                  The official book (Shark Tank parity) plus just-sold cards — not Collections, not
-                  canvasser volume.
-                </p>
               </div>
             )}
           </ArcadePanel>
         </Reveal>
 
-        {/* ── 4 · PIPELINE (funnel) ──────────────────────────────── */}
+        {/* ── 6 · MOMENTUM (slope, not standings) ────────────────── */}
         <Reveal
-          ready={!leadMetricsQuery.isPending}
-          i={3}
+          ready={!cardsQuery.isPending && (!isCurrentMonth || !recentLogsQuery.isPending)}
+          i={5}
           className="lg:col-span-5"
           skeleton={<PanelSkeleton rows={4} />}
         >
-          <ArcadePanel
-            title="Lead Factory"
-            action={
-              <NeonButton asChild className="min-h-9">
-                <Link to="/confirmation-desk">
-                  Desk{(pendingLeadsQuery.data ?? 0) > 0 ? ` · ${pendingLeadsQuery.data}` : ""}
-                </Link>
-              </NeonButton>
-            }
-          >
-            {leadMetricsQuery.isError ? (
-              <QueryStateCard
-                pending={false}
-                what="lead metrics"
-                onRetry={() => leadMetricsQuery.refetch()}
-              />
-            ) : (
-              <div
-                className={cn(
-                  "space-y-3 transition-opacity",
-                  leadMetricsQuery.isPlaceholderData && "opacity-50",
-                )}
-              >
-                <FunnelLadder stages={funnelStages} />
-                <div className="grid grid-cols-2 gap-px rounded-lg overflow-hidden border border-border/40 bg-border/40">
-                  <ArcadeStatTile flat mono label="Future" value={factory.future} accent="muted" />
-                  <ArcadeStatTile
-                    flat
-                    mono
-                    label="Blown out"
-                    value={factory.killed}
-                    accent={factory.killed > 0 ? "destructive" : "muted"}
-                  />
-                </div>
-                <p className="text-[10px] text-muted-foreground/70">
-                  QR &amp; internet leads aren't mirrored into the app yet — they live on the Monday
-                  leads board.
-                </p>
-              </div>
-            )}
-          </ArcadePanel>
+          <MomentumPanel momentum={momentum} />
         </Reveal>
 
-        {/* ── 5 · RHYTHM (calendar heatmap) ──────────────────────── */}
+        {/* ── 7 · RHYTHM (calendar heatmap) ──────────────────────── */}
         <Reveal
           ready={!collectionsQuery.isPending}
-          i={4}
+          i={6}
           className="lg:col-span-5"
           skeleton={<PanelSkeleton rows={5} />}
         >
@@ -1716,21 +2330,30 @@ function GodModeInner({
           </ArcadePanel>
         </Reveal>
 
-        {/* ── 6 · GROUND GAME ────────────────────────────────────── */}
+        {/* ── 8 · GROUND GAME (field funnel + production, one panel) ── */}
         <Reveal
-          ready={!dispatchQuery.isPending}
-          i={5}
+          ready={!dispatchQuery.isPending && !leadMetricsQuery.isPending}
+          i={7}
           className="lg:col-span-7"
-          skeleton={<PanelSkeleton rows={3} />}
+          skeleton={<PanelSkeleton rows={4} />}
         >
           <ArcadePanel
             title="Ground Game"
+            status={groundStatus}
+            info={infoBtn}
             action={
-              <NeonButton asChild className="min-h-9">
-                <Link to="/dashboard" search={{ tab: "dispatch" }}>
-                  Dispatch
-                </Link>
-              </NeonButton>
+              <div className="flex items-center gap-2">
+                <NeonButton asChild className="min-h-9">
+                  <Link to="/confirmation-desk">
+                    Desk{(pendingLeadsQuery.data ?? 0) > 0 ? ` · ${pendingLeadsQuery.data}` : ""}
+                  </Link>
+                </NeonButton>
+                <NeonButton asChild className="min-h-9">
+                  <Link to="/dashboard" search={{ tab: "dispatch" }}>
+                    Dispatch
+                  </Link>
+                </NeonButton>
+              </div>
             }
           >
             {dispatchQuery.isError ? (
@@ -1746,76 +2369,76 @@ function GodModeInner({
                   dispatchQuery.isPlaceholderData && "opacity-50",
                 )}
               >
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <div>
-                    <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-                      Confirmed volume · net of cancels
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <FunnelLadder
+                    stages={funnelStages}
+                    extra={{ future: factory.future, killed: factory.killed }}
+                  />
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <div>
+                        <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                          Field volume · net of cancels
+                        </div>
+                        <div className="mt-1 font-display text-xl md:text-2xl tabular-nums text-foreground">
+                          {fmtMoney(groundMoney.display)}
+                        </div>
+                      </div>
+                      {ground.cancels > 0 && (
+                        <div className="text-right text-xs tabular-nums text-muted-foreground">
+                          <span className="text-destructive">−{fmtMoney(ground.cancelledVol)}</span>{" "}
+                          · {ground.cancels} cancel{ground.cancels === 1 ? "" : "s"}
+                        </div>
+                      )}
                     </div>
-                    <div className="mt-1 font-display text-2xl md:text-3xl tabular-nums text-victory [text-shadow:none]">
-                      {fmtMoney(groundMoney.display)}
+                    <div className="grid grid-cols-3 gap-px rounded-lg overflow-hidden border border-border/40 bg-border/40">
+                      <ArcadeStatTile
+                        flat
+                        mono
+                        label="Doors"
+                        value={ground.doors}
+                        accent="muted"
+                        sub={{
+                          label: "$/door*",
+                          value: ground.doors > 0 ? fmtShort(ground.volume / ground.doors) : "—",
+                          accent: "muted",
+                        }}
+                      />
+                      <ArcadeStatTile flat mono label="Talks" value={ground.talks} accent="muted" />
+                      <ArcadeStatTile
+                        flat
+                        mono
+                        label="Leads"
+                        value={ground.leads}
+                        accent="muted"
+                        sub={{
+                          label: "$/lead",
+                          value: ground.leads > 0 ? fmtShort(ground.volume / ground.leads) : "—",
+                          accent: "muted",
+                        }}
+                      />
                     </div>
+                    <p className="text-[10px] text-muted-foreground/60">
+                      *doors since {DOORS_TRACKED_SINCE.slice(5).replace("-", "/")}
+                    </p>
                   </div>
-                  {ground.cancels > 0 && (
-                    <div className="text-right text-xs tabular-nums text-muted-foreground">
-                      <span className="text-destructive">−{fmtMoney(ground.cancelledVol)}</span> ·{" "}
-                      {ground.cancels} cancel{ground.cancels === 1 ? "" : "s"}
-                    </div>
-                  )}
                 </div>
-                <div className="grid grid-cols-3 md:grid-cols-5 gap-px rounded-lg overflow-hidden border border-border/40 bg-border/40">
-                  <ArcadeStatTile
-                    flat
-                    mono
-                    label="Doors"
-                    value={ground.doors}
-                    accent="muted"
-                    sub={{
-                      label: "$/door",
-                      value: ground.doors > 0 ? fmtShort(ground.volume / ground.doors) : "—",
-                      accent: "muted",
-                    }}
-                  />
-                  <ArcadeStatTile flat mono label="Talks" value={ground.talks} accent="muted" />
-                  <ArcadeStatTile flat mono label="Leads" value={ground.leads} accent="muted" />
-                  <ArcadeStatTile
-                    flat
-                    mono
-                    label="Sits"
-                    value={ground.sits}
-                    accent="muted"
-                    sub={{ label: "Sales", value: ground.sales, accent: "muted" }}
-                  />
-                  <ArcadeStatTile
-                    flat
-                    mono
-                    label="Points"
-                    value={ground.points}
-                    accent="muted"
-                    sub={{
-                      label: "$/lead",
-                      value: ground.leads > 0 ? fmtShort(ground.volume / ground.leads) : "—",
-                      accent: "muted",
-                    }}
-                  />
-                </div>
-                <p className="text-[10px] text-muted-foreground/70">
-                  Confirmed-lead dollars net of WCC cancels — the canvasser pay axis; a third money
-                  number that matches neither board above.
-                </p>
               </div>
             ) : null}
           </ArcadePanel>
         </Reveal>
 
-        {/* ── 7 · FIELD LEADS — leads called in + next-day confirms, per van ── */}
+        {/* ── 9 · FIELD LEADS — per van (PR #278) ────────────────── */}
         <Reveal
           ready={!fieldLeadsQuery.isPending}
-          i={6}
+          i={8}
           className="lg:col-span-5"
           skeleton={<PanelSkeleton rows={4} />}
         >
           <ArcadePanel
             title="Field Leads"
+            status={fieldStatus}
+            info={infoBtn}
             action={
               <div className="flex items-center gap-1">
                 {isCurrentMonth && (
@@ -1860,7 +2483,7 @@ function GodModeInner({
                     <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
                       Leads {fieldWindow === "today" ? "today" : monthLabel}
                     </div>
-                    <div className="mt-0.5 font-display text-2xl tabular-nums text-foreground">
+                    <div className="mt-0.5 font-mono text-xl tabular-nums text-foreground">
                       {fieldLeads.totals.leads}
                     </div>
                   </div>
@@ -1918,23 +2541,31 @@ function GodModeInner({
                     </div>
                   </div>
                 )}
-                <p className="text-[10px] text-muted-foreground/70">
-                  Leads called in from the field; next day = confirmed for tomorrow. Vans are the
-                  log-day snapshot, not today's roster.
-                </p>
               </div>
             )}
           </ArcadePanel>
         </Reveal>
 
-        {/* ── 8 · CREW (roster facts only — fires live in the rail) ── */}
+        {/* ── 10 · CREW (roster facts + honest money) ────────────── */}
         <Reveal
           ready={roster.isSuccess}
-          i={7}
+          i={9}
           className="lg:col-span-7"
           skeleton={<PanelSkeleton rows={1} />}
         >
-          <ArcadePanel title="Crew">
+          <ArcadePanel
+            title="Crew"
+            info={infoBtn}
+            action={
+              <button
+                type="button"
+                onClick={() => setCostsOpen((v) => !v)}
+                className="min-h-9 text-[10px] font-display uppercase tracking-widest text-neon hover:underline"
+              >
+                {contribution ? "Edit costs" : "Enter costs"}
+              </button>
+            }
+          >
             <div className="grid grid-cols-2 md:grid-cols-4 gap-px rounded-lg overflow-hidden border border-border/40 bg-border/40">
               <CrewCell
                 to="/crew-map"
@@ -1954,7 +2585,7 @@ function GodModeInner({
               />
               <CrewCell
                 to="/dashboard?tab=payroll"
-                label="Canvasser pay (month)"
+                label="Canvasser pay"
                 value={
                   laborQuery.isSuccess
                     ? fmtMoney(laborQuery.data.total)
@@ -1969,23 +2600,64 @@ function GodModeInner({
                 }
               />
               <CrewCell
-                to="/daily-wrap"
-                label="Daily wrap"
-                value="Open"
-                sub="Tonight's recap & winners"
+                to="/dashboard?tab=payroll"
+                label="Field cost / sale"
+                value={
+                  laborQuery.isSuccess && ground && ground.sales > 0
+                    ? fmtMoney(laborQuery.data.total / ground.sales)
+                    : "—"
+                }
+                sub={ground ? `${ground.sales} field sales` : undefined}
               />
             </div>
-            <p className="mt-2 text-[10px] text-muted-foreground/70">
-              Canvasser pay is the pay engine's month total (weekly pay + volume bonus) — not total
-              company labor.
-            </p>
+
+            {/* Honest margin: typed inputs or an explicit hole — never derived. */}
+            <div className="mt-3 text-xs tabular-nums">
+              {contribution ? (
+                <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+                  <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                    Contribution
+                  </span>
+                  {contribution.lanes.map((l) => (
+                    <span key={l.office} className="text-foreground">
+                      {l.office === "San Diego" ? "SD" : "OC"}{" "}
+                      <span
+                        className={cn(
+                          l.contrib >= 0 ? "text-victory [text-shadow:none]" : "text-destructive",
+                        )}
+                      >
+                        {fmtShort(l.contrib)}
+                      </span>
+                    </span>
+                  ))}
+                  {contribution.margin !== null && (
+                    <span className="text-muted-foreground">
+                      {Math.round(contribution.margin * 100)}% of collected · before field pay
+                    </span>
+                  )}
+                </div>
+              ) : costsQuery.data !== null ? (
+                <span className="text-muted-foreground">
+                  Margin: not shown — enter {monthLabel}'s job-cost % and office payroll.
+                </span>
+              ) : null}
+            </div>
+
+            {costsOpen && (
+              <CostsEditor
+                monthLabel={monthLabel}
+                existing={costsQuery.data ?? []}
+                onSave={(v) => saveCosts.mutate(v)}
+                saving={saveCosts.isPending}
+              />
+            )}
           </ArcadePanel>
         </Reveal>
 
-        {/* ── 9 · RECEIPTS DRAWER ────────────────────────────────── */}
+        {/* ── 11 · RECEIPTS DRAWER ───────────────────────────────── */}
         <Reveal
           ready={!collectionsQuery.isPending}
-          i={8}
+          i={10}
           className="lg:col-span-12"
           skeleton={<ArcadeSkeleton className="h-12 w-full" />}
         >
@@ -1995,9 +2667,18 @@ function GodModeInner({
             todayISO={todayISO}
             dayFilter={receiptsDay}
             clearDayFilter={() => setReceiptsDay(null)}
+            status={receiptsStatus}
+            forward={forward}
           />
         </Reveal>
       </div>
+
+      <GlossarySheet
+        open={glossaryOpen}
+        onOpenChange={setGlossaryOpen}
+        sections={GOD_GLOSSARY}
+        title="What God Mode's numbers mean"
+      />
     </div>
   );
 }
@@ -2005,6 +2686,332 @@ function GodModeInner({
 function searchOf(to: string): Record<string, string> | undefined {
   const q = to.split("?")[1];
   return q ? Object.fromEntries(new URLSearchParams(q).entries()) : undefined;
+}
+
+/** One this-week cell: value + ▲/▼ vs the same elapsed span last week. */
+function WeekCell({
+  label,
+  cur,
+  prev,
+  money = false,
+  badIsUp = false,
+}: {
+  label: string;
+  cur: number;
+  prev: number;
+  money?: boolean;
+  badIsUp?: boolean;
+}) {
+  const delta = prev > 0 ? (cur - prev) / prev : null;
+  const up = delta !== null && delta >= 0;
+  const good = delta === null ? null : badIsUp ? !up : up;
+  return (
+    <div className="min-w-0 bg-surface px-3 py-2">
+      <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground truncate">
+        {label}
+      </div>
+      <div className="mt-0.5 font-mono text-base md:text-lg tabular-nums text-foreground">
+        {money ? fmtShort(cur) : cur}
+      </div>
+      <div
+        className={cn(
+          "text-[10px] font-display uppercase tracking-widest tabular-nums",
+          delta === null
+            ? "text-muted-foreground/50"
+            : good
+              ? "text-victory [text-shadow:none]"
+              : "text-destructive",
+        )}
+      >
+        {delta === null
+          ? "no basis"
+          : `${up ? "▲" : "▼"} ${Math.abs(Math.round(delta * 100))}% vs last wk`}
+      </div>
+    </div>
+  );
+}
+
+/** The lever price list: what one unit of each input is worth per year.
+ *  Levers multiply — they never add; the drawer says so out loud. */
+function PathToGoal({
+  levers,
+  annualGoal,
+  contributionMargin,
+}: {
+  levers:
+    | (ReturnType<typeof leverSensitivities> & {
+        inputs: {
+          leadPerDoor: number;
+          sitRate: number;
+          closeRate: number;
+          grossTicket: number;
+          cancelRate: number;
+          doorsPerDay: number;
+        };
+      })
+    | null;
+  annualGoal: number;
+  contributionMargin: number | null;
+}) {
+  const [showAssumptions, setShowAssumptions] = useState(false);
+  if (!levers) {
+    return (
+      <ArcadePanel title={`Path to ${fmtShort(annualGoal)}`}>
+        <p className="text-xs text-muted-foreground">
+          Not enough live data yet to price the levers (needs the 60-day funnel baseline and a
+          3-month book).
+        </p>
+      </ArcadePanel>
+    );
+  }
+  const i = levers.inputs;
+  const row = (k: string) => levers.rows.find((r) => r.key === k)!;
+  const LEVERS: Array<{ key: string; title: string; detail: string }> = [
+    {
+      key: "cancel",
+      title: `Cancels back to 10% (now ${(i.cancelRate * 100).toFixed(1)}%)`,
+      detail: "found money — no new doors, no new hires",
+    },
+    {
+      key: "close",
+      title: `Close rate +1pt (now ${(i.closeRate * 100).toFixed(1)}%)`,
+      detail: "training, pitch, leadership at the table",
+    },
+    {
+      key: "ticket",
+      title: `Average ticket +$1K (now ${fmtShort(i.grossTicket)})`,
+      detail: "scope, financing, premium product mix",
+    },
+    {
+      key: "van",
+      title: "One more van (at the MEDIAN van's production)",
+      detail: "a new van is not your best van",
+    },
+    {
+      key: "doors",
+      title: `Doors for ${fmtShort(annualGoal)}: ${Math.round(row("doors").figure)}/day (now ~${Math.round(i.doorsPerDay)})`,
+      detail: "the brute-force lever — everything else multiplies it",
+    },
+  ];
+  return (
+    <ArcadePanel
+      title={`Path to ${fmtShort(annualGoal)}`}
+      headline={
+        <span className="tabular-nums text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+          model {fmtShort(levers.modeledNetPerYear)}/yr
+        </span>
+      }
+      action={
+        <button
+          type="button"
+          onClick={() => setShowAssumptions((v) => !v)}
+          className="min-h-9 text-[10px] font-display uppercase tracking-widest text-neon hover:underline"
+        >
+          {showAssumptions ? "Hide assumptions" : "Assumptions"}
+        </button>
+      }
+    >
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-px rounded-lg overflow-hidden border border-border/40 bg-border/40">
+        {LEVERS.map((l) => {
+          const r = row(l.key);
+          const dollars = l.key === "doors" ? r.dollars : r.dollars;
+          return (
+            <div key={l.key} className="min-w-0 bg-surface px-3 py-2.5">
+              <div
+                className={cn(
+                  "font-display text-lg tabular-nums [text-shadow:none]",
+                  l.key === "doors"
+                    ? dollars > 0
+                      ? "text-warning"
+                      : "text-victory"
+                    : dollars > 0
+                      ? "text-victory"
+                      : "text-muted-foreground/50",
+                )}
+              >
+                {l.key === "doors"
+                  ? dollars > 0
+                    ? `${fmtShort(dollars)} gap`
+                    : "goal met"
+                  : dollars > 0
+                    ? `+${fmtShort(dollars)}/yr`
+                    : "—"}
+              </div>
+              <div className="mt-1 text-xs text-foreground/90">{l.title}</div>
+              <div className="text-[10px] text-muted-foreground">{l.detail}</div>
+              {contributionMargin !== null && l.key !== "doors" && dollars > 0 && (
+                <div className="mt-0.5 text-[10px] text-muted-foreground tabular-nums">
+                  ≈ {fmtShort(dollars * contributionMargin)}/yr contribution
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {showAssumptions && (
+        <div className="mt-3 space-y-1 text-[11px] text-muted-foreground tabular-nums">
+          <p>
+            Model: doors/day × lead-per-door × sit rate × close rate × gross ticket × (1 − cancel
+            rate) × 300 working days. Levers are priced one at a time — they MULTIPLY, they don't
+            add.
+          </p>
+          <p>
+            Live inputs: {i.doorsPerDay.toFixed(0)} doors/day (28d, tracked since{" "}
+            {DOORS_TRACKED_SINCE}) · {(i.leadPerDoor * 100).toFixed(1)}% lead/door (60d
+            pair-matched) · {(i.sitRate * 100).toFixed(0)}% sit · {(i.closeRate * 100).toFixed(0)}%
+            close · {fmtShort(i.grossTicket)} gross ticket (3-mo book) ·{" "}
+            {(i.cancelRate * 100).toFixed(1)}% cancels.
+          </p>
+          <p>
+            Dollars are NET REVENUE, not profit
+            {contributionMargin !== null
+              ? ` — contribution lines use your typed ${Math.round(contributionMargin * 100)}% margin`
+              : " — enter monthly costs (Crew panel) to see contribution"}
+            . Goal is editable on the hero target.
+          </p>
+        </div>
+      )}
+    </ArcadePanel>
+  );
+}
+
+function RiskRow({
+  label,
+  pct,
+  amber,
+  red,
+}: {
+  label: string;
+  pct: number;
+  amber: number;
+  red: number;
+}) {
+  const tone =
+    pct >= red
+      ? "text-destructive"
+      : pct >= amber
+        ? "text-warning"
+        : "text-victory [text-shadow:none]";
+  return (
+    <div className="flex items-baseline justify-between gap-2 text-[11px]">
+      <span className="min-w-0 truncate text-muted-foreground">{label}</span>
+      <span className={cn("shrink-0 font-mono tabular-nums", tone)}>{fmtPct(pct)}</span>
+    </div>
+  );
+}
+
+function MomentumPanel({
+  momentum,
+}: {
+  momentum: {
+    repMoves: Array<{ name: string; from: number; to: number; sitsA: number }>;
+    vanMoves: Array<{ name: string; color: string | null; from: number; to: number }>;
+  } | null;
+}) {
+  if (!momentum) {
+    return (
+      <ArcadePanel title="Momentum">
+        <p className="text-xs text-muted-foreground">
+          Momentum reads the trailing 14 days — jump to the current month to see it.
+        </p>
+      </ArcadePanel>
+    );
+  }
+  const reps = momentum.repMoves;
+  const vans = momentum.vanMoves;
+  const repRows = [...reps.slice(0, 3), ...reps.slice(-3)].filter(
+    (r, idx, arr) => arr.findIndex((x) => x.name === r.name) === idx,
+  );
+  const vanRows = [...vans.slice(0, 2), ...vans.slice(-2)].filter(
+    (r, idx, arr) => arr.findIndex((x) => x.name === r.name) === idx,
+  );
+  return (
+    <ArcadePanel
+      title="Momentum"
+      headline={
+        <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+          14d vs prior 14d
+        </span>
+      }
+    >
+      <div className="space-y-3">
+        <div>
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            Closers · close rate
+          </div>
+          {repRows.length === 0 ? (
+            <p className="mt-1 text-xs text-muted-foreground">
+              No rep has 6+ resulted sits in both windows yet.
+            </p>
+          ) : (
+            <div className="mt-1 space-y-1">
+              {repRows.map((r) => {
+                const up = r.to >= r.from;
+                return (
+                  <Link
+                    key={r.name}
+                    to="/close-kombat"
+                    search={{ tab: "stats" }}
+                    className="flex items-baseline justify-between gap-2 text-xs hover:text-neon transition-colors"
+                  >
+                    <span className="min-w-0 truncate">
+                      <span className={up ? "text-victory [text-shadow:none]" : "text-destructive"}>
+                        {up ? "▲" : "▼"}
+                      </span>{" "}
+                      {r.name}
+                    </span>
+                    <span className="shrink-0 font-mono tabular-nums text-muted-foreground">
+                      {Math.round(r.from * 100)}%→
+                      <span className="text-foreground">{Math.round(r.to * 100)}%</span> ({r.sitsA}{" "}
+                      sits)
+                    </span>
+                  </Link>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        <div>
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            Vans · leads per active day
+          </div>
+          {vanRows.length === 0 ? (
+            <p className="mt-1 text-xs text-muted-foreground">
+              No van has 5+ active days in both windows yet.
+            </p>
+          ) : (
+            <div className="mt-1 space-y-1">
+              {vanRows.map((v) => {
+                const up = v.to >= v.from;
+                return (
+                  <Link
+                    key={v.name}
+                    to="/teams"
+                    className="flex items-baseline justify-between gap-2 text-xs hover:text-neon transition-colors"
+                  >
+                    <span className="min-w-0 truncate">
+                      <span
+                        className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle"
+                        style={{ background: v.color ?? "var(--muted-foreground)" }}
+                      />
+                      <span className={up ? "text-victory [text-shadow:none]" : "text-destructive"}>
+                        {up ? "▲" : "▼"}
+                      </span>{" "}
+                      {v.name}
+                    </span>
+                    <span className="shrink-0 font-mono tabular-nums text-muted-foreground">
+                      {v.from.toFixed(1)}→<span className="text-foreground">{v.to.toFixed(1)}</span>
+                      /day
+                    </span>
+                  </Link>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </ArcadePanel>
+  );
 }
 
 /** SD vs OC lanes — Office War recipe; crown pulses on the leader only. */
@@ -2082,7 +3089,13 @@ function OfficeLanes({
 
 /** Funnel with the conversion ladder between stages — the rates ARE the
  *  funnel; the bars are the magnitude backdrop. */
-function FunnelLadder({ stages }: { stages: Array<{ label: string; value: number }> }) {
+function FunnelLadder({
+  stages,
+  extra,
+}: {
+  stages: Array<{ label: string; value: number }>;
+  extra?: { future: number; killed: number };
+}) {
   const max = Math.max(1, ...stages.map((s) => s.value));
   const [ref, inView] = useInView<HTMLDivElement>();
   const first = stages[0]?.value ?? 0;
@@ -2132,13 +3145,20 @@ function FunnelLadder({ stages }: { stages: Array<{ label: string; value: number
           </div>
         </div>
       ))}
-      <div className="pt-1 font-display text-[10px] uppercase tracking-widest text-muted-foreground tabular-nums">
-        {first} generated → {last} sales{" "}
-        {last > 0 && <span className="text-foreground">· 1 in {Math.round(first / last)}</span>}
+      <div className="pt-1 flex flex-wrap items-baseline gap-x-3 font-display text-[10px] uppercase tracking-widest text-muted-foreground tabular-nums">
+        <span>
+          {first} generated → {last} sales{" "}
+          {last > 0 && <span className="text-foreground">· 1 in {Math.round(first / last)}</span>}
+        </span>
+        {extra && (
+          <span>
+            future <span className="text-foreground">{extra.future}</span> · blown out{" "}
+            <span className={extra.killed > 0 ? "text-destructive" : "text-foreground"}>
+              {extra.killed}
+            </span>
+          </span>
+        )}
       </div>
-      <p className="text-[10px] text-muted-foreground/60">
-        Generated/Confirmed count by submission day; Sits/Sales by block day.
-      </p>
     </div>
   );
 }
@@ -2169,6 +3189,105 @@ function CrewCell({
   );
 }
 
+/** Two numbers per office per month — the whole cost input. */
+function CostsEditor({
+  monthLabel,
+  existing,
+  onSave,
+  saving,
+}: {
+  monthLabel: string;
+  existing: Array<{ office: string; cogs_pct: number | null; office_payroll: number | null }>;
+  onSave: (v: { office: string; cogs_pct: number; office_payroll: number }) => void;
+  saving: boolean;
+}) {
+  return (
+    <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+      {OFFICE_LOCATIONS.map((office) => {
+        const row = existing.find((e) => e.office === office);
+        return (
+          <CostsForm
+            key={office}
+            office={office}
+            monthLabel={monthLabel}
+            initialCogs={row?.cogs_pct ?? null}
+            initialPayroll={row?.office_payroll ?? null}
+            onSave={onSave}
+            saving={saving}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function CostsForm({
+  office,
+  monthLabel,
+  initialCogs,
+  initialPayroll,
+  onSave,
+  saving,
+}: {
+  office: string;
+  monthLabel: string;
+  initialCogs: number | null;
+  initialPayroll: number | null;
+  onSave: (v: { office: string; cogs_pct: number; office_payroll: number }) => void;
+  saving: boolean;
+}) {
+  const [cogs, setCogs] = useState(
+    initialCogs !== null ? String(Math.round(initialCogs * 100)) : "",
+  );
+  const [payroll, setPayroll] = useState(initialPayroll !== null ? String(initialPayroll) : "");
+  return (
+    <form
+      className="rounded-lg border border-border/40 p-3 space-y-2"
+      onSubmit={(e) => {
+        e.preventDefault();
+        const c = Number(cogs.replace(/[^0-9.]/g, ""));
+        const p = Number(payroll.replace(/[^0-9.]/g, ""));
+        if (!Number.isFinite(c) || c <= 0 || c >= 100) {
+          toast.error("Job-cost % must be between 0 and 100");
+          return;
+        }
+        if (!Number.isFinite(p) || p < 0) {
+          toast.error("Office payroll must be a dollar amount");
+          return;
+        }
+        onSave({ office, cogs_pct: c / 100, office_payroll: p });
+      }}
+    >
+      <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+        {office} · {monthLabel}
+      </div>
+      <label className="block text-[11px] text-muted-foreground">
+        Job-cost % of collected
+        <input
+          inputMode="decimal"
+          value={cogs}
+          onChange={(e) => setCogs(e.target.value)}
+          placeholder="55"
+          className="mt-0.5 w-full rounded border border-border bg-background px-2 py-1.5 text-base md:text-xs tabular-nums"
+        />
+      </label>
+      <label className="block text-[11px] text-muted-foreground">
+        Office payroll + overhead $
+        <input
+          inputMode="numeric"
+          value={payroll}
+          onChange={(e) => setPayroll(e.target.value)}
+          placeholder="85000"
+          className="mt-0.5 w-full rounded border border-border bg-background px-2 py-1.5 text-base md:text-xs tabular-nums"
+        />
+      </label>
+      <NeonButton type="submit" disabled={saving} className="w-full">
+        Save {office === "San Diego" ? "SD" : "OC"}
+      </NeonButton>
+    </form>
+  );
+}
+
 // ── Receipts drawer: exceptions first, resolved rows behind a toggle ──────
 
 const stateBadge: Record<ReturnType<typeof rowCollectionState>, { label: string; cls: string }> = {
@@ -2196,12 +3315,16 @@ function ReceiptsDrawer({
   todayISO,
   dayFilter,
   clearDayFilter,
+  status,
+  forward,
 }: {
   rows: CollectionRow[];
   office: string | undefined;
   todayISO: string;
   dayFilter: string | null;
   clearDayFilter: () => void;
+  status: PanelStatus;
+  forward: { next7: number; next30: number; overdueBacklog: number } | null;
 }) {
   const [open, setOpen] = useState(false);
   const [showCollected, setShowCollected] = useState(false);
@@ -2210,7 +3333,14 @@ function ReceiptsDrawer({
     const mine = rows
       .filter((r) => office === undefined || r.office === office)
       .filter((r) => dayFilter === null || r.collected_date === dayFilter)
-      .map((r) => ({ r, state: rowCollectionState(r, todayISO) }));
+      .map((r) => ({
+        r,
+        state: rowCollectionState(r, todayISO),
+        daysLate:
+          r.anticipated_date !== null && r.anticipated_date < todayISO
+            ? daysBetween(r.anticipated_date, todayISO)
+            : 0,
+      }));
     const rank: Record<string, number> = { overdue: 0, partial: 1, pending: 2, collected: 3 };
     mine.sort(
       (a, b) =>
@@ -2237,6 +3367,14 @@ function ReceiptsDrawer({
   return (
     <ArcadePanel
       title={`Receipts · ${total}`}
+      status={status}
+      headline={
+        forward ? (
+          <span className="tabular-nums text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            next cash {fmtShort(forward.next7)}/7d · {fmtShort(forward.next30)}/30d
+          </span>
+        ) : undefined
+      }
       action={
         <button
           type="button"
@@ -2279,13 +3417,14 @@ function ReceiptsDrawer({
                   <th className="py-2 pr-2">Type</th>
                   <th className="py-2 pr-2">Office</th>
                   <th className="py-2 pr-2">Due</th>
+                  <th className="py-2 pr-2 text-right">Late</th>
                   <th className="py-2 pr-2 text-right">Planned</th>
                   <th className="py-2 pr-2 text-right">Collected</th>
                   <th className="py-2">Status</th>
                 </tr>
               </thead>
               <tbody className="font-mono">
-                {visible.map(({ r, state }) => (
+                {visible.map(({ r, state, daysLate }) => (
                   <tr
                     key={r.monday_item_id}
                     className={cn(
@@ -2312,6 +3451,14 @@ function ReceiptsDrawer({
                       )}
                     >
                       {r.anticipated_date ?? "—"}
+                    </td>
+                    <td
+                      className={cn(
+                        "py-2 pr-2 text-right tabular-nums",
+                        state === "overdue" ? "text-destructive" : "text-muted-foreground/40",
+                      )}
+                    >
+                      {state !== "collected" && daysLate > 0 ? `${daysLate}d` : ""}
                     </td>
                     <td className="py-2 pr-2 text-right tabular-nums">
                       {fmtMoney(r.planned_amount)}
@@ -2342,7 +3489,7 @@ function ReceiptsDrawer({
 
           {/* Mobile */}
           <MobileCardList>
-            {visible.map(({ r, state }) => (
+            {visible.map(({ r, state, daysLate }) => (
               <MobileCard
                 key={r.monday_item_id}
                 className={cn(state === "overdue" && "border-destructive/50")}
@@ -2362,6 +3509,9 @@ function ReceiptsDrawer({
                       {r.status ?? stateBadge[state].label}
                     </span>
                   </span>
+                  {state !== "collected" && daysLate > 0 && (
+                    <span className="text-destructive">{daysLate}d late</span>
+                  )}
                   {r.office && (
                     <span className="text-muted-foreground">
                       {r.office === "San Diego" ? "SD" : "OC"}
