@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.notify-day-off]
 verify_jwt = false
+
+[functions.notify-lunch-warning]
+verify_jwt = false
