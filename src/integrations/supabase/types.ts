@@ -873,6 +873,30 @@ export type Database = {
         }
         Relationships: []
       }
+      company_targets: {
+        Row: {
+          id: boolean
+          monthly_collected_target: number
+          oc_target: number | null
+          sd_target: number | null
+          updated_at: string
+        }
+        Insert: {
+          id?: boolean
+          monthly_collected_target?: number
+          oc_target?: number | null
+          sd_target?: number | null
+          updated_at?: string
+        }
+        Update: {
+          id?: boolean
+          monthly_collected_target?: number
+          oc_target?: number | null
+          sd_target?: number | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       report_collections: {
         Row: {
           actual_amount: number
