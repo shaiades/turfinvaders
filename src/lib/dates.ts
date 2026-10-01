@@ -69,6 +69,16 @@ export function weekStartMonday(d: Date = new Date()): Date {
   return dateFromISO(laWeekStartISO(d));
 }
 
+/** Monday (YYYY-MM-DD) of the Weekly Action Plan week: on an LA Sunday the
+ *  plan shows the UPCOMING week (owner spec 2026-10-01), every other day the
+ *  current Mon–Sun week. Takes `instant` so verify scripts can pin Sundays
+ *  and DST boundaries. */
+export function planWeekStartISO(instant: Date = new Date()): string {
+  const d = laDateISO(instant);
+  const ws = weekStartOfISO(d);
+  return d === addDaysISO(ws, 6) ? addDaysISO(ws, 7) : ws;
+}
+
 /**
  * YYYY-MM-DD of a Date via LOCAL getters. Pairs with dateFromISO /
  * weekStartMonday, which hand back local-midnight Dates for LA calendar

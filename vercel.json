@@ -19,6 +19,26 @@
     {
       "path": "/api/internal/god-digest",
       "schedule": "45 14 * * 1-6"
+    },
+    {
+      "path": "/api/internal/refresh-action-plans",
+      "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/internal/refresh-action-plans",
+      "schedule": "0 14 * * *"
+    },
+    {
+      "path": "/api/internal/refresh-action-plans",
+      "schedule": "0 15 * * *"
+    },
+    {
+      "path": "/api/internal/refresh-action-plans",
+      "schedule": "0 1 * * 1"
+    },
+    {
+      "path": "/api/internal/refresh-action-plans",
+      "schedule": "0 2 * * 1"
     }
   ]
 }
