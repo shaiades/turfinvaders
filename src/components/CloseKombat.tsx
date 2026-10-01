@@ -40,12 +40,14 @@ import {
   aggregateReportYear,
   auditBlockCards,
   buildPendingReportCheck,
+  CARD_COLUMNS,
   countReps,
   filterReportRows,
   isReload,
   mergeMonthStandings,
   mergeYearStandings,
   resolveCards,
+  SAVE_LINK_PAD_DAYS,
   volumeReps,
   type AttentionItem,
   type AttentionKind,
@@ -219,13 +221,6 @@ const COMPANY_TILES: TileDef[] = [
   { label: "Revenue", value: (t) => fmtMoney(t.revenue), accent: "victory" },
 ];
 
-/** Link context fetched on each side of the visible window (owner,
- *  2026-08-28): a save can land in the month after its sale, and the
- *  re-priced deal pays out on the ORIGINAL's date — so every view needs to
- *  see far enough both ways for linkSaves to pair the cards. Six weeks
- *  covers any month/week edge with room for a slow save. */
-const SAVE_LINK_PAD_DAYS = 42;
-
 function CloseKombatInner({
   rawTab,
   setPageTab,
@@ -345,12 +340,8 @@ function CloseKombatInner({
   // takes the full set and counts only its own window.
   const fetchStart = addDaysISO(range.start, -SAVE_LINK_PAD_DAYS);
   const fetchEnd = addDaysISO(range.end, SAVE_LINK_PAD_DAYS);
-  // Exactly the BlockCard fields — select("*") also dragged created_at /
-  // updated_at across the wire for thousands of rows, for nothing.
-  const CARD_COLUMNS =
-    "monday_item_id, board_id, office_location, card_date, group_title, lead_name, reps, " +
-    "iss, bo, ol, rs, pm, sale, sale_price, products, canvass_stats, wcc, comments, phone, " +
-    "report_reps, missing_from_report";
+  // Select list is the shared CARD_COLUMNS — usePurposeScoreboard rides the
+  // same query key, so the two selects must stay byte-identical.
   const cardsQuery = useQuery({
     queryKey: ["block_cards", fetchStart, fetchEnd],
     // The abort signal MUST reach every page request (2026-09-02): a

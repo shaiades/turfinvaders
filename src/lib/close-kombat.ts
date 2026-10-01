@@ -147,6 +147,27 @@ export type BlockCard = {
   missing_from_report?: boolean | null;
 };
 
+/** The exact select list for client fetches on the shared
+ *  ["block_cards", fetchStart, fetchEnd] react-query key family (Close
+ *  Kombat's stats + goals fetches, usePurposeScoreboard). react-query
+ *  dedupes by key — whichever surface fetches first serves the cache to
+ *  all of them — so every consumer must select these byte-identical
+ *  columns. Exactly the BlockCard fields the engine reads: select("*")
+ *  dragged created_at/updated_at across the wire for thousands of rows. */
+export const CARD_COLUMNS =
+  "monday_item_id, board_id, office_location, card_date, group_title, lead_name, reps, " +
+  "iss, bo, ol, rs, pm, sale, sale_price, products, canvass_stats, wcc, comments, phone, " +
+  "report_reps, missing_from_report";
+
+/** Link context fetched on each side of the visible window (owner,
+ *  2026-08-28): a save can land in the month after its sale, and the
+ *  re-priced deal pays out on the ORIGINAL's date — so every view needs to
+ *  see far enough both ways for linkSaves to pair the cards. Six weeks
+ *  covers any month/week edge with room for a slow save. Shared for the
+ *  same reason as CARD_COLUMNS: the pad feeds fetchStart/fetchEnd — the
+ *  query key itself — so a divergent pad silently forks the cache. */
+export const SAVE_LINK_PAD_DAYS = 42;
+
 /** Sale-column values that mean sold — keep in sync with SOLD_VALUES in
  *  supabase/functions/monday-live-dispatch/index.ts. */
 export const SOLD_VALUES = ["sold", "reload", "upsell", "sale"] as const;
