@@ -96,7 +96,10 @@ import { MovePlayersSheet } from "@/components/MovePlayersSheet";
 // dialogs' existing imports keep working.
 export type { RosterProfile, Van } from "@/hooks/useFleetRoster";
 
-type BoardProfile = RosterProfile & { role: "canvasser" | "captain"; former: boolean };
+type BoardProfile = RosterProfile & {
+  role: "canvasser" | "captain" | "manager";
+  former: boolean;
+};
 
 // The dispatch funnel counts ONLY actioned Lead Status results (owner,
 // 2026-07-28): Confirmed, Future, and Blowout — where Blowout absorbs the
@@ -301,7 +304,8 @@ function FleetDispatchInner({
   // Board membership: active canvassers and captains as before (is_active
   // === true — null is NOT active here, while Manage Fleet deliberately
   // treats null as active, matching the old split), PLUS everyone else with
-  // a role, carried as `former`. Former rows are data-gated downstream —
+  // a role, carried as `former`, PLUS Admin-tier (Owner/Manager) members of
+  // a van — everyone in a van knocks (owner directive 2026-10-01). Former rows are data-gated downstream —
   // they render only in ranges where they actually produced, bucketed by
   // their daily_logs/leads team snapshot — so removed people keep their
   // history without haunting the daily roster (owner, 2026-08-27).
@@ -318,11 +322,19 @@ function FleetDispatchInner({
       const roles = rolesByUser.get(p.id) ?? [];
       // Confirmers ride the board as canvasser-tier rows (Cynthia lives on
       // the Confirmation van) — the title only changes roster labels.
-      const role = roles.includes("captain")
+      const fieldRole = roles.includes("captain")
         ? "captain"
         : roles.includes("canvasser") || roles.includes("confirmer")
           ? "canvasser"
           : null;
+      // Admin-tier van members ride the board too (owner directive
+      // 2026-10-01: everyone in a van knocks — promoting a riding captain
+      // to Manager/Owner must not drop their row or their stats). Van
+      // membership is the gate: an unassigned Owner/Manager still sits
+      // out, and sales reps stay off regardless — a van-assigned closer
+      // (Leo) is not a canvasser row; Close Kombat is their board.
+      const role =
+        fieldRole ?? (p.team_id && roles.some((r) => isAdminRole(r)) ? ("manager" as const) : null);
       if (!role) continue;
       if (!seeChannels && isLeadSourceKey(normalizeName(p.display_name))) continue;
       out.push({ ...p, role, former: p.is_active !== true });
@@ -771,7 +783,7 @@ function FleetDispatchInner({
       display_name: string | null;
       office_location: string | null;
       team_office: string | null;
-      role: "canvasser" | "captain";
+      role: "canvasser" | "captain" | "manager";
       tracked: boolean;
       /** ANY non-archived member pinned — a half-locked group shows the
        *  padlock (the unlocked duplicate is the one Monday can still drag;
@@ -824,6 +836,7 @@ function FleetDispatchInner({
         if (!c.former) {
           g.activeIds.push(c.id);
           if (c.role === "captain") g.role = "captain";
+          else if (c.role === "manager" && g.role === "canvasser") g.role = "manager";
           if (!c.suspension_tracked) g.tracked = false;
           if (created < g.oldestCreated) g.oldestCreated = created;
           // A name-group is former only when EVERY same-name profile is —
@@ -1438,7 +1451,7 @@ type FunnelRow = {
     /** Non-former ids — the only ones roster actions may touch. */
     activeIds: string[];
     display_name: string | null;
-    role: "canvasser" | "captain";
+    role: "canvasser" | "captain" | "manager";
     team_id: string | null;
     vanLocked: boolean;
     /** Lock-toggle write set: is_active !== false members (union semantics
@@ -1842,9 +1855,9 @@ function DispatchRow({
             excused
           </span>
         )}
-        {r.g.role === "captain" && !r.g.former && (
+        {r.g.role !== "canvasser" && !r.g.former && (
           <span className="shrink-0 text-[9px] font-display uppercase tracking-widest px-1.5 py-0.5 rounded border border-accent/60 text-accent bg-accent/10">
-            Captain
+            {r.g.role === "manager" ? "Manager" : "Captain"}
           </span>
         )}
         {r.g.vanLocked && !r.g.former && (
@@ -2138,8 +2151,10 @@ function DispatchFleet({
     for (const list of rowsByVan.values()) list.sort(byProduction);
     const totalsByVan = new Map(vans.map((v) => [v.id, totalsOfRows(rowsByVan.get(v.id) ?? [])]));
     // Van captions come from the roster: active members holding the captain
-    // role (teams.captain_id is seed-era data with no UI writer — a stale id
-    // would caption a replaced captain, a NULL one no caption at all).
+    // role, or an Admin-tier member riding the van — a captain promoted to
+    // Manager keeps leading it (owner directive 2026-10-01). teams.captain_id
+    // stays unused: it is seed-era data with no UI writer — a stale id
+    // would caption a replaced captain, a NULL one no caption at all.
     // Deduped by normalizeName like the rows are — duplicate same-name
     // profiles ("Logan temple" / "Logan Temple") are normal on this board.
     // Profiles arrive display_name-ordered, so multi-captain joins are stable.
@@ -2147,7 +2162,7 @@ function DispatchFleet({
     const seenCaptainKeys = new Set<string>();
     for (const p of profiles) {
       if (p.is_active !== true || !p.team_id || !p.display_name) continue;
-      if (!(rolesByUser.get(p.id) ?? []).includes("captain")) continue;
+      if (!(rolesByUser.get(p.id) ?? []).some((r) => r === "captain" || isAdminRole(r))) continue;
       const key = `${p.team_id}|${normalizeName(p.display_name) || `id:${p.id}`}`;
       if (seenCaptainKeys.has(key)) continue;
       seenCaptainKeys.add(key);

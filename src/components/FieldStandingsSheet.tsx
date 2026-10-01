@@ -19,6 +19,7 @@ import {
   getDispatchProduction,
   type DispatchResults,
 } from "@/lib/dispatch.functions";
+import { isAdminRole } from "@/lib/roles";
 import { RangeTabs } from "@/components/RangeTabs";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
@@ -151,8 +152,15 @@ export function FieldStandingsSheet({
     for (const p of roster.data?.profiles ?? []) {
       const roles = rolesByUser.get(p.id) ?? [];
       // Canvasser-tier board membership, FleetDispatch semantics: captains
-      // knock too; confirmers ride as canvasser-tier rows.
-      if (!roles.some((r) => r === "captain" || r === "canvasser" || r === "confirmer")) continue;
+      // knock too; confirmers ride as canvasser-tier rows; Admin-tier
+      // (Owner/Manager) members of a van ride as well — everyone in a van
+      // knocks (owner directive 2026-10-01). Sales reps stay off: a
+      // van-assigned closer is not a canvasser row.
+      if (
+        !roles.some((r) => r === "captain" || r === "canvasser" || r === "confirmer") &&
+        !(p.team_id && roles.some((r) => isAdminRole(r)))
+      )
+        continue;
       const r = results[p.id];
       const former = p.is_active !== true;
       // Former members and invite placeholders appear only with in-range
