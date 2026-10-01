@@ -40,7 +40,7 @@ import {
 } from "@/components/arcade";
 import { QueryStateCard } from "@/components/QueryStateCard";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
-import { useDispatchRoster } from "@/hooks/useFleetRoster";
+import { useDispatchRoster, useDispatchVans } from "@/hooks/useFleetRoster";
 import { usePendingDojoCount } from "@/hooks/usePendingDojoCount";
 import { useCountUp } from "@/hooks/useCountUp";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
@@ -604,6 +604,88 @@ function GodModeInner({
     staleTime: 5 * 60_000,
     placeholderData: (prev) => prev,
   });
+  // --- Field leads per van (owner ask 2026-10-01: leads called in from the
+  // field + how many are next-day confirms, total and per van). Same
+  // columns and semantics as Live Daily Action: leads_called_in = field
+  // leads, next_days = Confirmed Tomorrow, future_leads = Confirmed Future;
+  // the log row's team_id is the van AT THE TIME (snapshot, never the live
+  // roster). ---
+  const fieldLeadsQuery = useQuery({
+    queryKey: ["god_mode", "field_leads", monthStart],
+    queryFn: paged<{
+      id: string;
+      canvasser_id: string | null;
+      team_id: string | null;
+      log_date: string;
+      office_location: string | null;
+      leads_called_in: number | null;
+      next_days: number | null;
+      future_leads: number | null;
+    }>((from, to) =>
+      supabase
+        .from("daily_logs")
+        .select(
+          "id, canvasser_id, team_id, log_date, office_location, leads_called_in, next_days, future_leads",
+        )
+        .gte("log_date", monthStart)
+        .lte("log_date", monthEnd)
+        .order("id")
+        .range(from, to),
+    ),
+    staleTime: 60_000,
+    placeholderData: (prev) => prev,
+  });
+  const vans = useDispatchVans();
+  const [fieldWindowRaw, setFieldWindowRaw] = useState<"today" | "month" | null>(null);
+  const fieldWindow: "today" | "month" = isCurrentMonth ? (fieldWindowRaw ?? "today") : "month";
+  const fieldLeads = useMemo(() => {
+    type VanRow = {
+      key: string;
+      name: string;
+      color: string | null;
+      leads: number;
+      nextDay: number;
+      future: number;
+    };
+    const rows = (fieldLeadsQuery.data ?? []).filter(
+      (r) =>
+        (office === "All" || (r.office_location ?? DEFAULT_OFFICE) === office) &&
+        (fieldWindow === "month" || r.log_date === todayISO),
+    );
+    const vanById = new Map((vans.data ?? []).map((v) => [v.id, v]));
+    const byVan = new Map<string, VanRow>();
+    const totals = { leads: 0, nextDay: 0, future: 0 };
+    for (const r of rows) {
+      const leads = r.leads_called_in ?? 0;
+      const nextDay = r.next_days ?? 0;
+      const future = r.future_leads ?? 0;
+      if (leads === 0 && nextDay === 0 && future === 0) continue;
+      const key = r.team_id ?? "none";
+      const van = r.team_id ? vanById.get(r.team_id) : undefined;
+      const slot =
+        byVan.get(key) ??
+        ({
+          key,
+          name: van?.name ?? "No van",
+          color: van?.color ?? null,
+          leads: 0,
+          nextDay: 0,
+          future: 0,
+        } as VanRow);
+      slot.leads += leads;
+      slot.nextDay += nextDay;
+      slot.future += future;
+      byVan.set(key, slot);
+      totals.leads += leads;
+      totals.nextDay += nextDay;
+      totals.future += future;
+    }
+    return {
+      totals,
+      vans: [...byVan.values()].sort((a, b) => b.leads - a.leads || a.name.localeCompare(b.name)),
+    };
+  }, [fieldLeadsQuery.data, vans.data, office, fieldWindow, todayISO]);
+
   const [heatMetric, setHeatMetric] = useState<"cash" | "sold" | "doors">("cash");
   const [receiptsDay, setReceiptsDay] = useState<string | null>(null);
   const heatDays: HeatDay[] = useMemo(() => {
@@ -1725,11 +1807,131 @@ function GodModeInner({
           </ArcadePanel>
         </Reveal>
 
-        {/* ── 7 · CREW (roster facts only — fires live in the rail) ── */}
+        {/* ── 7 · FIELD LEADS — leads called in + next-day confirms, per van ── */}
+        <Reveal
+          ready={!fieldLeadsQuery.isPending}
+          i={6}
+          className="lg:col-span-5"
+          skeleton={<PanelSkeleton rows={4} />}
+        >
+          <ArcadePanel
+            title="Field Leads"
+            action={
+              <div className="flex items-center gap-1">
+                {isCurrentMonth && (
+                  <>
+                    <ArcadePill
+                      size="sm"
+                      active={fieldWindow === "today"}
+                      onClick={() => setFieldWindowRaw("today")}
+                    >
+                      Today
+                    </ArcadePill>
+                    <ArcadePill
+                      size="sm"
+                      active={fieldWindow === "month"}
+                      onClick={() => setFieldWindowRaw("month")}
+                    >
+                      Month
+                    </ArcadePill>
+                  </>
+                )}
+                <NeonButton asChild className="min-h-9">
+                  <Link to="/teams">Vans</Link>
+                </NeonButton>
+              </div>
+            }
+          >
+            {fieldLeadsQuery.isError ? (
+              <QueryStateCard
+                pending={false}
+                what="field leads"
+                onRetry={() => fieldLeadsQuery.refetch()}
+              />
+            ) : (
+              <div
+                className={cn(
+                  "space-y-3 transition-opacity",
+                  fieldLeadsQuery.isPlaceholderData && "opacity-50",
+                )}
+              >
+                <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+                  <div>
+                    <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                      Leads {fieldWindow === "today" ? "today" : monthLabel}
+                    </div>
+                    <div className="mt-0.5 font-display text-2xl tabular-nums text-foreground">
+                      {fieldLeads.totals.leads}
+                    </div>
+                  </div>
+                  <div className="text-xs tabular-nums text-muted-foreground">
+                    <span className="text-foreground">{fieldLeads.totals.nextDay}</span> next day ·{" "}
+                    <span className="text-foreground">{fieldLeads.totals.future}</span> future
+                  </div>
+                </div>
+                {fieldLeads.vans.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    No field leads {fieldWindow === "today" ? "yet today" : "this month"}.
+                  </p>
+                ) : (
+                  <div className="min-w-0">
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] gap-x-3 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                      <span>Van</span>
+                      <span className="text-right">Leads</span>
+                      <span className="text-right">Next day</span>
+                      <span className="text-right">Future</span>
+                    </div>
+                    <div className="mt-1 space-y-1">
+                      {fieldLeads.vans.map((v) => (
+                        <div
+                          key={v.key}
+                          className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-baseline gap-x-3 border-t border-border/40 py-1.5"
+                        >
+                          <span className="min-w-0 truncate text-xs">
+                            <span
+                              className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle"
+                              style={{ background: v.color ?? "var(--muted-foreground)" }}
+                            />
+                            {v.name}
+                          </span>
+                          <span className="text-right font-mono text-sm tabular-nums">
+                            {v.leads}
+                          </span>
+                          <span
+                            className={cn(
+                              "text-right font-mono text-sm tabular-nums",
+                              v.nextDay > 0 ? "text-foreground" : "text-muted-foreground/40",
+                            )}
+                          >
+                            {v.nextDay}
+                          </span>
+                          <span
+                            className={cn(
+                              "text-right font-mono text-sm tabular-nums",
+                              v.future > 0 ? "text-foreground" : "text-muted-foreground/40",
+                            )}
+                          >
+                            {v.future}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <p className="text-[10px] text-muted-foreground/70">
+                  Leads called in from the field; next day = confirmed for tomorrow. Vans are the
+                  log-day snapshot, not today's roster.
+                </p>
+              </div>
+            )}
+          </ArcadePanel>
+        </Reveal>
+
+        {/* ── 8 · CREW (roster facts only — fires live in the rail) ── */}
         <Reveal
           ready={roster.isSuccess}
-          i={6}
-          className="lg:col-span-12"
+          i={7}
+          className="lg:col-span-7"
           skeleton={<PanelSkeleton rows={1} />}
         >
           <ArcadePanel title="Crew">
@@ -1780,10 +1982,10 @@ function GodModeInner({
           </ArcadePanel>
         </Reveal>
 
-        {/* ── 8 · RECEIPTS DRAWER ────────────────────────────────── */}
+        {/* ── 9 · RECEIPTS DRAWER ────────────────────────────────── */}
         <Reveal
           ready={!collectionsQuery.isPending}
-          i={7}
+          i={8}
           className="lg:col-span-12"
           skeleton={<ArcadeSkeleton className="h-12 w-full" />}
         >
