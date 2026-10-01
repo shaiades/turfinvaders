@@ -215,6 +215,53 @@ export function ArcadePanel({
   );
 }
 
+export type StatTileAccent = "neon" | "victory" | "accent" | "warning" | "destructive" | "muted";
+
+export const STAT_TILE_ACCENT: Record<StatTileAccent, string> = {
+  neon: "text-neon",
+  victory: "text-victory",
+  accent: "text-accent",
+  warning: "text-warning",
+  destructive: "text-destructive",
+  muted: "text-muted-foreground",
+};
+
+/** The compact label-over-value stat tile (CloseKombat's KombatTile layout,
+ *  generalized for any faction). `sub` = a companion stat sharing the tile
+ *  (e.g. Sold + Close %), right-aligned. */
+export function ArcadeStatTile({
+  label,
+  value,
+  accent,
+  sub,
+  faction,
+}: {
+  label: string;
+  value: number | string;
+  accent: StatTileAccent;
+  sub?: { label: string; value: number | string; accent: StatTileAccent };
+  faction?: keyof typeof ARCADE_CARD_FACTION;
+}) {
+  return (
+    <ArcadeCard faction={faction}>
+      <div className="flex items-baseline justify-between gap-2 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+        <span>{label}</span>
+        {sub && <span className="text-right">{sub.label}</span>}
+      </div>
+      <div className="mt-1 flex items-baseline justify-between gap-2">
+        <span className={cn("font-display text-2xl break-words", STAT_TILE_ACCENT[accent])}>
+          {value}
+        </span>
+        {sub && (
+          <span className={cn("font-display text-lg", STAT_TILE_ACCENT[sub.accent])}>
+            {sub.value}
+          </span>
+        )}
+      </div>
+    </ArcadeCard>
+  );
+}
+
 export function TeamBadge({ name, color }: { name: string; color: string }) {
   return (
     <span

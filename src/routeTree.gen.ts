@@ -22,6 +22,7 @@ import { Route as AuthenticatedMissionRouteImport } from './routes/_authenticate
 import { Route as AuthenticatedLogRouteImport } from './routes/_authenticated/log'
 import { Route as AuthenticatedLearnRouteImport } from './routes/_authenticated/learn'
 import { Route as AuthenticatedLeaderboardRouteImport } from './routes/_authenticated/leaderboard'
+import { Route as AuthenticatedGodModeRouteImport } from './routes/_authenticated/god-mode'
 import { Route as AuthenticatedFieldRouteImport } from './routes/_authenticated/field'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedDailyWrapRouteImport } from './routes/_authenticated/daily-wrap'
@@ -104,6 +105,11 @@ const AuthenticatedLeaderboardRoute =
     path: '/leaderboard',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedGodModeRoute = AuthenticatedGodModeRouteImport.update({
+  id: '/god-mode',
+  path: '/god-mode',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedFieldRoute = AuthenticatedFieldRouteImport.update({
   id: '/field',
   path: '/field',
@@ -199,6 +205,7 @@ export interface FileRoutesByFullPath {
   '/daily-wrap': typeof AuthenticatedDailyWrapRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/field': typeof AuthenticatedFieldRoute
+  '/god-mode': typeof AuthenticatedGodModeRoute
   '/leaderboard': typeof AuthenticatedLeaderboardRoute
   '/learn': typeof AuthenticatedLearnRoute
   '/log': typeof AuthenticatedLogRoute
@@ -228,6 +235,7 @@ export interface FileRoutesByTo {
   '/daily-wrap': typeof AuthenticatedDailyWrapRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/field': typeof AuthenticatedFieldRoute
+  '/god-mode': typeof AuthenticatedGodModeRoute
   '/leaderboard': typeof AuthenticatedLeaderboardRoute
   '/learn': typeof AuthenticatedLearnRoute
   '/log': typeof AuthenticatedLogRoute
@@ -259,6 +267,7 @@ export interface FileRoutesById {
   '/_authenticated/daily-wrap': typeof AuthenticatedDailyWrapRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/field': typeof AuthenticatedFieldRoute
+  '/_authenticated/god-mode': typeof AuthenticatedGodModeRoute
   '/_authenticated/leaderboard': typeof AuthenticatedLeaderboardRoute
   '/_authenticated/learn': typeof AuthenticatedLearnRoute
   '/_authenticated/log': typeof AuthenticatedLogRoute
@@ -290,6 +299,7 @@ export interface FileRouteTypes {
     | '/daily-wrap'
     | '/dashboard'
     | '/field'
+    | '/god-mode'
     | '/leaderboard'
     | '/learn'
     | '/log'
@@ -319,6 +329,7 @@ export interface FileRouteTypes {
     | '/daily-wrap'
     | '/dashboard'
     | '/field'
+    | '/god-mode'
     | '/leaderboard'
     | '/learn'
     | '/log'
@@ -349,6 +360,7 @@ export interface FileRouteTypes {
     | '/_authenticated/daily-wrap'
     | '/_authenticated/dashboard'
     | '/_authenticated/field'
+    | '/_authenticated/god-mode'
     | '/_authenticated/leaderboard'
     | '/_authenticated/learn'
     | '/_authenticated/log'
@@ -470,6 +482,13 @@ declare module '@tanstack/react-router' {
       path: '/leaderboard'
       fullPath: '/leaderboard'
       preLoaderRoute: typeof AuthenticatedLeaderboardRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/god-mode': {
+      id: '/_authenticated/god-mode'
+      path: '/god-mode'
+      fullPath: '/god-mode'
+      preLoaderRoute: typeof AuthenticatedGodModeRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/field': {
@@ -602,6 +621,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedDailyWrapRoute: typeof AuthenticatedDailyWrapRoute
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
   AuthenticatedFieldRoute: typeof AuthenticatedFieldRoute
+  AuthenticatedGodModeRoute: typeof AuthenticatedGodModeRoute
   AuthenticatedLeaderboardRoute: typeof AuthenticatedLeaderboardRoute
   AuthenticatedLearnRoute: typeof AuthenticatedLearnRoute
   AuthenticatedLogRoute: typeof AuthenticatedLogRoute
@@ -625,6 +645,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedDailyWrapRoute: AuthenticatedDailyWrapRoute,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
   AuthenticatedFieldRoute: AuthenticatedFieldRoute,
+  AuthenticatedGodModeRoute: AuthenticatedGodModeRoute,
   AuthenticatedLeaderboardRoute: AuthenticatedLeaderboardRoute,
   AuthenticatedLearnRoute: AuthenticatedLearnRoute,
   AuthenticatedLogRoute: AuthenticatedLogRoute,
