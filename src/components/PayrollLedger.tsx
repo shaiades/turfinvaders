@@ -35,6 +35,8 @@ import { useOfficeFilter } from "@/components/OfficeFilterContext";
 import { cn } from "@/lib/utils";
 import { addDaysISO, laDateISO, laMidnightUtcISO, monthStartISO, nextMonthStartISO } from "@/lib/dates";
 import { useWeekSelector } from "@/hooks/useWeekSelector";
+import { csvCell } from "@/lib/csv";
+import { isAdminRole } from "@/lib/role-policy";
 
 type LogRow = {
   canvasser_id: string;
@@ -717,7 +719,9 @@ export function PayrollLedger() {
               Reopen run
             </Button>
           )}
-          {run?.status !== "approved" && (
+          {/* Run operations are Admin-tier; the bookkeeper mounts this
+              ledger read-only on /reports (RLS enforces it regardless). */}
+          {isAdminRole(role) && run?.status !== "approved" && (
             <Button
               size="sm"
               variant="outline"
@@ -728,7 +732,7 @@ export function PayrollLedger() {
               {run?.status === "draft" ? "Re-create draft" : "Create draft run"}
             </Button>
           )}
-          {run?.status === "draft" && (
+          {isAdminRole(role) && run?.status === "draft" && (
             <Button
               size="sm"
               disabled={approveRun.isPending}
@@ -1232,8 +1236,3 @@ function MonthlyVolumeBonusPanel({ monthStart }: { monthStart: string }) {
   );
 }
 
-function csvCell(v: unknown): string {
-  const s = String(v ?? "");
-  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-  return s;
-}
