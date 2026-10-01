@@ -4,7 +4,21 @@
   "installCommand": "npm ci",
   "buildCommand": "npm run build",
   "crons": [
-    { "path": "/api/internal/rotate-boards", "schedule": "0 13 * * 1" },
-    { "path": "/api/internal/rotate-boards?mode=check", "schedule": "30 13 * * *" }
+    {
+      "path": "/api/internal/rotate-boards",
+      "schedule": "0 13 * * 1"
+    },
+    {
+      "path": "/api/internal/rotate-boards?mode=check",
+      "schedule": "30 13 * * *"
+    },
+    {
+      "path": "/api/internal/god-digest",
+      "schedule": "45 13 * * 1-6"
+    },
+    {
+      "path": "/api/internal/god-digest",
+      "schedule": "45 14 * * 1-6"
+    }
   ]
 }

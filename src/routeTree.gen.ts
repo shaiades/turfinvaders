@@ -33,6 +33,7 @@ import { Route as AuthenticatedTeamsIndexRouteImport } from './routes/_authentic
 import { Route as AuthenticatedPurposeLeadershipIndexRouteImport } from './routes/_authenticated/purpose-leadership.index'
 import { Route as AuthenticatedMyPurposeIndexRouteImport } from './routes/_authenticated/my-purpose.index'
 import { Route as ApiInternalRotateBoardsRouteImport } from './routes/api/internal/rotate-boards'
+import { Route as ApiInternalGodDigestRouteImport } from './routes/api/internal/god-digest'
 import { Route as AuthenticatedTeamsTeamIdRouteImport } from './routes/_authenticated/teams.$teamId'
 import { Route as AuthenticatedPurposeLeadershipUserIdRouteImport } from './routes/_authenticated/purpose-leadership.$userId'
 import { Route as AuthenticatedMyPurposeWorkshopRouteImport } from './routes/_authenticated/my-purpose.workshop'
@@ -164,6 +165,11 @@ const ApiInternalRotateBoardsRoute = ApiInternalRotateBoardsRouteImport.update({
   path: '/api/internal/rotate-boards',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiInternalGodDigestRoute = ApiInternalGodDigestRouteImport.update({
+  id: '/api/internal/god-digest',
+  path: '/api/internal/god-digest',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthenticatedTeamsTeamIdRoute =
   AuthenticatedTeamsTeamIdRouteImport.update({
     id: '/teams/$teamId',
@@ -219,6 +225,7 @@ export interface FileRoutesByFullPath {
   '/my-purpose/workshop': typeof AuthenticatedMyPurposeWorkshopRoute
   '/purpose-leadership/$userId': typeof AuthenticatedPurposeLeadershipUserIdRoute
   '/teams/$teamId': typeof AuthenticatedTeamsTeamIdRoute
+  '/api/internal/god-digest': typeof ApiInternalGodDigestRoute
   '/api/internal/rotate-boards': typeof ApiInternalRotateBoardsRoute
   '/my-purpose/': typeof AuthenticatedMyPurposeIndexRoute
   '/purpose-leadership/': typeof AuthenticatedPurposeLeadershipIndexRoute
@@ -249,6 +256,7 @@ export interface FileRoutesByTo {
   '/my-purpose/workshop': typeof AuthenticatedMyPurposeWorkshopRoute
   '/purpose-leadership/$userId': typeof AuthenticatedPurposeLeadershipUserIdRoute
   '/teams/$teamId': typeof AuthenticatedTeamsTeamIdRoute
+  '/api/internal/god-digest': typeof ApiInternalGodDigestRoute
   '/api/internal/rotate-boards': typeof ApiInternalRotateBoardsRoute
   '/my-purpose': typeof AuthenticatedMyPurposeIndexRoute
   '/purpose-leadership': typeof AuthenticatedPurposeLeadershipIndexRoute
@@ -281,6 +289,7 @@ export interface FileRoutesById {
   '/_authenticated/my-purpose/workshop': typeof AuthenticatedMyPurposeWorkshopRoute
   '/_authenticated/purpose-leadership/$userId': typeof AuthenticatedPurposeLeadershipUserIdRoute
   '/_authenticated/teams/$teamId': typeof AuthenticatedTeamsTeamIdRoute
+  '/api/internal/god-digest': typeof ApiInternalGodDigestRoute
   '/api/internal/rotate-boards': typeof ApiInternalRotateBoardsRoute
   '/_authenticated/my-purpose/': typeof AuthenticatedMyPurposeIndexRoute
   '/_authenticated/purpose-leadership/': typeof AuthenticatedPurposeLeadershipIndexRoute
@@ -313,6 +322,7 @@ export interface FileRouteTypes {
     | '/my-purpose/workshop'
     | '/purpose-leadership/$userId'
     | '/teams/$teamId'
+    | '/api/internal/god-digest'
     | '/api/internal/rotate-boards'
     | '/my-purpose/'
     | '/purpose-leadership/'
@@ -343,6 +353,7 @@ export interface FileRouteTypes {
     | '/my-purpose/workshop'
     | '/purpose-leadership/$userId'
     | '/teams/$teamId'
+    | '/api/internal/god-digest'
     | '/api/internal/rotate-boards'
     | '/my-purpose'
     | '/purpose-leadership'
@@ -374,6 +385,7 @@ export interface FileRouteTypes {
     | '/_authenticated/my-purpose/workshop'
     | '/_authenticated/purpose-leadership/$userId'
     | '/_authenticated/teams/$teamId'
+    | '/api/internal/god-digest'
     | '/api/internal/rotate-boards'
     | '/_authenticated/my-purpose/'
     | '/_authenticated/purpose-leadership/'
@@ -388,6 +400,7 @@ export interface RootRouteChildren {
   LeadSubmittedRoute: typeof LeadSubmittedRoute
   AuthCallbackRoute: typeof AuthCallbackRoute
   AuthWelcomeRoute: typeof AuthWelcomeRoute
+  ApiInternalGodDigestRoute: typeof ApiInternalGodDigestRoute
   ApiInternalRotateBoardsRoute: typeof ApiInternalRotateBoardsRoute
 }
 
@@ -561,6 +574,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiInternalRotateBoardsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/internal/god-digest': {
+      id: '/api/internal/god-digest'
+      path: '/api/internal/god-digest'
+      fullPath: '/api/internal/god-digest'
+      preLoaderRoute: typeof ApiInternalGodDigestRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_authenticated/teams/$teamId': {
       id: '/_authenticated/teams/$teamId'
       path: '/teams/$teamId'
@@ -675,6 +695,7 @@ const rootRouteChildren: RootRouteChildren = {
   LeadSubmittedRoute: LeadSubmittedRoute,
   AuthCallbackRoute: AuthCallbackRoute,
   AuthWelcomeRoute: AuthWelcomeRoute,
+  ApiInternalGodDigestRoute: ApiInternalGodDigestRoute,
   ApiInternalRotateBoardsRoute: ApiInternalRotateBoardsRoute,
 }
 export const routeTree = rootRouteImport

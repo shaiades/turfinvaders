@@ -64,6 +64,7 @@ import {
 } from "@/lib/close-kombat";
 import { getKombatSyncInfo, syncBlockCards } from "@/lib/close-kombat.functions";
 import { getCollectionsSyncInfo, syncCollections } from "@/lib/collections.functions";
+import { getWhatChanged } from "@/lib/deviations.functions";
 import {
   aggregateCollections,
   buildCashCurve,
@@ -1138,6 +1139,16 @@ function GodModeInner({
   });
   const dojoPending = usePendingDojoCount();
 
+  // What Changed — one deviation engine, two outlets (the 6:45am push
+  // digest is the other; both read the same server computation).
+  const whatChangedQuery = useQuery({
+    queryKey: ["god_mode", "what_changed"],
+    enabled: isCurrentMonth,
+    staleTime: 5 * 60_000,
+    refetchInterval: 15 * 60_000,
+    queryFn: () => getWhatChanged(),
+  });
+
   const activeIds = useMemo(
     () =>
       (roster.data?.profiles ?? [])
@@ -1888,6 +1899,26 @@ function GodModeInner({
           skeleton={<PanelSkeleton rows={3} />}
         >
           <div className="space-y-2">
+            {isCurrentMonth && (whatChangedQuery.data?.items.length ?? 0) > 0 && (
+              <>
+                <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground px-1">
+                  What changed
+                </div>
+                {whatChangedQuery.data!.items.map((d) => (
+                  <Link
+                    key={d.key}
+                    to={d.to.split("?")[0]}
+                    search={searchOf(d.to)}
+                    className="block w-full rounded-lg border border-neon/30 bg-neon/5 p-3 text-left hover:border-neon/60 transition-colors"
+                  >
+                    <div className="text-xs text-foreground/90">{d.line}</div>
+                    {d.sub && (
+                      <div className="mt-0.5 text-[11px] text-muted-foreground">{d.sub}</div>
+                    )}
+                  </Link>
+                ))}
+              </>
+            )}
             <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground px-1">
               Needs you{alerts.length > 0 ? ` · ${alerts.length}` : ""}
             </div>
