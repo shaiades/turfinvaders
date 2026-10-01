@@ -16,6 +16,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthWelcomeRouteImport } from './routes/auth_.welcome'
 import { Route as AuthCallbackRouteImport } from './routes/auth_.callback'
 import { Route as AuthenticatedUsersRouteImport } from './routes/_authenticated/users'
+import { Route as AuthenticatedReportsRouteImport } from './routes/_authenticated/reports'
 import { Route as AuthenticatedPlaybookRouteImport } from './routes/_authenticated/playbook'
 import { Route as AuthenticatedMyTerritoryRouteImport } from './routes/_authenticated/my-territory'
 import { Route as AuthenticatedMissionRouteImport } from './routes/_authenticated/mission'
@@ -72,6 +73,11 @@ const AuthCallbackRoute = AuthCallbackRouteImport.update({
 const AuthenticatedUsersRoute = AuthenticatedUsersRouteImport.update({
   id: '/users',
   path: '/users',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedReportsRoute = AuthenticatedReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedPlaybookRoute = AuthenticatedPlaybookRouteImport.update({
@@ -218,6 +224,7 @@ export interface FileRoutesByFullPath {
   '/mission': typeof AuthenticatedMissionRoute
   '/my-territory': typeof AuthenticatedMyTerritoryRoute
   '/playbook': typeof AuthenticatedPlaybookRoute
+  '/reports': typeof AuthenticatedReportsRoute
   '/users': typeof AuthenticatedUsersRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/welcome': typeof AuthWelcomeRoute
@@ -249,6 +256,7 @@ export interface FileRoutesByTo {
   '/mission': typeof AuthenticatedMissionRoute
   '/my-territory': typeof AuthenticatedMyTerritoryRoute
   '/playbook': typeof AuthenticatedPlaybookRoute
+  '/reports': typeof AuthenticatedReportsRoute
   '/users': typeof AuthenticatedUsersRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/welcome': typeof AuthWelcomeRoute
@@ -282,6 +290,7 @@ export interface FileRoutesById {
   '/_authenticated/mission': typeof AuthenticatedMissionRoute
   '/_authenticated/my-territory': typeof AuthenticatedMyTerritoryRoute
   '/_authenticated/playbook': typeof AuthenticatedPlaybookRoute
+  '/_authenticated/reports': typeof AuthenticatedReportsRoute
   '/_authenticated/users': typeof AuthenticatedUsersRoute
   '/auth_/callback': typeof AuthCallbackRoute
   '/auth_/welcome': typeof AuthWelcomeRoute
@@ -315,6 +324,7 @@ export interface FileRouteTypes {
     | '/mission'
     | '/my-territory'
     | '/playbook'
+    | '/reports'
     | '/users'
     | '/auth/callback'
     | '/auth/welcome'
@@ -346,6 +356,7 @@ export interface FileRouteTypes {
     | '/mission'
     | '/my-territory'
     | '/playbook'
+    | '/reports'
     | '/users'
     | '/auth/callback'
     | '/auth/welcome'
@@ -378,6 +389,7 @@ export interface FileRouteTypes {
     | '/_authenticated/mission'
     | '/_authenticated/my-territory'
     | '/_authenticated/playbook'
+    | '/_authenticated/reports'
     | '/_authenticated/users'
     | '/auth_/callback'
     | '/auth_/welcome'
@@ -453,6 +465,13 @@ declare module '@tanstack/react-router' {
       path: '/users'
       fullPath: '/users'
       preLoaderRoute: typeof AuthenticatedUsersRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/reports': {
+      id: '/_authenticated/reports'
+      path: '/reports'
+      fullPath: '/reports'
+      preLoaderRoute: typeof AuthenticatedReportsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/playbook': {
@@ -648,6 +667,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedMissionRoute: typeof AuthenticatedMissionRoute
   AuthenticatedMyTerritoryRoute: typeof AuthenticatedMyTerritoryRoute
   AuthenticatedPlaybookRoute: typeof AuthenticatedPlaybookRoute
+  AuthenticatedReportsRoute: typeof AuthenticatedReportsRoute
   AuthenticatedUsersRoute: typeof AuthenticatedUsersRoute
   AuthenticatedCanvassersCanvasserIdRoute: typeof AuthenticatedCanvassersCanvasserIdRouteWithChildren
   AuthenticatedMyPurposeWorkshopRoute: typeof AuthenticatedMyPurposeWorkshopRoute
@@ -672,6 +692,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedMissionRoute: AuthenticatedMissionRoute,
   AuthenticatedMyTerritoryRoute: AuthenticatedMyTerritoryRoute,
   AuthenticatedPlaybookRoute: AuthenticatedPlaybookRoute,
+  AuthenticatedReportsRoute: AuthenticatedReportsRoute,
   AuthenticatedUsersRoute: AuthenticatedUsersRoute,
   AuthenticatedCanvassersCanvasserIdRoute:
     AuthenticatedCanvassersCanvasserIdRouteWithChildren,

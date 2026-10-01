@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, Navigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { isAdminRole } from "@/lib/roles";
@@ -95,6 +95,9 @@ function Dashboard() {
 
   // Owners and Office Staff (Admins) both get the full Command view.
   if (isAdminRole(role)) return <OwnerDashboard visibility={!!settings?.global_visibility} />;
+  // Bookkeeper's home is the Reports console — never the canvasser Mission
+  // the unknown-role fallthrough below would hand her.
+  if (role === "bookkeeper") return <Navigate to="/reports" search={{ tab: "exports" }} replace />;
   if (role === "captain")
     return <CaptainDashboard teamId={teamId} visibility={!!settings?.global_visibility} />;
   return user?.id ? (

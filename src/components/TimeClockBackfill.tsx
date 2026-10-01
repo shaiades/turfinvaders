@@ -32,14 +32,17 @@ const FIELD_LABEL = "text-[10px] font-display uppercase tracking-widest text-mut
  *  inside a dialog. */
 export function TimeClockBackfill({
   profiles,
+  initialUserId,
   onDone,
 }: {
   profiles: Profile[];
+  /** Pre-select the player (person-group "Add day" buttons). */
+  initialUserId?: string;
   /** Fires after a successful create so a dialog host can close itself. */
   onDone?: () => void;
 }) {
   const qc = useQueryClient();
-  const [userId, setUserId] = useState("");
+  const [userId, setUserId] = useState(initialUserId ?? "");
   const [clockIn, setClockIn] = useState("");
   const [clockOut, setClockOut] = useState("");
   const [lunchStart, setLunchStart] = useState("");

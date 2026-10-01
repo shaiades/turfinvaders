@@ -1,7 +1,9 @@
 // DISPLAY-ONLY mirror of public.calc_weekly_paycheck.
 //
 // The authoritative pay engine lives in Postgres — latest definition:
-// supabase/migrations/20260913040000_commission_clawback.sql (v7: WCC-
+// supabase/migrations/20261002150000_second_meal_rule.sql (v8: a day earns
+// its single meal-premium hour when EITHER the first meal OR the >10h
+// second meal — LC 512 — was missed/late; v7 in 20260913040000: WCC-
 // cancelled sales — leads.sale_cancelled_at — pay no commission and earn no
 // monthly volume bonus; sales paid in an already-approved run are recovered
 // by create_payroll_run's ledgered clawback pass, capped at each week's
@@ -24,6 +26,11 @@ export function weeklyPoints(demosSits: number, sales: number): number {
 export const HOURLY_BASE = 18;
 export const HOURLY_MID = 30;
 export const HOURLY_TOP = 35;
+
+/** CA LC 512: a shift over this many hours owes a SECOND 30-min meal
+ *  period (starting before the end of the 10th hour). Mirrors the compute
+ *  trigger's second_meal_status rule. */
+export const SECOND_MEAL_AFTER_HOURS = 10;
 
 export const COMMISSION_BASE = 0.01;
 export const COMMISSION_TOP = 0.02;

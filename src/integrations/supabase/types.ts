@@ -1400,6 +1400,9 @@ export type Database = {
           created_by: string
           id: string
           notes: string | null
+          reopen_reason: string | null
+          reopened_at: string | null
+          reopened_by: string | null
           status: string
           week_start: string
         }
@@ -1410,6 +1413,9 @@ export type Database = {
           created_by: string
           id?: string
           notes?: string | null
+          reopen_reason?: string | null
+          reopened_at?: string | null
+          reopened_by?: string | null
           status?: string
           week_start: string
         }
@@ -1420,6 +1426,9 @@ export type Database = {
           created_by?: string
           id?: string
           notes?: string | null
+          reopen_reason?: string | null
+          reopened_at?: string | null
+          reopened_by?: string | null
           status?: string
           week_start?: string
         }
@@ -1478,6 +1487,7 @@ export type Database = {
           needs_correction: boolean
           reviewed_at: string | null
           reviewed_by: string | null
+          second_meal_status: string
           updated_at: string
           user_id: string
           void_reason: string | null
@@ -1497,6 +1507,7 @@ export type Database = {
           needs_correction?: boolean
           reviewed_at?: string | null
           reviewed_by?: string | null
+          second_meal_status?: string
           updated_at?: string
           user_id: string
           void_reason?: string | null
@@ -1516,6 +1527,7 @@ export type Database = {
           needs_correction?: boolean
           reviewed_at?: string | null
           reviewed_by?: string | null
+          second_meal_status?: string
           updated_at?: string
           user_id?: string
           void_reason?: string | null
@@ -1554,6 +1566,39 @@ export type Database = {
           old_row?: Json | null
           reason?: string | null
           time_entry_id?: string
+        }
+        Relationships: []
+      }
+      time_week_attestations: {
+        Row: {
+          created_at: string
+          hours_at_attestation: number | null
+          id: string
+          note: string | null
+          status: string
+          superseded_at: string | null
+          user_id: string
+          week_start: string
+        }
+        Insert: {
+          created_at?: string
+          hours_at_attestation?: number | null
+          id?: string
+          note?: string | null
+          status: string
+          superseded_at?: string | null
+          user_id: string
+          week_start: string
+        }
+        Update: {
+          created_at?: string
+          hours_at_attestation?: number | null
+          id?: string
+          note?: string | null
+          status?: string
+          superseded_at?: string | null
+          user_id?: string
+          week_start?: string
         }
         Relationships: []
       }
@@ -1782,6 +1827,32 @@ export type Database = {
         }
         Relationships: []
       }
+      timesheet_day_detail: {
+        Row: {
+          billable_hours: number | null
+          clock_in: string | null
+          clock_out: string | null
+          display_name: string | null
+          entry_source: string | null
+          first_meal_start: string | null
+          flag_reasons: string[] | null
+          id: string | null
+          last_meal_end: string | null
+          log_date: string | null
+          meal_count: number | null
+          meal_minutes: number | null
+          meal_status: string | null
+          needs_correction: boolean | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          second_meal_status: string | null
+          team_name: string | null
+          user_id: string | null
+          void_reason: string | null
+          voided_at: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       archive_agent: { Args: { _user_id: string }; Returns: undefined }
@@ -1820,6 +1891,14 @@ export type Database = {
       }
       approve_time_entry: {
         Args: { _id: string }
+        Returns: undefined
+      }
+      attest_week: {
+        Args: { _week_start: string; _confirm: boolean; _note?: string | null }
+        Returns: string
+      }
+      reopen_payroll_run: {
+        Args: { _run_id: string; _reason: string }
         Returns: undefined
       }
       calc_monthly_paycheck: {
@@ -1945,7 +2024,14 @@ export type Database = {
       }
     }
     Enums: {
-      app_role: "owner" | "captain" | "canvasser" | "office_staff" | "sales_rep" | "confirmer"
+      app_role:
+        | "owner"
+        | "captain"
+        | "canvasser"
+        | "office_staff"
+        | "sales_rep"
+        | "confirmer"
+        | "bookkeeper"
       canvasser_status:
         | "active"
         | "suspended"
@@ -2088,7 +2174,15 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["owner", "captain", "canvasser", "office_staff", "sales_rep", "confirmer"],
+      app_role: [
+        "owner",
+        "captain",
+        "canvasser",
+        "office_staff",
+        "sales_rep",
+        "confirmer",
+        "bookkeeper",
+      ],
       canvasser_status: [
         "active",
         "suspended",

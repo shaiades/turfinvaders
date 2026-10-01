@@ -18,7 +18,15 @@ function roleCreatable(callerRoles: string[], role: AppRole): boolean {
   return false;
 }
 
-const ROLES = ["owner", "office_staff", "captain", "sales_rep", "confirmer", "canvasser"] as const;
+const ROLES = [
+  "owner",
+  "office_staff",
+  "captain",
+  "bookkeeper",
+  "sales_rep",
+  "confirmer",
+  "canvasser",
+] as const;
 
 const createCanvasserSchema = z.object({
   email: z.string().trim().email().max(255),

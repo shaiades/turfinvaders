@@ -14,6 +14,7 @@ export const APP_ROLES = [
   "owner",
   "office_staff",
   "captain",
+  "bookkeeper",
   "sales_rep",
   "confirmer",
   "canvasser",
@@ -41,6 +42,17 @@ export function isManagerRole(role: AppRole | string | null | undefined): boolea
   if (!role) return false;
   return (MANAGER_ROLES as readonly string[]).includes(role);
 }
+
+/** Payroll/time READ tier: the Admin pair plus the bookkeeper (Mary —
+ *  owner decision 2026-10-01). Read-everything, write-NOTHING: bookkeeper
+ *  is deliberately absent from MANAGER_ROLES, ADMIN_ROLES, and
+ *  MANAGER_GRANTABLE_ROLES (owner grants it; Managers cannot). Gates the
+ *  /reports route and the paycheck server fns' read-everyone branch. */
+export const PAYROLL_READ_ROLES: readonly AppRole[] = [
+  "owner",
+  "office_staff",
+  "bookkeeper",
+] as const;
 
 /** Admin tier: owner and office_staff ONLY — captains are deliberately
  *  excluded. Gates the owner dashboard, the confirmation desk, and
@@ -150,6 +162,7 @@ export const ROLE_LABEL: Record<AppRole, string> = {
   owner: "Owner",
   office_staff: "Manager",
   captain: "Captain",
+  bookkeeper: "Bookkeeper",
   sales_rep: "Sales Rep",
   confirmer: "Confirmer",
   canvasser: "Canvasser",
@@ -159,6 +172,7 @@ export const ROLE_TONE: Record<AppRole, string> = {
   owner: "text-victory border-victory/40",
   office_staff: "text-accent border-accent/40",
   captain: "text-neon border-neon/40",
+  bookkeeper: "text-victory/70 border-victory/30",
   sales_rep: "text-warning border-warning/40",
   confirmer: "text-turf-cyan border-turf-cyan/40",
   canvasser: "text-muted-foreground border-border",
