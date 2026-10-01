@@ -1226,6 +1226,28 @@ function GodModeInner({
     staleTime: 15 * 60_000,
     queryFn: () => getFunnelBaseline(),
   });
+  // The +1-van lever needs a FULL month of confirmed leads per van — the
+  // selected month's MTD numbers would price a partial month ×12. Always the
+  // last full LA month, company-wide (the panel's inputs ignore the office
+  // filter and time travel).
+  const vanBaselineSpan = useMemo(() => {
+    const prevEnd = addDaysISO(laMonthStartISO(), -1);
+    return { start: monthStartISO(prevEnd), end: prevEnd };
+  }, []);
+  const vanBaselineQuery = useQuery({
+    queryKey: ["god_mode", "van_baseline", vanBaselineSpan.start],
+    staleTime: 15 * 60_000,
+    queryFn: paged<{ id: string; team_id: string | null; leads_confirmed: number }>((from, to) =>
+      supabase
+        .from("daily_metrics")
+        .select("id, team_id, leads_confirmed")
+        .gte("metric_date", vanBaselineSpan.start)
+        .lte("metric_date", vanBaselineSpan.end)
+        .gt("leads_confirmed", 0)
+        .order("id")
+        .range(from, to),
+    ),
+  });
   const levers = useMemo(() => {
     const b = baselineQuery.data;
     if (!b) return null;
@@ -1246,7 +1268,11 @@ function GodModeInner({
     const doorDays = new Set(logs.filter((r) => (r.doors_knocked ?? 0) > 0).map((r) => r.log_date));
     const doors = logs.reduce((s, r) => s + (r.doors_knocked ?? 0), 0);
     const doorsPerDay = doorDays.size > 0 ? doors / doorDays.size : 0;
-    const medianVan = median([...factory.confirmedByVan.values()]) ?? 0;
+    const byVan = new Map<string, number>();
+    for (const r of vanBaselineQuery.data ?? []) {
+      if (r.team_id) byVan.set(r.team_id, (byVan.get(r.team_id) ?? 0) + r.leads_confirmed);
+    }
+    const medianVan = median([...byVan.values()]) ?? 0;
     const result = leverSensitivities({
       annualGoal,
       doorsPerDay,
@@ -1270,7 +1296,7 @@ function GodModeInner({
     reportQuery.data,
     threeMonths,
     recentLogsQuery.data,
-    factory.confirmedByVan,
+    vanBaselineQuery.data,
     annualGoal,
   ]);
 
@@ -2891,7 +2917,8 @@ function PathToGoal({
             {DOORS_TRACKED_SINCE}) · {(i.leadPerDoor * 100).toFixed(1)}% lead/door (60d
             pair-matched) · {(i.sitRate * 100).toFixed(0)}% sit · {(i.closeRate * 100).toFixed(0)}%
             close · {fmtShort(i.grossTicket)} gross ticket (3-mo book) ·{" "}
-            {(i.cancelRate * 100).toFixed(1)}% cancels.
+            {(i.cancelRate * 100).toFixed(1)}% cancels · median van {Math.round(row("van").figure)}{" "}
+            confirmed/mo (last full month).
           </p>
           <p>
             Dollars are NET REVENUE, not profit
