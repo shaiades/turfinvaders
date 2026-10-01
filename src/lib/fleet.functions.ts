@@ -232,7 +232,8 @@ export const getWeeklyPaycheck = createServerFn({ method: "POST" })
       context.supabase.from("profiles").select("team_id").eq("id", data.canvasser_id).maybeSingle(),
     ]);
     const roles = (rolesR.data ?? []).map((r) => r.role);
-    const isAdmin = roles.includes("owner") || roles.includes("office_staff");
+    const isAdmin =
+      roles.includes("owner") || roles.includes("office_staff") || roles.includes("bookkeeper");
     const isCaptain = roles.includes("captain");
     const isSelf = context.userId === data.canvasser_id;
     const sameTeam = !!meProfR.data?.team_id && meProfR.data.team_id === targetProfR.data?.team_id;
@@ -315,8 +316,8 @@ export const getWeeklyPaychecks = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
     let allowedIds = data.canvasser_ids;
-    if (roleSet.has("owner") || roleSet.has("office_staff")) {
-      // Full access — the Payroll tab audience.
+    if (roleSet.has("owner") || roleSet.has("office_staff") || roleSet.has("bookkeeper")) {
+      // Full access — the Payroll tab audience (+ the read-only bookkeeper).
     } else if (roleSet.has("captain")) {
       const { data: meProf } = await supabaseAdmin
         .from("profiles").select("team_id").eq("id", context.userId).maybeSingle();
@@ -404,8 +405,8 @@ export const getMonthlyPaychecks = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
     let allowedIds = data.canvasser_ids;
-    if (roleSet.has("owner") || roleSet.has("office_staff")) {
-      // Full access — the Payroll tab audience.
+    if (roleSet.has("owner") || roleSet.has("office_staff") || roleSet.has("bookkeeper")) {
+      // Full access — the Payroll tab audience (+ the read-only bookkeeper).
     } else if (roleSet.has("captain")) {
       const { data: meProf } = await supabaseAdmin
         .from("profiles").select("team_id").eq("id", context.userId).maybeSingle();

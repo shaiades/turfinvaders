@@ -33,6 +33,7 @@ import {
   MapPin,
   FlaskConical,
   DollarSign,
+  FileSpreadsheet,
   Zap,
   Trophy,
   Target,
@@ -232,6 +233,15 @@ export function AppShell({ children }: { children: ReactNode }) {
         { to: "/learn", label: "Learn", icon: GraduationCap },
         { to: "/leaderboard", label: "Leaders", icon: Trophy },
         { to: "/daily-wrap", label: "Wrap", icon: Sparkles },
+      ];
+    }
+    if (role === "bookkeeper") {
+      // Mary's two-tab app: the Reports console (exports) and the read-only
+      // Payroll ledger view inside it. Explicit branch — the leadership
+      // fallthrough below would hand an unknown role the admin nav.
+      return [
+        { to: "/reports", search: { tab: "exports" }, label: "Reports", icon: FileSpreadsheet },
+        { to: "/reports", search: { tab: "payroll" }, label: "Payroll", icon: DollarSign },
       ];
     }
     if (role === "captain") {

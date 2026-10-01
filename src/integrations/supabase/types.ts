@@ -1827,6 +1827,32 @@ export type Database = {
         }
         Relationships: []
       }
+      timesheet_day_detail: {
+        Row: {
+          billable_hours: number | null
+          clock_in: string | null
+          clock_out: string | null
+          display_name: string | null
+          entry_source: string | null
+          first_meal_start: string | null
+          flag_reasons: string[] | null
+          id: string | null
+          last_meal_end: string | null
+          log_date: string | null
+          meal_count: number | null
+          meal_minutes: number | null
+          meal_status: string | null
+          needs_correction: boolean | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          second_meal_status: string | null
+          team_name: string | null
+          user_id: string | null
+          void_reason: string | null
+          voided_at: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       archive_agent: { Args: { _user_id: string }; Returns: undefined }
@@ -1998,7 +2024,14 @@ export type Database = {
       }
     }
     Enums: {
-      app_role: "owner" | "captain" | "canvasser" | "office_staff" | "sales_rep" | "confirmer"
+      app_role:
+        | "owner"
+        | "captain"
+        | "canvasser"
+        | "office_staff"
+        | "sales_rep"
+        | "confirmer"
+        | "bookkeeper"
       canvasser_status:
         | "active"
         | "suspended"
@@ -2141,7 +2174,15 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["owner", "captain", "canvasser", "office_staff", "sales_rep", "confirmer"],
+      app_role: [
+        "owner",
+        "captain",
+        "canvasser",
+        "office_staff",
+        "sales_rep",
+        "confirmer",
+        "bookkeeper",
+      ],
       canvasser_status: [
         "active",
         "suspended",

@@ -11,7 +11,18 @@ import { InvitePlayerSheet } from "@/components/InvitePlayerSheet";
 import { startCanvasserTutorial } from "@/components/tutorial/CanvasserTutorial";
 import { useAuth } from "@/hooks/useAuth";
 import { ROLE_LABEL } from "@/lib/role-policy";
-import { Eye, GraduationCap, Radar, Send, Sparkles, Users, CircleHelp, Compass, Telescope } from "lucide-react";
+import {
+  Eye,
+  FileSpreadsheet,
+  GraduationCap,
+  Radar,
+  Send,
+  Sparkles,
+  Users,
+  CircleHelp,
+  Compass,
+  Telescope,
+} from "lucide-react";
 
 const itemCls =
   "w-full flex items-center gap-3 rounded-md border border-border bg-surface px-4 py-3 min-h-12 text-left text-xs font-display uppercase tracking-widest text-foreground hover:border-neon/60 hover:text-neon transition-colors";
@@ -79,6 +90,22 @@ export function AppMenu({
                 </span>
               </span>
             </Link>
+            {isAdminTier && (
+              <Link
+                to="/reports"
+                search={{ tab: "exports" }}
+                onClick={() => onOpenChange(false)}
+                className={itemCls}
+              >
+                <FileSpreadsheet className="w-4 h-4 shrink-0" />
+                <span className="flex-1">
+                  Reports &amp; Exports
+                  <span className="block normal-case font-sans tracking-normal text-[11px] text-muted-foreground mt-0.5">
+                    Payroll, time records, audit log — CSV for the books
+                  </span>
+                </span>
+              </Link>
+            )}
             {/* OWNER ONLY — not the admin tier: God Mode leads with
                 collections money (owner decision 2026-09-30). */}
             {isOwner && (

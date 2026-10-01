@@ -2,8 +2,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { isManagerRole, privilegeRole } from "@/lib/roles";
 
 export type RoleDestination = {
-  to: "/field" | "/dashboard" | "/close-kombat";
-  search?: { tab: "dispatch" };
+  to: "/field" | "/dashboard" | "/close-kombat" | "/reports";
+  search?: { tab: "dispatch" } | { tab: "exports" };
 };
 
 /**
@@ -23,6 +23,10 @@ export async function destinationByRole(userId: string): Promise<RoleDestination
   // old canvasser carve-out here was dead code telling the other story.
   if (roles.includes("sales_rep") && !isManager) {
     return { to: "/close-kombat" };
+  }
+  // Mary's whole app is the Reports console (read-only payroll + exports).
+  if (roles.includes("bookkeeper") && !isManager) {
+    return { to: "/reports", search: { tab: "exports" } };
   }
   const isCanvasserOnly = roles.includes("canvasser") && !isManager;
   return isCanvasserOnly ? { to: "/field" } : { to: "/dashboard", search: { tab: "dispatch" } };
