@@ -25,6 +25,7 @@ import {
   PurposeReminderCard,
   isPurposeReminderForced,
 } from "@/components/purpose/PurposeReminderCard";
+import { WeeklyPlanPopup, isWeeklyPlanPopupForced } from "@/components/WeeklyPlanPopup";
 import { usePurposeConfig, readCachedPurposeEnabled } from "@/hooks/usePurposeConfig";
 import { CLOSE_KOMBAT_ROLES, ROLE_LABEL, canUseViewAs, privilegeRole } from "@/lib/roles";
 import {
@@ -40,6 +41,7 @@ import {
   PhoneCall,
   Sparkles,
   Swords,
+  CalendarDays,
   GraduationCap,
   CircleHelp,
   Compass,
@@ -133,6 +135,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   // tour back so the two first-open moments can't stack.
   const [introActive, setIntroActive] = useState(false);
   const [purposeReminderActive, setPurposeReminderActive] = useState(false);
+  // Weekly Action Plan popup: active while UNSETTLED (not just showing), so
+  // the purpose reminder and the page tour can't pop underneath it during
+  // its checking/ready races (the PurposeReminderCard stacking lesson).
+  const [planPopupActive, setPlanPopupActive] = useState(false);
   // End-of-day recap cutscene: same hold for the tour. Play order on a
   // morning open that owes both: intro → EOD recap → page tour.
   const [eodActive, setEodActive] = useState(false);
@@ -213,6 +219,11 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (role === "sales_rep") {
       return [
         { to: "/close-kombat", label: "Close Kombat", icon: Swords },
+        // The Weekly Action Plan's always-available reopen (owner spec
+        // 2026-10-01 §1): one obvious tap from anywhere, including
+        // /my-purpose — same two-items-one-path pattern as the bookkeeper
+        // Reports/Payroll pair.
+        { to: "/close-kombat", search: { tab: "plan" }, label: "Plan", icon: CalendarDays },
         // My Purpose appears once the owners flip the launch flag (or in an
         // owner's View-As preview). Two items also switches on the mobile
         // bottom bar for reps — that's intentional: the workshop must be one
@@ -670,16 +681,26 @@ export function AppShell({ children }: { children: ReactNode }) {
           <EodRecapFx userId={user.id} heldBack={introActive} onActiveChange={setEodActive} />
         )}
 
+      {/* Weekly Action Plan popup — reps only, once per PLAN week (Sunday
+          shows the upcoming week). Sequenced after the door-kick intro via
+          heldBack; gated on the REAL role so a View-As preview can't burn
+          the owner's week stamp (`?plan_pop=1` previews without stamping,
+          same contract as the other overlays). */}
+      {user && (isWeeklyPlanPopupForced() || privilegeRole(realRole) === "sales_rep") && (
+        <WeeklyPlanPopup userId={user.id} heldBack={introActive} onActiveChange={setPlanPopupActive} />
+      )}
+
       {/* Daily "remember your why" — reps only, once per LA day, and ONLY
           after their Purpose Profile is submitted (the card itself checks
           and stays silent otherwise). Sequenced after the door-kick intro
-          via heldBack; gated on the REAL role so a View-As preview can't
-          burn the owner's daily flag (`?purpose_reminder=1` previews without
-          stamping, same contract as the other overlays). */}
+          AND the weekly plan popup via heldBack; gated on the REAL role so a
+          View-As preview can't burn the owner's daily flag
+          (`?purpose_reminder=1` previews without stamping, same contract as
+          the other overlays). */}
       {user && (isPurposeReminderForced() || privilegeRole(realRole) === "sales_rep") && (
         <PurposeReminderCard
           userId={user.id}
-          heldBack={introActive}
+          heldBack={introActive || planPopupActive}
           onActiveChange={setPurposeReminderActive}
         />
       )}
@@ -698,6 +719,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             (tourRole === "canvasser" || tourRole === "captain" || tourRole === "sales_rep") &&
             !introActive &&
             !eodActive &&
+            !planPopupActive &&
             !purposeReminderActive && (
               <CanvasserTutorial
                 userId={user.id}

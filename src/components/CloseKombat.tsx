@@ -65,6 +65,7 @@ import { GlossarySheet, type GlossarySections } from "@/components/GlossarySheet
 import { PushAlertsCard } from "@/components/PushAlertsCard";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { CloseKombatMoneyTab } from "@/components/CloseKombatMoneyTab";
+import { CloseKombatPlanTab, PlanTabBadge } from "@/components/CloseKombatPlanTab";
 import { CloseKombatGoalsTab } from "@/components/CloseKombatGoalsTab";
 import { CloseKombatLearnTab } from "@/components/CloseKombatLearnTab";
 import { toast } from "sonner";
@@ -98,10 +99,14 @@ import {
 // alongside the existing stats screen). Separate from RangeTab below — that
 // one picks the day/week/month/year window, this one picks which SECTION of
 // the page is showing.
-export const CLOSE_KOMBAT_PAGE_TABS = ["stats", "money", "goals", "learn"] as const;
+export const CLOSE_KOMBAT_PAGE_TABS = ["stats", "plan", "money", "goals", "learn"] as const;
 export type CloseKombatPageTab = (typeof CLOSE_KOMBAT_PAGE_TABS)[number];
 export const isCloseKombatPageTab = (t: unknown): t is CloseKombatPageTab =>
   (CLOSE_KOMBAT_PAGE_TABS as readonly unknown[]).includes(t);
+// Rep-only sections: a non-rep landing on one of these (leadership link,
+// View As switched back mid-preview) coerces to Stats — the TabsContent is
+// `isRep &&`-gated, so without this they'd get an empty page.
+const REP_ONLY_TABS = new Set<CloseKombatPageTab>(["plan", "money", "goals"]);
 
 export function CloseKombat({
   rawTab,
@@ -237,9 +242,11 @@ function CloseKombatInner({
   // the admin controls above keep keying off realRole (the sync buttons must
   // not vanish from the owner mid-preview).
   const isRep = role === "sales_rep";
-  // Money/Goals are personal — foreign values (a stray bookmark, a link from
-  // a non-rep session) coerce to Stats rather than 404ing.
-  const pageTab: CloseKombatPageTab = isCloseKombatPageTab(rawTab) ? rawTab : "stats";
+  // Plan/Money/Goals are personal — foreign values (a stray bookmark, a link
+  // from a non-rep session) and rep-only tabs under a non-rep role coerce to
+  // Stats rather than rendering an empty page.
+  const pageTab: CloseKombatPageTab =
+    isCloseKombatPageTab(rawTab) && (isRep || !REP_ONLY_TABS.has(rawTab)) ? rawTab : "stats";
   // View As doesn't swap user.id (useAuth.ts) — only role/displayName are
   // overridden — so a preview must never let Goals write to the admin's own
   // profile row believing it's the previewed rep's.
@@ -1029,8 +1036,9 @@ function CloseKombatInner({
           )}
           {/* The Year tab is company-wide by design (the Shark Tank YTD is
               combined and the Jan–Apr books carry no office) — showing the
-              pills there would promise a filter that doesn't apply. */}
-          {!(pageTab === "stats" && isYearTab) && <OfficeFilterToggle />}
+              pills there would promise a filter that doesn't apply. The Plan
+              tab is the rep's own jobs regardless of office, same rule. */}
+          {!(pageTab === "stats" && isYearTab) && pageTab !== "plan" && <OfficeFilterToggle />}
         </div>
       </div>
 
@@ -1040,6 +1048,14 @@ function CloseKombatInner({
         <div className="-mx-4 px-4 sm:mx-0 sm:px-0 overflow-x-auto scrollbar-hide">
           <TabsList className="flex w-max min-w-full flex-nowrap whitespace-nowrap bg-surface border border-border p-1 h-auto">
             <KombatTab value="stats">Stats</KombatTab>
+            {/* Plan rides second so it's on-screen inside the 375px strip —
+                it's the rep's always-available reopen of the weekly popup. */}
+            {isRep && (
+              <KombatTab value="plan">
+                Plan
+                <PlanTabBadge displayName={displayName} />
+              </KombatTab>
+            )}
             {isRep && <KombatTab value="money">Money</KombatTab>}
             {isRep && <KombatTab value="goals">Goals</KombatTab>}
             <KombatTab value="learn">Learn</KombatTab>
@@ -1862,6 +1878,16 @@ function CloseKombatInner({
             />
           )}
         </TabsContent>
+
+        {isRep && (
+          <TabsContent value="plan" className="mt-4">
+            <CloseKombatPlanTab
+              userId={user?.id ?? null}
+              displayName={displayName}
+              isPreview={isPreview}
+            />
+          </TabsContent>
+        )}
 
         {isRep && (
           <TabsContent value="money" className="mt-4">

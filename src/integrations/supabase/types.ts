@@ -924,6 +924,249 @@ export type Database = {
         }
         Relationships: []
       }
+      geocode_cache: {
+        Row: {
+          address_norm: string
+          created_at: string
+          lat: number | null
+          lng: number | null
+        }
+        Insert: {
+          address_norm: string
+          created_at?: string
+          lat?: number | null
+          lng?: number | null
+        }
+        Update: {
+          address_norm?: string
+          created_at?: string
+          lat?: number | null
+          lng?: number | null
+        }
+        Relationships: []
+      }
+      plan_pm_alert_log: {
+        Row: {
+          alerted_at: string
+          monday_item_id: string
+          status_note_date: string
+        }
+        Insert: {
+          alerted_at?: string
+          monday_item_id: string
+          status_note_date: string
+        }
+        Update: {
+          alerted_at?: string
+          monday_item_id?: string
+          status_note_date?: string
+        }
+        Relationships: []
+      }
+      production_job_notes: {
+        Row: {
+          monday_item_id: string
+          notes_digest: Json
+          updated_at: string
+        }
+        Insert: {
+          monday_item_id: string
+          notes_digest?: Json
+          updated_at?: string
+        }
+        Update: {
+          monday_item_id?: string
+          notes_digest?: Json
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "production_job_notes_monday_item_id_fkey"
+            columns: ["monday_item_id"]
+            isOneToOne: true
+            referencedRelation: "production_jobs"
+            referencedColumns: ["monday_item_id"]
+          },
+        ]
+      }
+      production_job_overrides: {
+        Row: {
+          based_on_note_date: string | null
+          homeowner_status: string
+          monday_item_id: string
+          note: string | null
+          set_at: string
+          set_by: string
+        }
+        Insert: {
+          based_on_note_date?: string | null
+          homeowner_status: string
+          monday_item_id: string
+          note?: string | null
+          set_at?: string
+          set_by: string
+        }
+        Update: {
+          based_on_note_date?: string | null
+          homeowner_status?: string
+          monday_item_id?: string
+          note?: string | null
+          set_at?: string
+          set_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "production_job_overrides_set_by_fkey"
+            columns: ["set_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      production_jobs: {
+        Row: {
+          address: string | null
+          advantage_plus: boolean
+          board_id: string
+          completion_date: string | null
+          created_at: string
+          delayed_until: string | null
+          geo_source: string | null
+          group_id: string
+          group_title: string
+          homeowner_name: string | null
+          homeowner_status: string
+          homeowner_status_note_date: string | null
+          homeowner_status_reason: string | null
+          lat: number | null
+          lng: number | null
+          monday_item_id: string
+          office_location: string | null
+          pm_monday_ids: number[]
+          pm_name: string | null
+          prev_schedule_end: string | null
+          prev_schedule_start: string | null
+          projects: string | null
+          referral_status: string | null
+          reloaded: string | null
+          reloads: string | null
+          rep_monday_ids: number[]
+          reps: string[]
+          reviews_status: string | null
+          sale_amount: number
+          schedule_end: string | null
+          schedule_start: string | null
+          status_label: string | null
+          updated_at: string
+          zip: string | null
+        }
+        Insert: {
+          address?: string | null
+          advantage_plus?: boolean
+          board_id: string
+          completion_date?: string | null
+          created_at?: string
+          delayed_until?: string | null
+          geo_source?: string | null
+          group_id: string
+          group_title: string
+          homeowner_name?: string | null
+          homeowner_status?: string
+          homeowner_status_note_date?: string | null
+          homeowner_status_reason?: string | null
+          lat?: number | null
+          lng?: number | null
+          monday_item_id: string
+          office_location?: string | null
+          pm_monday_ids?: number[]
+          pm_name?: string | null
+          prev_schedule_end?: string | null
+          prev_schedule_start?: string | null
+          projects?: string | null
+          referral_status?: string | null
+          reloaded?: string | null
+          reloads?: string | null
+          rep_monday_ids?: number[]
+          reps?: string[]
+          reviews_status?: string | null
+          sale_amount?: number
+          schedule_end?: string | null
+          schedule_start?: string | null
+          status_label?: string | null
+          updated_at?: string
+          zip?: string | null
+        }
+        Update: {
+          address?: string | null
+          advantage_plus?: boolean
+          board_id?: string
+          completion_date?: string | null
+          created_at?: string
+          delayed_until?: string | null
+          geo_source?: string | null
+          group_id?: string
+          group_title?: string
+          homeowner_name?: string | null
+          homeowner_status?: string
+          homeowner_status_note_date?: string | null
+          homeowner_status_reason?: string | null
+          lat?: number | null
+          lng?: number | null
+          monday_item_id?: string
+          office_location?: string | null
+          pm_monday_ids?: number[]
+          pm_name?: string | null
+          prev_schedule_end?: string | null
+          prev_schedule_start?: string | null
+          projects?: string | null
+          referral_status?: string | null
+          reloaded?: string | null
+          reloads?: string | null
+          rep_monday_ids?: number[]
+          reps?: string[]
+          reviews_status?: string | null
+          sale_amount?: number
+          schedule_end?: string | null
+          schedule_start?: string | null
+          status_label?: string | null
+          updated_at?: string
+          zip?: string | null
+        }
+        Relationships: []
+      }
+      rep_job_visits: {
+        Row: {
+          created_at: string
+          id: string
+          monday_item_id: string
+          rep_id: string
+          visited_on: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          monday_item_id: string
+          rep_id: string
+          visited_on: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          monday_item_id?: string
+          rep_id?: string
+          visited_on?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rep_job_visits_rep_id_fkey"
+            columns: ["rep_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       report_collections: {
         Row: {
           actual_amount: number

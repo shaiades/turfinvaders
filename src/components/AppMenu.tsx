@@ -12,6 +12,7 @@ import { startCanvasserTutorial } from "@/components/tutorial/CanvasserTutorial"
 import { useAuth } from "@/hooks/useAuth";
 import { ROLE_LABEL } from "@/lib/role-policy";
 import {
+  CalendarDays,
   Eye,
   FileSpreadsheet,
   GraduationCap,
@@ -181,6 +182,17 @@ export function AppMenu({
                   </span>
                 </span>
               </button>
+            )}
+            {isAdminTier && (
+              <Link to="/action-plans" onClick={() => onOpenChange(false)} className={itemCls}>
+                <CalendarDays className="w-4 h-4 shrink-0" />
+                <span className="flex-1">
+                  Action Plans
+                  <span className="block normal-case font-sans tracking-normal text-[11px] text-muted-foreground mt-0.5">
+                    Every rep's weekly jobs-in-progress plan · correct homeowner flags
+                  </span>
+                </span>
+              </Link>
             )}
             {isAdminTier && (
               <Link to="/users" onClick={() => onOpenChange(false)} className={itemCls}>

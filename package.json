@@ -24,7 +24,8 @@
     "verify:repgoals": "npx tsx scripts/verify-rep-goals.ts",
     "verify:collections": "npx tsx scripts/verify-collections.ts",
     "verify:capital": "npx tsx scripts/verify-capital.ts",
-    "verify:deviations": "npx tsx scripts/verify-deviations.ts"
+    "verify:deviations": "npx tsx scripts/verify-deviations.ts",
+    "verify:plan": "npx tsx scripts/verify-action-plan.ts"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",
