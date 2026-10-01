@@ -873,6 +873,72 @@ export type Database = {
         }
         Relationships: []
       }
+      report_collections: {
+        Row: {
+          actual_amount: number
+          anticipated_date: string | null
+          board_id: string
+          board_name: string
+          collected_date: string | null
+          collection_month: string
+          created_at: string
+          customer_name: string | null
+          date_deposited: string | null
+          group_title: string | null
+          in_bank: string | null
+          milestone: string | null
+          monday_item_id: string
+          notes: string | null
+          office: string | null
+          payment_type: string | null
+          planned_amount: number
+          status: string | null
+          updated_at: string
+        }
+        Insert: {
+          actual_amount?: number
+          anticipated_date?: string | null
+          board_id: string
+          board_name: string
+          collected_date?: string | null
+          collection_month: string
+          created_at?: string
+          customer_name?: string | null
+          date_deposited?: string | null
+          group_title?: string | null
+          in_bank?: string | null
+          milestone?: string | null
+          monday_item_id: string
+          notes?: string | null
+          office?: string | null
+          payment_type?: string | null
+          planned_amount?: number
+          status?: string | null
+          updated_at?: string
+        }
+        Update: {
+          actual_amount?: number
+          anticipated_date?: string | null
+          board_id?: string
+          board_name?: string
+          collected_date?: string | null
+          collection_month?: string
+          created_at?: string
+          customer_name?: string | null
+          date_deposited?: string | null
+          group_title?: string | null
+          in_bank?: string | null
+          milestone?: string | null
+          monday_item_id?: string
+          notes?: string | null
+          office?: string | null
+          payment_type?: string | null
+          planned_amount?: number
+          status?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       report_sales: {
         Row: {
           board_id: string

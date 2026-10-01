@@ -60,6 +60,7 @@ import {
   type YearRepRow,
 } from "@/lib/close-kombat";
 import { getKombatSyncInfo, syncBlockCards } from "@/lib/close-kombat.functions";
+import { syncCollections } from "@/lib/collections.functions";
 import { GlossarySheet, type GlossarySections } from "@/components/GlossarySheet";
 import { PushAlertsCard } from "@/components/PushAlertsCard";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -917,7 +918,18 @@ function CloseKombatInner({
 
   // --- Admin sync: pull the boards from Monday on demand ---
   const sync = useMutation({
-    mutationFn: (scope: "active" | "all") => syncBlockCards({ data: { scope } }),
+    // Collections piggyback (owner, 2026-09-30): the same button also
+    // refreshes the "<Month> Collections" mirror, ISOLATED — a collections
+    // failure must never read as a Kombat sync failure, and its outcome
+    // never joins the Kombat toast summary (God Mode has its own).
+    mutationFn: async (scope: "active" | "all") => {
+      const [blocks, col] = await Promise.allSettled([
+        syncBlockCards({ data: { scope } }),
+        syncCollections({ data: { scope } }),
+      ]);
+      if (blocks.status === "rejected") throw blocks.reason;
+      return { ...blocks.value, collectionsFailed: col.status === "rejected" };
+    },
     onSuccess: (res) => {
       const fetched = res.results.reduce((s, r) => s + r.fetched, 0);
       toast.success(
@@ -962,8 +974,13 @@ function CloseKombatInner({
           `${res.wcc.missing_flagged} sold card${res.wcc.missing_flagged === 1 ? " isn't" : "s aren't"} on the Sales Reports — counting at Block price; see Needs Attention`,
         );
       }
+      if (res.collectionsFailed) {
+        toast.warning("Collections refresh failed — sync again from God Mode");
+      }
       qc.invalidateQueries({ queryKey: ["block_cards"] });
       qc.invalidateQueries({ queryKey: ["report_sales"] });
+      qc.invalidateQueries({ queryKey: ["report_collections"] });
+      qc.invalidateQueries({ queryKey: ["collections_sync_info"] });
       // The freshness caption must move the moment the sync that feeds it
       // lands (review 2026-09-12).
       qc.invalidateQueries({ queryKey: ["kombat_sync_info"] });

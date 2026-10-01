@@ -272,7 +272,7 @@ export type SyncSummary = {
  *  "Full history" quietly stopped reaching them, so a June card edit (the
  *  Murray 6/10 sale, fixed 8/7 Christianson upsell) could never land until
  *  the listing paged. Cheap: id+name only, ~5 pages on the 2026 account. */
-async function listAllBoards(token: string): Promise<Array<{ id: string; name: string }>> {
+export async function listAllBoards(token: string): Promise<Array<{ id: string; name: string }>> {
   const out: Array<{ id: string; name: string }> = [];
   const PAGE = 100;
   for (let page = 1; ; page++) {

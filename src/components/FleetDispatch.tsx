@@ -73,6 +73,7 @@ import {
   type DispatchResults,
 } from "@/lib/dispatch.functions";
 import { getKombatSyncInfo, syncBlockCards } from "@/lib/close-kombat.functions";
+import { syncCollections } from "@/lib/collections.functions";
 import { FleetDispatchManage } from "@/components/FleetDispatchManage";
 import { GlossarySheet } from "@/components/GlossarySheet";
 import { RepcardSeasonBoard } from "@/components/RepcardSeasonBoard";
@@ -2631,12 +2632,24 @@ function SyncFromMondayButton() {
     queryFn: () => getKombatSyncInfo(),
   });
   const sync = useMutation({
-    mutationFn: () => syncBlockCards({ data: { scope: "active" } }),
+    // Collections piggyback (owner, 2026-09-30): refresh the Collections
+    // mirror alongside, ISOLATED — its failure never fails the board sync.
+    mutationFn: async () => {
+      const [blocks, col] = await Promise.allSettled([
+        syncBlockCards({ data: { scope: "active" } }),
+        syncCollections({ data: { scope: "active" } }),
+      ]);
+      if (blocks.status === "rejected") throw blocks.reason;
+      return { ...blocks.value, collectionsFailed: col.status === "rejected" };
+    },
     onSuccess: (res) => {
       const fetched = res.results.reduce((s, r) => s + r.fetched, 0);
       toast.success(
         `Synced ${res.results.length} board${res.results.length === 1 ? "" : "s"} · ${fetched} cards`,
       );
+      if (res.collectionsFailed) {
+        toast.warning("Collections refresh failed — sync again from God Mode");
+      }
       if (res.skipped.length > 0) {
         toast.warning(
           `${res.skipped.length} board${res.skipped.length === 1 ? "" : "s"} skipped — see webhook logs`,
@@ -2659,6 +2672,8 @@ function SyncFromMondayButton() {
       // The sync also mirrors Sales Report rows (the Kombat Year book).
       qc.invalidateQueries({ queryKey: ["report_sales"] });
       qc.invalidateQueries({ queryKey: ["kombat_sync_info"] });
+      qc.invalidateQueries({ queryKey: ["report_collections"] });
+      qc.invalidateQueries({ queryKey: ["collections_sync_info"] });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Sync failed"),
   });
