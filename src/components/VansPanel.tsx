@@ -17,6 +17,7 @@ import { Building2, Check, Pencil, Plus, Trash2, Truck, X } from "lucide-react";
 import { deleteVan } from "@/lib/fleet.functions";
 import { DEFAULT_OFFICE, OFFICE_LOCATIONS, type OfficeLocation } from "@/lib/offices";
 import type { RosterProfile, Van } from "@/hooks/useFleetRoster";
+import { isAdminRole } from "@/lib/roles";
 import { normalizeName } from "@/lib/utils";
 
 const VAN_COLORS = [
@@ -137,7 +138,9 @@ export function VansPanel({
     const out: string[] = [];
     for (const p of active) {
       if (p.team_id !== vanId) continue;
-      if (!(rolesByUser.get(p.id) ?? []).includes("captain")) continue;
+      // Captains and Admin-tier van members both caption their van — a
+      // captain promoted to Manager keeps leading it (owner, 2026-10-01).
+      if (!(rolesByUser.get(p.id) ?? []).some((r) => r === "captain" || isAdminRole(r))) continue;
       const key = normalizeName(p.display_name) || `id:${p.id}`;
       if (seen.has(key)) continue;
       seen.add(key);

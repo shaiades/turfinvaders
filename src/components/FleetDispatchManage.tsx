@@ -171,7 +171,12 @@ export function FleetDispatchManage({
   // Legacy Fleet Manager semantics: null is_active counts as active here.
   const profiles = allProfiles.filter((p) => p.is_active !== false);
   const archivedProfiles = allProfiles.filter((p) => p.is_active === false);
-  const captains = profiles.filter((p) => (rolesByUser.get(p.id) ?? []).includes("captain"));
+  // Captains plus Admin-tier riders — both caption their van (owner,
+  // 2026-10-01: a captain promoted to Manager keeps leading it). Only used
+  // van-filtered, so unassigned Owners/Managers never leak into captions.
+  const captains = profiles.filter((p) =>
+    (rolesByUser.get(p.id) ?? []).some((r) => r === "captain" || isAdminRole(r)),
+  );
   // Sales reps never need vans (owner, 2026-08-04) — the Free Agents pen is
   // for canvassers/captains awaiting assignment only.
   const unassigned = profiles.filter((p) => {
