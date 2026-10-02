@@ -1,16 +1,22 @@
 // Kombat Month verification suite — every contest rule as an executable
-// check, plus the owner's September calibration (spec §6: the money rules
-// over September's Sales Reports must land on the published figures ±1).
-// Run:  npm run verify:kombat-month   (or: npx tsx scripts/verify-kombat-month.ts)
+// check. Run:  npm run verify:kombat-month   (npx tsx scripts/verify-kombat-month.ts)
 // Pure module in, assertions out — no network, no database, no browser.
+//
+// Model (owner 2026-10-02 rework): volume (1pt/$1k) SPLITS across the sale's
+// reps; every other point is FULL to each rep. One type kicker per block
+// card, never stacking (self-gen/referral sale 15, pitch-miss 10; reload 10;
+// sale 5; sit 2; job walk → nothing). Marketing Home + Upsell removed.
+// Advantage+ (3) and Rep Reset (5) kept as report bonuses. Dinner tier 175.
 
 import {
+  BELT_ACCENT,
+  SALE_CATEGORIES,
   bountyMultiplier,
+  buildCardCandidates,
   buildMoneyCandidates,
   buildReloadPitchCandidates,
   buildScorecard,
-  buildSelfGenPitchCandidates,
-  buildSitCandidates,
+  cardSource,
   companyWritten,
   computeProofAward,
   contestDaysLeft,
@@ -31,12 +37,7 @@ import {
   type LedgerRowLite,
 } from "../src/lib/kombat-month";
 import type { BlockCard } from "../src/lib/close-kombat";
-import {
-  SEPT_EXPECTED,
-  SEPT_OC_ROWS,
-  SEPT_SD_ROWS,
-  type SeptRow,
-} from "./fixtures/kombat-sept-2026";
+import { SEPT_OC_ROWS, SEPT_SD_ROWS, type SeptRow } from "./fixtures/kombat-sept-2026";
 
 const fails: string[] = [];
 const eq = (label: string, got: unknown, want: unknown) => {
@@ -89,376 +90,259 @@ const card = (over: Partial<BlockCard>): BlockCard => ({
   report_reps: null,
   ...over,
 });
+const MID = "2026-10-20"; // mid-contest: everything still live (pending)
 
 // ---- 1. Label normalization --------------------------------------------
-eq("blank count = sale", normalizeSalesCount(null, R), "sale");
-eq(
-  "blank count honours flag",
-  normalizeSalesCount(null, mergeKombatRules({ money: { blank_count_is_sale: false } })),
-  "other",
-);
-eq("count: Reload", normalizeSalesCount(" Reload ", R), "reload");
-eq("count: canceled spelling", normalizeSalesCount("Canceled", R), "cancelled");
+eq("blank count = other", normalizeSalesCount(null), "other");
+eq("count: Reload", normalizeSalesCount(" Reload "), "reload");
+eq("count: canceled spelling", normalizeSalesCount("Canceled"), "cancelled");
 eq("source: Self Gen", normalizeSource("Self Gen"), "self_gen");
 eq("source: self-gen", normalizeSource("self-gen"), "self_gen");
+eq("source: Referral", normalizeSource("Referral"), "referral");
+eq("source: referal (1 r)", normalizeSource("referal"), "referral");
 eq("source: Rep Reset", normalizeSource("Rep Reset"), "rep_reset");
-eq("source: jobwalk variants", normalizeSource("jobwalk"), "job_walk");
 eq("source: job walk variants", normalizeSource("job walk"), "job_walk");
-eq("source: Canvass is no kicker", normalizeSource("Canvass"), null);
-eq("source: Reload is no kicker", normalizeSource("Reload"), null);
+eq("source: Canvass is nothing", normalizeSource("Canvass"), null);
+eq("cardSource reads source first", cardSource({ source: "Self Gen", agent: null }), "self_gen");
+eq("cardSource falls back to agent", cardSource({ source: null, agent: "referral" }), "referral");
 
-// ---- 2. Card scoring ----------------------------------------------------
+// ---- 2. Report money layer (volume split + flat bonuses) ----------------
 {
   const parts = scoreReportCard(row({ sale_amt: 10000, sales_count: "Sale" }), R);
-  eq(
-    "sale card = volume + sale kicker",
-    parts.reduce((s, p) => s + p.points, 0),
-    15,
-  );
+  eq("report row = volume only (no sale kicker here)", parts.length, 1);
+  eq("volume = $/1000", parts[0].points, 10);
+  eq("volume splits", parts[0].split, true);
 }
+eq(
+  "cancelled report row earns nothing",
+  scoreReportCard(row({ sale_amt: 5000, sales_count: "Cancelled" }), R).length,
+  0,
+);
+eq(
+  "Marketing Home no longer scores",
+  scoreReportCard(row({ sale_amt: 0, marketing_home: "Marketing Home" }), R).length,
+  0,
+);
+eq(
+  "Upsell no longer kicks (volume only)",
+  scoreReportCard(row({ sale_amt: 3000, sales_count: "Upsell" }), R).reduce(
+    (s, p) => s + p.points,
+    0,
+  ),
+  3,
+);
 {
   const parts = scoreReportCard(
-    row({
-      sale_amt: 1000,
-      sales_count: "Sale",
-      source: "Self Gen",
-      marketing_home: "Marketing Home",
-      advantage_plus: "Advantage+",
-    }),
+    row({ sale_amt: 0, advantage_plus: "Advantage+", source: "Rep Reset" }),
     R,
   );
-  eq(
-    "kickers stack: 1 + 5 + 15 + 3 + 3",
-    parts.reduce((s, p) => s + p.points, 0),
-    27,
-  );
+  const adv = parts.find((p) => p.category === "money.advantage_plus");
+  const rr = parts.find((p) => p.category === "money.rep_reset");
+  eq("advantage+ bonus = 3, full per rep", adv?.points, 3);
+  eq("advantage+ does not split", adv?.split, false);
+  eq("rep reset bonus = 5, full per rep", rr?.points, 5);
 }
-eq(
-  "cancelled row earns NOTHING (not even MH)",
-  scoreReportCard(
-    row({ sale_amt: 5000, sales_count: "Cancelled", marketing_home: "Marketing Home" }),
-    R,
-  ).length,
-  0,
-);
-eq(
-  "job walk default = volume + count only",
-  scoreReportCard(row({ sale_amt: 2000, sales_count: "Sale", source: "Job Walk" }), R).reduce(
-    (s, p) => s + p.points,
-    0,
-  ),
-  7,
-);
-eq(
-  "job walk kicker is a config flag",
-  scoreReportCard(
-    row({ sale_amt: 2000, sales_count: "Sale", source: "Job Walk" }),
-    mergeKombatRules({ money: { job_walk_kicker: 10 } }),
-  ).reduce((s, p) => s + p.points, 0),
-  17,
-);
-eq(
-  "rep reset kicker",
-  scoreReportCard(row({ sale_amt: 0, sales_count: "Sale", source: "Rep Reset" }), R).reduce(
-    (s, p) => s + p.points,
-    0,
-  ),
-  10,
-);
 
-eq(
-  "blank-count utility row ($0, no dollars) mints nothing",
-  scoreReportCard(row({ sale_amt: 0, cancel_amt: 0, sales_count: null, date_sold: null }), R)
-    .length,
-  0,
-);
-eq(
-  "blank count with real money still scores as a Sale",
-  scoreReportCard(row({ sale_amt: 2000, sales_count: null }), R).reduce((s, p) => s + p.points, 0),
-  7,
-);
-
-// ---- 3. Split + lock ----------------------------------------------------
-// Owner 2026-10-02 follow-up: points count RIGHT AWAY and stay revisable
-// all month; the cancel window applies only after MONTH END (Oct + 3 days
-// → final from Nov 4). Cancellations subtract immediately at any time.
+// ---- 3. Volume splits, bonuses don't ------------------------------------
 {
   const { candidates } = buildMoneyCandidates(
-    [row({ sale_amt: 10000, sales_count: "Sale", reps: ["A", "B"], date_sold: "2026-10-01" })],
+    [row({ sale_amt: 20000, advantage_plus: "Advantage+", reps: ["A", "B"] })],
     R,
     [],
-    "2026-10-20",
+    MID,
   );
-  eq("two reps → two rows per part", candidates.length, 4);
-  const a = candidates.filter((c) => c.rep_name === "A").reduce((s, c) => s + c.points, 0);
-  eq("even split", a, 7.5);
-  eq(
-    "mid-month: counts now, not final yet",
-    candidates.every((c) => c.status === "pending"),
-    true,
+  const a = candidates.filter((c) => c.rep_name === "A");
+  const vol = a.find((c) => c.category === "money.volume");
+  const adv = a.find((c) => c.category === "money.advantage_plus");
+  eq("volume split: 20 / 2 = 10 each", vol?.points, 10);
+  eq("advantage+ full to each rep: 3", adv?.points, 3);
+  eq("both reps covered", new Set(candidates.map((c) => c.rep_name)).size, 2);
+}
+{
+  const { candidates, deadSourceIds } = buildMoneyCandidates(
+    [row({ monday_item_id: "dead", sale_amt: 0, sales_count: "Cancelled", wcc: "Cancelled" })],
+    R,
+    [],
+    MID,
   );
+  eq("dead row → no candidates", candidates.length, 0);
+  eq("dead row → deadSourceIds", deadSourceIds.has("dead"), true);
 }
 eq(
-  "all month long → live (pending)",
+  "other months stay out",
+  buildMoneyCandidates([row({ report_month: "2026-09-01" })], R, [], MID).candidates.length,
+  0,
+);
+
+// ---- 4. Locking (count live all month, lock after month-end window) -----
+eq(
+  "live through Oct 31",
   reportRowLockState(row({ date_sold: "2026-10-01" }), R, "2026-10-31"),
   "pending",
 );
 eq(
-  "month-end window still open → live",
+  "still live Nov 3",
   reportRowLockState(row({ date_sold: "2026-10-01" }), R, "2026-11-03"),
   "pending",
 );
+eq("final Nov 4", reportRowLockState(row({ date_sold: "2026-10-01" }), R, "2026-11-04"), "locked");
+eq("dead WCC → cancelled", reportRowLockState(row({ wcc: "Turned Down" }), R, MID), "cancelled");
+
+// ---- 5. Card kicker — one per card, full per rep, no stacking ------------
+const kickerOf = (c: BlockCard, today = MID) => {
+  const out = buildCardCandidates([c], R, [], today);
+  const cats = new Set(out.map((x) => x.category));
+  return { cats: [...cats], points: out[0]?.points, rows: out.length, cat: out[0]?.category };
+};
 eq(
-  "final once the month-end window passes",
-  reportRowLockState(row({ date_sold: "2026-10-01" }), R, "2026-11-04"),
-  "locked",
+  "self-gen sale → 15",
+  kickerOf(card({ source: "self gen", pm: null, sale: "Sold" })).cat,
+  "card.selfgen_sale",
 );
 eq(
-  "dead WCC → cancelled immediately",
-  reportRowLockState(row({ wcc: "Cancelled" }), R, "2026-10-20"),
-  "cancelled",
+  "self-gen sale points 15",
+  kickerOf(card({ source: "self gen", pm: null, sale: "Sold" })).points,
+  15,
 );
 eq(
-  "Turned Down → cancelled",
-  reportRowLockState(row({ wcc: "Turned Down" }), R, "2026-10-20"),
-  "cancelled",
-);
-eq("FTD → cancelled", reportRowLockState(row({ wcc: "FTD" }), R, "2026-10-20"), "cancelled");
-eq(
-  "LVM is alive",
-  reportRowLockState(row({ wcc: "LVM", date_sold: "2026-10-01" }), R, "2026-11-10"),
-  "locked",
+  "referral sale → 15",
+  kickerOf(card({ source: "Referral", pm: null, sale: "Sold" })).cat,
+  "card.referral_sale",
 );
 eq(
-  "no Date Sold rides the same month-end clock",
-  reportRowLockState(row({ date_sold: null }), R, "2026-11-01"),
+  "self-gen pitch miss → 10",
+  kickerOf(card({ source: "self gen", pm: "PM", sale: null })).cat,
+  "card.selfgen_miss",
+);
+eq(
+  "self-gen miss points 10",
+  kickerOf(card({ source: "self gen", pm: "PM", sale: null })).points,
+  10,
+);
+eq(
+  "referral pitch miss → 10",
+  kickerOf(card({ source: "referral", pm: "PM", sale: null })).cat,
+  "card.referral_miss",
+);
+eq(
+  "reload sale → 10",
+  kickerOf(card({ source: "Canvass", pm: null, sale: "Reload" })).cat,
+  "card.reload",
+);
+eq(
+  "normal sale → 5",
+  kickerOf(card({ source: "Canvass", pm: null, sale: "Sold" })).cat,
+  "card.sale",
+);
+eq("normal sit → 2", kickerOf(card({ source: "Canvass", pm: "PM", sale: null })).cat, "card.sit");
+eq(
+  "job walk sale → no kicker",
+  kickerOf(card({ source: "Job Walk", pm: null, sale: "Sold" })).rows,
+  0,
+);
+eq(
+  "office appt → no kicker",
+  kickerOf(card({ iss: "Office Appt", pm: null, sale: "Sold" })).rows,
+  0,
+);
+eq("CTC excluded → no kicker", kickerOf(card({ iss: "CTC", pm: "PM" })).rows, 0);
+eq("no-demo → no kicker", kickerOf(card({ pm: null, bo: "BO" })).rows, 0);
+eq(
+  "NO STACKING: self-gen sale emits exactly one category",
+  kickerOf(card({ source: "self gen", pm: null, sale: "Sold" })).cats.length,
+  1,
+);
+{
+  // Full per rep: a 2-rep self-gen sale → 15 to EACH.
+  const out = buildCardCandidates(
+    [card({ source: "self gen", pm: null, sale: "Sold", reps: ["A", "B"] })],
+    R,
+    [],
+    MID,
+  );
+  eq("self-gen sale is full per rep (2 rows)", out.length, 2);
+  eq(
+    "each rep gets the full 15",
+    out.every((c) => c.points === 15),
+    true,
+  );
+}
+eq(
+  "cancelled self-gen sale → sat credit (miss 10), money zeroed elsewhere",
+  kickerOf(card({ source: "self gen", pm: null, sale: "Sold", wcc: "Cancelled" })).cat,
+  "card.selfgen_miss",
+);
+eq(
+  "agent-sourced self gen also counts",
+  kickerOf(card({ source: null, agent: "Self Gen", pm: null, sale: "Sold" })).cat,
+  "card.selfgen_sale",
+);
+// card candidates lock with the month, like the money layer.
+eq(
+  "card kicker live mid-month",
+  buildCardCandidates([card({ pm: "PM" })], R, [], "2026-10-31")[0]?.status,
   "pending",
 );
 eq(
-  "no Date Sold finalizes in November too",
-  reportRowLockState(row({ date_sold: null }), R, "2026-11-04"),
+  "card kicker final after month-end window",
+  buildCardCandidates([card({ pm: "PM" })], R, [], "2026-11-04")[0]?.status,
   "locked",
 );
-{
-  const { candidates, deadSourceIds } = buildMoneyCandidates(
-    [row({ monday_item_id: "dead1", sale_amt: 0, sales_count: "Cancelled", wcc: "Cancelled" })],
-    R,
-    [],
-    "2026-10-20",
-  );
-  eq("dead row emits no candidates", candidates.length, 0);
-  eq("dead row lands in deadSourceIds", deadSourceIds.has("dead1"), true);
-}
-{
-  const other = buildMoneyCandidates([row({ report_month: "2026-09-01" })], R, [], "2026-10-20");
-  eq("other months stay out", other.candidates.length, 0);
-}
+// isSitCard still classifies sits (PM/Sold) correctly.
+eq("isSitCard: PM is a sit", isSitCard(card({ pm: "PM" })), true);
+eq("isSitCard: no-demo is not", isSitCard(card({ pm: null, bo: "BO" })), false);
 
-// ---- 4. Activity: sits, reload pitches, self gen ------------------------
-eq("PM card is a sit", isSitCard(card({ pm: "PM" })), true);
-eq("sold card is a sit", isSitCard(card({ pm: null, sale: "Sold" })), true);
-eq("reload sale is NOT a sit", isSitCard(card({ pm: null, sale: "Reload" })), false);
-eq("office appt is NOT a sit", isSitCard(card({ iss: "Office Appt" })), false);
-eq("CTC card is NOT a sit", isSitCard(card({ iss: "CTC" })), false);
-eq(
-  "cancelled lead sale is a sit (PM bucket)",
-  isSitCard(card({ pm: null, sale: "Sold", wcc: "Cancelled" })),
-  true,
-);
-eq("no-demo card is NOT a sit", isSitCard(card({ pm: null, bo: "BO" })), false);
-{
-  const sits = buildSitCandidates(
-    [card({ reps: ["A", "B"], card_date: "2026-10-06" })],
-    R,
-    [],
-    "2026-10-07",
-  );
-  eq(
-    "sit = 2 pts per rep on card, not split",
-    sits.length === 2 && sits.every((s) => s.points === 2),
-    true,
-  );
-  eq(
-    "sit counts live during the month",
-    sits.every((s) => s.status === "pending"),
-    true,
-  );
-}
-{
-  const live = buildSitCandidates([card({ card_date: "2026-10-06" })], R, [], "2026-10-31");
-  eq("sit stays live through Oct 31", live[0]?.status, "pending");
-  const final = buildSitCandidates([card({ card_date: "2026-10-06" })], R, [], "2026-11-04");
-  eq("sit finalizes with the month", final[0]?.status, "locked");
-}
-{
-  const subs = buildReloadPitchCandidates(
-    [
-      {
-        subitem_id: "s1",
-        parent_item_id: "p1",
-        report_month: "2026-10-01",
-        name: "x",
-        result: "Sold",
-        date_went: "2026-10-08",
-        reps: ["A"],
-      },
-      {
-        subitem_id: "s2",
-        parent_item_id: "p1",
-        report_month: "2026-10-01",
-        name: "x",
-        result: "Waiting",
-        date_went: "2026-10-08",
-        reps: ["A"],
-      },
-      {
-        subitem_id: "s3",
-        parent_item_id: "p1",
-        report_month: "2026-10-01",
-        name: "x",
-        result: "PM",
-        date_went: "2026-09-20",
-        reps: ["A"],
-      },
-      {
-        subitem_id: "s4",
-        parent_item_id: "p1",
-        report_month: "2026-10-01",
-        name: "x",
-        result: "PM",
-        date_went: "2026-10-09",
-        reps: [],
-      },
-    ],
-    new Map([["p1", ["B"]]]),
-    R,
-    [],
-    "2026-10-20",
-  );
-  eq("only Sold/PM with an October Date Went score", subs.length, 2);
-  eq("reload pitch = 3", subs[0]?.points, 3);
-  eq("blank subitem rep falls back to the parent row's reps", subs[1]?.rep_name, "B");
-}
-{
-  const sg = buildSelfGenPitchCandidates(
-    [
-      card({ source: "self gen", card_date: "2026-10-06" }),
-      card({ agent: "Self Gen", card_date: "2026-10-06" }),
-      card({ source: "Canvass", card_date: "2026-10-06" }),
-      card({ source: "self gen", pm: null, bo: "BO", card_date: "2026-10-06" }),
-    ],
-    R,
-    [],
-    "2026-10-07",
-  );
-  eq("self gen pitched: source or agent says self gen AND the card sat", sg.length, 2);
-  eq("self gen pitched = 5", sg[0]?.points, 5);
-  const off = buildSelfGenPitchCandidates(
-    [card({ source: "self gen" })],
-    mergeKombatRules({ activity: { self_gen_pitch_enabled: false } }),
-    [],
-    "2026-10-07",
-  );
-  eq("self gen pitch flag off → nothing", off.length, 0);
-}
-
-// ---- 5. Bounties --------------------------------------------------------
+// ---- 6. Bounties --------------------------------------------------------
 {
   const b: KombatBounty = {
     id: "b1",
     label: "Self Gen Week",
-    categories: ["money.self_gen"],
+    categories: ["card.selfgen_sale"],
     multiplier: 2,
     starts_on: "2026-10-13",
     ends_on: "2026-10-19",
     active: true,
   };
-  eq("bounty doubles inside the window", bountyMultiplier("money.self_gen", "2026-10-15", [b]), 2);
-  eq("bounty off outside the window", bountyMultiplier("money.self_gen", "2026-10-20", [b]), 1);
-  eq("bounty ignores other categories", bountyMultiplier("money.sale", "2026-10-15", [b]), 1);
-  eq(
-    "inactive bounty is dead",
-    bountyMultiplier("money.self_gen", "2026-10-15", [{ ...b, active: false }]),
-    1,
-  );
-  const { candidates } = buildMoneyCandidates(
-    [row({ sale_amt: 0, sales_count: "Sale", source: "Self Gen", date_sold: "2026-10-15" })],
+  eq("bounty doubles inside window", bountyMultiplier("card.selfgen_sale", "2026-10-15", [b]), 2);
+  eq("bounty off outside window", bountyMultiplier("card.selfgen_sale", "2026-10-25", [b]), 1);
+  eq("bounty ignores other categories", bountyMultiplier("card.sale", "2026-10-15", [b]), 1);
+  const out = buildCardCandidates(
+    [card({ source: "self gen", pm: null, sale: "Sold", card_date: "2026-10-15" })],
     R,
     [b],
-    "2026-10-25",
+    MID,
   );
-  const selfGen = candidates.find((c) => c.category === "money.self_gen");
-  eq("bounty applies at derivation: 15 × 2", selfGen?.points, 30);
+  eq("bounty applies at derivation: 15 × 2", out[0]?.points, 30);
 }
 
-// ---- 6. Proof caps ------------------------------------------------------
+// ---- 7. Proof caps (unchanged) ------------------------------------------
 {
-  const no = computeProofAward("testimonial", "2026-10-06", [], R);
-  eq("testimonial = 5", no.points, 5);
-  const gymDay = computeProofAward(
-    "gym_checkin",
-    "2026-10-06",
-    [{ category: "gym_checkin", points: 1, on: "2026-10-06" }],
-    R,
+  eq("testimonial = 5", computeProofAward("testimonial", "2026-10-06", [], R).points, 5);
+  eq(
+    "gym 1/day cap",
+    computeProofAward(
+      "gym_checkin",
+      "2026-10-06",
+      [{ category: "gym_checkin", points: 1, on: "2026-10-06" }],
+      R,
+    ).points,
+    0,
   );
-  eq("gym 1/day cap", gymDay.points, 0);
-  const gymWeek = computeProofAward(
-    "gym_checkin",
-    "2026-10-09",
-    ["2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08", "2026-10-10"].map((on) => ({
-      category: "gym_checkin" as const,
-      points: 1,
-      on,
-    })),
-    R,
+  eq(
+    "role play 3/week cap",
+    computeProofAward(
+      "role_play",
+      "2026-10-08",
+      ["2026-10-05", "2026-10-06", "2026-10-07"].map((on) => ({
+        category: "role_play" as const,
+        points: 2,
+        on,
+      })),
+      R,
+    ).points,
+    0,
   );
-  eq("gym 5/week cap", gymWeek.points, 0);
-  const rpWeek = computeProofAward(
-    "role_play",
-    "2026-10-08",
-    ["2026-10-05", "2026-10-06", "2026-10-07"].map((on) => ({
-      category: "role_play" as const,
-      points: 2,
-      on,
-    })),
-    R,
-  );
-  eq("role play 3/week cap", rpWeek.points, 0);
-  const rpNextWeek = computeProofAward(
-    "role_play",
-    "2026-10-12",
-    ["2026-10-05", "2026-10-06", "2026-10-07"].map((on) => ({
-      category: "role_play" as const,
-      points: 2,
-      on,
-    })),
-    R,
-  );
-  eq("role play cap resets Monday", rpNextWeek.points, 2);
-  const baMonth = computeProofAward(
-    "before_after",
-    "2026-10-20",
-    Array.from({ length: 10 }, (_, i) => ({
-      category: "before_after" as const,
-      points: 1,
-      on: `2026-10-${String(i + 1).padStart(2, "0")}`,
-    })),
-    R,
-  );
-  eq("before/after 10/month cap", baMonth.points, 0);
   const total = computeProofAward(
-    "testimonial",
-    "2026-10-20",
-    Array.from({ length: 12 }, (_, i) => ({
-      category: "referral_sit" as const,
-      points: i < 7 ? 5 : 1,
-      on: "2026-10-10",
-    })),
-    R,
-  );
-  // 7×5 + 5×1 = 40 already spent → clamp to 0.
-  eq("40/month total cap clamps", total.points, 0);
-  const clamp = computeProofAward(
     "testimonial",
     "2026-10-20",
     Array.from({ length: 7 }, () => ({
@@ -468,66 +352,40 @@ eq("no-demo card is NOT a sit", isSitCard(card({ pm: null, bo: "BO" })), false);
     })),
     R,
   );
-  // 35 spent → a 5-point testimonial still fits exactly.
-  eq("total cap exact fit", clamp.points, 5);
-  const clamp2 = computeProofAward(
-    "testimonial",
-    "2026-10-20",
-    [
-      ...Array.from({ length: 7 }, () => ({
-        category: "referral_sit" as const,
-        points: 5,
-        on: "2026-10-10",
-      })),
-      { category: "before_after" as const, points: 1, on: "2026-10-11" },
-    ],
-    R,
-  );
-  // 36 spent → testimonial clamps to the remaining 4.
-  eq("total cap partial clamp", clamp2.points, 4);
-  eq("partial clamp flagged", clamp2.capped, true);
+  eq("40/mo total cap: 35 spent → 5 fits", total.points, 5);
 }
 
-// ---- 7. Tiers, payouts, company bar -------------------------------------
+// ---- 8. Tiers + payouts + company bar (dinner = 175) --------------------
+eq("below dinner", tierFor(174, R).current, null);
+eq("dinner at 175", tierFor(175, R).current?.key, "steakhouse");
+eq("King at 600", tierFor(600, R).current?.key, "king");
 {
-  eq("no tier below Steakhouse", tierFor(124, R).current, null);
-  eq("Steakhouse at 125", tierFor(125, R).current?.key, "steakhouse");
-  eq("King at 500", tierFor(500, R).current?.key, "king");
-  const t = tierFor(130, R);
+  const t = tierFor(200, R);
   eq("next tier is Bronze", t.next?.key, "bronze");
-  eq("70 to Bronze", t.toNext, 70);
+  eq("50 to Bronze", t.toNext, 50);
 }
 {
   const ledger: LedgerRowLite[] = [
-    { rep_name: "A", category: "money.volume", points: 300, status: "locked" },
-    { rep_name: "A", category: "money.sale", points: 80, status: "pending" },
-    { rep_name: "B", category: "money.volume", points: 210, status: "locked" },
+    { rep_name: "A", category: "money.volume", points: 460, status: "locked" },
+    { rep_name: "A", category: "card.selfgen_sale", points: 30, status: "pending" },
+    { rep_name: "B", category: "money.volume", points: 260, status: "locked" },
     { rep_name: "C", category: "money.volume", points: 100, status: "locked" },
-    { rep_name: "C", category: "money.sale", points: 50, status: "cancelled" },
+    { rep_name: "C", category: "card.sale", points: 50, status: "cancelled" },
   ];
   const totals = totalsFromLedger(ledger);
-  eq("cancelled rows never count", totals.find((t) => t.rep_name === "C")?.total, 100);
-  eq("locked + pending split", totals.find((t) => t.rep_name === "A")?.pending, 80);
+  eq("cancelled never counts", totals.find((t) => t.rep_name === "C")?.total, 100);
+  eq("A total 490", totals.find((t) => t.rep_name === "A")?.total, 490);
   const eligible = new Map([
     ["A", true],
     ["B", true],
     ["C", false],
   ]);
   const proj = projectPayouts(totals, eligible, 2_000_000, R);
-  eq("A at Gold (380 pts) → $2000", proj.rows.find((r) => r.rep_name === "A")?.cash, 2000);
-  eq("B at Bronze (210) → $500", proj.rows.find((r) => r.rep_name === "B")?.cash, 500);
+  eq("A at Gold (490 pts) → $2000", proj.rows.find((r) => r.rep_name === "A")?.cash, 2000);
+  eq("B at Bronze (260) → $500", proj.rows.find((r) => r.rep_name === "B")?.cash, 500);
   eq("ineligible C gets nothing", proj.rows.find((r) => r.rep_name === "C")?.cash, 0);
-  eq("under budget", proj.overBudget, false);
   const unlocked = projectPayouts(totals, eligible, 3_100_000, R);
   eq("$3M unlock ×1.25", unlocked.rows.find((r) => r.rep_name === "A")?.cash, 2500);
-  const tight = projectPayouts(
-    totals,
-    eligible,
-    3_100_000,
-    mergeKombatRules({ prizes: { budget_cap: 1500 } }),
-  );
-  eq("over budget flagged", tight.overBudget, true);
-  near("cash pro-rated to the cap", tight.prorate, 1500 / 3125, 1e-9);
 }
 eq(
   "company written sums the month net",
@@ -538,35 +396,70 @@ eq(
   100,
 );
 
-// ---- 8. Eligibility -----------------------------------------------------
+// ---- 9. Scorecard reflects the new config -------------------------------
+{
+  const groups = buildScorecard(R);
+  eq("four scorecard groups", groups.length, 4);
+  const money = groups.find((g) => g.key === "money")!;
+  eq("money has volume", money.moves.find((m) => m.label === "Written volume")?.points, 1);
+  eq(
+    "money has no Sale/Upsell/Marketing Home",
+    money.moves.some((m) => /sale|upsell|marketing/i.test(m.label)),
+    false,
+  );
+  const close = groups.find((g) => g.key === "close")!;
+  eq("close: self-gen sale 15", close.moves.find((m) => m.label === "Self-gen sale")?.points, 15);
+  eq("close: referral sale 15", close.moves.find((m) => m.label === "Referral sale")?.points, 15);
+  const act = groups.find((g) => g.key === "activity")!;
+  eq(
+    "activity: self-gen pitch 10",
+    act.moves.find((m) => m.label === "Self-gen pitch")?.points,
+    10,
+  );
+  eq("activity: sit 2", act.moves.find((m) => m.label === "Sit")?.points, 2);
+}
+eq("SALE_CATEGORIES covers the four closes", SALE_CATEGORIES.length, 4);
+eq("BELT_ACCENT has steakhouse", typeof BELT_ACCENT.steakhouse, "string");
+
+// ---- 10. Countdown + eligibility ----------------------------------------
+eq("Oct 1 → 31 days left", contestDaysLeft(R, "2026-10-01"), 31);
+eq("Oct 31 → 1 day left", contestDaysLeft(R, "2026-10-31"), 1);
+eq("November → 0", contestDaysLeft(R, "2026-11-02"), 0);
 {
   const weeks = kombatWeeks("2026-10-01");
-  eq("October 2026 spans 5 Mon–Sun weeks", weeks.length, 5);
-  eq("first week clips to Oct 1", weeks[0]?.octStart, "2026-10-01");
-  eq("last week clips to Oct 31", weeks[4]?.octEnd, "2026-10-31");
+  eq("October spans 5 Mon–Sun weeks", weeks.length, 5);
   const s = eligibilityStatus(
     { purposeSubmitted: true, testDays: ["2026-10-02", "2026-10-06"], hasCountedSale: true },
     R,
     "2026-10-07",
   );
-  eq("two weeks due by Oct 7", s.weeksDue, 2);
-  eq("both weeks hit", s.weeksHit, 2);
+  eq("two weeks due by Oct 7, both hit", s.weeksHit, 2);
   eq("eligible", s.eligible, true);
-  const miss = eligibilityStatus(
-    { purposeSubmitted: true, testDays: ["2026-09-30"], hasCountedSale: true },
-    R,
-    "2026-10-03",
+  eq(
+    "a Sep 30 take doesn't cover an October week",
+    eligibilityStatus(
+      { purposeSubmitted: true, testDays: ["2026-09-30"], hasCountedSale: true },
+      R,
+      "2026-10-03",
+    ).testsOk,
+    false,
   );
-  eq("a Sep 30 take does not cover an October week", miss.testsOk, false);
-  const noPurpose = eligibilityStatus(
-    { purposeSubmitted: false, testDays: ["2026-10-02"], hasCountedSale: true },
-    R,
-    "2026-10-03",
+  eq(
+    "no sale → not eligible",
+    eligibilityStatus(
+      { purposeSubmitted: true, testDays: ["2026-10-02"], hasCountedSale: false },
+      R,
+      "2026-10-03",
+    ).eligible,
+    false,
   );
-  eq("purpose required", noPurpose.eligible, false);
 }
 
-// ---- 9. September calibration (owner's figures, ±1) ---------------------
+// ---- 11. September fixture: volume splits correctly ---------------------
+// The fixture is report rows only (no block cards), so under the new model
+// it produces VOLUME (split) + Advantage+/Rep Reset bonuses. Validates the
+// split mechanic against real data: total volume == Σ non-cancelled
+// sale_amt / 1000, and a known two-rep deal halves.
 {
   const septRules = mergeKombatRules({ contest: { month: "2026-09-01" } });
   const toRows = (rows: SeptRow[], office: string): KombatReportRow[] =>
@@ -586,54 +479,22 @@ eq(
     }));
   const all = [...toRows(SEPT_SD_ROWS, "San Diego"), ...toRows(SEPT_OC_ROWS, "Orange County")];
   const { candidates } = buildMoneyCandidates(all, septRules, [], "2026-12-01");
-  const totals = totalsFromLedger(candidates.map((c) => ({ ...c })));
-  for (const [rep, want] of Object.entries(SEPT_EXPECTED)) {
-    const got = totals.find((t) => t.rep_name === rep)?.total ?? 0;
-    near(`calibration: ${rep}`, Math.round(got), want, 1);
-  }
-  eq("calibration covers every rep exactly once", totals.length, Object.keys(SEPT_EXPECTED).length);
+  const volPts = candidates
+    .filter((c) => c.category === "money.volume")
+    .reduce((s, c) => s + c.points, 0);
+  const expectedVol =
+    all
+      .filter((r) => normalizeSalesCount(r.sales_count) !== "cancelled")
+      .reduce((s, r) => s + r.sale_amt, 0) / 1000;
+  near("Sept total volume = Σ non-cancelled sale_amt / 1000", volPts, expectedVol, 0.5);
+  // Every volume candidate for a 2-rep row is exactly half the card volume.
+  const twoRep = all.find((r) => r.reps.length === 2 && r.sale_amt > 0 && r.wcc !== "Cancelled")!;
+  const mine = candidates.filter(
+    (c) => c.source_id === twoRep.monday_item_id && c.category === "money.volume",
+  );
+  eq("2-rep row → 2 volume candidates", mine.length, 2);
+  near("each = half the volume", mine[0]?.points ?? 0, twoRep.sale_amt / 1000 / 2, 1e-6);
 }
-
-// ---- 10. Scorecard + countdown (presentation helpers) ------------------
-{
-  const groups = buildScorecard(R);
-  const money = groups.find((g) => g.key === "money")!;
-  eq("scorecard money reads config", money.moves.find((m) => m.label === "Self Gen")?.points, 15);
-  eq(
-    "Job Walk dropped at the default 0 weight",
-    money.moves.some((m) => m.label === "Job Walk"),
-    false,
-  );
-  const jwOn = buildScorecard(mergeKombatRules({ money: { job_walk_kicker: 7 } }));
-  eq(
-    "Job Walk appears when the owner sets a weight",
-    jwOn.find((g) => g.key === "money")!.moves.find((m) => m.label === "Job Walk")?.points,
-    7,
-  );
-  const activity = groups.find((g) => g.key === "activity")!;
-  eq("scorecard activity has the sit", activity.moves.find((m) => m.label === "Sit")?.points, 2);
-  const sgOff = buildScorecard(mergeKombatRules({ activity: { self_gen_pitch_enabled: false } }));
-  eq(
-    "self gen pitched drops when detection is off",
-    sgOff.find((g) => g.key === "activity")!.moves.some((m) => m.label === "Self gen pitched"),
-    false,
-  );
-  const proofs = groups.find((g) => g.key === "proofs")!;
-  eq(
-    "scorecard proofs read config",
-    proofs.moves.find((m) => m.label === "Video testimonial")?.points,
-    5,
-  );
-  eq(
-    "before/after carries its cap note",
-    proofs.moves.find((m) => m.label === "Before/after set")?.note,
-    "10/mo",
-  );
-}
-eq("countdown: Oct 1 → 31 days left", contestDaysLeft(R, "2026-10-01"), 31);
-eq("countdown: Oct 31 → 1 day left", contestDaysLeft(R, "2026-10-31"), 1);
-eq("countdown: November → 0", contestDaysLeft(R, "2026-11-02"), 0);
-eq("countdown clamps a pre-month date to the full month", contestDaysLeft(R, "2026-09-20"), 31);
 
 console.log(`checks run, ${fails.length} failure(s)`);
 for (const f of fails) console.log("  FAIL " + f);

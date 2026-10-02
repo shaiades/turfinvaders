@@ -476,41 +476,25 @@ function RulesEditor({ rules, onChanged }: { rules: KombatRules; onChanged: () =
     >
       <div className="space-y-5">
         <section>
-          <RulesHeading>Money points (per card, split across its reps)</RulesHeading>
+          <RulesHeading>Money (volume splits across the reps; bonuses full each)</RulesHeading>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
             {num("money.per_1000", "Per $1,000 written")}
-            {num("money.count_kickers.sale", "Sale kicker")}
-            {num("money.count_kickers.reload", "Reload kicker")}
-            {num("money.count_kickers.upsell", "Upsell kicker")}
-            {num("money.source_kickers.self_gen", "Self Gen kicker")}
-            {num("money.source_kickers.rep_reset", "Rep Reset kicker")}
-            {num("money.job_walk_kicker", "Job Walk kicker (0 = volume only)")}
-            {num("money.marketing_home", "Marketing Home")}
             {num("money.advantage_plus", "Advantage+")}
+            {num("money.rep_reset", "Rep Reset")}
             {num("lock.cancel_window_days", "Cancel window (days)")}
           </div>
         </section>
         <section>
-          <RulesHeading>Activity points (per rep on the card)</RulesHeading>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-            {num("activity.sit", "Sit")}
-            {num("activity.reload_pitch", "Reload pitch")}
-            {num("activity.self_gen_pitch", "Self gen pitched")}
-            <div className="space-y-1">
-              <Label className="text-[10px] leading-tight">Self gen pitch detection</Label>
-              <ArcadePill
-                tone="kombat-gold"
-                active={draft["activity.self_gen_pitch_enabled"] === "1"}
-                onClick={() =>
-                  set(
-                    "activity.self_gen_pitch_enabled",
-                    draft["activity.self_gen_pitch_enabled"] === "1" ? "0" : "1",
-                  )
-                }
-              >
-                {draft["activity.self_gen_pitch_enabled"] === "1" ? "On" : "Off"}
-              </ArcadePill>
-            </div>
+          <RulesHeading>Card kicker — one per deal, full to each rep</RulesHeading>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            {num("card.selfgen_sale", "Self-gen sale")}
+            {num("card.referral_sale", "Referral sale")}
+            {num("card.reload", "Reload sale")}
+            {num("card.sale", "Sale")}
+            {num("card.selfgen_miss", "Self-gen pitch (miss)")}
+            {num("card.referral_miss", "Referral pitch (miss)")}
+            {num("activity.reload_pitch", "Reload pitch (subitem)")}
+            {num("card.sit", "Sit")}
           </div>
         </section>
         <section>

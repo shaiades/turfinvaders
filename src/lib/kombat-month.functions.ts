@@ -320,11 +320,12 @@ export const getKombatAdminBoard = createServerFn({ method: "POST" })
       testsByUser.set(t.rep_id, list);
     }
 
+    const { SALE_CATEGORIES } = await import("@/lib/kombat-month");
     const { data: countedSales } = await supabaseAdmin
       .from("contest_ledger")
       .select("rep_name")
       .eq("month", month)
-      .eq("category", "money.sale")
+      .in("category", [...SALE_CATEGORIES])
       .neq("status", "cancelled");
 
     return {

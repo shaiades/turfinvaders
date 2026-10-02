@@ -24,10 +24,9 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { laTodayISO, nextMonthStartISO } from "@/lib/dates";
 import { CARD_COLUMNS, type BlockCard } from "@/lib/close-kombat";
 import {
+  buildCardCandidates,
   buildMoneyCandidates,
   buildReloadPitchCandidates,
-  buildSelfGenPitchCandidates,
-  buildSitCandidates,
   mergeKombatRules,
   type KombatBounty,
   type KombatReportRow,
@@ -140,8 +139,7 @@ export async function runKombatRecompute(): Promise<KombatRecomputeSummary> {
   const money = buildMoneyCandidates(reportRows, rules, bounties, today);
   const candidates: LedgerCandidate[] = [
     ...money.candidates,
-    ...buildSitCandidates(cards, rules, bounties, today),
-    ...buildSelfGenPitchCandidates(cards, rules, bounties, today),
+    ...buildCardCandidates(cards, rules, bounties, today),
     ...buildReloadPitchCandidates(reloadRows, parentRepsById, rules, bounties, today),
   ];
 
