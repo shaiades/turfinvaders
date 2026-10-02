@@ -220,7 +220,8 @@ export function KombatBeltLadder({
       {/* Rules + eligibility gates */}
       <div className="mt-5 border-t border-kombat-red/20 pt-4">
         <p className="text-xs text-muted-foreground">
-          Earn points on{" "}
+          <span className="text-kombat-gold font-semibold">Dinner = 175 pts ≈ your $175k share</span>{" "}
+          of the $3M. Earn points on{" "}
           <span className="text-foreground">every sale, every activity, every proof</span>. Points
           count the second they land and update live all month; a cancellation drops them right
           away. The count locks after the cancel window at month end — that's the final tally. Hit a

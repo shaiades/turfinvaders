@@ -66,20 +66,28 @@ export type KombatTier = { key: string; label: string; points: number; cash: num
 export type KombatRules = {
   contest: { month: string; label: string };
   money: {
+    /** Volume — points per $1,000 written. SPLIT across the sale's reps
+     *  (the board's own amount÷reps formula). */
     per_1000: number;
-    count_kickers: { sale: number; reload: number; upsell: number };
-    blank_count_is_sale: boolean;
-    source_kickers: { self_gen: number; rep_reset: number };
-    /** OWNER TO DECIDE — 0 = volume points only (the default). */
-    job_walk_kicker: number;
-    marketing_home: number;
+    /** Report-side flat bonuses, FULL to each rep on the sale. */
     advantage_plus: number;
+    rep_reset: number;
+  };
+  /** The ONE kicker a block card earns, by outcome + source (never stacks —
+   *  a card emits exactly one). FULL to each rep on the card (owner
+   *  2026-10-02: only volume splits). "miss" = sat (PM) but didn't close. */
+  card: {
+    sale: number;
+    reload: number;
+    sit: number;
+    selfgen_sale: number;
+    selfgen_miss: number;
+    referral_sale: number;
+    referral_miss: number;
   };
   activity: {
-    sit: number;
+    /** Reloads-subitem pitch that sat (Result Sold/PM). */
     reload_pitch: number;
-    self_gen_pitch: number;
-    self_gen_pitch_enabled: boolean;
   };
   proofs: {
     weights: Record<ProofCategory, number>;
@@ -109,16 +117,20 @@ export type KombatRules = {
 
 export const DEFAULT_KOMBAT_RULES: KombatRules = {
   contest: { month: "2026-10-01", label: "Kombat Month" },
-  money: {
-    per_1000: 1,
-    count_kickers: { sale: 5, reload: 10, upsell: 3 },
-    blank_count_is_sale: true,
-    source_kickers: { self_gen: 15, rep_reset: 5 },
-    job_walk_kicker: 0,
-    marketing_home: 3,
-    advantage_plus: 3,
+  // Volume is the backbone: 1 pt per $1,000, split by rep count. The dinner
+  // tier sits at 175 pts (owner 2026-10-02) because $3M ÷ ~17 reps ≈ $175k
+  // each — so "dinner" == you wrote your share of the record month.
+  money: { per_1000: 1, advantage_plus: 3, rep_reset: 5 },
+  card: {
+    sale: 5,
+    reload: 10,
+    sit: 2,
+    selfgen_sale: 15,
+    selfgen_miss: 10,
+    referral_sale: 15,
+    referral_miss: 10,
   },
-  activity: { sit: 2, reload_pitch: 3, self_gen_pitch: 5, self_gen_pitch_enabled: true },
+  activity: { reload_pitch: 3 },
   proofs: {
     weights: {
       testimonial: 5,
@@ -140,11 +152,11 @@ export const DEFAULT_KOMBAT_RULES: KombatRules = {
   eligibility: { require_purpose: true, require_weekly_test: true, require_locked_sale: true },
   prizes: {
     tiers: [
-      { key: "steakhouse", label: "Steakhouse", points: 125, cash: 0 },
-      { key: "bronze", label: "Bronze", points: 200, cash: 500 },
-      { key: "silver", label: "Silver", points: 275, cash: 1000 },
-      { key: "gold", label: "Gold", points: 375, cash: 2000 },
-      { key: "king", label: "Kombat King", points: 500, cash: 3000 },
+      { key: "steakhouse", label: "Steakhouse", points: 175, cash: 0 },
+      { key: "bronze", label: "Bronze", points: 250, cash: 500 },
+      { key: "silver", label: "Silver", points: 350, cash: 1000 },
+      { key: "gold", label: "Gold", points: 475, cash: 2000 },
+      { key: "king", label: "Kombat King", points: 600, cash: 3000 },
     ],
     unlock_threshold: 3_000_000,
     unlock_multiplier: 1.25,
@@ -184,13 +196,12 @@ export function mergeKombatRules(stored: unknown): KombatRules {
 
 const norm = (v: string | null | undefined): string => (v ?? "").trim().toLowerCase();
 
-/** Sales Count → token. Blank counts as a sale (see module doctrine). */
+/** Sales Count → token. Only "cancelled" steers scoring now (the type
+ *  kicker moved to the block card); the rest are informational. */
 export function normalizeSalesCount(
   v: string | null | undefined,
-  rules: KombatRules,
 ): "sale" | "reload" | "upsell" | "cancelled" | "other" {
   const t = norm(v);
-  if (t === "" || t === "none") return rules.money.blank_count_is_sale ? "sale" : "other";
   if (t === "sale") return "sale";
   if (t === "reload") return "reload";
   if (t === "upsell") return "upsell";
@@ -198,19 +209,17 @@ export function normalizeSalesCount(
   return "other";
 }
 
-/** Source → kicker token. The boards carry three Job Walk spellings. */
+/** Source → kicker token. Covers the board spellings for each. */
 export function normalizeSource(
   v: string | null | undefined,
-): "self_gen" | "rep_reset" | "job_walk" | null {
+): "self_gen" | "referral" | "rep_reset" | "job_walk" | null {
   const t = norm(v);
   if (/self\s*[-_]?\s*gen/.test(t)) return "self_gen";
+  if (/referr?al/.test(t)) return "referral";
   if (/rep\s*[-_]?\s*reset/.test(t)) return "rep_reset";
   if (/job\s*[-_]?\s*walk|jobwalk/.test(t)) return "job_walk";
   return null;
 }
-
-export const isMarketingHomeLabel = (v: string | null | undefined): boolean =>
-  /marketing\s*home/i.test(v ?? "");
 
 export const isAdvantagePlusLabel = (v: string | null | undefined): boolean =>
   /advantage\s*\+/i.test(v ?? "");
@@ -220,10 +229,21 @@ export const isAdvantagePlusLabel = (v: string | null | undefined): boolean =>
 export const isDeadWcc = (v: string | null | undefined): boolean =>
   /cancel|\bctc\b|turned\s*down|\bftd\b|financial\s*turn/i.test(v ?? "");
 
-/** "self gen" in the Block card's free-text Source or Agent column —
- *  the proposed self-gen-pitched detection rule (see PR). */
-export const isSelfGenCard = (c: Pick<BlockCard, "source" | "agent">): boolean =>
-  normalizeSource(c.source) === "self_gen" || normalizeSource(c.agent) === "self_gen";
+/** The normalized source of a block card — its free-text Source column,
+ *  falling back to Agent (owner 2026-10-02: referral/self-gen are tracked
+ *  by the source on the block card). */
+export const cardSource = (
+  c: Pick<BlockCard, "source" | "agent">,
+): ReturnType<typeof normalizeSource> => normalizeSource(c.source) ?? normalizeSource(c.agent);
+
+/** Ledger categories that count as a "sale that sticks" for eligibility —
+ *  any closed deal, however it was sourced. */
+export const SALE_CATEGORIES = [
+  "card.sale",
+  "card.reload",
+  "card.selfgen_sale",
+  "card.referral_sale",
+] as const;
 
 // ── Ledger candidates ────────────────────────────────────────────────────
 
@@ -279,19 +299,16 @@ export type KombatReportRow = ReportSaleRow & {
   advantage_plus?: string | null;
 };
 
-export type CardScorePart = { category: string; label: string; points: number };
+/** `split: true` parts (volume) divide across the sale's reps; `false`
+ *  parts (the flat bonuses) go full to each rep (owner 2026-10-02). */
+export type CardScorePart = { category: string; label: string; points: number; split: boolean };
 
-/** Score one Sales-Report CARD (before the rep split). A cancelled row
- *  returns [] — no volume, no kickers (see module doctrine). A BLANK Sales
- *  Count scores as a Sale only when the row carries real money: the boards
- *  hold utility rows ("Move each month", every rep listed, no dollars) and
- *  a blank $0 row must mint nothing (seen live on the Oct 2026 SD board). */
+/** Score one Sales-Report row's MONEY layer: volume (split) plus the flat
+ *  Advantage+ / Rep Reset bonuses (full per rep). The sale/reload/self-gen/
+ *  referral TYPE kicker is NOT here — it comes from the block card (one per
+ *  card, non-stacking). A cancelled row earns nothing. */
 export function scoreReportCard(row: KombatReportRow, rules: KombatRules): CardScorePart[] {
-  const rawBlank =
-    (row.sales_count ?? "").trim() === "" || /^none$/i.test((row.sales_count ?? "").trim());
-  let count = normalizeSalesCount(row.sales_count, rules);
-  if (count === "cancelled") return [];
-  if (rawBlank && row.sale_amt === 0 && row.cancel_amt === 0) count = "other";
+  if (normalizeSalesCount(row.sales_count) === "cancelled") return [];
   const parts: CardScorePart[] = [];
   const vol = (row.sale_amt / 1000) * rules.money.per_1000;
   if (vol !== 0) {
@@ -299,43 +316,7 @@ export function scoreReportCard(row: KombatReportRow, rules: KombatRules): CardS
       category: "money.volume",
       label: `$${Math.round(row.sale_amt).toLocaleString()} written`,
       points: vol,
-    });
-  }
-  if (count === "sale" || count === "reload" || count === "upsell") {
-    const kick = rules.money.count_kickers[count];
-    if (kick !== 0) {
-      parts.push({
-        category: `money.${count}`,
-        label: count === "sale" ? "Sale" : count === "reload" ? "Reload" : "Upsell",
-        points: kick,
-      });
-    }
-  }
-  const src = normalizeSource(row.source);
-  if (src === "self_gen" && rules.money.source_kickers.self_gen !== 0) {
-    parts.push({
-      category: "money.self_gen",
-      label: "Self Gen",
-      points: rules.money.source_kickers.self_gen,
-    });
-  } else if (src === "rep_reset" && rules.money.source_kickers.rep_reset !== 0) {
-    parts.push({
-      category: "money.rep_reset",
-      label: "Rep Reset",
-      points: rules.money.source_kickers.rep_reset,
-    });
-  } else if (src === "job_walk" && rules.money.job_walk_kicker !== 0) {
-    parts.push({
-      category: "money.job_walk",
-      label: "Job Walk",
-      points: rules.money.job_walk_kicker,
-    });
-  }
-  if (isMarketingHomeLabel(row.marketing_home) && rules.money.marketing_home !== 0) {
-    parts.push({
-      category: "money.marketing_home",
-      label: "Marketing Home",
-      points: rules.money.marketing_home,
+      split: true,
     });
   }
   if (isAdvantagePlusLabel(row.advantage_plus) && rules.money.advantage_plus !== 0) {
@@ -343,6 +324,15 @@ export function scoreReportCard(row: KombatReportRow, rules: KombatRules): CardS
       category: "money.advantage_plus",
       label: "Advantage+",
       points: rules.money.advantage_plus,
+      split: false,
+    });
+  }
+  if (normalizeSource(row.source) === "rep_reset" && rules.money.rep_reset !== 0) {
+    parts.push({
+      category: "money.rep_reset",
+      label: "Rep Reset",
+      points: rules.money.rep_reset,
+      split: false,
     });
   }
   return parts;
@@ -369,7 +359,7 @@ export function reportRowLockState(
   rules: KombatRules,
   todayISO: string = laTodayISO(),
 ): LedgerStatus {
-  if (isDeadWcc(row.wcc) || normalizeSalesCount(row.sales_count, rules) === "cancelled") {
+  if (isDeadWcc(row.wcc) || normalizeSalesCount(row.sales_count) === "cancelled") {
     return "cancelled";
   }
   return todayISO > contestFinalizeAfterISO(rules) ? "locked" : "pending";
@@ -402,7 +392,9 @@ export function buildMoneyCandidates(
     const occurred = row.date_sold ?? month;
     for (const part of scoreReportCard(row, rules)) {
       const mult = bountyMultiplier(part.category, occurred, bounties);
-      const perRep = (part.points * mult) / row.reps.length;
+      // Volume splits across the reps (board formula); flat bonuses are full
+      // to each rep (owner 2026-10-02).
+      const perRep = part.split ? (part.points * mult) / row.reps.length : part.points * mult;
       if (perRep === 0) continue;
       for (const rep of row.reps) {
         candidates.push({
@@ -451,7 +443,48 @@ export function isSitCard(c: BlockCard): boolean {
 const inContestMonth = (dateISO: string | null, month: string): boolean =>
   dateISO !== null && dateISO >= month && dateISO < nextMonthStartISO(month);
 
-export function buildSitCandidates(
+/** The ONE kicker a sat block card earns — by outcome then source, most
+ *  specific wins, never stacking (owner 2026-10-02). Returns null for cards
+ *  that earn no kicker (didn't sit, job walk, or a 0-weight). */
+function cardKicker(
+  c: BlockCard,
+  rules: KombatRules,
+): { category: string; label: string; points: number } | null {
+  if (isExcludedIss(c) || isOfficeAppt(c)) return null;
+  const outcome = cardOutcome(c);
+  const sold = outcome === "sold";
+  // Sit = PM or Sold (cancelled lead-sale lands in PM). Anything else
+  // (reset / no-show / no-demo / OL / unmarked) earns nothing.
+  const sat = sold || outcome === "pm" || outcome === "cancelled";
+  if (!sat) return null;
+  const src = cardSource(c);
+  // Job walk is volume-only by standing owner decision — no card kicker.
+  if (src === "job_walk") return null;
+  const k = rules.card;
+  if (src === "self_gen") {
+    return sold
+      ? { category: "card.selfgen_sale", label: "Self-gen sale", points: k.selfgen_sale }
+      : { category: "card.selfgen_miss", label: "Self-gen pitch", points: k.selfgen_miss };
+  }
+  if (src === "referral") {
+    return sold
+      ? { category: "card.referral_sale", label: "Referral sale", points: k.referral_sale }
+      : { category: "card.referral_miss", label: "Referral pitch", points: k.referral_miss };
+  }
+  if (sold) {
+    return isReload(c)
+      ? { category: "card.reload", label: "Reload", points: k.reload }
+      : { category: "card.sale", label: "Sale", points: k.sale };
+  }
+  return { category: "card.sit", label: "Sit", points: k.sit };
+}
+
+/** Every block card's single type kicker (sale / reload / self-gen /
+ *  referral / sit / pitch-miss), FULL to each rep on the card. Replaces the
+ *  old split sit + self-gen-pitch passes; the money volume stays on the
+ *  report. source_kind "sit" tags all block-card points; the category says
+ *  which kicker. */
+export function buildCardCandidates(
   cards: readonly BlockCard[],
   rules: KombatRules,
   bounties: readonly KombatBounty[],
@@ -459,65 +492,30 @@ export function buildSitCandidates(
 ): LedgerCandidate[] {
   const month = rules.contest.month;
   const out: LedgerCandidate[] = [];
-  if (rules.activity.sit === 0) return out;
   const status: LedgerCandidate["status"] =
     todayISO > contestFinalizeAfterISO(rules) ? "locked" : "pending";
   for (const card of cards) {
-    if (!inContestMonth(card.card_date, month) || !isSitCard(card)) continue;
-    const mult = bountyMultiplier("activity.sit", card.card_date, bounties);
+    if (!inContestMonth(card.card_date, month)) continue;
+    const kicker = cardKicker(card, rules);
+    if (!kicker || kicker.points === 0) continue;
+    const mult = bountyMultiplier(kicker.category, card.card_date, bounties);
+    const points = kicker.points * mult;
+    if (points === 0) continue;
     for (const rep of countReps(card)) {
       out.push({
         month,
         rep_name: rep,
-        category: "activity.sit",
-        points: rules.activity.sit * mult,
+        category: kicker.category,
+        points,
         status,
         source_kind: "sit",
         source_id: card.monday_item_id,
         occurred_on: card.card_date,
         meta: {
-          label: "Sit",
+          label: kicker.label,
           customer: card.lead_name,
           office: card.office_location,
           outcome: cardOutcome(card),
-          board_id: card.board_id,
-          ...(mult !== 1 ? { bounty_multiplier: mult } : {}),
-        },
-      });
-    }
-  }
-  return out;
-}
-
-export function buildSelfGenPitchCandidates(
-  cards: readonly BlockCard[],
-  rules: KombatRules,
-  bounties: readonly KombatBounty[],
-  todayISO: string = laTodayISO(),
-): LedgerCandidate[] {
-  const month = rules.contest.month;
-  const out: LedgerCandidate[] = [];
-  if (!rules.activity.self_gen_pitch_enabled || rules.activity.self_gen_pitch === 0) return out;
-  for (const card of cards) {
-    if (!inContestMonth(card.card_date, month)) continue;
-    if (!isSelfGenCard(card) || !isSitCard(card)) continue;
-    const mult = bountyMultiplier("activity.self_gen_pitch", card.card_date, bounties);
-    const status: LedgerCandidate["status"] =
-      todayISO > contestFinalizeAfterISO(rules) ? "locked" : "pending";
-    for (const rep of countReps(card)) {
-      out.push({
-        month,
-        rep_name: rep,
-        category: "activity.self_gen_pitch",
-        points: rules.activity.self_gen_pitch * mult,
-        status,
-        source_kind: "self_gen_pitch",
-        source_id: card.monday_item_id,
-        occurred_on: card.card_date,
-        meta: {
-          label: "Self gen pitched",
-          customer: card.lead_name,
-          office: card.office_location,
           source: card.source ?? card.agent ?? null,
           board_id: card.board_id,
           ...(mult !== 1 ? { bounty_multiplier: mult } : {}),
@@ -841,17 +839,16 @@ export function eligibilityStatus(
 
 export const CATEGORY_LABELS: Record<string, string> = {
   "money.volume": "Volume",
-  "money.sale": "Sales",
-  "money.reload": "Reloads",
-  "money.upsell": "Upsells",
-  "money.self_gen": "Self Gen",
   "money.rep_reset": "Rep Reset",
-  "money.job_walk": "Job Walk",
-  "money.marketing_home": "Marketing Home",
   "money.advantage_plus": "Advantage+",
-  "activity.sit": "Sits",
+  "card.sale": "Sales",
+  "card.reload": "Reloads",
+  "card.sit": "Sits",
+  "card.selfgen_sale": "Self-gen sales",
+  "card.selfgen_miss": "Self-gen pitches",
+  "card.referral_sale": "Referral sales",
+  "card.referral_miss": "Referral pitches",
   "activity.reload_pitch": "Reload pitches",
-  "activity.self_gen_pitch": "Self gen pitched",
   "proof.testimonial": "Testimonials",
   "proof.google_review": "Google reviews",
   "proof.referral_sit": "Referral sits",
@@ -873,32 +870,34 @@ export const fmtPts = (n: number): string => {
 
 export type ScorecardMove = { label: string; points: number; per: string; note?: string };
 export type ScorecardGroup = {
-  key: "money" | "activity" | "proofs";
+  key: "money" | "close" | "activity" | "proofs";
   title: string;
+  hint: string;
   moves: ScorecardMove[];
 };
 
 export function buildScorecard(rules: KombatRules): ScorecardGroup[] {
   const m = rules.money;
+  const c = rules.card;
   const a = rules.activity;
   const p = rules.proofs;
   const money: ScorecardMove[] = [
     { label: "Written volume", points: m.per_1000, per: "per $1,000 sold" },
-    { label: "Sale", points: m.count_kickers.sale, per: "each sale" },
-    { label: "Reload", points: m.count_kickers.reload, per: "each reload" },
-    { label: "Upsell", points: m.count_kickers.upsell, per: "each upsell" },
-    { label: "Self Gen", points: m.source_kickers.self_gen, per: "your own lead" },
-    { label: "Rep Reset", points: m.source_kickers.rep_reset, per: "rep reset" },
-    { label: "Job Walk", points: m.job_walk_kicker, per: "job walk" },
-    { label: "Marketing Home", points: m.marketing_home, per: "marketing home" },
     { label: "Advantage+", points: m.advantage_plus, per: "advantage+ member" },
+    { label: "Rep Reset", points: m.rep_reset, per: "rep reset" },
+  ].filter((x) => x.points !== 0);
+  // The one kicker a sold card earns — never stacks with the sit/volume.
+  const close: ScorecardMove[] = [
+    { label: "Self-gen sale", points: c.selfgen_sale, per: "your own lead, closed" },
+    { label: "Referral sale", points: c.referral_sale, per: "referral, closed" },
+    { label: "Reload", points: c.reload, per: "reload, closed" },
+    { label: "Sale", points: c.sale, per: "any other close" },
   ].filter((x) => x.points !== 0);
   const activity: ScorecardMove[] = [
-    { label: "Sit", points: a.sit, per: "PM or sold on a block card" },
+    { label: "Self-gen pitch", points: c.selfgen_miss, per: "your lead sat, no close" },
+    { label: "Referral pitch", points: c.referral_miss, per: "referral sat, no close" },
     { label: "Reload pitch", points: a.reload_pitch, per: "reload sat (sold/PM)" },
-    ...(a.self_gen_pitch_enabled && a.self_gen_pitch !== 0
-      ? [{ label: "Self gen pitched", points: a.self_gen_pitch, per: "your self-gen lead sat" }]
-      : []),
+    { label: "Sit", points: c.sit, per: "any other sit (PM)" },
   ].filter((x) => x.points !== 0);
   const proofs: ScorecardMove[] = [
     { label: "Video testimonial", points: p.weights.testimonial, per: "customer on camera" },
@@ -924,11 +923,13 @@ export function buildScorecard(rules: KombatRules): ScorecardGroup[] {
     },
   ].filter((x) => x.points !== 0);
   return [
-    { key: "money", title: "Money", moves: money },
-    { key: "activity", title: "Activity", moves: activity },
+    { key: "money", title: "Money", hint: "volume splits across the reps", moves: money },
+    { key: "close", title: "Close it", hint: "one per deal — the best one", moves: close },
+    { key: "activity", title: "Sit & pitch", hint: "full to each rep", moves: activity },
     {
       key: "proofs",
-      title: `Proof (owner/manager approves · ${p.caps.total_per_month}/mo cap)`,
+      title: "Proof",
+      hint: `owner approves · ${p.caps.total_per_month}/mo cap`,
       moves: proofs,
     },
   ];

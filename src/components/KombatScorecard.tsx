@@ -8,43 +8,50 @@ import { buildScorecard, fmtPts, type KombatRules } from "@/lib/kombat-month";
 
 const GROUP_ACCENT: Record<string, string> = {
   money: "var(--kombat-gold)",
-  activity: "var(--kombat-red)",
-  proofs: "var(--accent)",
+  close: "var(--kombat-red)",
+  activity: "var(--accent)",
+  proofs: "var(--victory)",
 };
 
 export function KombatScorecard({ rules }: { rules: KombatRules }) {
   const groups = buildScorecard(rules);
   return (
     <ArcadePanel title="Scorecard — what everything's worth" faction="kombat" status="good">
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {groups.map((g) => {
           const accent = GROUP_ACCENT[g.key] ?? "var(--kombat-gold)";
           return (
-            <div key={g.key} className="min-w-0">
+            <div
+              key={g.key}
+              className="min-w-0 rounded-lg border p-3"
+              style={{
+                borderColor: `color-mix(in oklab, ${accent} 25%, transparent)`,
+                background: `color-mix(in oklab, ${accent} 5%, transparent)`,
+              }}
+            >
               <div
-                className="mb-2 border-b pb-1.5 font-display text-[10px] uppercase tracking-widest"
-                style={{
-                  color: accent,
-                  borderColor: `color-mix(in oklab, ${accent} 30%, transparent)`,
-                }}
+                className="font-display text-[10px] uppercase tracking-widest"
+                style={{ color: accent }}
               >
                 {g.title}
               </div>
+              <div className="mb-2 text-[9px] uppercase tracking-wider text-muted-foreground">
+                {g.hint}
+              </div>
               <ul className="space-y-0.5">
                 {g.moves.map((m) => (
-                  <li
-                    key={m.label}
-                    className="flex items-center gap-2 rounded px-1.5 py-1.5 hover:bg-[color-mix(in_oklab,var(--foreground)_4%,transparent)]"
-                  >
+                  <li key={m.label} className="flex items-baseline gap-2 py-1">
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium">{m.label}</span>
+                      <span className="block truncate text-sm font-medium leading-tight">
+                        {m.label}
+                      </span>
                       <span className="block truncate text-[10px] text-muted-foreground">
                         {m.per}
                         {m.note ? ` · ${m.note}` : ""}
                       </span>
                     </span>
                     <span
-                      className="shrink-0 font-mono tabular-nums text-sm font-bold"
+                      className="shrink-0 font-mono tabular-nums text-base font-bold"
                       style={{ color: accent }}
                     >
                       +{fmtPts(m.points)}

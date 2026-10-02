@@ -35,6 +35,7 @@ import {
   DEFAULT_KOMBAT_RULES,
   PROOF_CATEGORIES,
   PROOF_LABELS,
+  SALE_CATEGORIES,
   eligibilityStatus,
   fmtPts,
   mergeKombatRules,
@@ -200,9 +201,12 @@ export function KombatMonthTab({
     {
       purposeSubmitted: purposeQuery.data?.row?.status === "submitted",
       testDays: (testsQuery.data?.takes ?? []).map((t: { taken_on: string }) => t.taken_on),
-      // Points count right away (owner 2026-10-02): a sale counts unless
-      // it cancels; the month-end window only makes the count final.
-      hasCountedSale: myLedger.some((r) => r.category === "money.sale" && r.status !== "cancelled"),
+      // Points count right away (owner 2026-10-02): any closed deal counts
+      // unless it cancels; the month-end window only makes the count final.
+      hasCountedSale: myLedger.some(
+        (r) =>
+          (SALE_CATEGORIES as readonly string[]).includes(r.category) && r.status !== "cancelled",
+      ),
     },
     rules,
   );
