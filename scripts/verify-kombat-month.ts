@@ -29,7 +29,9 @@ import {
   normalizeSource,
   projectPayouts,
   reportRowLockState,
+  reportOnlyKicker,
   scoreReportCard,
+  scoredCardKeys,
   tierFor,
   totalsFromLedger,
   type KombatBounty,
@@ -495,6 +497,108 @@ eq("November → 0", contestDaysLeft(R, "2026-11-02"), 0);
   eq("2-rep row → 2 volume candidates", mine.length, 2);
   near("each = half the volume", mine[0]?.points ?? 0, twoRep.sale_amt / 1000 / 2, 1e-6);
 }
+
+// ---- 12. Report-only sales carry a kicker (no double) -------------------
+// reportOnlyKicker: the kicker a report sale earns on its own.
+eq(
+  "report-only: plain sale → 5",
+  reportOnlyKicker(row({ sales_count: "Sale", source: "Canvass" }), R)?.points,
+  5,
+);
+eq(
+  "report-only: self-gen sale → 15",
+  reportOnlyKicker(row({ sales_count: "Sale", source: "Self Gen" }), R)?.category,
+  "card.selfgen_sale",
+);
+eq(
+  "report-only: reload → 10",
+  reportOnlyKicker(row({ sales_count: "Reload", source: "Reload" }), R)?.points,
+  10,
+);
+eq("report-only: upsell → none", reportOnlyKicker(row({ sales_count: "Upsell" }), R), null);
+eq(
+  "report-only: job walk → none",
+  reportOnlyKicker(row({ sales_count: "Sale", source: "Job Walk" }), R),
+  null,
+);
+eq(
+  "report-only: blank $0 utility row → none",
+  reportOnlyKicker(row({ sales_count: null, sale_amt: 0 }), R),
+  null,
+);
+eq(
+  "report-only: blank row WITH money → sale",
+  reportOnlyKicker(row({ sales_count: null, sale_amt: 8000 }), R)?.category,
+  "card.sale",
+);
+// scoredCardKeys + the covered gate in buildMoneyCandidates.
+{
+  const soldCard = card({
+    lead_name: "Smith, John",
+    office_location: "San Diego",
+    phone: "619-555-0001",
+    source: "Canvass",
+    pm: null,
+    sale: "Sold",
+  });
+  const keys = scoredCardKeys([soldCard], R);
+  eq("scoredCardKeys has the name key", keys.has("San Diego|n|smith john"), true);
+  eq("scoredCardKeys has the phone key", keys.has("San Diego|p|6195550001"), true);
+  eq(
+    "a sit-only card still keys (covers the customer)",
+    scoredCardKeys([card({ lead_name: "x", pm: "PM" })], R).size > 0,
+    true,
+  );
+
+  // Covered report row (same customer as the sold block card) → NO report
+  // kicker, just volume/bonus. The block card is the authority.
+  const covRow = row({
+    customer_name: "Smith, John (copy)",
+    office: "San Diego",
+    sale_amt: 10000,
+    sales_count: "Sale",
+  });
+  const cov = buildMoneyCandidates([covRow], R, [], MID, keys).candidates;
+  eq(
+    "covered sale: no card.* kicker from the report",
+    cov.some((c) => c.category.startsWith("card.")),
+    false,
+  );
+  eq(
+    "covered sale: still earns volume",
+    cov.some((c) => c.category === "money.volume"),
+    true,
+  );
+
+  // Report-only sale (not covered) → gets the kicker, FULL per rep.
+  const onlyRow = row({
+    customer_name: "Nguyen, Kim",
+    office: "San Diego",
+    sale_amt: 10000,
+    sales_count: "Sale",
+    reps: ["A", "B"],
+  });
+  const only = buildMoneyCandidates([onlyRow], R, [], MID, keys).candidates;
+  const aKick = only.filter((c) => c.rep_name === "A" && c.category === "card.sale");
+  eq("report-only sale: emits card.sale", aKick.length, 1);
+  eq("report-only sale: full 5 to each rep (not split)", aKick[0]?.points, 5);
+  eq(
+    "report-only sale: both reps get it",
+    only.filter((c) => c.category === "card.sale").length,
+    2,
+  );
+  // and volume still splits
+  const aVol = only.find((c) => c.rep_name === "A" && c.category === "money.volume");
+  eq("report-only sale: volume still splits (10/2=5)", aVol?.points, 5);
+}
+// Without a coveredKeys set, buildMoneyCandidates stays volume+bonus only.
+eq(
+  "no coveredKeys → no report kicker",
+  buildMoneyCandidates([row({ sale_amt: 10000, sales_count: "Sale" })], R, [], MID).candidates.some(
+    (c) => c.category.startsWith("card."),
+  ),
+  false,
+);
 
 console.log(`checks run, ${fails.length} failure(s)`);
 for (const f of fails) console.log("  FAIL " + f);

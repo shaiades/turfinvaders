@@ -34,6 +34,8 @@ import {
   countReps,
   isOfficeAppt,
   isReload,
+  normalizeCustomer,
+  phoneKey,
   type BlockCard,
   type ReportSaleRow,
 } from "@/lib/close-kombat";
@@ -245,6 +247,23 @@ export const SALE_CATEGORIES = [
   "card.referral_sale",
 ] as const;
 
+/** Office-scoped customer keys (name + phone) used to decide whether a
+ *  Sales-Report row already has a block card — so a report-only sale gets
+ *  its kicker without ever double-counting one that a block card scored. */
+function customerKeys(
+  office: string | null | undefined,
+  name: string | null | undefined,
+  phone: string | null | undefined,
+): string[] {
+  const o = office ?? "";
+  const keys: string[] = [];
+  const nk = normalizeCustomer(name ?? "");
+  if (nk) keys.push(`${o}|n|${nk}`);
+  const pk = phoneKey(phone);
+  if (pk) keys.push(`${o}|p|${pk}`);
+  return keys;
+}
+
 // ── Ledger candidates ────────────────────────────────────────────────────
 
 export type LedgerStatus = "pending" | "locked" | "cancelled";
@@ -338,6 +357,33 @@ export function scoreReportCard(row: KombatReportRow, rules: KombatRules): CardS
   return parts;
 }
 
+/** The type kicker a Sales-Report SALE row earns on its OWN (owner
+ *  2026-10-02: report-only sales carry a kicker too). Used only for rows
+ *  with no matching block card — the block card is the authority when one
+ *  exists, so this never stacks. Full to each rep. Returns null for
+ *  non-sales (cancelled, upsell, blank $0 utility rows) and job walk
+ *  (volume only). Referral can't be seen on the report, so a report-only
+ *  referral sale reads as a plain sale. */
+export function reportOnlyKicker(
+  row: KombatReportRow,
+  rules: KombatRules,
+): { category: string; label: string; points: number } | null {
+  const count = normalizeSalesCount(row.sales_count);
+  if (count === "cancelled" || count === "upsell") return null;
+  // A genuine sale: a sale/reload row, or a blank row carrying real money.
+  const isSale = count === "sale" || count === "reload" || (count === "other" && row.sale_amt > 0);
+  if (!isSale) return null;
+  const src = normalizeSource(row.source);
+  if (src === "job_walk") return null;
+  const k = rules.card;
+  if (src === "self_gen")
+    return { category: "card.selfgen_sale", label: "Self-gen sale", points: k.selfgen_sale };
+  if (src === "referral")
+    return { category: "card.referral_sale", label: "Referral sale", points: k.referral_sale };
+  if (count === "reload") return { category: "card.reload", label: "Reload", points: k.reload };
+  return { category: "card.sale", label: "Sale", points: k.sale };
+}
+
 const lastDayOfMonth = (monthStart: string): string =>
   addDaysISO(nextMonthStartISO(monthStart), -1);
 
@@ -377,6 +423,11 @@ export function buildMoneyCandidates(
   rules: KombatRules,
   bounties: readonly KombatBounty[],
   todayISO: string = laTodayISO(),
+  // Office-scoped customer keys of sales a BLOCK card already scored (from
+  // scoredCardKeys). When provided, a report sale NOT in this set is
+  // "report-only" and earns its own type kicker — never double, because a
+  // covered sale is skipped. Omit it to emit volume + bonuses only.
+  coveredKeys?: ReadonlySet<string>,
 ): MoneyCandidates {
   const month = rules.contest.month;
   const candidates: LedgerCandidate[] = [];
@@ -390,10 +441,22 @@ export function buildMoneyCandidates(
     }
     if (row.reps.length === 0) continue;
     const occurred = row.date_sold ?? month;
-    for (const part of scoreReportCard(row, rules)) {
+    const parts = [...scoreReportCard(row, rules)];
+    // Report-only kicker: only when a covered-keys set was supplied AND no
+    // block card covers this customer (owner 2026-10-02). Full per rep.
+    if (coveredKeys) {
+      const covered = customerKeys(row.office, row.customer_name, row.phone).some((k) =>
+        coveredKeys.has(k),
+      );
+      const kicker = covered ? null : reportOnlyKicker(row, rules);
+      if (kicker && kicker.points !== 0) {
+        parts.push({ ...kicker, split: false });
+      }
+    }
+    for (const part of parts) {
       const mult = bountyMultiplier(part.category, occurred, bounties);
-      // Volume splits across the reps (board formula); flat bonuses are full
-      // to each rep (owner 2026-10-02).
+      // Volume splits across the reps (board formula); flat bonuses + the
+      // report-only kicker are full to each rep (owner 2026-10-02).
       const perRep = part.split ? (part.points * mult) / row.reps.length : part.points * mult;
       if (perRep === 0) continue;
       for (const rep of row.reps) {
@@ -524,6 +587,22 @@ export function buildCardCandidates(
     }
   }
   return out;
+}
+
+/** Office-scoped customer keys for every block card that earned a kicker in
+ *  the contest month — the "a block card already scored this customer" set
+ *  that buildMoneyCandidates uses to decide which report sales are
+ *  report-only. Same month gate as buildCardCandidates. */
+export function scoredCardKeys(cards: readonly BlockCard[], rules: KombatRules): Set<string> {
+  const month = rules.contest.month;
+  const keys = new Set<string>();
+  for (const c of cards) {
+    if (!inContestMonth(c.card_date, month)) continue;
+    const kicker = cardKicker(c, rules);
+    if (!kicker || kicker.points === 0) continue;
+    for (const k of customerKeys(c.office_location, c.lead_name, c.phone)) keys.add(k);
+  }
+  return keys;
 }
 
 export type ReloadSubitemRow = {
