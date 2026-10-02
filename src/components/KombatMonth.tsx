@@ -52,6 +52,7 @@ import { KombatScorecard } from "@/components/KombatScorecard";
 import { KombatLeaderboard } from "@/components/KombatLeaderboard";
 import { KombatBeltUpFx, type BeltUpFx } from "@/components/KombatBeltUpFx";
 import { ArenaBackdrop } from "@/components/KombatArena";
+import { makeBeeper } from "@/components/intro-fx";
 
 const MONDAY_HOST = "https://tidal-remodeling.monday.com";
 
@@ -883,6 +884,15 @@ function KombatStrikeFx({
       finish();
       return;
     }
+    // Arcade coin + ka-ching the instant points land. Best-effort: the shared
+    // AudioContext starts suspended on iOS and makeBeeper arms its own
+    // one-time tap-to-unlock, so the very first hit may be silent until the
+    // next tap — never throws, never blocks the visuals.
+    const beep = makeBeeper();
+    beep(880, 70, 0, "square"); // coin
+    beep(1175, 90, 70, "square"); // coin, up a fourth
+    beep(1568, 230, 160, "triangle"); // ka-ching shimmer tail
+    if (snap.points >= 10) beep(2093, 190, 300, "triangle"); // big-hit sparkle
     let confettiCancelled = false;
     void import("canvas-confetti").then(({ default: confetti }) => {
       if (confettiCancelled) return;
