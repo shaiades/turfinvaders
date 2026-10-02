@@ -129,10 +129,12 @@ GRANT EXECUTE ON FUNCTION public.get_activity_test_team_stats() TO authenticated
 
 -- 3) Seed — the 10 Google Form responses (submitted 2026-10-01), answers
 --    and scores transcribed VERBATIM from the form's grading. Profile
---    lookup happens AT APPLY TIME by display_name (lower + btrim both
---    sides: the form has 'Curtis Westergard ' with a trailing space); a
---    missing or ambiguous name ABORTS the migration rather than silently
---    skipping or mis-crediting a rep.
+--    lookup happens AT APPLY TIME by display_name (lower + btrim), against
+--    the rep's APP HANDLE where it differs from their real name — the
+--    owner confirmed the three handle mappings 2026-10-01: CurtofWest =
+--    Curtis Westergard, MudaBaka = Alfredo Castro, Sam Corona = Samuel
+--    Corona. A missing or ambiguous handle ABORTS the migration rather
+--    than silently skipping or mis-crediting a rep.
 DO $$
 DECLARE
   r record;
@@ -140,7 +142,7 @@ DECLARE
   v_count int;
 BEGIN
   FOR r IN SELECT * FROM (VALUES
-    ('Jovanny Paz', 23, '{
+    ('Jovanny Paz', 'Jovanny Paz', 23, '{
       "gym_exercise":"no","role_play_weekly":"yes","meditate":"no","game_plan_day":"yes",
       "read_books":"no","audiobooks_between_leads":"yes","meal_prep":"yes","eat_out_every_day":"no",
       "saturday_hungover":"no","appts_15_early":"yes","knock_neighbors_jips":"yes","visualize_goals":"no",
@@ -148,7 +150,7 @@ BEGIN
       "go_home_between_leads":"no","visit_jips_photos":"yes","notes_meetings":"yes","review_numbers_ti":"no",
       "jip_visits_week":"2","visits_per_jip":"2","prev_customers_week":"2"
     }'::jsonb),
-    ('Jonathan Paz', 16, '{
+    ('Jonathan Paz', 'Jonathan Paz', 16, '{
       "gym_exercise":"no","role_play_weekly":"no","meditate":"no","game_plan_day":"no",
       "read_books":"no","audiobooks_between_leads":"no","meal_prep":"yes","eat_out_every_day":"no",
       "saturday_hungover":"no","appts_15_early":"yes","knock_neighbors_jips":"no","visualize_goals":"no",
@@ -156,7 +158,7 @@ BEGIN
       "go_home_between_leads":"no","visit_jips_photos":"yes","notes_meetings":"yes","review_numbers_ti":"no",
       "jip_visits_week":"5+","visits_per_jip":"3","prev_customers_week":"2"
     }'::jsonb),
-    ('Yakup Sancakli', 29, '{
+    ('Yakup Sancakli', 'Yakup Sancakli', 29, '{
       "gym_exercise":"yes","role_play_weekly":"yes","meditate":"yes","game_plan_day":"yes",
       "read_books":"yes","audiobooks_between_leads":"yes","meal_prep":"yes","eat_out_every_day":"no",
       "saturday_hungover":"no","appts_15_early":"yes","knock_neighbors_jips":"yes","visualize_goals":"yes",
@@ -164,7 +166,7 @@ BEGIN
       "go_home_between_leads":"no","visit_jips_photos":"yes","notes_meetings":"yes","review_numbers_ti":"no",
       "jip_visits_week":"5+","visits_per_jip":"5+","prev_customers_week":"2"
     }'::jsonb),
-    ('Josiah Haas', 23, '{
+    ('Josiah Haas', 'Josiah Haas', 23, '{
       "gym_exercise":"yes","role_play_weekly":"no","meditate":"yes","game_plan_day":"yes",
       "read_books":"yes","audiobooks_between_leads":"yes","meal_prep":"yes","eat_out_every_day":"no",
       "saturday_hungover":"no","appts_15_early":"no","knock_neighbors_jips":"yes","visualize_goals":"no",
@@ -172,7 +174,7 @@ BEGIN
       "go_home_between_leads":"no","visit_jips_photos":"yes","notes_meetings":"yes","review_numbers_ti":"no",
       "jip_visits_week":"3","visits_per_jip":"4","prev_customers_week":"4+"
     }'::jsonb),
-    ('Jaxon Heilman', 7, '{
+    ('Jaxon Heilman', 'Jaxon Heilman', 7, '{
       "gym_exercise":"yes","role_play_weekly":"no","meditate":"no","game_plan_day":"no",
       "read_books":"no","audiobooks_between_leads":"no","meal_prep":"yes","eat_out_every_day":"no",
       "saturday_hungover":"no","appts_15_early":"no","knock_neighbors_jips":"no","visualize_goals":"no",
@@ -180,7 +182,7 @@ BEGIN
       "go_home_between_leads":"no","visit_jips_photos":"no","notes_meetings":"no","review_numbers_ti":"no",
       "jip_visits_week":"1","visits_per_jip":"1","prev_customers_week":"0"
     }'::jsonb),
-    ('Bergan Lundak', 15, '{
+    ('Bergan Lundak', 'Bergan Lundak', 15, '{
       "gym_exercise":"yes","role_play_weekly":"no","meditate":"no","game_plan_day":"yes",
       "read_books":"no","audiobooks_between_leads":"no","meal_prep":"no","eat_out_every_day":"yes",
       "saturday_hungover":"no","appts_15_early":"yes","knock_neighbors_jips":"yes","visualize_goals":"no",
@@ -188,7 +190,7 @@ BEGIN
       "go_home_between_leads":"no","visit_jips_photos":"yes","notes_meetings":"yes","review_numbers_ti":"no",
       "jip_visits_week":"1","visits_per_jip":"2","prev_customers_week":"4+"
     }'::jsonb),
-    ('Bradley Crouse', 19, '{
+    ('Bradley Crouse', 'Bradley Crouse', 19, '{
       "gym_exercise":"no","role_play_weekly":"yes","meditate":"no","game_plan_day":"yes",
       "read_books":"yes","audiobooks_between_leads":"yes","meal_prep":"no","eat_out_every_day":"no",
       "saturday_hungover":"no","appts_15_early":"yes","knock_neighbors_jips":"no","visualize_goals":"no",
@@ -196,7 +198,7 @@ BEGIN
       "go_home_between_leads":"no","visit_jips_photos":"yes","notes_meetings":"yes","review_numbers_ti":"yes",
       "jip_visits_week":"1","visits_per_jip":"4","prev_customers_week":"0"
     }'::jsonb),
-    ('Alfredo Castro', 18, '{
+    ('Alfredo Castro', 'MudaBaka', 18, '{
       "gym_exercise":"no","role_play_weekly":"yes","meditate":"yes","game_plan_day":"no",
       "read_books":"no","audiobooks_between_leads":"no","meal_prep":"no","eat_out_every_day":"no",
       "saturday_hungover":"no","appts_15_early":"yes","knock_neighbors_jips":"no","visualize_goals":"no",
@@ -204,7 +206,7 @@ BEGIN
       "go_home_between_leads":"no","visit_jips_photos":"yes","notes_meetings":"yes","review_numbers_ti":"no",
       "jip_visits_week":"2","visits_per_jip":"5+","prev_customers_week":"1"
     }'::jsonb),
-    ('Curtis Westergard ', 29, '{
+    ('Curtis Westergard ', 'CurtofWest', 29, '{
       "gym_exercise":"yes","role_play_weekly":"yes","meditate":"yes","game_plan_day":"yes",
       "read_books":"yes","audiobooks_between_leads":"yes","meal_prep":"no","eat_out_every_day":"no",
       "saturday_hungover":"no","appts_15_early":"yes","knock_neighbors_jips":"yes","visualize_goals":"yes",
@@ -212,7 +214,7 @@ BEGIN
       "go_home_between_leads":"no","visit_jips_photos":"yes","notes_meetings":"yes","review_numbers_ti":"yes",
       "jip_visits_week":"3","visits_per_jip":"5+","prev_customers_week":"4+"
     }'::jsonb),
-    ('Samuel Corona', 24, '{
+    ('Samuel Corona', 'Sam Corona', 24, '{
       "gym_exercise":"no","role_play_weekly":"yes","meditate":"yes","game_plan_day":"yes",
       "read_books":"yes","audiobooks_between_leads":"no","meal_prep":"no","eat_out_every_day":"no",
       "saturday_hungover":"no","appts_15_early":"yes","knock_neighbors_jips":"no","visualize_goals":"yes",
@@ -220,21 +222,21 @@ BEGIN
       "go_home_between_leads":"no","visit_jips_photos":"yes","notes_meetings":"yes","review_numbers_ti":"yes",
       "jip_visits_week":"3","visits_per_jip":"2","prev_customers_week":"2"
     }'::jsonb)
-  ) AS t(form_name, score, answers)
+  ) AS t(form_name, profile_name, score, answers)
   LOOP
     SELECT count(*) INTO v_count
     FROM public.profiles
-    WHERE lower(btrim(display_name)) = lower(btrim(r.form_name));
+    WHERE lower(btrim(display_name)) = lower(btrim(r.profile_name));
 
     IF v_count = 0 THEN
-      RAISE EXCEPTION 'activity_tests seed: no profile named "%"', r.form_name;
+      RAISE EXCEPTION 'activity_tests seed: no profile named "%" (for %)', r.profile_name, r.form_name;
     ELSIF v_count > 1 THEN
-      RAISE EXCEPTION 'activity_tests seed: name "%" is ambiguous (% profiles)', r.form_name, v_count;
+      RAISE EXCEPTION 'activity_tests seed: name "%" is ambiguous (% profiles)', r.profile_name, v_count;
     END IF;
 
     SELECT id INTO v_rep
     FROM public.profiles
-    WHERE lower(btrim(display_name)) = lower(btrim(r.form_name));
+    WHERE lower(btrim(display_name)) = lower(btrim(r.profile_name));
 
     INSERT INTO public.activity_tests (rep_id, taken_on, source, version, answers, score, max_score)
     VALUES (v_rep, date '2026-10-01', 'google_form', 1, r.answers, r.score, 30)
