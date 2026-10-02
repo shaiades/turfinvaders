@@ -303,8 +303,9 @@ export function AppShell({ children }: { children: ReactNode }) {
     ];
   })();
 
-  // The hamburger menu is the management tier's overflow: Invite a Player
-  // (Owners/Admins/Captains), plus the office pages for Owners/Admins.
+  // The hamburger menu is the management tier's overflow: the office pages
+  // for Owners/Admins (Manage Players carries the invite flow), plus the
+  // standalone Invite a Player for Captains, who can't open /users.
   const hasMenu = role === "owner" || role === "office_staff" || role === "captain";
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -646,7 +647,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </nav>
       )}
 
-      {/* Management hamburger drawer + the Invite a Player flow behind it. */}
+      {/* Management hamburger drawer (captains' Invite a Player lives behind it). */}
       {user && hasMenu && <AppMenu open={menuOpen} onOpenChange={setMenuOpen} />}
 
       {/* First-sign-in arcade intro — every role, once per account. Sales

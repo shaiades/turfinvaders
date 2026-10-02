@@ -31,10 +31,13 @@ const itemCls =
 /** The management hamburger: everything a leader reaches occasionally lives
  *  here instead of crowding the top bar. Role-scoped — Owners/Admins get the
  *  office pages (Manage Players, Learn, Daily Wrap moved in from the old
- *  8-item bar), Captains get exactly the one action their tabs don't cover:
- *  Invite a Player. Canvassers and sales reps have no menu (their whole app
- *  is their tab bar). The invite action closes the drawer and opens the
- *  roster picker so the two bottom sheets never stack. */
+ *  8-item bar). Inviting lives INSIDE Manage Players (2026-10-01 combine —
+ *  the menu no longer carries a separate "Invite a Player" for admins);
+ *  Captains can't open /users (owner decision 2026-08-12), so they keep the
+ *  standalone invite button — the one action their tabs don't cover.
+ *  Canvassers and sales reps have no menu (their whole app is their tab
+ *  bar). The invite action closes the drawer and opens the roster picker so
+ *  the two bottom sheets never stack. */
 export function AppMenu({
   open,
   onOpenChange,
@@ -46,7 +49,7 @@ export function AppMenu({
   const [inviteOpen, setInviteOpen] = useState(false);
   const isAdminTier = role === "owner" || role === "office_staff";
   const isOwner = role === "owner";
-  const canInvite = isAdminTier || role === "captain";
+  const captainInvite = role === "captain";
 
   return (
     <>
@@ -62,7 +65,25 @@ export function AppMenu({
             </SheetDescription>
           </SheetHeader>
           <div className="px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 space-y-2 overflow-y-auto">
-            {canInvite && (
+            {/* Admins: one combined entry — Manage Players carries the whole
+                invite flow (roster-picker Invite button + per-player sheet),
+                so it takes the invite's old highlighted top slot. */}
+            {isAdminTier && (
+              <Link
+                to="/users"
+                onClick={() => onOpenChange(false)}
+                className="w-full flex items-center gap-3 rounded-md border border-neon/50 bg-neon/10 px-4 py-3 min-h-12 text-left text-xs font-display uppercase tracking-widest text-neon hover:bg-neon/20 transition-colors"
+              >
+                <Users className="w-4 h-4 shrink-0" />
+                <span className="flex-1">
+                  Manage Players
+                  <span className="block normal-case font-sans tracking-normal text-[11px] text-muted-foreground mt-0.5">
+                    Everyone in one place — invites &amp; logins, roles, vans, cleanup
+                  </span>
+                </span>
+              </Link>
+            )}
+            {captainInvite && (
               <button
                 type="button"
                 onClick={() => {
@@ -195,17 +216,6 @@ export function AppMenu({
               </Link>
             )}
             {isAdminTier && (
-              <Link to="/users" onClick={() => onOpenChange(false)} className={itemCls}>
-                <Users className="w-4 h-4 shrink-0" />
-                <span className="flex-1">
-                  Manage Players
-                  <span className="block normal-case font-sans tracking-normal text-[11px] text-muted-foreground mt-0.5">
-                    Everyone in one place — roles, vans, invites &amp; logins, cleanup
-                  </span>
-                </span>
-              </Link>
-            )}
-            {isAdminTier && (
               <Link to="/learn" onClick={() => onOpenChange(false)} className={itemCls}>
                 <GraduationCap className="w-4 h-4 shrink-0" />
                 <span className="flex-1">Learn</span>
@@ -221,7 +231,7 @@ export function AppMenu({
         </SheetContent>
       </Sheet>
 
-      {canInvite && <InvitePlayerSheet open={inviteOpen} onOpenChange={setInviteOpen} />}
+      {captainInvite && <InvitePlayerSheet open={inviteOpen} onOpenChange={setInviteOpen} />}
     </>
   );
 }
