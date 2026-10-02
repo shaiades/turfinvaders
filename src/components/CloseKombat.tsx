@@ -258,6 +258,14 @@ function CloseKombatInner({
     lever: "closePct" | "sitPct";
     seq: number;
   } | null>(null);
+  // Expire the pulse after it plays — a remounted Goals tab must never
+  // replay a stale seq.
+  const leverFlashTimer = useRef(0);
+  const pulseLever = (lever: "closePct" | "sitPct") => {
+    setLeverFlash((f) => ({ lever, seq: (f?.seq ?? 0) + 1 }));
+    window.clearTimeout(leverFlashTimer.current);
+    leverFlashTimer.current = window.setTimeout(() => setLeverFlash(null), 1300);
+  };
 
   // --- Range engine: Day / Week (Mon–Sun) / Month / Year, all LA-calendar ---
   const [tab, setTab] = useState<RangeTab>("day");
@@ -1927,7 +1935,7 @@ function CloseKombatInner({
               userId={user?.id}
               displayName={displayName}
               isPreview={isPreview}
-              onLeverPulse={(lever) => setLeverFlash((f) => ({ lever, seq: (f?.seq ?? 0) + 1 }))}
+              onLeverPulse={pulseLever}
             />
           </TabsContent>
         )}

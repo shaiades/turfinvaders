@@ -1,0 +1,1 @@
+SELECT p.id, p.display_name, p.is_active FROM public.profiles p JOIN public.user_roles ur ON ur.user_id=p.id AND ur.role='sales_rep' ORDER BY p.display_name;

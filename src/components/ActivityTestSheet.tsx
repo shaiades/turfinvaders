@@ -141,6 +141,11 @@ export function ActivityTestSheet({
   const [revealTarget, setRevealTarget] = useState(0);
   const [rankUpLabel, setRankUpLabel] = useState<string | null>(null);
   const [personalBest, setPersonalBest] = useState(false);
+  // Latched at submit time: the post-insert invalidation refetches the
+  // panel's takes, which rewrites the previousScore prop to the JUST
+  // SUBMITTED score mid-reveal — a live comparison would call every
+  // improved take "flat or lower".
+  const [flatOrLower, setFlatOrLower] = useState(false);
 
   const advanceTimer = useRef(0);
   const revealTimer = useRef(0);
@@ -156,6 +161,7 @@ export function ActivityTestSheet({
     setFinalScore(0);
     setRankUpLabel(null);
     setPersonalBest(false);
+    setFlatOrLower(false);
     lastBeeped.current = 0;
     if (review) return;
     const draft = readDraft(userId);
@@ -233,6 +239,7 @@ export function ActivityTestSheet({
     const isBest = bestBefore != null && score > bestBefore;
     setRankUpLabel(crossed ? tier.label : null);
     setPersonalBest(isBest);
+    setFlatOrLower(previousScore != null && score <= previousScore);
     if (isBest) rewardToast("NEW PERSONAL BEST", { description: `${score}/${MAX_SCORE}` });
     else if (previousScore == null) toast("Logged — your fighter card is live");
     else if (score <= previousScore) toast("Logged — your card is current");
@@ -251,8 +258,16 @@ export function ActivityTestSheet({
   const submit = () => {
     if (!allAnswered || insert.isPending || isPreview) return;
     insert.mutate(answers, {
-      onSuccess: (score) => {
+      onSuccess: ({ score, deduped }) => {
         clearDraft(userId);
+        if (deduped) {
+          // The UNIQUE backstop caught a same-day double submit — the
+          // persisted take stands; celebrating this one would present an
+          // unsaved score as logged.
+          toast("Already logged today — your saved take stands");
+          onOpenChange(false);
+          return;
+        }
         beginReveal(score);
       },
       onError: (e: Error) => toast.error(e.message),
@@ -260,7 +275,6 @@ export function ActivityTestSheet({
   };
 
   const q = idx < TOTAL ? QUIZ[idx] : null;
-  const flatOrLower = phase === "reveal" && previousScore != null && finalScore <= previousScore;
   const revealTier = tierForScore(finalScore);
 
   return (
@@ -324,7 +338,7 @@ export function ActivityTestSheet({
                   <ChevronLeft className="h-4 w-4" />
                 </button>
                 <span className="font-mono text-xs tabular-nums text-muted-foreground">
-                  ROUND {Math.min(answered + 1, TOTAL)} / {TOTAL}
+                  ROUND {Math.min(idx + 1, TOTAL)} / {TOTAL}
                 </span>
               </div>
               {/* The rail: red while fighting, gold the moment the score lands. */}

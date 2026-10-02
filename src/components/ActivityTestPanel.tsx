@@ -216,7 +216,10 @@ export function ActivityTestPanel({
   // Field receipts — the rep's OWN visit log only (never readable in preview).
   const jipQuery = useMyJipVisitsThisWeek(userId, !isPreview);
   const said = latest ? claimedJipVisitsPerWeek(latest.answers) : null;
-  const logged = jipQuery.data?.length ?? null;
+  // DISTINCT jobs, not job×day rows — the claim is "how many JOBS do you
+  // visit each week" (times-per-job is the separate, untracked question),
+  // and one job visited three days must not count as three.
+  const logged = jipQuery.data ? new Set(jipQuery.data.map((r) => r.monday_item_id)).size : null;
 
   // Purpose strip gating: flag on AND (preview placeholder OR own submitted).
   const purposeConfigQuery = usePurposeConfig(true);
@@ -263,13 +266,18 @@ export function ActivityTestPanel({
   const [barMoved, setBarMoved] = useState<{ old: number; now: number } | null>(null);
   useEffect(() => {
     const best = stats?.best_score;
-    if (!userId || best == null) return;
+    // Own-account only: in View As, userId is the ADMIN's — reading or
+    // advancing their last-seen-best during a preview would be a lie.
+    if (isPreview || !userId || best == null) {
+      if (isPreview) setBarMoved(null);
+      return;
+    }
     const key = `ti_activity_lastbest:${userId}`;
     const raw = tryGet(key);
     const old = raw == null ? null : Number(raw);
     if (old != null && Number.isFinite(old) && best > old) setBarMoved({ old, now: best });
     if (old == null || !Number.isFinite(old) || best > old) trySet(key, String(best));
-  }, [userId, stats?.best_score]);
+  }, [isPreview, userId, stats?.best_score]);
 
   const { display: scoreDisplay } = useCountUp(latest?.score ?? 0, reduced);
 
@@ -365,7 +373,7 @@ export function ActivityTestPanel({
           22 questions · 3 minutes. Your fighter card builds itself.
         </p>
         {canWrite ? (
-          <span className="pulse-glow-wrapper w-full max-w-xs">
+          <span className={cn("w-full max-w-xs", !reduced && "pulse-glow-wrapper")}>
             <button
               type="button"
               onClick={openRetake}

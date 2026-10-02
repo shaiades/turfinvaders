@@ -124,9 +124,12 @@ export function useTrailingCrmByName(names: readonly string[], enabled = true) {
   const trailingStart = addDaysISO(week.weekStartISO, -14);
   const trailingEnd = addDaysISO(week.weekStartISO, -1);
   const nameKey = names.join("|");
+  const isError = cardsQuery.isError;
   return useMemo(() => {
     const cards = cardsQuery.data;
-    if (!cards) return null;
+    // map: null while loading OR on error — isError tells the two apart so
+    // a failed fetch never renders as a forever-"Loading…" state.
+    if (!cards) return { map: null, isError } as const;
     const { reps } = aggregateCloseKombat(cards, { start: trailingStart, end: trailingEnd });
     const pool = reps.map((r) => r.rep);
     const map = new Map<string, { sold: number; revenue: number; closePct: number | null }>();
@@ -136,8 +139,8 @@ export function useTrailingCrmByName(names: readonly string[], enabled = true) {
       const row = matcher.matched ? reps.find((r) => matcher.isMe(r.rep)) : undefined;
       if (row) map.set(name, { sold: row.sold, revenue: row.revenue, closePct: row.closePct });
     }
-    return map;
-  }, [cardsQuery.data, nameKey, trailingStart, trailingEnd]);
+    return { map, isError: false } as const;
+  }, [cardsQuery.data, nameKey, trailingStart, trailingEnd, isError]);
 }
 
 export function usePurposeScoreboard(

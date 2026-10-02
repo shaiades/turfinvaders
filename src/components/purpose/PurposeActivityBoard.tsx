@@ -148,7 +148,7 @@ export function PurposeActivityBoard({ rows }: { rows: ActivityBoardRep[] }) {
   const names = useMemo(() => rows.map((r) => r.displayName), [rows]);
   // Same ["block_cards", …] key the page's week column already fetches —
   // this aggregation is served warm, zero extra network.
-  const crm = useTrailingCrmByName(names, true);
+  const { map: crm, isError: crmError } = useTrailingCrmByName(names, true);
 
   const takes = useMemo(() => all.data?.takes ?? [], [all.data]);
   const missingMigration = all.data?.missingMigration ?? false;
@@ -526,7 +526,11 @@ export function PurposeActivityBoard({ rows }: { rows: ActivityBoardRep[] }) {
                 </div>
               </div>
 
-              {crm === null ? (
+              {crmError ? (
+                <p className="mt-3 text-sm text-[var(--purpose-ink-dim)]">
+                  Couldn't load the trailing board numbers. Try again in a moment.
+                </p>
+              ) : crm === null ? (
                 <p className="mt-3 text-sm text-[var(--purpose-ink-dim)]">
                   Loading the trailing board numbers…
                 </p>

@@ -324,7 +324,12 @@ function FunnelTile({
   const reduced = usePrefersReducedMotion();
   const [ring, setRing] = useState<number | null>(null);
   useEffect(() => {
-    if (highlight === undefined) return;
+    // Clear (don't just skip) when the pulse expires upstream, so a stale
+    // seq can't leave a reduced-motion ring stuck or replay on remount.
+    if (highlight === undefined) {
+      setRing(null);
+      return;
+    }
     setRing(highlight);
     const id = window.setTimeout(() => setRing(null), 1200);
     return () => window.clearTimeout(id);

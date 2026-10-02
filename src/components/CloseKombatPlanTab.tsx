@@ -27,12 +27,12 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel, ArcadeSkeleton, NeonBar } from "@/components/arcade";
 import { useWeeklyPlan } from "@/hooks/useWeeklyPlan";
-import { useActivityTests } from "@/hooks/useActivityTests";
+import { useActivityTests, useMyJipVisitsThisWeek } from "@/hooks/useActivityTests";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { claimedJipVisitsPerWeek } from "@/lib/activity-test";
 import { rewardToast } from "@/lib/reward-toast";
 import { getProductionSyncInfo } from "@/lib/production-jobs.functions";
-import { addDaysISO, laDateTimeLabel, laTodayISO } from "@/lib/dates";
+import { addDaysISO, laDateTimeLabel, laTodayISO, laWeekStartISO } from "@/lib/dates";
 import {
   SUPPRESSED_ASKS,
   type AssembledJob,
@@ -129,7 +129,12 @@ export function CloseKombatPlanTab({
       });
       if (error && error.code !== "23505") throw error; // double-tap = already logged
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["rep_job_visits", planWeekStart, userId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["rep_job_visits", planWeekStart, userId] });
+      // The Field Receipts gauge + JIP Patrol count the same table under
+      // their own week-keyed family — a logged visit must reach them too.
+      qc.invalidateQueries({ queryKey: ["rep_job_visits_week"] });
+    },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Couldn't log the visit"),
   });
 
@@ -198,14 +203,7 @@ export function CloseKombatPlanTab({
       )}
 
       {/* JIP Patrol — Power Level claim vs this week's field receipts */}
-      {canVisit && userId !== null && (
-        <JipPatrolStrip
-          userId={userId}
-          planWeekStart={planWeekStart}
-          todayISO={todayISO}
-          visits={visitsQuery.data}
-        />
-      )}
+      {canVisit && userId !== null && <JipPatrolStrip userId={userId} todayISO={todayISO} />}
 
       {/* Mon–Sun agenda */}
       <ArcadePanel
@@ -322,36 +320,28 @@ function LastUpdated({
   );
 }
 
-/** "JIP PATROL" — the rep's Power Level claim ("I visit my JIPs N times a
- *  week") held against this week's logged visit rows, as a pip rail. Only
+/** "JIP PATROL" — the rep's Power Level claim ("I visit N jobs in progress
+ *  a week") held against this week's logged visit rows, as a pip rail. Only
  *  the signed-in rep ever sees it (parent gates on canVisit), so their own
- *  uid IS the test subject — no useActivitySubject resolution needed. Every
- *  number traces to a row: pips = rep_job_visits in the plan week, the
- *  target = the latest take's answer. Loading, missing migration, or a
- *  take with no claim → nothing, never a fabricated 0. */
-function JipPatrolStrip({
-  userId,
-  planWeekStart,
-  todayISO,
-  visits,
-}: {
-  userId: string;
-  planWeekStart: string;
-  todayISO: string;
-  visits: { monday_item_id: string; visited_on: string }[] | undefined;
-}) {
+ *  uid IS the test subject — no useActivitySubject resolution needed. The
+ *  receipts window is the CURRENT Mon–Sun LA week (laWeekStartISO, the same
+ *  cache the Goals gauge reads), deliberately NOT the plan clock: on an LA
+ *  Sunday planWeekStart flips to the upcoming Monday, which would zero this
+ *  rail while the linked gauge still counts Sunday's week. Counting is by
+ *  DISTINCT job — the claim is jobs per week, not job×day rows. Loading,
+ *  missing migration, or a take with no claim → nothing, never a
+ *  fabricated 0. */
+function JipPatrolStrip({ userId, todayISO }: { userId: string; todayISO: string }) {
   const testsQuery = useActivityTests(userId);
+  const visitsWeekQuery = useMyJipVisitsThisWeek(userId, true);
+  const visits = visitsWeekQuery.data;
   const reduced = usePrefersReducedMotion();
   const [kaching, setKaching] = useState(false);
   const prevLogged = useRef<number | null>(null);
 
-  const weekEnd = addDaysISO(planWeekStart, 6);
-  const weekRows = useMemo(
-    () => (visits ?? []).filter((v) => v.visited_on >= planWeekStart && v.visited_on <= weekEnd),
-    [visits, planWeekStart, weekEnd],
-  );
-  const logged = weekRows.length;
-  const hasToday = weekRows.some((v) => v.visited_on === todayISO);
+  const receiptsWeekStart = laWeekStartISO();
+  const logged = useMemo(() => new Set((visits ?? []).map((v) => v.monday_item_id)).size, [visits]);
+  const hasToday = (visits ?? []).some((v) => v.visited_on === todayISO);
 
   const takes = testsQuery.data?.takes;
   const latest = takes?.[0];
@@ -365,7 +355,7 @@ function JipPatrolStrip({
     prevLogged.current = logged;
     if (prev === null || !(prev < said && logged >= said)) return;
     try {
-      const key = `ti_jip_backed:${userId}:${planWeekStart}`;
+      const key = `ti_jip_backed:${userId}:${receiptsWeekStart}`;
       if (localStorage.getItem(key)) return;
       localStorage.setItem(key, "1");
     } catch {
@@ -375,7 +365,7 @@ function JipPatrolStrip({
     rewardToast("FIELD RECEIPTS", {
       description: "Logged visits just backed your Power Level claim.",
     });
-  }, [visits, said, logged, userId, planWeekStart, reduced]);
+  }, [visits, said, logged, userId, receiptsWeekStart, reduced]);
   useEffect(() => {
     if (!kaching) return;
     const t = window.setTimeout(() => setKaching(false), 2600); // 1.2s × 2 beats
@@ -411,7 +401,7 @@ function JipPatrolStrip({
         <>
           <span
             className="min-w-0 flex-1 flex items-center gap-1"
-            aria-label={`${logged} of ${target} claimed visits logged this week`}
+            aria-label={`${logged} of ${target} claimed jobs visited this week`}
           >
             {Array.from({ length: pipCount }, (_, i) => {
               const isFilled = i < filled;

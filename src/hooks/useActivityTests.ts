@@ -145,9 +145,10 @@ export function useInsertActivityTest(userId: string | undefined, isPreview: boo
       // previewed rep's answers under the ADMIN's own uid.
       if (isPreview || !userId) throw new Error("Retake is disabled while previewing.");
       const { score } = scoreActivityTest(answers);
+      const takenOn = laTodayISO();
       const { error } = await purposeTable("activity_tests").insert({
         rep_id: userId,
-        taken_on: laTodayISO(),
+        taken_on: takenOn,
         source: "in_app",
         version: TEST_VERSION,
         answers,
@@ -155,7 +156,20 @@ export function useInsertActivityTest(userId: string | undefined, isPreview: boo
         max_score: MAX_SCORE,
       });
       if (error && (error as { code?: string }).code !== "23505") throw error;
-      return score;
+      if (error) {
+        // Same-day double submit — the FIRST take stands (history is
+        // immutable). Return the persisted score so the UI never presents
+        // an unsaved sheet as logged.
+        const { data, error: readErr } = await purposeTable("activity_tests")
+          .select("score")
+          .eq("rep_id", userId)
+          .eq("taken_on", takenOn)
+          .eq("source", "in_app")
+          .maybeSingle();
+        if (readErr) throw readErr;
+        return { score: (data as { score: number } | null)?.score ?? score, deduped: true };
+      }
+      return { score, deduped: false };
     },
     onSuccess: () => {
       if (userId) qc.invalidateQueries({ queryKey: activityTestsKey(userId) });
@@ -174,18 +188,27 @@ export function useAllActivityTests(enabled: boolean) {
     staleTime: 60_000,
     retry: false,
     queryFn: async () => {
-      const { data, error } = await purposeTable("activity_tests")
-        .select("*")
-        .order("taken_on", { ascending: false })
-        .order("created_at", { ascending: false });
-      if (error) {
-        if (isMissingMigration(error)) return { takes: [], missingMigration: true } as const;
-        throw error;
+      // Paged: PostgREST caps unranged selects at 1000 rows, and a roster
+      // retaking weekly outgrows that within a year — a silent cap would
+      // start marking tested reps "Not taken".
+      const PAGE = 1000;
+      const takes: ActivityTestRow[] = [];
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await purposeTable("activity_tests")
+          .select("*")
+          .order("taken_on", { ascending: false })
+          .order("created_at", { ascending: false })
+          .range(from, from + PAGE - 1);
+        if (error) {
+          if (from === 0 && isMissingMigration(error))
+            return { takes: [], missingMigration: true } as const;
+          throw error;
+        }
+        const rows = (data ?? []) as unknown as ActivityTestRow[];
+        takes.push(...rows);
+        if (rows.length < PAGE) break;
       }
-      return {
-        takes: (data ?? []) as unknown as ActivityTestRow[],
-        missingMigration: false,
-      } as const;
+      return { takes, missingMigration: false } as const;
     },
   });
 }
