@@ -864,3 +864,97 @@ export const fmtPts = (n: number): string => {
   const r = Math.round(n * 10) / 10;
   return Number.isInteger(r) ? String(r) : r.toFixed(1);
 };
+
+// ── Scorecard (the "move list": what every point is worth) ───────────────
+// Built straight from the live rules so the rep-facing card can never drift
+// from config — if the owner retunes a weight in contest_rules, the card
+// moves with it. A move with a 0 weight is dropped (e.g. Job Walk at the
+// default). `per` describes the trigger; `note` carries a cap/condition.
+
+export type ScorecardMove = { label: string; points: number; per: string; note?: string };
+export type ScorecardGroup = {
+  key: "money" | "activity" | "proofs";
+  title: string;
+  moves: ScorecardMove[];
+};
+
+export function buildScorecard(rules: KombatRules): ScorecardGroup[] {
+  const m = rules.money;
+  const a = rules.activity;
+  const p = rules.proofs;
+  const money: ScorecardMove[] = [
+    { label: "Written volume", points: m.per_1000, per: "per $1,000 sold" },
+    { label: "Sale", points: m.count_kickers.sale, per: "each sale" },
+    { label: "Reload", points: m.count_kickers.reload, per: "each reload" },
+    { label: "Upsell", points: m.count_kickers.upsell, per: "each upsell" },
+    { label: "Self Gen", points: m.source_kickers.self_gen, per: "your own lead" },
+    { label: "Rep Reset", points: m.source_kickers.rep_reset, per: "rep reset" },
+    { label: "Job Walk", points: m.job_walk_kicker, per: "job walk" },
+    { label: "Marketing Home", points: m.marketing_home, per: "marketing home" },
+    { label: "Advantage+", points: m.advantage_plus, per: "advantage+ member" },
+  ].filter((x) => x.points !== 0);
+  const activity: ScorecardMove[] = [
+    { label: "Sit", points: a.sit, per: "PM or sold on a block card" },
+    { label: "Reload pitch", points: a.reload_pitch, per: "reload sat (sold/PM)" },
+    ...(a.self_gen_pitch_enabled && a.self_gen_pitch !== 0
+      ? [{ label: "Self gen pitched", points: a.self_gen_pitch, per: "your self-gen lead sat" }]
+      : []),
+  ].filter((x) => x.points !== 0);
+  const proofs: ScorecardMove[] = [
+    { label: "Video testimonial", points: p.weights.testimonial, per: "customer on camera" },
+    { label: "Google review", points: p.weights.google_review, per: "names you + link" },
+    { label: "Referral that sits", points: p.weights.referral_sit, per: "referral sat" },
+    {
+      label: "Before/after set",
+      points: p.weights.before_after,
+      per: "job photos",
+      note: `${p.caps.before_after_per_month}/mo`,
+    },
+    {
+      label: "Role play video",
+      points: p.weights.role_play,
+      per: "pitch/objection rep",
+      note: `${p.caps.role_play_per_week}/wk`,
+    },
+    {
+      label: "Gym check-in",
+      points: p.weights.gym_checkin,
+      per: "stay sharp",
+      note: `${p.caps.gym_per_day}/day · ${p.caps.gym_per_week}/wk`,
+    },
+  ].filter((x) => x.points !== 0);
+  return [
+    { key: "money", title: "Money", moves: money },
+    { key: "activity", title: "Activity", moves: activity },
+    {
+      key: "proofs",
+      title: `Proof (owner/manager approves · ${p.caps.total_per_month}/mo cap)`,
+      moves: proofs,
+    },
+  ];
+}
+
+/** Days remaining in the contest (today inclusive → last day of the contest
+ *  month). Zero once the month is over. Pure ISO date math — the countdown
+ *  reads as "N days left" without a ticking clock. */
+export function contestDaysLeft(rules: KombatRules, todayISO: string = laTodayISO()): number {
+  const end = addDaysISO(nextMonthStartISO(rules.contest.month), -1);
+  if (todayISO > end) return 0;
+  // Count days from today to end inclusive.
+  let n = 0;
+  let cur = todayISO < rules.contest.month ? rules.contest.month : todayISO;
+  while (cur <= end) {
+    n += 1;
+    cur = addDaysISO(cur, 1);
+  }
+  return n;
+}
+
+/** The belt color token for a tier key — gold crown, descending metals. */
+export const BELT_ACCENT: Record<string, string> = {
+  king: "var(--kombat-gold)",
+  gold: "var(--kombat-gold)",
+  silver: "var(--muted-foreground)",
+  bronze: "var(--kombat-red)",
+  steakhouse: "var(--warning)",
+};
