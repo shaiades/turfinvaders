@@ -96,22 +96,32 @@ function PodiumCard({
   return (
     <div
       className={
-        "min-w-0 rounded-md border text-center px-2 " + pad + (me ? " ring-1 ring-kombat-gold" : "")
+        "min-w-0 rounded-md border text-center px-2 " +
+        pad +
+        (place === 0 ? " kombat-champion" : "") +
+        (me ? " ring-1 ring-kombat-gold" : "")
       }
       style={{
         borderColor: `color-mix(in oklab, ${accent} 55%, transparent)`,
         background: `color-mix(in oklab, ${accent} 10%, transparent)`,
-        boxShadow: place === 0 ? `0 0 22px -6px ${accent}` : undefined,
       }}
     >
-      <div className="text-lg leading-none">{place === 0 ? "👑" : place === 1 ? "🥈" : "🥉"}</div>
+      <div className="text-lg leading-none">
+        {place === 0 ? <span className="kombat-crown">👑</span> : place === 1 ? "🥈" : "🥉"}
+      </div>
       <div
         className="mt-1 truncate font-display text-[10px] uppercase tracking-widest"
         style={{ color: accent }}
       >
         {firstName(total.rep_name)}
       </div>
-      <div className="mt-1 font-mono tabular-nums text-lg font-bold" style={{ color: accent }}>
+      <div
+        className={
+          "mt-1 font-mono tabular-nums text-lg font-bold" +
+          (place === 0 ? " kombat-score-flare" : "")
+        }
+        style={{ color: accent }}
+      >
         {fmtPts(pts.display)}
       </div>
       {belt && (
@@ -151,8 +161,10 @@ function LadderRow({
       className={
         "flex items-center gap-3 rounded-md border px-3 py-2.5 " +
         (me
-          ? "border-kombat-gold/60 bg-[color-mix(in_oklab,var(--kombat-gold)_10%,transparent)]"
-          : "border-border")
+          ? "border-kombat-gold/60 bg-[color-mix(in_oklab,var(--kombat-gold)_10%,transparent)] kombat-you"
+          : "border-border") +
+        // One-shot gold ping the instant this rep's total ticks up.
+        (pts.bump ? " kombat-rank-flash" : "")
       }
     >
       <span className={"w-6 shrink-0 text-right font-display text-xs tabular-nums " + rankColor}>
