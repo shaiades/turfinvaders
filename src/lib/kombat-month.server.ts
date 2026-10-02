@@ -27,6 +27,7 @@ import {
   buildCardCandidates,
   buildMoneyCandidates,
   buildReloadPitchCandidates,
+  scoredCardKeys,
   mergeKombatRules,
   type KombatBounty,
   type KombatReportRow,
@@ -109,7 +110,7 @@ export async function runKombatRecompute(): Promise<KombatRecomputeSummary> {
     supabaseAdmin
       .from("report_sales")
       .select(
-        "monday_item_id, board_id, office, report_month, customer_name, date_sold, sale_amt, cancel_amt, wcc, sales_count, reps, source, marketing_home, advantage_plus",
+        "monday_item_id, board_id, office, report_month, customer_name, phone, date_sold, sale_amt, cancel_amt, wcc, sales_count, reps, source, marketing_home, advantage_plus",
       )
       .eq("report_month", month)
       .order("monday_item_id")
@@ -136,7 +137,11 @@ export async function runKombatRecompute(): Promise<KombatRecomputeSummary> {
   )) as unknown as BlockCard[];
 
   const parentRepsById = new Map(reportRows.map((r) => [r.monday_item_id, r.reps]));
-  const money = buildMoneyCandidates(reportRows, rules, bounties, today);
+  // Report-only sales (no block card) carry their own kicker (owner
+  // 2026-10-02); the covered-keys set stops it double-counting a sale a
+  // block card already scored.
+  const coveredKeys = scoredCardKeys(cards, rules);
+  const money = buildMoneyCandidates(reportRows, rules, bounties, today, coveredKeys);
   const candidates: LedgerCandidate[] = [
     ...money.candidates,
     ...buildCardCandidates(cards, rules, bounties, today),
