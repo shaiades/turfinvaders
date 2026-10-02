@@ -69,6 +69,7 @@ import { CloseKombatPlanTab, PlanTabBadge } from "@/components/CloseKombatPlanTa
 import { CloseKombatGoalsTab } from "@/components/CloseKombatGoalsTab";
 import { ActivityTestPanel } from "@/components/ActivityTestPanel";
 import { CloseKombatLearnTab } from "@/components/CloseKombatLearnTab";
+import { KombatMonthTab } from "@/components/KombatMonth";
 import { toast } from "sonner";
 import { rewardToast } from "@/lib/reward-toast";
 import { useCountUp } from "@/hooks/useCountUp";
@@ -100,7 +101,7 @@ import {
 // alongside the existing stats screen). Separate from RangeTab below — that
 // one picks the day/week/month/year window, this one picks which SECTION of
 // the page is showing.
-export const CLOSE_KOMBAT_PAGE_TABS = ["stats", "plan", "money", "goals", "learn"] as const;
+export const CLOSE_KOMBAT_PAGE_TABS = ["stats", "plan", "kombat", "money", "goals", "learn"] as const;
 export type CloseKombatPageTab = (typeof CLOSE_KOMBAT_PAGE_TABS)[number];
 export const isCloseKombatPageTab = (t: unknown): t is CloseKombatPageTab =>
   (CLOSE_KOMBAT_PAGE_TABS as readonly unknown[]).includes(t);
@@ -1053,7 +1054,10 @@ function CloseKombatInner({
               combined and the Jan–Apr books carry no office) — showing the
               pills there would promise a filter that doesn't apply. The Plan
               tab is the rep's own jobs regardless of office, same rule. */}
-          {!(pageTab === "stats" && isYearTab) && pageTab !== "plan" && <OfficeFilterToggle />}
+          {/* Kombat Month is company-wide (SD + OC, one contest) — no pills. */}
+          {!(pageTab === "stats" && isYearTab) && pageTab !== "plan" && pageTab !== "kombat" && (
+            <OfficeFilterToggle />
+          )}
         </div>
       </div>
 
@@ -1071,6 +1075,9 @@ function CloseKombatInner({
                 <PlanTabBadge displayName={displayName} />
               </KombatTab>
             )}
+            {/* Kombat Month (owner, 2026-10-02): the October contest — every
+                Close Kombat role sees it; admins get the tools section. */}
+            <KombatTab value="kombat">Kombat</KombatTab>
             {isRep && <KombatTab value="money">Money</KombatTab>}
             {isRep && <KombatTab value="goals">Goals</KombatTab>}
             <KombatTab value="learn">Learn</KombatTab>
@@ -1903,6 +1910,15 @@ function CloseKombatInner({
             />
           </TabsContent>
         )}
+
+        <TabsContent value="kombat" className="mt-4">
+          <KombatMonthTab
+            userId={user?.id ?? null}
+            displayName={displayName}
+            isAdmin={isAdmin}
+            isPreview={isPreview}
+          />
+        </TabsContent>
 
         {isRep && (
           <TabsContent value="money" className="mt-4">

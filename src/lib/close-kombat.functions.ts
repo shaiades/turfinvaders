@@ -58,5 +58,17 @@ export const syncBlockCards = createServerFn({ method: "POST" })
     }
 
     const { syncBoardsToBlockCards } = await import("@/lib/block-cards.server");
-    return syncBoardsToBlockCards(data);
+    const summary = await syncBoardsToBlockCards(data);
+    // Kombat Month ledger recompute (owner, 2026-10-02): fresh report rows
+    // may mint, lock or cancel contest points. Best-effort — a ledger
+    // hiccup must never fail the sync the office just ran.
+    try {
+      const { runKombatRecompute } = await import("@/lib/kombat-month.server");
+      await runKombatRecompute();
+    } catch (err) {
+      summary.wcc.errors.push(
+        `kombat ledger recompute: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    return summary;
   });
