@@ -51,6 +51,7 @@ import { KombatBeltLadder } from "@/components/KombatBeltLadder";
 import { KombatScorecard } from "@/components/KombatScorecard";
 import { KombatLeaderboard } from "@/components/KombatLeaderboard";
 import { KombatBeltUpFx, type BeltUpFx } from "@/components/KombatBeltUpFx";
+import { ArenaBackdrop } from "@/components/KombatArena";
 
 const MONDAY_HOST = "https://tidal-remodeling.monday.com";
 
@@ -310,114 +311,135 @@ export function KombatMonthTab({
   }
 
   return (
-    <div className="space-y-4 md:space-y-6">
-      {fx && <KombatStrikeFx key={fx.seq} fx={fx} onDone={() => setFx(null)} />}
-      {beltFx && (
-        <KombatBeltUpFx key={`belt-${beltFx.seq}`} fx={beltFx} onDone={() => setBeltFx(null)} />
-      )}
+    <div className="relative">
+      {/* Arena lights — drifting red/gold spotlights behind the whole tab. */}
+      <ArenaBackdrop />
+      <div className="relative z-10 space-y-4 md:space-y-6">
+        {fx && <KombatStrikeFx key={fx.seq} fx={fx} onDone={() => setFx(null)} />}
+        {beltFx && (
+          <KombatBeltUpFx key={`belt-${beltFx.seq}`} fx={beltFx} onDone={() => setBeltFx(null)} />
+        )}
 
-      {/* Bounty banners */}
-      {activeBounties.map((b) => (
-        <div
-          key={b.id}
-          className="arcade-card border-kombat-gold/40 px-4 py-3 text-sm flex flex-wrap items-center gap-x-3 gap-y-1"
+        {/* Bounty banners */}
+        {activeBounties.map((b) => (
+          <div
+            key={b.id}
+            className="arcade-card border-kombat-gold/40 px-4 py-3 text-sm flex flex-wrap items-center gap-x-3 gap-y-1"
+          >
+            <span className="font-display text-[10px] uppercase tracking-widest text-kombat-gold">
+              Bounty live
+            </span>
+            <span className="font-semibold">{b.label}</span>
+            <span className="text-muted-foreground">
+              ×{b.multiplier} · through {b.ends_on}
+            </span>
+          </div>
+        ))}
+
+        {/* ① THE BELT — what you're fighting for + where you stand + the rules */}
+        <KombatBeltLadder
+          rules={rules}
+          loading={ledgerQuery.isPending}
+          matched={matcher.matched !== null}
+          myTotals={myTotals}
+          written={written}
+          eligibility={eligibility}
+          canSubmit={!!userId && !isPreview}
+          onSubmitProof={() => setProofOpen(true)}
+        />
+
+        {/* ② THE SCORECARD — exactly what everything is worth */}
+        <KombatScorecard rules={rules} />
+
+        {/* ③ EVERYONE — the competition */}
+        <KombatLeaderboard
+          totals={totals}
+          rules={rules}
+          matcher={matcher}
+          loading={ledgerQuery.isPending}
+        />
+
+        {/* Live feed */}
+        <ArcadePanel
+          title="Fight feed"
+          faction="kombat"
+          status="good"
+          headline={
+            <span className="flex items-center gap-1.5 font-display text-[10px] uppercase tracking-widest text-victory">
+              <span className="kombat-live-dot inline-block h-1.5 w-1.5 rounded-full bg-victory" />
+              Live
+            </span>
+          }
         >
-          <span className="font-display text-[10px] uppercase tracking-widest text-kombat-gold">
-            Bounty live
-          </span>
-          <span className="font-semibold">{b.label}</span>
-          <span className="text-muted-foreground">
-            ×{b.multiplier} · through {b.ends_on}
-          </span>
-        </div>
-      ))}
-
-      {/* ① THE BELT — what you're fighting for + where you stand + the rules */}
-      <KombatBeltLadder
-        rules={rules}
-        loading={ledgerQuery.isPending}
-        matched={matcher.matched !== null}
-        myTotals={myTotals}
-        written={written}
-        eligibility={eligibility}
-        canSubmit={!!userId && !isPreview}
-        onSubmitProof={() => setProofOpen(true)}
-      />
-
-      {/* ② THE SCORECARD — exactly what everything is worth */}
-      <KombatScorecard rules={rules} />
-
-      {/* ③ EVERYONE — the competition */}
-      <KombatLeaderboard
-        totals={totals}
-        rules={rules}
-        matcher={matcher}
-        loading={ledgerQuery.isPending}
-      />
-
-      {/* Live feed */}
-      <ArcadePanel title="Points feed" status="good">
-        {feed.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Nothing yet — go make it rain.</p>
-        ) : (
-          <ul className="space-y-1">
-            {feed.map((r) => (
-              <li key={r.id}>
-                <button
-                  type="button"
-                  onClick={() => setDetail(r)}
-                  className="w-full min-h-11 md:min-h-9 rounded-md border border-border px-3 py-2 text-left text-sm flex items-center gap-2 hover:border-kombat-gold/40"
-                >
-                  <span
+          {feed.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Nothing yet — go make it rain.</p>
+          ) : (
+            <ul className="space-y-1">
+              {feed.map((r) => (
+                // Only a newly-mounted top row animates in; existing rows just
+                // slide down — the feed reads as a live fight ticker.
+                <li key={r.id} className="animate-in fade-in slide-in-from-top-2 duration-500">
+                  <button
+                    type="button"
+                    onClick={() => setDetail(r)}
                     className={
-                      "w-14 shrink-0 text-right tabular-nums font-semibold " +
-                      (r.status === "cancelled" ? "text-destructive" : "text-victory")
+                      "w-full min-h-11 md:min-h-9 rounded-md border border-l-2 px-3 py-2 text-left text-sm flex items-center gap-2 transition-colors hover:border-kombat-gold/40 " +
+                      (r.status === "cancelled"
+                        ? "border-border border-l-destructive/70"
+                        : "border-border border-l-victory/70")
                     }
                   >
-                    {r.status === "cancelled" ? `−${fmtPts(r.points)}` : `+${fmtPts(r.points)}`}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate">
-                    <span className="font-medium">{r.rep_name}</span>
-                    <span className="text-muted-foreground">
-                      {" · "}
-                      {(r.meta?.label as string) ?? CATEGORY_LABELS[r.category] ?? r.category}
-                      {r.status === "cancelled" ? " · cancelled" : ""}
+                    <span
+                      className={
+                        "w-14 shrink-0 text-right tabular-nums font-semibold " +
+                        (r.status === "cancelled" ? "text-destructive" : "text-victory")
+                      }
+                    >
+                      {r.status === "cancelled" ? `−${fmtPts(r.points)}` : `+${fmtPts(r.points)}`}
                     </span>
-                  </span>
-                  <span className="shrink-0 text-[10px] text-muted-foreground">
-                    {r.occurred_on ?? ""}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
+                    <span className="min-w-0 flex-1 truncate">
+                      <span className="font-medium">{r.rep_name}</span>
+                      <span className="text-muted-foreground">
+                        {" · "}
+                        {(r.meta?.label as string) ?? CATEGORY_LABELS[r.category] ?? r.category}
+                        {r.status === "cancelled" ? " · cancelled" : ""}
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-[10px] text-muted-foreground">
+                      {r.occurred_on ?? ""}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </ArcadePanel>
+
+        {/* My ledger */}
+        {matcher.matched && <MyLedgerPanel rows={myLedger} onOpen={setDetail} />}
+
+        {/* Admin tools */}
+        {isAdmin && !isPreview && (
+          <KombatMonthAdmin
+            rules={rules}
+            totals={totals}
+            ledger={ledger}
+            written={written}
+            bounties={bountiesQuery.data ?? []}
+            onChanged={() => {
+              void qc.invalidateQueries({ queryKey: ["contest_rules"] });
+              void qc.invalidateQueries({ queryKey: ["contest_ledger"] });
+              void qc.invalidateQueries({ queryKey: ["contest_bounties"] });
+              void qc.invalidateQueries({ queryKey: ["kombat_admin_board"] });
+            }}
+          />
         )}
-      </ArcadePanel>
 
-      {/* My ledger */}
-      {matcher.matched && <MyLedgerPanel rows={myLedger} onOpen={setDetail} />}
-
-      {/* Admin tools */}
-      {isAdmin && !isPreview && (
-        <KombatMonthAdmin
-          rules={rules}
-          totals={totals}
-          ledger={ledger}
-          written={written}
-          bounties={bountiesQuery.data ?? []}
-          onChanged={() => {
-            void qc.invalidateQueries({ queryKey: ["contest_rules"] });
-            void qc.invalidateQueries({ queryKey: ["contest_ledger"] });
-            void qc.invalidateQueries({ queryKey: ["contest_bounties"] });
-            void qc.invalidateQueries({ queryKey: ["kombat_admin_board"] });
-          }}
-        />
-      )}
-
-      {userId && (
-        <ProofSheet open={proofOpen} onOpenChange={setProofOpen} userId={userId} rules={rules} />
-      )}
-      <LedgerDetailSheet row={detail} onClose={() => setDetail(null)} />
+        {userId && (
+          <ProofSheet open={proofOpen} onOpenChange={setProofOpen} userId={userId} rules={rules} />
+        )}
+        <LedgerDetailSheet row={detail} onClose={() => setDetail(null)} />
+      </div>
     </div>
   );
 }
@@ -864,11 +886,35 @@ function KombatStrikeFx({
     let confettiCancelled = false;
     void import("canvas-confetti").then(({ default: confetti }) => {
       if (confettiCancelled) return;
+      const GOLD = ["#f5c518", "#ffd24a", "#df2f4a", "#ffffff"];
+      // A coin shape when the browser supports shapeFromText (confetti v1.9+);
+      // gold discs otherwise. Garnish only — never let confetti throw.
+      let coin: ReturnType<typeof confetti.shapeFromText> | undefined;
+      try {
+        coin = confetti.shapeFromText?.({ text: "🪙", scalar: 2 });
+      } catch {
+        coin = undefined;
+      }
+      // Punchy burst up from the hero…
       void confetti({
-        particleCount: 60,
-        spread: 70,
+        particleCount: 90,
+        spread: 78,
+        startVelocity: 45,
         origin: { y: 0.7 },
-        colors: ["#f5c518", "#df2f4a", "#ffffff"],
+        colors: GOLD,
+        disableForReducedMotion: true,
+      });
+      // …then make it rain: coins tumbling down across the top.
+      void confetti({
+        particleCount: 50,
+        spread: 120,
+        startVelocity: 18,
+        gravity: 0.9,
+        ticks: 180,
+        scalar: coin ? 1.6 : 1.1,
+        origin: { y: -0.1 },
+        colors: GOLD,
+        shapes: coin ? [coin] : undefined,
         disableForReducedMotion: true,
       });
     });
@@ -887,11 +933,15 @@ function KombatStrikeFx({
       onClick={finish}
       className="fixed inset-0 z-[10030] flex items-center justify-center bg-transparent pointer-events-auto"
     >
-      <span className="animate-in zoom-in-50 fade-in duration-300 rounded-xl border border-kombat-gold/60 bg-background/95 px-6 py-4 text-center shadow-[0_0_40px_-8px_var(--kombat-gold)]">
-        <span className="block font-display text-2xl text-kombat-gold tabular-nums">
-          +{fmtPts(fx.points)} PTS
+      <span className="animate-in zoom-in-95 fade-in slide-in-from-bottom-2 duration-300 rounded-2xl border-2 border-kombat-gold/70 bg-kombat-black px-8 py-5 text-center shadow-[0_0_60px_-6px_var(--kombat-gold)]">
+        <span className="block font-display text-[10px] uppercase tracking-[0.3em] text-kombat-red">
+          Points scored
         </span>
-        <span className="mt-1 block text-sm font-semibold">{fx.rep}</span>
+        <span className="kombat-score-flare mt-1 block font-display text-kombat-gold tabular-nums leading-none">
+          <span className="text-4xl">+{fmtPts(fx.points)}</span>
+          <span className="ml-1 text-lg">PTS</span>
+        </span>
+        <span className="mt-2 block text-sm font-semibold">{fx.rep}</span>
         <span className="block text-xs text-muted-foreground">{fx.label}</span>
       </span>
     </button>,

@@ -6,6 +6,7 @@
 // `rules` and the ledger totals passed in.
 
 import { ArcadePanel, ArcadeSkeleton, NeonBar, NeonButton } from "@/components/arcade";
+import { CoinRain } from "@/components/KombatArena";
 import { useCountUp } from "@/hooks/useCountUp";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import {
@@ -82,90 +83,100 @@ export function KombatBeltLadder({
         <ArcadeSkeleton className="h-64" />
       ) : (
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
-          {/* Left: your standing + the carrot + boss bar */}
-          <div className="min-w-0">
-            <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-              {matched ? "Your points" : "Points to win"}
-            </div>
-            <div
-              className={
-                "font-display tabular-nums text-kombat-gold leading-none mt-1 text-[clamp(2.2rem,12vw,3.5rem)] " +
-                (points.bump
-                  ? "transition-transform duration-200 scale-105"
-                  : "transition-transform duration-200")
-              }
-              style={{
-                textShadow: "0 0 24px color-mix(in oklab, var(--kombat-gold) 55%, transparent)",
-              }}
-            >
-              {fmtPts(matched ? points.display : 0)}
-            </div>
-            {matched ? (
-              <div className="mt-1 text-xs text-muted-foreground">
-                <span className="text-kombat-gold font-semibold">
-                  {fmtPts(myTotals?.locked ?? 0)}
-                </span>{" "}
-                final ·{" "}
-                <span className="text-foreground font-semibold">
-                  {fmtPts(myTotals?.pending ?? 0)}
-                </span>{" "}
-                live
+          {/* Left: your standing + the carrot + boss bar. Money rains behind
+              the whole column; a gold aura breathes behind your score. */}
+          <div className="relative min-w-0">
+            {matched && myTotal > 0 && <CoinRain count={10} className="z-0" />}
+            <div className="relative z-10">
+              <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                {matched ? "Your points" : "Points to win"}
               </div>
-            ) : (
-              <div className="mt-1 text-xs text-muted-foreground">
-                Your row opens on your first synced October sale.
+              {/* w-fit so the aura centers on the number itself, not the column. */}
+              <div className="relative mt-1 w-fit">
+                {matched && (
+                  <span aria-hidden className="kombat-hero-aura z-0 h-28 w-28 md:h-36 md:w-36" />
+                )}
+                <div
+                  className={
+                    "kombat-score-flare relative z-10 font-display tabular-nums text-kombat-gold leading-none text-[clamp(2.2rem,12vw,3.5rem)] " +
+                    (points.bump
+                      ? "transition-transform duration-200 scale-105"
+                      : "transition-transform duration-200")
+                  }
+                >
+                  {fmtPts(matched ? points.display : 0)}
+                </div>
               </div>
-            )}
-
-            {/* Carrot */}
-            <div className="mt-4">
-              {tier.next ? (
-                <div className="flex items-baseline justify-between gap-2 text-sm">
-                  <span className="font-semibold">
-                    <span className="text-kombat-gold tabular-nums">{fmtPts(tier.toNext)} pts</span>{" "}
-                    to {tier.next.label}
-                  </span>
-                  <span className="text-xs text-kombat-gold font-display uppercase tracking-widest">
-                    {tier.next.cash > 0
-                      ? `+${fmtMoney(cashWithUnlock(tier.next.cash, unlocked, rules))}`
-                      : "Dinner"}
-                  </span>
+              {matched ? (
+                <div className="mt-1 text-xs text-muted-foreground">
+                  <span className="text-kombat-gold font-semibold">
+                    {fmtPts(myTotals?.locked ?? 0)}
+                  </span>{" "}
+                  final ·{" "}
+                  <span className="text-foreground font-semibold">
+                    {fmtPts(myTotals?.pending ?? 0)}
+                  </span>{" "}
+                  live
                 </div>
               ) : (
-                <div className="text-sm font-semibold text-kombat-gold">
-                  👑 KOMBAT KING — you maxed the ladder.
+                <div className="mt-1 text-xs text-muted-foreground">
+                  Your row opens on your first synced October sale.
                 </div>
               )}
-              <NeonBar pct={carrotPct} accent="var(--kombat-gold)" />
-            </div>
 
-            {/* $3M boss bar */}
-            <div className="mt-5">
-              <div className="flex items-baseline justify-between gap-2 text-[10px] font-display uppercase tracking-widest">
-                <span className={unlocked ? "text-kombat-gold" : "text-muted-foreground"}>
-                  Team goal — crack $3M
-                </span>
-                <span className="tabular-nums text-muted-foreground">
-                  {fmtMoney(written)} / {fmtMoney(rules.prizes.unlock_threshold)}
-                </span>
-              </div>
-              <NeonBar
-                pct={written / rules.prizes.unlock_threshold}
-                accent={unlocked ? "var(--victory)" : "var(--kombat-red)"}
-                tall
-                sheen
-              />
-              <p className="mt-1.5 text-xs">
-                {unlocked ? (
-                  <span className="text-victory font-semibold">
-                    💥 $3M SMASHED — every cash prize pays ×{rules.prizes.unlock_multiplier}.
-                  </span>
+              {/* Carrot */}
+              <div className="mt-4">
+                {tier.next ? (
+                  <div className="flex items-baseline justify-between gap-2 text-sm">
+                    <span className="font-semibold">
+                      <span className="text-kombat-gold tabular-nums">
+                        {fmtPts(tier.toNext)} pts
+                      </span>{" "}
+                      to {tier.next.label}
+                    </span>
+                    <span className="text-xs text-kombat-gold font-display uppercase tracking-widest">
+                      {tier.next.cash > 0
+                        ? `+${fmtMoney(cashWithUnlock(tier.next.cash, unlocked, rules))}`
+                        : "Dinner"}
+                    </span>
+                  </div>
                 ) : (
-                  <span className="text-muted-foreground">
-                    Drop the boss together → every cash tier pays ×{rules.prizes.unlock_multiplier}.
-                  </span>
+                  <div className="text-sm font-semibold text-kombat-gold">
+                    👑 KOMBAT KING — you maxed the ladder.
+                  </div>
                 )}
-              </p>
+                <NeonBar pct={carrotPct} accent="var(--kombat-gold)" />
+              </div>
+
+              {/* $3M boss bar */}
+              <div className="mt-5">
+                <div className="flex items-baseline justify-between gap-2 text-[10px] font-display uppercase tracking-widest">
+                  <span className={unlocked ? "text-kombat-gold" : "text-muted-foreground"}>
+                    Team goal — crack $3M
+                  </span>
+                  <span className="tabular-nums text-muted-foreground">
+                    {fmtMoney(written)} / {fmtMoney(rules.prizes.unlock_threshold)}
+                  </span>
+                </div>
+                <NeonBar
+                  pct={written / rules.prizes.unlock_threshold}
+                  accent={unlocked ? "var(--victory)" : "var(--kombat-red)"}
+                  tall
+                  sheen
+                />
+                <p className="mt-1.5 text-xs">
+                  {unlocked ? (
+                    <span className="text-victory font-semibold">
+                      💥 $3M SMASHED — every cash prize pays ×{rules.prizes.unlock_multiplier}.
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">
+                      Drop the boss together → every cash tier pays ×
+                      {rules.prizes.unlock_multiplier}.
+                    </span>
+                  )}
+                </p>
+              </div>
             </div>
           </div>
 
@@ -220,7 +231,9 @@ export function KombatBeltLadder({
       {/* Rules + eligibility gates */}
       <div className="mt-5 border-t border-kombat-red/20 pt-4">
         <p className="text-xs text-muted-foreground">
-          <span className="text-kombat-gold font-semibold">Dinner = 175 pts ≈ your $175k share</span>{" "}
+          <span className="text-kombat-gold font-semibold">
+            Dinner = 175 pts ≈ your $175k share
+          </span>{" "}
           of the $3M. Earn points on{" "}
           <span className="text-foreground">every sale, every activity, every proof</span>. Points
           count the second they land and update live all month; a cancellation drops them right

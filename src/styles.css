@@ -842,6 +842,231 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   KOMBAT ARENA — the "turn up the video game" layer (owner directive
+   2026-10-02). Drifting arena spotlights, falling money, a living hero score,
+   a bobbing champion crown, rank-up flashes, a live-feed heartbeat, and
+   move-list ignition. Every animation yields to prefers-reduced-motion — the
+   arena holds still, it never disappears, and text contrast is never touched.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Two spotlights drifting across the arena floor — blood red up from below,
+   trophy gold down from above. Low opacity, so it shows through the gaps
+   between the opaque kombat panels and the whole tab breathes. */
+@keyframes kombat-arena-drift {
+  0% {
+    transform: translate3d(-3%, -2%, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(3%, 2%, 0) scale(1.1);
+  }
+  100% {
+    transform: translate3d(-3%, -2%, 0) scale(1);
+  }
+}
+@utility kombat-arena {
+  position: absolute;
+  inset: -15%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      38% 50% at 12% 112%,
+      color-mix(in oklab, var(--kombat-red) 34%, transparent),
+      transparent 72%
+    ),
+    radial-gradient(
+      36% 46% at 88% -12%,
+      color-mix(in oklab, var(--kombat-gold) 24%, transparent),
+      transparent 72%
+    );
+  animation: kombat-arena-drift 16s ease-in-out infinite;
+  will-change: transform;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+/* Make it rain — gold coins tumbling down inside a clipped layer that sits
+   behind the content it garnishes (pointer-events-none). */
+@keyframes kombat-coin-fall {
+  0% {
+    transform: translateY(-140%) rotate(0deg);
+    opacity: 0;
+  }
+  12% {
+    opacity: var(--coin-opacity, 0.55);
+  }
+  88% {
+    opacity: var(--coin-opacity, 0.55);
+  }
+  100% {
+    transform: translateY(var(--coin-drop, 520%)) rotate(240deg);
+    opacity: 0;
+  }
+}
+@utility kombat-coin {
+  position: absolute;
+  top: 0;
+  left: var(--coin-left, 50%);
+  width: var(--coin-size, 13px);
+  height: var(--coin-size, 13px);
+  border-radius: 9999px;
+  background: radial-gradient(circle at 34% 30%, #fff4b8, #f5c518 46%, #9a6c08 100%);
+  box-shadow:
+    0 0 8px color-mix(in oklab, var(--kombat-gold) 70%, transparent),
+    inset 0 0 2px rgba(255, 255, 255, 0.6);
+  animation: kombat-coin-fall var(--coin-dur, 3.4s) linear var(--coin-delay, 0s) infinite;
+  will-change: transform, opacity;
+  @media (prefers-reduced-motion: reduce) {
+    display: none;
+  }
+}
+
+/* The hero score's living halo — a gold aura breathing behind your points so
+   the number reads as powered-up, not static. */
+@keyframes kombat-hero-aura {
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  50% {
+    opacity: 0.75;
+    transform: translate(-50%, -50%) scale(1.14);
+  }
+}
+@utility kombat-hero-aura {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  pointer-events: none;
+  border-radius: 9999px;
+  background: radial-gradient(
+    circle,
+    color-mix(in oklab, var(--kombat-gold) 42%, transparent),
+    transparent 70%
+  );
+  animation: kombat-hero-aura 3.6s ease-in-out infinite;
+  will-change: transform, opacity;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+    opacity: 0.5;
+  }
+}
+
+/* Continuous flare on a hero number — the baseline glow matches the old inline
+   shadow; the pulse is the turn-up. */
+@keyframes kombat-score-flare {
+  0%,
+  100% {
+    text-shadow:
+      0 0 22px color-mix(in oklab, var(--kombat-gold) 52%, transparent),
+      0 0 46px color-mix(in oklab, var(--kombat-gold) 22%, transparent);
+  }
+  50% {
+    text-shadow:
+      0 0 32px color-mix(in oklab, var(--kombat-gold) 78%, transparent),
+      0 0 72px color-mix(in oklab, var(--kombat-gold) 42%, transparent);
+  }
+}
+@utility kombat-score-flare {
+  text-shadow: 0 0 24px color-mix(in oklab, var(--kombat-gold) 55%, transparent);
+  animation: kombat-score-flare 3s ease-in-out infinite;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+/* The champion's crown bobs and glows at the top of the podium. */
+@keyframes kombat-crown-bob {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-5deg);
+  }
+  50% {
+    transform: translateY(-4px) rotate(5deg);
+  }
+}
+@utility kombat-crown {
+  display: inline-block;
+  animation: kombat-crown-bob 2.2s ease-in-out infinite;
+  filter: drop-shadow(0 0 10px color-mix(in oklab, var(--kombat-gold) 75%, transparent));
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+/* The #1 podium card breathes gold. */
+@keyframes kombat-champion {
+  0%,
+  100% {
+    box-shadow: 0 0 22px -6px var(--kombat-gold);
+  }
+  50% {
+    box-shadow: 0 0 42px -2px color-mix(in oklab, var(--kombat-gold) 85%, transparent);
+  }
+}
+@utility kombat-champion {
+  animation: kombat-champion 2.8s ease-in-out infinite;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+    box-shadow: 0 0 22px -6px var(--kombat-gold);
+  }
+}
+
+/* One-shot ping ring when a ladder total ticks up — a rank-up pop. */
+@keyframes kombat-rank-flash {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--kombat-gold) 60%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 12px transparent;
+  }
+}
+@utility kombat-rank-flash {
+  animation: kombat-rank-flash 0.65s ease-out;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+/* Your own row breathes gently so you can always find yourself in the fight. */
+@keyframes kombat-you {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--kombat-gold) 28%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 18px -2px color-mix(in oklab, var(--kombat-gold) 55%, transparent);
+  }
+}
+@utility kombat-you {
+  animation: kombat-you 3.2s ease-in-out infinite;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+/* Live-feed heartbeat dot. */
+@keyframes kombat-live {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 7px var(--victory);
+  }
+  50% {
+    opacity: 0.35;
+    box-shadow: 0 0 2px var(--victory);
+  }
+}
+@utility kombat-live-dot {
+  animation: kombat-live 1.5s ease-in-out infinite;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
    MY PURPOSE — the calm surface. The workshop is deliberately NOT the arcade:
    deep tidal navy, warm off-white text, restrained sand for emphasis, sans
    headings (the Press Start 2P h1–h3 rule is overridden inside this scope).
