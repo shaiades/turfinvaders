@@ -4,6 +4,8 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { Target, TrendingUp, Zap } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { clampVolumeGoal, useRepGoal, useSaveRepGoal } from "@/hooks/useRepGoal";
 import {
   backSolveVolumeGoal,
@@ -67,6 +69,7 @@ export function CloseKombatGoalsTab({
   trailingCompanyBaseline,
   isPreview,
   previewName,
+  leverFlash,
 }: {
   userId: string | undefined;
   weekLabel: string;
@@ -88,6 +91,9 @@ export function CloseKombatGoalsTab({
    *  silently write to the wrong profile row. */
   isPreview: boolean;
   previewName: string | null;
+  /** One-shot neon ring on the tile matching an Activity-Test money lever
+   *  (closePct → Sits to go, sitPct → Appts to go); seq re-fires repeats. */
+  leverFlash?: { lever: "closePct" | "sitPct"; seq: number } | null;
 }) {
   const goalQuery = useRepGoal(userId);
   const saveGoal = useSaveRepGoal(userId);
@@ -217,11 +223,13 @@ export function CloseKombatGoalsTab({
                         label="Sits to go"
                         value={fmtInt(solve.sitsNeeded)}
                         sub={`${fmtPct(resolved.rates.closePct)} close`}
+                        highlight={leverFlash?.lever === "closePct" ? leverFlash.seq : undefined}
                       />
                       <FunnelTile
                         label="Appts to go"
                         value={fmtInt(solve.apptsNeeded)}
                         sub={`${fmtPct(resolved.rates.sitPct)} sit`}
+                        highlight={leverFlash?.lever === "sitPct" ? leverFlash.seq : undefined}
                       />
                     </div>
                     <div className="mt-2 flex items-baseline justify-between gap-2 flex-wrap text-[10px]">
@@ -300,14 +308,53 @@ export function CloseKombatGoalsTab({
   );
 }
 
-function FunnelTile({ label, value, sub }: { label: string; value: string; sub: string }) {
+function FunnelTile({
+  label,
+  value,
+  sub,
+  highlight,
+}: {
+  label: string;
+  value: string;
+  sub: string;
+  /** Bump to play a one-shot ~1.2s fading neon outline ring (static ring,
+   *  no fade, under reduced motion) — the Activity-Test lever pulse. */
+  highlight?: number;
+}) {
+  const reduced = usePrefersReducedMotion();
+  const [ring, setRing] = useState<number | null>(null);
+  useEffect(() => {
+    // Clear (don't just skip) when the pulse expires upstream, so a stale
+    // seq can't leave a reduced-motion ring stuck or replay on remount.
+    if (highlight === undefined) {
+      setRing(null);
+      return;
+    }
+    setRing(highlight);
+    const id = window.setTimeout(() => setRing(null), 1200);
+    return () => window.clearTimeout(id);
+  }, [highlight]);
   return (
-    <div className="rounded-lg border border-border bg-background/40 p-3">
+    <div className="relative rounded-lg border border-border bg-background/40 p-3">
       <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
         {label}
       </div>
       <div className="mt-1 font-display text-2xl text-neon">{value}</div>
       <div className="mt-1 text-[10px] text-muted-foreground">{sub}</div>
+      {ring !== null && (
+        <div
+          key={ring}
+          aria-hidden
+          className={cn(
+            "pointer-events-none absolute inset-0 rounded-lg",
+            !reduced && "animate-out fade-out-0 duration-1000 fill-mode-forwards",
+          )}
+          style={{
+            boxShadow:
+              "0 0 0 2px var(--neon), 0 0 16px color-mix(in oklab, var(--neon) 60%, transparent)",
+          }}
+        />
+      )}
     </div>
   );
 }

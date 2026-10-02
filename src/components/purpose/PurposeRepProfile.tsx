@@ -6,13 +6,19 @@
 
 import type { ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Check, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useAuth } from "@/hooks/useAuth";
+import { useActivityTests } from "@/hooks/useActivityTests";
+import { activityEarned, habitEarned, scoreActivityTest, tierForScore } from "@/lib/activity-test";
 import {
-  usePurposeLeadershipDetail,
-  useResolveSafetyFlag,
-} from "@/hooks/usePurposeLeadership";
+  ACTIVITY_QUESTIONS,
+  HABITS,
+  MAX_SCORE,
+  PILLAR_META,
+  PILLAR_ORDER,
+} from "@/data/activity-test-content";
+import { useAuth } from "@/hooks/useAuth";
+import { usePurposeLeadershipDetail, useResolveSafetyFlag } from "@/hooks/usePurposeLeadership";
 import { usePurposeScoreboard } from "@/hooks/usePurposeScoreboard";
 import type { PurposeWhyLeadershipRow } from "@/hooks/usePurposeTable";
 import type { Option } from "@/lib/purpose/types";
@@ -68,13 +74,7 @@ function Field({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
-function Bullets({
-  slugs,
-  opts,
-}: {
-  slugs: string[] | null | undefined;
-  opts: readonly Option[];
-}) {
+function Bullets({ slugs, opts }: { slugs: string[] | null | undefined; opts: readonly Option[] }) {
   if (!slugs || slugs.length === 0) return <Dash />;
   return (
     <ul className="space-y-1">
@@ -132,6 +132,165 @@ function whyCategoryLabels(w: PurposeWhyLeadershipRow | undefined): string | nul
 
 const isPrivateWhy = (w: PurposeWhyLeadershipRow | undefined) =>
   !!w && w.answer_text == null && w.visibility === "private_to_rep";
+
+const tierWord = (score: number) => {
+  const label = tierForScore(score).label;
+  return label.charAt(0) + label.slice(1).toLowerCase();
+};
+
+const SOURCE_LABELS: Record<string, string> = {
+  google_form: "Google Form",
+  in_app: "In-app",
+};
+
+/** Tidal Activity Test — the full named answer sheet. Allowed here on
+ *  purpose: this is the admin-tier surface (every number traces to the
+ *  take's stored answers via the one shared scorer). */
+function ActivityTestCard({ userId }: { userId: string }) {
+  const testsQuery = useActivityTests(userId);
+  const data = testsQuery.data;
+
+  if (testsQuery.isLoading) {
+    return (
+      <PurposeCard className="mt-4">
+        <PurposeLabel>Activity Test</PurposeLabel>
+        <p className="mt-2 text-sm text-[var(--purpose-ink-dim)]">Loading…</p>
+      </PurposeCard>
+    );
+  }
+  if (testsQuery.isError) {
+    return (
+      <PurposeCard className="mt-4">
+        <PurposeLabel>Activity Test</PurposeLabel>
+        <p className="mt-2 text-sm leading-relaxed text-[var(--purpose-ink-dim)]">
+          Couldn't load the Activity Test. Try again in a moment.
+        </p>
+      </PurposeCard>
+    );
+  }
+  // The table isn't deployed yet — the section simply doesn't exist.
+  if (!data || data.missingMigration) return null;
+
+  const takes = data.takes;
+  const latest = takes[0];
+  if (!latest) {
+    return (
+      <PurposeCard className="mt-4">
+        <PurposeLabel>Activity Test</PurposeLabel>
+        <p className="mt-2 text-sm text-[var(--purpose-ink-dim)]">Not taken yet.</p>
+      </PurposeCard>
+    );
+  }
+
+  const sheet = scoreActivityTest(latest.answers);
+  const maxScore = latest.max_score > 0 ? latest.max_score : MAX_SCORE;
+
+  return (
+    <PurposeCard className="mt-4">
+      <PurposeLabel>Activity Test</PurposeLabel>
+      <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span className="text-2xl font-semibold tabular-nums">
+          {latest.score}/{maxScore}
+        </span>
+        <span className="text-sm text-[var(--purpose-sand)]">{tierWord(latest.score)}</span>
+      </div>
+      <p className="mt-1 text-xs tabular-nums text-[var(--purpose-ink-dim)]">
+        Taken {fmtDate(latest.taken_on)} · {takes.length} {takes.length === 1 ? "take" : "takes"}
+      </p>
+
+      <div className="mt-5 space-y-5">
+        {PILLAR_ORDER.map((p) => (
+          <div key={p}>
+            <div className="flex items-baseline justify-between gap-2">
+              <PurposeLabel>{PILLAR_META[p].label}</PurposeLabel>
+              <span className="text-xs tabular-nums text-[var(--purpose-ink-dim)]">
+                {sheet.byPillar[p].earned}/{sheet.byPillar[p].possible}
+              </span>
+            </div>
+            <ul className="mt-2 space-y-1.5">
+              {HABITS.filter((h) => h.pillar === p).map((h) => {
+                const earned = habitEarned(h, latest.answers?.[h.key]);
+                return (
+                  <li key={h.key} className="flex min-w-0 items-start gap-2 text-sm leading-snug">
+                    {earned ? (
+                      <Check
+                        className="mt-0.5 size-4 shrink-0 text-[var(--purpose-tide)]"
+                        aria-label="Earned"
+                      />
+                    ) : (
+                      <X
+                        className="mt-0.5 size-4 shrink-0 text-[var(--purpose-ink-dim)]"
+                        aria-label="Missed"
+                      />
+                    )}
+                    <span className="min-w-0">
+                      {h.label}
+                      {h.correctAnswer === "no" && (
+                        <span className="text-[var(--purpose-ink-dim)]">
+                          {" "}
+                          (reverse — check means they skip it)
+                        </span>
+                      )}
+                    </span>
+                    <span className="ml-auto shrink-0 text-xs tabular-nums text-[var(--purpose-ink-dim)]">
+                      {h.points} {h.points === 1 ? "pt" : "pts"}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
+
+        <div>
+          <PurposeLabel>Activity</PurposeLabel>
+          <ul className="mt-2 space-y-2">
+            {ACTIVITY_QUESTIONS.map((q) => {
+              const answer = latest.answers?.[q.key];
+              const earned = activityEarned(q, answer);
+              return (
+                <li key={q.key} className="flex min-w-0 items-start gap-2 text-sm leading-snug">
+                  {earned ? (
+                    <Check
+                      className="mt-0.5 size-4 shrink-0 text-[var(--purpose-tide)]"
+                      aria-label="Earned"
+                    />
+                  ) : (
+                    <X
+                      className="mt-0.5 size-4 shrink-0 text-[var(--purpose-ink-dim)]"
+                      aria-label="Missed"
+                    />
+                  )}
+                  <span className="min-w-0">
+                    {q.label}
+                    <span className="mt-0.5 block text-xs text-[var(--purpose-ink-dim)]">
+                      Answered {answer ?? "—"} · counts at {q.correct.join(", ")}
+                    </span>
+                  </span>
+                  <span className="ml-auto shrink-0 text-xs tabular-nums text-[var(--purpose-ink-dim)]">
+                    {q.points} pts
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+
+        <div>
+          <PurposeLabel>Take history</PurposeLabel>
+          <ul className="mt-2 space-y-1 text-xs tabular-nums text-[var(--purpose-ink-dim)]">
+            {takes.map((t) => (
+              <li key={t.id}>
+                {fmtDate(t.taken_on)} · {t.score}/{t.max_score > 0 ? t.max_score : MAX_SCORE} ·{" "}
+                {SOURCE_LABELS[t.source] ?? t.source}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </PurposeCard>
+  );
+}
 
 export function PurposeRepProfile({ userId }: { userId: string }) {
   const { user } = useAuth();
@@ -197,8 +356,8 @@ export function PurposeRepProfile({ userId }: { userId: string }) {
           <PurposeCard className="mt-4">
             <h1 className="text-xl">{detail.displayName}</h1>
             <p className="mt-2 text-sm leading-relaxed text-[var(--purpose-ink-dim)]">
-              {detail.displayName} hasn't started their Purpose Profile yet. This page fills in
-              as they walk the workshop.
+              {detail.displayName} hasn't started their Purpose Profile yet. This page fills in as
+              they walk the workshop.
             </p>
           </PurposeCard>
         ) : (
@@ -209,10 +368,7 @@ export function PurposeRepProfile({ userId }: { userId: string }) {
                 <PurposeLabel className="text-red-300">Safety flag</PurposeLabel>
                 <div className="mt-2 space-y-3">
                   {openFlags.map((f) => (
-                    <div
-                      key={f.id}
-                      className="flex flex-wrap items-center justify-between gap-3"
-                    >
+                    <div key={f.id} className="flex flex-wrap items-center justify-between gap-3">
                       <p className="text-sm leading-relaxed text-red-200">
                         Fired {fmtDate(f.flagged_at)}
                         {f.module_key ? ` · ${moduleLabel(f.module_key)}` : ""}
@@ -286,7 +442,10 @@ export function PurposeRepProfile({ userId }: { userId: string }) {
               <Field label="Three-year possibility" value={g3?.goal_description} />
               <Field label="One-year target" value={g1?.goal_description} />
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Target date" value={g1?.target_date ? fmtDate(g1.target_date) : null} />
+                <Field
+                  label="Target date"
+                  value={g1?.target_date ? fmtDate(g1.target_date) : null}
+                />
                 <Field label="Measurable outcome" value={g1?.measurable_outcome} />
               </div>
               <Field label="90-day mission" value={g90?.goal_description} />
@@ -328,7 +487,10 @@ export function PurposeRepProfile({ userId }: { userId: string }) {
                   value={constraintLabel(beliefs?.primary_constraint_category)}
                 />
               </div>
-              <Field label="What makes it feel like a ceiling" value={beliefs?.stated_ceiling_reason} />
+              <Field
+                label="What makes it feel like a ceiling"
+                value={beliefs?.stated_ceiling_reason}
+              />
               <Field
                 label="Belief categories"
                 value={
@@ -413,9 +575,7 @@ export function PurposeRepProfile({ userId }: { userId: string }) {
                         <Dash />
                       </p>
                     ) : null}
-                    {cats && (
-                      <p className="mt-1 text-sm text-[var(--purpose-sand)]">{cats}</p>
-                    )}
+                    {cats && <p className="mt-1 text-sm text-[var(--purpose-sand)]">{cats}</p>}
                   </div>
                 );
               })}
@@ -535,6 +695,9 @@ export function PurposeRepProfile({ userId }: { userId: string }) {
                 </div>
               )}
             </SectionCard>
+
+            {/* Tidal Activity Test — named sheet (admin-tier surface). */}
+            <ActivityTestCard userId={userId} />
 
             {/* F — Leadership actions */}
             <PurposeLeadershipActions detail={detail} />

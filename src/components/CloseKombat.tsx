@@ -67,6 +67,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { CloseKombatMoneyTab } from "@/components/CloseKombatMoneyTab";
 import { CloseKombatPlanTab, PlanTabBadge } from "@/components/CloseKombatPlanTab";
 import { CloseKombatGoalsTab } from "@/components/CloseKombatGoalsTab";
+import { ActivityTestPanel } from "@/components/ActivityTestPanel";
 import { CloseKombatLearnTab } from "@/components/CloseKombatLearnTab";
 import { toast } from "sonner";
 import { rewardToast } from "@/lib/reward-toast";
@@ -251,6 +252,20 @@ function CloseKombatInner({
   // overridden — so a preview must never let Goals write to the admin's own
   // profile row believing it's the previewed rep's.
   const isPreview = role !== realRole;
+  // Activity-test gap rows pulse the matching Goals funnel tile — a one-shot
+  // ring keyed by seq so repeat taps re-fire (High-Performer Profile panel).
+  const [leverFlash, setLeverFlash] = useState<{
+    lever: "closePct" | "sitPct";
+    seq: number;
+  } | null>(null);
+  // Expire the pulse after it plays — a remounted Goals tab must never
+  // replay a stale seq.
+  const leverFlashTimer = useRef(0);
+  const pulseLever = (lever: "closePct" | "sitPct") => {
+    setLeverFlash((f) => ({ lever, seq: (f?.seq ?? 0) + 1 }));
+    window.clearTimeout(leverFlashTimer.current);
+    leverFlashTimer.current = window.setTimeout(() => setLeverFlash(null), 1300);
+  };
 
   // --- Range engine: Day / Week (Mon–Sun) / Month / Year, all LA-calendar ---
   const [tab, setTab] = useState<RangeTab>("day");
@@ -1902,7 +1917,7 @@ function CloseKombatInner({
         )}
 
         {isRep && (
-          <TabsContent value="goals" className="mt-4">
+          <TabsContent value="goals" className="mt-4 space-y-4">
             <CloseKombatGoalsTab
               userId={user?.id}
               weekLabel={formatWeekRange(goalsWeek.weekStart, goalsWeek.weekEnd)}
@@ -1914,6 +1929,13 @@ function CloseKombatInner({
               trailingCompanyBaseline={trailingCompanyBaseline}
               isPreview={isPreview}
               previewName={isPreview ? displayName : null}
+              leverFlash={leverFlash}
+            />
+            <ActivityTestPanel
+              userId={user?.id}
+              displayName={displayName}
+              isPreview={isPreview}
+              onLeverPulse={pulseLever}
             />
           </TabsContent>
         )}
