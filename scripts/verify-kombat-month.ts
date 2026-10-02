@@ -8,10 +8,12 @@ import {
   bountyMultiplier,
   buildMoneyCandidates,
   buildReloadPitchCandidates,
+  buildScorecard,
   buildSelfGenPitchCandidates,
   buildSitCandidates,
   companyWritten,
   computeProofAward,
+  contestDaysLeft,
   DEFAULT_KOMBAT_RULES,
   eligibilityStatus,
   isSitCard,
@@ -166,10 +168,8 @@ eq(
 
 eq(
   "blank-count utility row ($0, no dollars) mints nothing",
-  scoreReportCard(
-    row({ sale_amt: 0, cancel_amt: 0, sales_count: null, date_sold: null }),
-    R,
-  ).length,
+  scoreReportCard(row({ sale_amt: 0, cancel_amt: 0, sales_count: null, date_sold: null }), R)
+    .length,
   0,
 );
 eq(
@@ -593,6 +593,47 @@ eq(
   }
   eq("calibration covers every rep exactly once", totals.length, Object.keys(SEPT_EXPECTED).length);
 }
+
+// ---- 10. Scorecard + countdown (presentation helpers) ------------------
+{
+  const groups = buildScorecard(R);
+  const money = groups.find((g) => g.key === "money")!;
+  eq("scorecard money reads config", money.moves.find((m) => m.label === "Self Gen")?.points, 15);
+  eq(
+    "Job Walk dropped at the default 0 weight",
+    money.moves.some((m) => m.label === "Job Walk"),
+    false,
+  );
+  const jwOn = buildScorecard(mergeKombatRules({ money: { job_walk_kicker: 7 } }));
+  eq(
+    "Job Walk appears when the owner sets a weight",
+    jwOn.find((g) => g.key === "money")!.moves.find((m) => m.label === "Job Walk")?.points,
+    7,
+  );
+  const activity = groups.find((g) => g.key === "activity")!;
+  eq("scorecard activity has the sit", activity.moves.find((m) => m.label === "Sit")?.points, 2);
+  const sgOff = buildScorecard(mergeKombatRules({ activity: { self_gen_pitch_enabled: false } }));
+  eq(
+    "self gen pitched drops when detection is off",
+    sgOff.find((g) => g.key === "activity")!.moves.some((m) => m.label === "Self gen pitched"),
+    false,
+  );
+  const proofs = groups.find((g) => g.key === "proofs")!;
+  eq(
+    "scorecard proofs read config",
+    proofs.moves.find((m) => m.label === "Video testimonial")?.points,
+    5,
+  );
+  eq(
+    "before/after carries its cap note",
+    proofs.moves.find((m) => m.label === "Before/after set")?.note,
+    "10/mo",
+  );
+}
+eq("countdown: Oct 1 → 31 days left", contestDaysLeft(R, "2026-10-01"), 31);
+eq("countdown: Oct 31 → 1 day left", contestDaysLeft(R, "2026-10-31"), 1);
+eq("countdown: November → 0", contestDaysLeft(R, "2026-11-02"), 0);
+eq("countdown clamps a pre-month date to the full month", contestDaysLeft(R, "2026-09-20"), 31);
 
 console.log(`checks run, ${fails.length} failure(s)`);
 for (const f of fails) console.log("  FAIL " + f);

@@ -19,13 +19,7 @@ import { useActivityTests } from "@/hooks/useActivityTests";
 import { buildRepMatcher } from "@/lib/rep-identity";
 import { rewardToast } from "@/lib/reward-toast";
 import { laTodayISO } from "@/lib/dates";
-import {
-  ArcadePanel,
-  ArcadePill,
-  ArcadeSkeleton,
-  ArcadeStatTile,
-  NeonButton,
-} from "@/components/arcade";
+import { ArcadePanel, ArcadePill, NeonButton } from "@/components/arcade";
 import {
   Sheet,
   SheetContent,
@@ -52,6 +46,10 @@ import {
   type ProofCategory,
 } from "@/lib/kombat-month";
 import { KombatMonthAdmin } from "@/components/KombatMonthAdmin";
+import { KombatBeltLadder } from "@/components/KombatBeltLadder";
+import { KombatScorecard } from "@/components/KombatScorecard";
+import { KombatLeaderboard } from "@/components/KombatLeaderboard";
+import { KombatBeltUpFx, type BeltUpFx } from "@/components/KombatBeltUpFx";
 
 const MONDAY_HOST = "https://tidal-remodeling.monday.com";
 
@@ -77,6 +75,12 @@ const fmtMoney = (n: number) =>
     currency: "USD",
     maximumFractionDigits: 0,
   }).format(n);
+
+/** Points threshold of a tier key (0 if unknown) — guards the belt-up test
+ *  so a RETUNED ladder (a belt's threshold lowered) can't read as a climb. */
+function beltPoints(key: string, rules: KombatRules): number {
+  return rules.prizes.tiers.find((t) => t.key === key)?.points ?? 0;
+}
 
 async function pageLedger(month: string): Promise<LedgerRow[]> {
   const out: LedgerRow[] = [];
@@ -240,10 +244,53 @@ export function KombatMonthTab({
   }, [ledger, ledgerQuery.isSuccess]);
 
   const written = writtenQuery.data ?? 0;
-  const unlockPct = Math.min(100, (written / rules.prizes.unlock_threshold) * 100);
   const activeBounties = (bountiesQuery.data ?? []).filter(
     (b) => b.active && b.starts_on <= laTodayISO() && b.ends_on >= laTodayISO(),
   );
+
+  // ── Belt-up ceremony ── when MY belt rises, drop the flourish once per
+  // belt per device. Baseline in localStorage keyed by uid, seeded on the
+  // first settle so an already-earned belt doesn't fire on page open.
+  const [beltFx, setBeltFx] = useState<BeltUpFx | null>(null);
+  const myTier = tierFor(myTotal, rules).current;
+  const beltSeededRef = useRef(false);
+  useEffect(() => {
+    if (!ledgerQuery.isSuccess || !matcher.matched || !userId) return;
+    const key = `ti_kombat_belt:${rules.contest.month}:${userId}`;
+    const nowKey = myTier?.key ?? "";
+    let prev = "";
+    try {
+      prev = localStorage.getItem(key) ?? "";
+    } catch {
+      /* private mode — degrade to in-session */
+    }
+    if (!beltSeededRef.current) {
+      beltSeededRef.current = true;
+      if (prev === "") {
+        try {
+          localStorage.setItem(key, nowKey);
+        } catch {
+          /* ignore */
+        }
+        return; // first settle seeds silently
+      }
+    }
+    if (nowKey && nowKey !== prev && (myTier?.points ?? 0) > beltPoints(prev, rules)) {
+      try {
+        localStorage.setItem(key, nowKey);
+      } catch {
+        /* ignore */
+      }
+      setBeltFx((f) => ({
+        seq: (f?.seq ?? 0) + 1,
+        beltLabel: myTier!.label,
+        cash:
+          myTier!.cash *
+          (written >= rules.prizes.unlock_threshold ? rules.prizes.unlock_multiplier : 1),
+      }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myTier?.key, ledgerQuery.isSuccess, matcher.matched, userId, written]);
 
   const [proofOpen, setProofOpen] = useState(false);
   const [detail, setDetail] = useState<LedgerRow | null>(null);
@@ -261,6 +308,9 @@ export function KombatMonthTab({
   return (
     <div className="space-y-4 md:space-y-6">
       {fx && <KombatStrikeFx key={fx.seq} fx={fx} onDone={() => setFx(null)} />}
+      {beltFx && (
+        <KombatBeltUpFx key={`belt-${beltFx.seq}`} fx={beltFx} onDone={() => setBeltFx(null)} />
+      )}
 
       {/* Bounty banners */}
       {activeBounties.map((b) => (
@@ -278,178 +328,28 @@ export function KombatMonthTab({
         </div>
       ))}
 
-      {/* Hero: my points, tier, next tier */}
-      <ArcadePanel
-        title={rules.contest.label}
-        faction="kombat"
-        status={ledgerQuery.isSuccess ? "good" : "warn"}
-        action={
-          userId ? (
-            <NeonButton tone="kombat-gold" disabled={isPreview} onClick={() => setProofOpen(true)}>
-              Submit proof
-            </NeonButton>
-          ) : undefined
-        }
-      >
-        {ledgerQuery.isPending ? (
-          <ArcadeSkeleton className="h-28" />
-        ) : matcher.matched === null && repNames.length > 0 && !isAdmin ? (
-          <p className="text-sm text-muted-foreground">
-            Couldn't find your row on the contest ledger — check with your manager that your profile
-            name matches the board.
-          </p>
-        ) : (
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-            <ArcadeStatTile
-              label="My points"
-              value={fmtPts(myTotal)}
-              accent="victory"
-              faction="kombat"
-              sub={{
-                // All points count now; "final" appears once the month-end
-                // cancel window passes and the count freezes.
-                label: "final / live",
-                value: `${fmtPts(myTotals?.locked ?? 0)} / ${fmtPts(myTotals?.pending ?? 0)}`,
-                accent: "muted",
-              }}
-            />
-            <ArcadeStatTile
-              label="Current tier"
-              value={tier.current?.label ?? "—"}
-              accent={tier.current ? "victory" : "muted"}
-              faction="kombat"
-              sub={
-                tier.current && tier.current.cash > 0
-                  ? {
-                      label: "prize",
-                      value: `Dinner + ${fmtMoney(tier.current.cash)}`,
-                      accent: "neon",
-                    }
-                  : tier.current
-                    ? { label: "prize", value: "Dinner", accent: "neon" }
-                    : undefined
-              }
-            />
-            <ArcadeStatTile
-              label={tier.next ? `To ${tier.next.label}` : "Top tier"}
-              value={tier.next ? `${fmtPts(tier.toNext)} pts` : "MAXED"}
-              accent="accent"
-              faction="kombat"
-              sub={
-                tier.next
-                  ? {
-                      label: "worth",
-                      value: tier.next.cash > 0 ? `Dinner + ${fmtMoney(tier.next.cash)}` : "Dinner",
-                      accent: "muted",
-                    }
-                  : undefined
-              }
-            />
-          </div>
-        )}
+      {/* ① THE BELT — what you're fighting for + where you stand + the rules */}
+      <KombatBeltLadder
+        rules={rules}
+        loading={ledgerQuery.isPending}
+        matched={matcher.matched !== null}
+        myTotals={myTotals}
+        written={written}
+        eligibility={eligibility}
+        canSubmit={!!userId && !isPreview}
+        onSubmitProof={() => setProofOpen(true)}
+      />
 
-        {/* Company $3M bar */}
-        <div className="mt-4">
-          <div className="flex items-baseline justify-between text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-            <span>Company October written</span>
-            <span>
-              {fmtMoney(written)} / {fmtMoney(rules.prizes.unlock_threshold)}
-            </span>
-          </div>
-          <div className="mt-1.5 h-2.5 rounded-full bg-surface border border-border overflow-hidden">
-            <div
-              className="h-full rounded-full bg-kombat-gold transition-[width] duration-700"
-              style={{ width: `${unlockPct}%` }}
-            />
-          </div>
-          <p className="mt-1.5 text-xs text-muted-foreground">
-            {written >= rules.prizes.unlock_threshold ? (
-              <span className="text-kombat-gold font-semibold">
-                $3M UNLOCKED — every cash prize pays ×{rules.prizes.unlock_multiplier}.
-              </span>
-            ) : (
-              <>
-                Clear {fmtMoney(rules.prizes.unlock_threshold)} together and every cash tier pays ×
-                {rules.prizes.unlock_multiplier}.
-              </>
-            )}
-          </p>
-        </div>
-      </ArcadePanel>
+      {/* ② THE SCORECARD — exactly what everything is worth */}
+      <KombatScorecard rules={rules} />
 
-      {/* Eligibility checklist */}
-      <ArcadePanel title="Prize eligibility" status={eligibility.eligible ? "good" : "warn"}>
-        <ul className="space-y-2 text-sm">
-          <EligibilityItem
-            ok={eligibility.purposeOk}
-            label="My Purpose completed"
-            detail={eligibility.purposeOk ? "Done" : "Finish the workshop on My Purpose"}
-          />
-          <EligibilityItem
-            ok={eligibility.testsOk}
-            label="Activity Test every week in October"
-            detail={`${eligibility.weeksHit}/${eligibility.weeksDue} weeks so far`}
-          />
-          <EligibilityItem
-            ok={eligibility.saleOk}
-            label="At least 1 sale that sticks"
-            detail={
-              eligibility.saleOk
-                ? "Done — a cancellation would take it back"
-                : "Close one sale this month (cancellations don't count)"
-            }
-          />
-        </ul>
-      </ArcadePanel>
-
-      {/* Leaderboard */}
-      <ArcadePanel title="Leaderboard" faction="kombat" status="good">
-        {ledgerQuery.isPending ? (
-          <ArcadeSkeleton className="h-40" />
-        ) : totals.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No points on the board yet — the first synced October sale opens the contest.
-          </p>
-        ) : (
-          <ol className="space-y-1.5">
-            {totals.map((t, i) => {
-              const tt = tierFor(t.total, rules);
-              const me = matcher.isMe(t.rep_name);
-              return (
-                <li
-                  key={t.rep_name}
-                  className={
-                    "flex items-center gap-3 rounded-md border px-3 py-2.5 " +
-                    (me
-                      ? "border-kombat-gold/50 bg-[color-mix(in_oklab,var(--kombat-gold)_8%,transparent)]"
-                      : "border-border")
-                  }
-                >
-                  <span className="w-6 shrink-0 text-right font-display text-xs text-muted-foreground">
-                    {i + 1}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                    {t.rep_name}
-                    {me && (
-                      <span className="ml-1.5 text-[10px] text-kombat-gold font-display uppercase">
-                        you
-                      </span>
-                    )}
-                  </span>
-                  {tt.current && (
-                    <span className="shrink-0 rounded-full border border-kombat-gold/40 px-2 py-0.5 font-display text-[9px] uppercase tracking-widest text-kombat-gold">
-                      {tt.current.label}
-                    </span>
-                  )}
-                  <span className="w-16 shrink-0 text-right tabular-nums text-sm font-semibold">
-                    {fmtPts(t.total)}
-                  </span>
-                </li>
-              );
-            })}
-          </ol>
-        )}
-      </ArcadePanel>
+      {/* ③ EVERYONE — the competition */}
+      <KombatLeaderboard
+        totals={totals}
+        rules={rules}
+        matcher={matcher}
+        loading={ledgerQuery.isPending}
+      />
 
       {/* Live feed */}
       <ArcadePanel title="Points feed" status="good">
@@ -515,26 +415,6 @@ export function KombatMonthTab({
       )}
       <LedgerDetailSheet row={detail} onClose={() => setDetail(null)} />
     </div>
-  );
-}
-
-function EligibilityItem({ ok, label, detail }: { ok: boolean; label: string; detail: string }) {
-  return (
-    <li className="flex items-start gap-2.5">
-      <span
-        aria-hidden
-        className={
-          "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[11px] font-bold " +
-          (ok ? "border-victory text-victory" : "border-border text-muted-foreground")
-        }
-      >
-        {ok ? "✓" : "·"}
-      </span>
-      <span className="min-w-0">
-        <span className={ok ? "" : "text-muted-foreground"}>{label}</span>
-        <span className="block text-xs text-muted-foreground">{detail}</span>
-      </span>
-    </li>
   );
 }
 
