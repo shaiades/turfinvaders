@@ -600,6 +600,42 @@ eq(
   const aVol = only.find((c) => c.rep_name === "A" && c.category === "money.volume");
   eq("report-only sale: volume still splits (10/2=5)", aVol?.points, 5);
 }
+// Name-order + no-phone dedup (the Edward/Mokan reload, owner 2026-10-02):
+// the block card says "Ken and Katherine Mokan" with NO phone; the report
+// says "Mokan, Ken & Katherine" with a phone. Order-sensitive name keys and
+// the phone key both miss, so the report-only kicker used to stack on the
+// block card's — double-counting the reload. The sorted-token tier must bind
+// the two spellings so the report emits volume only, no second card.reload.
+{
+  const reloadCard = card({
+    lead_name: "Ken and Katherine Mokan (copy) (copy)",
+    office_location: "San Diego",
+    phone: null,
+    source: "Reload",
+    pm: null,
+    sale: "Reload",
+  });
+  const keys = scoredCardKeys([reloadCard], R);
+  const reportRow = row({
+    customer_name: "Mokan, Ken & Katherine (copy)",
+    office: "San Diego",
+    phone: "619-825-3779",
+    sale_amt: 28500,
+    sales_count: "Reload",
+    reps: ["Edward Romero"],
+  });
+  const got = buildMoneyCandidates([reportRow], R, [], MID, keys).candidates;
+  eq(
+    "name-order reload: no second card.reload from the report",
+    got.some((c) => c.category === "card.reload"),
+    false,
+  );
+  eq(
+    "name-order reload: report still earns volume",
+    got.some((c) => c.category === "money.volume"),
+    true,
+  );
+}
 // Without a coveredKeys set, buildMoneyCandidates stays volume+bonus only.
 eq(
   "no coveredKeys → no report kicker",
