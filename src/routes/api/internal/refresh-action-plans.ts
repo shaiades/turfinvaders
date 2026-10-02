@@ -78,7 +78,18 @@ async function handle(request: Request): Promise<Response> {
   try {
     const { syncProductionJobs } = await import("@/lib/production-jobs.server");
     const summary = await syncProductionJobs();
-    return json({ ok: true, ...summary });
+    // Kombat Month lock sweep (owner, 2026-10-02): pending contest points
+    // lock on wall-clock time (the cancel window), so the daily run must
+    // advance them even when nobody pressed Sync. Best-effort: a ledger
+    // error must never fail the action-plan refresh.
+    let kombat: unknown = null;
+    try {
+      const { runKombatRecompute } = await import("@/lib/kombat-month.server");
+      kombat = await runKombatRecompute();
+    } catch (kombatErr) {
+      kombat = { error: kombatErr instanceof Error ? kombatErr.message : String(kombatErr) };
+    }
+    return json({ ok: true, ...summary, kombat });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     // Failure trail (cron doctrine: a dead 6 AM run must be visible in the

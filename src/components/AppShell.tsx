@@ -12,6 +12,7 @@ import {
 import { useSwipeNav } from "@/hooks/useSwipeNav";
 import { useTheme } from "@/hooks/useTheme";
 import { usePendingDojoCount } from "@/hooks/usePendingDojoCount";
+import { usePendingProofCount } from "@/hooks/usePendingProofCount";
 import { AccessRevokedScreen, useLiveAccessRevoked } from "@/components/AccessRevokedScreen";
 import { CanvasserHUD } from "@/components/CanvasserHUD";
 import { CrewBeacon } from "@/components/CrewBeacon";
@@ -111,6 +112,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { theme, toggleTheme } = useTheme();
   // Dojo submissions awaiting review — 0 for everyone outside the Admin tier.
   const pendingDojo = usePendingDojoCount();
+  const pendingProofs = usePendingProofCount();
   // My Purpose launch flag — only reps (and owners, incl. View-As previews)
   // pay this query. The localStorage warm cache keeps a launched rep's
   // 2-item bottom bar from popping in on every cold load; pre-launch the
@@ -293,10 +295,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       { to: "/dashboard", search: { tab: "dispatch" }, label: "Command", icon: LayoutDashboard },
       { to: "/my-territory", label: "Territory", icon: MapPin },
       { to: "/dashboard", search: { tab: "payroll" }, label: "Payroll", icon: DollarSign },
-      // Badge = Dojo submissions waiting for review — the in-app companion
-      // to the notify-dojo push, so work waiting is visible even with push
-      // alerts off on this device.
-      { to: "/confirmation-desk", label: "Desk", icon: PhoneCall, badge: pendingDojo },
+      // Badge = Dojo submissions + Kombat Month proofs waiting for review —
+      // the in-app companion to the notify-dojo push, so work waiting is
+      // visible even with push alerts off on this device.
+      { to: "/confirmation-desk", label: "Desk", icon: PhoneCall, badge: pendingDojo + pendingProofs },
       ...(role && CLOSE_KOMBAT_ROLES.includes(role)
         ? [{ to: "/close-kombat", label: "Close Kombat", icon: Swords } as NavItem]
         : []),

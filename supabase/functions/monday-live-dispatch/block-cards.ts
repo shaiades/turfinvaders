@@ -208,6 +208,10 @@ export type BlockCardRow = {
   sale_price: number | null
   products: string | null
   canvass_stats: string | null
+  /** Kombat Month (owner, 2026-10-02): the Block boards' free-text Source
+   *  and Agent columns — the self-gen-pitched signal. */
+  source: string | null
+  agent: string | null
   /** Can/Save support (owner, 2026-08-01) — comments carry the "Can/Save"
    *  marker; phone links a save card to the original sale's card. KEEP IN
    *  SYNC with buildBlockCardRow in src/lib/block-cards.server.ts. */
@@ -286,6 +290,10 @@ export function buildBlockCardRow(
     sale_price: parseMoney(priceCol?.text || priceCol?.display_value || ''),
     products: colText(cols, 'products'),
     canvass_stats: colText(cols, 'canvass stats'),
+    // Kombat Month (owner, 2026-10-02): the Block boards' free-text Source
+    // and Agent columns — "self gen" there is the self-gen-pitched signal.
+    source: colText(cols, 'source'),
+    agent: colText(cols, 'agent'),
     comments: colText(cols, 'comments'),
     phone: colText(cols, 'phone'),
     lat: hasCoords ? (locCol!.lat as number) : null,

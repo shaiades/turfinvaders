@@ -46,11 +46,19 @@ type MondayCol = {
   column: { title: string; id: string };
 };
 
+type MondaySubitem = {
+  id: unknown;
+  name?: unknown;
+  column_values?: MondayCol[] | null;
+};
+
 type MondayItem = {
   id: unknown;
   name?: unknown;
   group?: { id?: unknown; title?: unknown } | null;
   column_values?: MondayCol[] | null;
+  /** Requested only by REPORT_ITEM_PAGE_FIELDS (the Reloads subitems). */
+  subitems?: MondaySubitem[] | null;
 };
 
 type ItemsPage = { cursor: string | null; items: MondayItem[] };
@@ -169,6 +177,10 @@ export function buildBlockCardRow(
     sale_price: parseMoney(priceCol?.text || priceCol?.display_value || ""),
     products: colText(cols, "products"),
     canvass_stats: colText(cols, "canvass stats"),
+    // Kombat Month (owner, 2026-10-02): the Block boards' free-text Source
+    // and Agent columns — "self gen" there is the self-gen-pitched signal.
+    source: colText(cols, "source"),
+    agent: colText(cols, "agent"),
     // Can/Save support (owner, 2026-08-01): comments carry the "Can/Save"
     // marker; phone links a save card to the original sale's card.
     comments: colText(cols, "comments"),
@@ -183,6 +195,12 @@ export function buildBlockCardRow(
 
 const ITEM_PAGE_FIELDS =
   "cursor items { id name group { id title } column_values { id text column { title id } ... on FormulaValue { display_value } ... on LocationValue { lat lng } } }";
+
+/** Sales-Report boards additionally pull each row's Reloads subitems
+ *  (Result / Date Went / Rep — the Kombat Month reload-pitch evidence).
+ *  Block boards keep the lean field set; their subitems are never read. */
+const REPORT_ITEM_PAGE_FIELDS =
+  "cursor items { id name group { id title } column_values { id text column { title id } ... on FormulaValue { display_value } ... on LocationValue { lat lng } } subitems { id name column_values { id text column { title id } } } }";
 
 const CHUNK = 200;
 const chunks = <T>(arr: T[], size: number): T[][] => {
@@ -221,6 +239,8 @@ export type WccReportResult = {
   captured?: number;
   /** Stale report_sales rows deleted by this board's reconcile. */
   report_deleted?: number;
+  /** Reloads subitems mirrored into report_sale_reloads this walk. */
+  reloads_captured?: number;
 };
 
 /** One Monday Sales-Report row, mirrored verbatim into public.report_sales
@@ -240,6 +260,27 @@ type ReportSaleInsert = {
   wcc: string | null;
   sales_count: string | null;
   phone: string | null;
+  reps: string[];
+  /** Kombat Month scoring columns (owner, 2026-10-02): Source / Marketing
+   *  Home / Advantage+ raw labels, captured by title like everything else. */
+  source: string | null;
+  marketing_home: string | null;
+  advantage_plus: string | null;
+};
+
+/** One Reloads subitem row, mirrored into public.report_sale_reloads —
+ *  the reload-pitch evidence for Kombat Month (Result Sold/PM + Date Went
+ *  in the contest month scores; the subitem's Rep gets the credit). */
+type ReportReloadInsert = {
+  subitem_id: string;
+  parent_item_id: string;
+  board_id: string;
+  board_name: string;
+  report_month: string;
+  name: string | null;
+  result: string | null;
+  date_went: string | null;
+  due_date: string | null;
   reps: string[];
 };
 
@@ -567,9 +608,11 @@ export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSumm
           // stale.
           const walkStartISO = new Date().toISOString();
           const captured: ReportSaleInsert[] = [];
+          const capturedReloads: ReportReloadInsert[] = [];
           const res = await collectReportBoard(token, rb, soldCards, matches, {
             stamp: rb.stamp,
             capture: captured,
+            captureReloads: capturedReloads,
           });
           // report_sales mirror (owner, 2026-09-23): every walked report row
           // upserts verbatim; the Year tab computes Shark Tank standings
@@ -614,6 +657,40 @@ export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSumm
               if (error) throw new Error(`report_sales delete: ${error.message}`);
             }
             res.report_deleted = stale.length;
+
+            // Reloads subitems mirror (Kombat Month, owner 2026-10-02):
+            // upsert + delete-reconcile exactly like report_sales above,
+            // keyed by the PARENT report board so an emptied board still
+            // clears its stale subitem rows.
+            for (const batch of chunks(capturedReloads, CHUNK)) {
+              const { error } = await supabaseAdmin
+                .from("report_sale_reloads")
+                .upsert(batch, { onConflict: "subitem_id" });
+              if (error) throw new Error(`report_sale_reloads upsert: ${error.message}`);
+            }
+            const existingSubs: string[] = [];
+            for (let from = 0; ; from += CHUNK) {
+              const { data: page, error: exErr } = await supabaseAdmin
+                .from("report_sale_reloads")
+                .select("subitem_id")
+                .eq("board_id", rb.id)
+                .lt("updated_at", walkStartISO)
+                .order("subitem_id")
+                .range(from, from + CHUNK - 1);
+              if (exErr) throw new Error(`report_sale_reloads reconcile: ${exErr.message}`);
+              existingSubs.push(...(page ?? []).map((r) => r.subitem_id));
+              if (!page || page.length < CHUNK) break;
+            }
+            const capturedSubIds = new Set(capturedReloads.map((r) => r.subitem_id));
+            const staleSubs = existingSubs.filter((id) => !capturedSubIds.has(id));
+            for (const batch of chunks(staleSubs, CHUNK)) {
+              const { error } = await supabaseAdmin
+                .from("report_sale_reloads")
+                .delete()
+                .in("subitem_id", batch);
+              if (error) throw new Error(`report_sale_reloads delete: ${error.message}`);
+            }
+            res.reloads_captured = capturedReloads.length;
           }
           res.captured = captured.length;
           wcc.reports.push(res);
@@ -1208,7 +1285,8 @@ async function collectReportBoard(
   // stamp: run the wcc/report_reps matcher (SD/OC-prefixed boards only —
   // un-prefixed books have no Block cards and the date-blind fallback could
   // mis-bind). capture: every walked row lands here for report_sales.
-  opts: { stamp: boolean; capture: ReportSaleInsert[] },
+  // captureReloads: every row's Reloads subitems, for report_sale_reloads.
+  opts: { stamp: boolean; capture: ReportSaleInsert[]; captureReloads: ReportReloadInsert[] },
 ): Promise<WccReportResult> {
   const office = /^OC\b/i.test(board.name.trim())
     ? "Orange County"
@@ -1248,12 +1326,12 @@ async function collectReportBoard(
     const data: Record<string, unknown> = cursor
       ? await monday(
           token,
-          `query ($cursor: String!) { next_items_page(cursor: $cursor, limit: 500) { ${ITEM_PAGE_FIELDS} } }`,
+          `query ($cursor: String!) { next_items_page(cursor: $cursor, limit: 500) { ${REPORT_ITEM_PAGE_FIELDS} } }`,
           { cursor },
         )
       : await monday(
           token,
-          `query ($b: ID!) { boards(ids: [$b]) { items_page(limit: 500) { ${ITEM_PAGE_FIELDS} } } }`,
+          `query ($b: ID!) { boards(ids: [$b]) { items_page(limit: 500) { ${REPORT_ITEM_PAGE_FIELDS} } } }`,
           { b: board.id },
         );
     const page: ItemsPage | null = cursor
@@ -1321,7 +1399,29 @@ async function collectReportBoard(
           sales_count: colText(cols, "sales count"),
           phone: colText(cols, "phone"),
           reps: rowReps,
+          source: colText(cols, "source"),
+          marketing_home: colText(cols, "marketing home"),
+          advantage_plus: colText(cols, "advantage+"),
         });
+        // Reloads subitems ride the same month bucket as their parent row.
+        for (const sub of item.subitems ?? []) {
+          const scols: MondayCol[] = sub.column_values ?? [];
+          const went = colText(scols, "date went");
+          const due = colText(scols, "due date");
+          const subName = sub.name == null ? "" : String(sub.name).trim();
+          opts.captureReloads.push({
+            subitem_id: String(sub.id),
+            parent_item_id: String(item.id),
+            board_id: board.id,
+            board_name: board.name,
+            report_month: reportMonthStart,
+            name: subName === "" ? null : subName,
+            result: colText(scols, "result"),
+            date_went: went && !Number.isNaN(Date.parse(went)) ? went : null,
+            due_date: due && !Number.isNaN(Date.parse(due)) ? due : null,
+            reps: cleanReps((colText(scols, "rep") ?? "").split(",")),
+          });
+        }
       }
       // Capture-only boards stop here: the stamp matcher below must never
       // see a board with no Block-card era (see opts doc above).

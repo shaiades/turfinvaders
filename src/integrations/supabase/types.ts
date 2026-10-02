@@ -17,6 +17,7 @@ export type Database = {
       block_cards: {
         Row: {
           address: string | null
+          agent: string | null
           board_id: string
           bo: string | null
           canvass_stats: string | null
@@ -40,11 +41,13 @@ export type Database = {
           rs: string | null
           sale: string | null
           sale_price: number | null
+          source: string | null
           updated_at: string
           wcc: string | null
         }
         Insert: {
           address?: string | null
+          agent?: string | null
           board_id: string
           bo?: string | null
           canvass_stats?: string | null
@@ -68,11 +71,13 @@ export type Database = {
           rs?: string | null
           sale?: string | null
           sale_price?: number | null
+          source?: string | null
           updated_at?: string
           wcc?: string | null
         }
         Update: {
           address?: string | null
+          agent?: string | null
           board_id?: string
           bo?: string | null
           canvass_stats?: string | null
@@ -96,8 +101,165 @@ export type Database = {
           rs?: string | null
           sale?: string | null
           sale_price?: number | null
+          source?: string | null
           updated_at?: string
           wcc?: string | null
+        }
+        Relationships: []
+      }
+      contest_bounties: {
+        Row: {
+          active: boolean
+          categories: string[]
+          created_at: string
+          created_by: string | null
+          ends_on: string
+          id: string
+          label: string
+          multiplier: number
+          starts_on: string
+        }
+        Insert: {
+          active?: boolean
+          categories?: string[]
+          created_at?: string
+          created_by?: string | null
+          ends_on: string
+          id?: string
+          label: string
+          multiplier?: number
+          starts_on: string
+        }
+        Update: {
+          active?: boolean
+          categories?: string[]
+          created_at?: string
+          created_by?: string | null
+          ends_on?: string
+          id?: string
+          label?: string
+          multiplier?: number
+          starts_on?: string
+        }
+        Relationships: []
+      }
+      contest_ledger: {
+        Row: {
+          category: string
+          created_at: string
+          id: string
+          locked_at: string | null
+          meta: Json
+          month: string
+          occurred_on: string | null
+          points: number
+          rep_name: string
+          source_id: string
+          source_kind: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          category: string
+          created_at?: string
+          id?: string
+          locked_at?: string | null
+          meta?: Json
+          month: string
+          occurred_on?: string | null
+          points: number
+          rep_name: string
+          source_id: string
+          source_kind: string
+          status: string
+          updated_at?: string
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          id?: string
+          locked_at?: string | null
+          meta?: Json
+          month?: string
+          occurred_on?: string | null
+          points?: number
+          rep_name?: string
+          source_id?: string
+          source_kind?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      contest_proofs: {
+        Row: {
+          category: string
+          created_at: string
+          customer_name: string | null
+          deny_reason: string | null
+          id: string
+          link_url: string | null
+          note: string
+          points_awarded: number | null
+          rep_id: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          sat_on: string | null
+          status: string
+          storage_path: string | null
+        }
+        Insert: {
+          category: string
+          created_at?: string
+          customer_name?: string | null
+          deny_reason?: string | null
+          id?: string
+          link_url?: string | null
+          note: string
+          points_awarded?: number | null
+          rep_id: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          sat_on?: string | null
+          status?: string
+          storage_path?: string | null
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          customer_name?: string | null
+          deny_reason?: string | null
+          id?: string
+          link_url?: string | null
+          note?: string
+          points_awarded?: number | null
+          rep_id?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          sat_on?: string | null
+          status?: string
+          storage_path?: string | null
+        }
+        Relationships: []
+      }
+      contest_rules: {
+        Row: {
+          id: boolean
+          rules: Json
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          id?: boolean
+          rules?: Json
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          id?: boolean
+          rules?: Json
+          updated_at?: string
+          updated_by?: string | null
         }
         Relationships: []
       }
@@ -1233,14 +1395,61 @@ export type Database = {
         }
         Relationships: []
       }
+      report_sale_reloads: {
+        Row: {
+          board_id: string
+          board_name: string
+          created_at: string
+          date_went: string | null
+          due_date: string | null
+          name: string | null
+          parent_item_id: string
+          report_month: string
+          reps: string[]
+          result: string | null
+          subitem_id: string
+          updated_at: string
+        }
+        Insert: {
+          board_id: string
+          board_name: string
+          created_at?: string
+          date_went?: string | null
+          due_date?: string | null
+          name?: string | null
+          parent_item_id: string
+          report_month: string
+          reps?: string[]
+          result?: string | null
+          subitem_id: string
+          updated_at?: string
+        }
+        Update: {
+          board_id?: string
+          board_name?: string
+          created_at?: string
+          date_went?: string | null
+          due_date?: string | null
+          name?: string | null
+          parent_item_id?: string
+          report_month?: string
+          reps?: string[]
+          result?: string | null
+          subitem_id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       report_sales: {
         Row: {
+          advantage_plus: string | null
           board_id: string
           board_name: string
           cancel_amt: number
           created_at: string
           customer_name: string | null
           date_sold: string | null
+          marketing_home: string | null
           monday_item_id: string
           office: string | null
           phone: string | null
@@ -1248,16 +1457,19 @@ export type Database = {
           reps: string[]
           sale_amt: number
           sales_count: string | null
+          source: string | null
           updated_at: string
           wcc: string | null
         }
         Insert: {
+          advantage_plus?: string | null
           board_id: string
           board_name: string
           cancel_amt?: number
           created_at?: string
           customer_name?: string | null
           date_sold?: string | null
+          marketing_home?: string | null
           monday_item_id: string
           office?: string | null
           phone?: string | null
@@ -1265,16 +1477,19 @@ export type Database = {
           reps?: string[]
           sale_amt?: number
           sales_count?: string | null
+          source?: string | null
           updated_at?: string
           wcc?: string | null
         }
         Update: {
+          advantage_plus?: string | null
           board_id?: string
           board_name?: string
           cancel_amt?: number
           created_at?: string
           customer_name?: string | null
           date_sold?: string | null
+          marketing_home?: string | null
           monday_item_id?: string
           office?: string | null
           phone?: string | null
@@ -1282,6 +1497,7 @@ export type Database = {
           reps?: string[]
           sale_amt?: number
           sales_count?: string | null
+          source?: string | null
           updated_at?: string
           wcc?: string | null
         }

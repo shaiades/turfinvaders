@@ -25,6 +25,8 @@ export function ReasonDialog({
   confirmLabel = "Save",
   destructive = false,
   pending = false,
+  placeholder = 'e.g. "forgot to punch out — confirmed 4:30 PM with the captain"',
+  footer = "Goes on the audit trail with your name and the before/after times.",
   onSubmit,
 }: {
   open: boolean;
@@ -35,6 +37,9 @@ export function ReasonDialog({
   confirmLabel?: string;
   destructive?: boolean;
   pending?: boolean;
+  /** Defaults keep the original timesheet copy (its only pre-2026-10 user). */
+  placeholder?: string;
+  footer?: string;
   onSubmit: (reason: string) => void;
 }) {
   const [reason, setReason] = useState("");
@@ -56,11 +61,11 @@ export function ReasonDialog({
           autoFocus
           value={reason}
           onChange={(e) => setReason(e.target.value)}
-          placeholder='e.g. "forgot to punch out — confirmed 4:30 PM with the captain"'
+          placeholder={placeholder}
           className="text-base md:text-sm min-h-20"
         />
         <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
-          Goes on the audit trail with your name and the before/after times.
+          {footer}
         </div>
         <DialogFooter className="gap-2">
           <Button

@@ -122,6 +122,11 @@ export type BlockCard = {
   sale_price: number | null;
   products: string | null;
   canvass_stats: string | null;
+  /** Block board free-text Source / Agent columns (Kombat Month, owner
+   *  2026-10-02): "self gen" in either is the self-gen-pitched signal.
+   *  Optional so pre-existing fixtures/literals keep compiling. */
+  source?: string | null;
+  agent?: string | null;
   /** Raw WCC label from the monthly Sales Report, matched on by the sync. */
   wcc: string | null;
   /** Confirmer/office notes — carries the "Can/Save" marker (owner, 2026-08-01). */
@@ -156,8 +161,8 @@ export type BlockCard = {
  *  dragged created_at/updated_at across the wire for thousands of rows. */
 export const CARD_COLUMNS =
   "monday_item_id, board_id, office_location, card_date, group_title, lead_name, reps, " +
-  "iss, bo, ol, rs, pm, sale, sale_price, products, canvass_stats, wcc, comments, phone, " +
-  "report_reps, missing_from_report";
+  "iss, bo, ol, rs, pm, sale, sale_price, products, canvass_stats, source, agent, wcc, " +
+  "comments, phone, report_reps, missing_from_report";
 
 /** Link context fetched on each side of the visible window (owner,
  *  2026-08-28): a save can land in the month after its sale, and the
