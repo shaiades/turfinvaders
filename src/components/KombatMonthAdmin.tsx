@@ -476,11 +476,10 @@ function RulesEditor({ rules, onChanged }: { rules: KombatRules; onChanged: () =
     >
       <div className="space-y-5">
         <section>
-          <RulesHeading>Money (volume splits across the reps; bonuses full each)</RulesHeading>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+          <RulesHeading>Money (volume splits across the reps; bonus full each)</RulesHeading>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
             {num("money.per_1000", "Per $1,000 written")}
             {num("money.advantage_plus", "Advantage+")}
-            {num("money.rep_reset", "Rep Reset")}
             {num("lock.cancel_window_days", "Cancel window (days)")}
           </div>
         </section>

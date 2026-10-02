@@ -6,7 +6,8 @@
 // reps; every other point is FULL to each rep. One type kicker per block
 // card, never stacking (self-gen/referral sale 15, pitch-miss 10; reload 10;
 // sale 5; sit 2; job walk → nothing). Marketing Home + Upsell removed.
-// Advantage+ (3) and Rep Reset (5) kept as report bonuses. Dinner tier 175.
+// Advantage+ (3) is the only report bonus; a Rep Reset sale is just a sale
+// (owner 2026-10-02 — not a behavior we reward). Dinner tier 175.
 
 import {
   BELT_ACCENT,
@@ -102,7 +103,7 @@ eq("source: Self Gen", normalizeSource("Self Gen"), "self_gen");
 eq("source: self-gen", normalizeSource("self-gen"), "self_gen");
 eq("source: Referral", normalizeSource("Referral"), "referral");
 eq("source: referal (1 r)", normalizeSource("referal"), "referral");
-eq("source: Rep Reset", normalizeSource("Rep Reset"), "rep_reset");
+eq("source: Rep Reset is not a token (scores as a sale)", normalizeSource("Rep Reset"), null);
 eq("source: job walk variants", normalizeSource("job walk"), "job_walk");
 eq("source: Canvass is nothing", normalizeSource("Canvass"), null);
 eq("cardSource reads source first", cardSource({ source: "Self Gen", agent: null }), "self_gen");
@@ -139,10 +140,13 @@ eq(
     R,
   );
   const adv = parts.find((p) => p.category === "money.advantage_plus");
-  const rr = parts.find((p) => p.category === "money.rep_reset");
   eq("advantage+ bonus = 3, full per rep", adv?.points, 3);
   eq("advantage+ does not split", adv?.split, false);
-  eq("rep reset bonus = 5, full per rep", rr?.points, 5);
+  eq(
+    "rep reset earns no special money bonus",
+    parts.some((p) => p.category === "money.rep_reset"),
+    false,
+  );
 }
 
 // ---- 3. Volume splits, bonuses don't ------------------------------------
@@ -459,7 +463,7 @@ eq("November → 0", contestDaysLeft(R, "2026-11-02"), 0);
 
 // ---- 11. September fixture: volume splits correctly ---------------------
 // The fixture is report rows only (no block cards), so under the new model
-// it produces VOLUME (split) + Advantage+/Rep Reset bonuses. Validates the
+// it produces VOLUME (split) + the Advantage+ bonus. Validates the
 // split mechanic against real data: total volume == Σ non-cancelled
 // sale_amt / 1000, and a known two-rep deal halves.
 {
@@ -509,6 +513,11 @@ eq(
   "report-only: self-gen sale → 15",
   reportOnlyKicker(row({ sales_count: "Sale", source: "Self Gen" }), R)?.category,
   "card.selfgen_sale",
+);
+eq(
+  "report-only: rep-reset sale scores as a plain sale",
+  reportOnlyKicker(row({ sales_count: "Sale", source: "Rep Reset" }), R)?.category,
+  "card.sale",
 );
 eq(
   "report-only: reload → 10",
