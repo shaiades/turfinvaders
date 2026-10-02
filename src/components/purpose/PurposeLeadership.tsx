@@ -9,10 +9,7 @@ import { Link } from "@tanstack/react-router";
 import { ChevronDown, Telescope } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { LeadershipStatus, Option } from "@/lib/purpose/types";
-import {
-  usePurposeLeadershipList,
-  type LeadershipListRow,
-} from "@/hooks/usePurposeLeadership";
+import { usePurposeLeadershipList, type LeadershipListRow } from "@/hooks/usePurposeLeadership";
 import { usePurposeConfig, useSavePurposeConfig } from "@/hooks/usePurposeConfig";
 import { useWeekCrmByName } from "@/hooks/usePurposeScoreboard";
 import type { PurposeProfileRow } from "@/hooks/usePurposeTable";
@@ -25,6 +22,7 @@ import {
 } from "@/data/purpose-workshop-content";
 import { PurposeButton, PurposeCard, PurposeChip, PurposeLabel } from "./kit";
 import { HowToUseThisWell } from "./HowToUseThisWell";
+import { PurposeActivityBoard } from "./PurposeActivityBoard";
 import {
   MobileCard,
   MobileCardHeader,
@@ -153,7 +151,15 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
 ];
 
 /** Small stat tile for the §19.1 summary grid. */
-function SummaryTile({ label, value, small }: { label: string; value: string | number; small?: boolean }) {
+function SummaryTile({
+  label,
+  value,
+  small,
+}: {
+  label: string;
+  value: string | number;
+  small?: boolean;
+}) {
   return (
     <div className="min-w-0 rounded-xl border border-[var(--purpose-line)] bg-[var(--purpose-card)] p-3">
       <div
@@ -284,6 +290,13 @@ export function PurposeLeadership() {
 
   const flagged = useMemo(() => visible.filter((r) => r.openSafetyFlag), [visible]);
 
+  // The Activity Test board rides the SAME visible roster, so the
+  // test-profile toggle hides the owner walkthroughs there too.
+  const activityRoster = useMemo(
+    () => visible.map((r) => ({ userId: r.rep.userId, displayName: r.rep.displayName })),
+    [visible],
+  );
+
   const stats = useMemo(() => {
     const completions = visible.map((r) => completionOf(r.profile));
     const proFocusMode = modeOf(visible.map((r) => r.goals["professional_focus"]?.life_area));
@@ -296,8 +309,7 @@ export function PurposeLeadership() {
       submitted: completions.filter((c) => c === "submitted").length,
       needsReview: visible.filter((r) => r.profile?.leadership_status === "needs_review").length,
       followUpScheduled: visible.filter(
-        (r) =>
-          r.profile?.leadership_follow_up_date && r.profile.leadership_follow_up_date >= today,
+        (r) => r.profile?.leadership_follow_up_date && r.profile.leadership_follow_up_date >= today,
       ).length,
       followUpOverdue: visible.filter(
         (r) => r.profile?.leadership_follow_up_date && r.profile.leadership_follow_up_date < today,
@@ -365,7 +377,8 @@ export function PurposeLeadership() {
       else if (sortKey === "target_date") c = cmpNullableAsc(a.targetDate, b.targetDate);
       else if (sortKey === "follow_up") c = cmpNullableAsc(a.followUp, b.followUp);
       // never-reviewed first — they're the ones waiting on you
-      else if (sortKey === "last_reviewed") c = cmpNullableAsc(a.lastReviewed, b.lastReviewed, false);
+      else if (sortKey === "last_reviewed")
+        c = cmpNullableAsc(a.lastReviewed, b.lastReviewed, false);
       else if (sortKey === "week_volume") c = (b.weekVolume ?? -1) - (a.weekVolume ?? -1);
       return c !== 0 ? c : a.name.localeCompare(b.name);
     });
@@ -427,21 +440,30 @@ export function PurposeLeadership() {
             <h2 className="text-lg">My Purpose is not open to the sales team yet</h2>
             <p className="mt-2 text-sm leading-relaxed text-[var(--purpose-ink-dim)]">
               Reps don't see the My Purpose tab until you open it. You and Tyler can walk the
-              workshop yourselves from the menu first — your own runs show up here as test
-              profiles, not in the rep counts.
+              workshop yourselves from the menu first — your own runs show up here as test profiles,
+              not in the rep counts.
             </p>
             <div className="mt-4">
-              <PurposeButton onClick={() => setConfirming("open")}>Open to sales team</PurposeButton>
+              <PurposeButton onClick={() => setConfirming("open")}>
+                Open to sales team
+              </PurposeButton>
             </div>
           </PurposeCard>
         )}
         {config?.sales_rep_feature_enabled && (
           <div className="mt-6 flex min-h-11 items-center justify-between gap-3 rounded-xl border border-[var(--purpose-line)] px-4 py-2">
             <p className="flex items-center gap-2 text-sm text-[var(--purpose-ink-dim)]">
-              <span className="inline-block size-1.5 rounded-full bg-[var(--purpose-tide)]" aria-hidden />
+              <span
+                className="inline-block size-1.5 rounded-full bg-[var(--purpose-tide)]"
+                aria-hidden
+              />
               Live for the sales team
             </p>
-            <PurposeButton tone="quiet" className="px-2 text-sm" onClick={() => setConfirming("close")}>
+            <PurposeButton
+              tone="quiet"
+              className="px-2 text-sm"
+              onClick={() => setConfirming("close")}
+            >
               Close it
             </PurposeButton>
           </div>
@@ -511,6 +533,9 @@ export function PurposeLeadership() {
               <SummaryTile label="Top limiting belief" value={stats.beliefMode} small />
               <SummaryTile label="Top support request" value={stats.supportMode} small />
             </div>
+
+            {/* Tidal Activity Test — the owner board (named; admin surface). */}
+            <PurposeActivityBoard rows={activityRoster} />
 
             {/* Filters */}
             <div className="mt-6 space-y-3">

@@ -88,7 +88,62 @@ export function useWeekCrmByName(names: readonly string[], enabled: boolean) {
   }, [cardsQuery.data, nameKey, week.weekStartISO, week.weekEndISO]);
 }
 
-export function usePurposeScoreboard(displayName: string | null, enabled: boolean): PurposeScoreboard {
+/** Trailing-2-completed-weeks variant for the Activity-Test scatter: the
+ *  SAME shared block_cards fetch (key + select byte-identical with the
+ *  Goals-tab query above), aggregated over weekStart−14 → weekStart−1 —
+ *  both inside the ±42d pad. closePct comes straight off RepStats, never
+ *  derived here. Unmatched names are simply absent from the map — callers
+ *  render a dash, never a fabricated zero. */
+export function useTrailingCrmByName(names: readonly string[], enabled = true) {
+  const week = useWeekSelector({ endOffsetDays: 6 });
+  const fetchStart = addDaysISO(week.weekStartISO, -SAVE_LINK_PAD_DAYS);
+  const fetchEnd = addDaysISO(week.weekEndISO, SAVE_LINK_PAD_DAYS);
+  const cardsQuery = useQuery({
+    queryKey: ["block_cards", fetchStart, fetchEnd],
+    enabled: enabled && names.length > 0,
+    staleTime: 15_000,
+    queryFn: async ({ signal }) => {
+      const PAGE = 1000;
+      const all: BlockCard[] = [];
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await supabase
+          .from("block_cards")
+          .select(CARD_COLUMNS)
+          .gte("card_date", fetchStart)
+          .lte("card_date", fetchEnd)
+          .order("monday_item_id")
+          .range(from, from + PAGE - 1)
+          .abortSignal(signal);
+        if (error) throw error;
+        all.push(...((data ?? []) as unknown as BlockCard[]));
+        if (!data || data.length < PAGE) break;
+      }
+      return all;
+    },
+  });
+  const trailingStart = addDaysISO(week.weekStartISO, -14);
+  const trailingEnd = addDaysISO(week.weekStartISO, -1);
+  const nameKey = names.join("|");
+  return useMemo(() => {
+    const cards = cardsQuery.data;
+    if (!cards) return null;
+    const { reps } = aggregateCloseKombat(cards, { start: trailingStart, end: trailingEnd });
+    const pool = reps.map((r) => r.rep);
+    const map = new Map<string, { sold: number; revenue: number; closePct: number | null }>();
+    for (const name of nameKey.split("|")) {
+      if (!name) continue;
+      const matcher = buildRepMatcher(name, pool);
+      const row = matcher.matched ? reps.find((r) => matcher.isMe(r.rep)) : undefined;
+      if (row) map.set(name, { sold: row.sold, revenue: row.revenue, closePct: row.closePct });
+    }
+    return map;
+  }, [cardsQuery.data, nameKey, trailingStart, trailingEnd]);
+}
+
+export function usePurposeScoreboard(
+  displayName: string | null,
+  enabled: boolean,
+): PurposeScoreboard {
   const week = useWeekSelector({ endOffsetDays: 6 });
   const fetchStart = addDaysISO(week.weekStartISO, -SAVE_LINK_PAD_DAYS);
   const fetchEnd = addDaysISO(week.weekEndISO, SAVE_LINK_PAD_DAYS);

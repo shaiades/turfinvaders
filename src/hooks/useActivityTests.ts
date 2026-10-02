@@ -191,7 +191,7 @@ export function useAllActivityTests(enabled: boolean) {
 }
 
 /** Latest take per rep_id from a newest-first list. */
-export function latestTakeByRep(takes: ActivityTestRow[]): Map<string, ActivityTestRow> {
+export function latestTakeByRep(takes: readonly ActivityTestRow[]): Map<string, ActivityTestRow> {
   const map = new Map<string, ActivityTestRow>();
   for (const t of takes) if (!map.has(t.rep_id)) map.set(t.rep_id, t);
   return map;

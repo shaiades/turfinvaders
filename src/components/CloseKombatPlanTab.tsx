@@ -9,12 +9,15 @@
 // component for any picked board name (readOnly), so the rep and the
 // leadership view can never disagree.
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import {
   AlertTriangle,
   CalendarDays,
+  Check,
   CheckCircle2,
+  Footprints,
   MapPin,
   RefreshCw,
   Route as RouteIcon,
@@ -24,6 +27,10 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel, ArcadeSkeleton, NeonBar } from "@/components/arcade";
 import { useWeeklyPlan } from "@/hooks/useWeeklyPlan";
+import { useActivityTests } from "@/hooks/useActivityTests";
+import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
+import { claimedJipVisitsPerWeek } from "@/lib/activity-test";
+import { rewardToast } from "@/lib/reward-toast";
 import { getProductionSyncInfo } from "@/lib/production-jobs.functions";
 import { addDaysISO, laDateTimeLabel, laTodayISO } from "@/lib/dates";
 import {
@@ -50,7 +57,12 @@ const STATE_CHIP: Record<string, string> = {
 
 const fmtDay = (iso: string) =>
   new Date(`${iso}T00:00:00Z`)
-    .toLocaleDateString("en-US", { weekday: "short", month: "numeric", day: "numeric", timeZone: "UTC" })
+    .toLocaleDateString("en-US", {
+      weekday: "short",
+      month: "numeric",
+      day: "numeric",
+      timeZone: "UTC",
+    })
     .replace(",", "");
 
 export function CloseKombatPlanTab({
@@ -141,7 +153,10 @@ export function CloseKombatPlanTab({
 
   const jobById = new Map(plan.jobs.map((j) => [j.job.monday_item_id, j]));
 
-  if (matchedName === null || plan.jobs.length + plan.paused.length + plan.upcomingTbd.length === 0) {
+  if (
+    matchedName === null ||
+    plan.jobs.length + plan.paused.length + plan.upcomingTbd.length === 0
+  ) {
     return (
       <ArcadePanel title="Weekly Action Plan" faction="kombat" status="good">
         <p className="text-sm text-muted-foreground">
@@ -182,14 +197,22 @@ export function CloseKombatPlanTab({
         </ArcadePanel>
       )}
 
+      {/* JIP Patrol — Power Level claim vs this week's field receipts */}
+      {canVisit && userId !== null && (
+        <JipPatrolStrip
+          userId={userId}
+          planWeekStart={planWeekStart}
+          todayISO={todayISO}
+          visits={visitsQuery.data}
+        />
+      )}
+
       {/* Mon–Sun agenda */}
       <ArcadePanel
         title="This week"
         faction="kombat"
         status="good"
-        info={
-          <CalendarDays className="w-3.5 h-3.5 text-muted-foreground" aria-hidden />
-        }
+        info={<CalendarDays className="w-3.5 h-3.5 text-muted-foreground" aria-hidden />}
       >
         <Agenda agenda={plan.agenda} planWeekStart={planWeekStart} jobById={jobById} />
       </ArcadePanel>
@@ -299,6 +322,138 @@ function LastUpdated({
   );
 }
 
+/** "JIP PATROL" — the rep's Power Level claim ("I visit my JIPs N times a
+ *  week") held against this week's logged visit rows, as a pip rail. Only
+ *  the signed-in rep ever sees it (parent gates on canVisit), so their own
+ *  uid IS the test subject — no useActivitySubject resolution needed. Every
+ *  number traces to a row: pips = rep_job_visits in the plan week, the
+ *  target = the latest take's answer. Loading, missing migration, or a
+ *  take with no claim → nothing, never a fabricated 0. */
+function JipPatrolStrip({
+  userId,
+  planWeekStart,
+  todayISO,
+  visits,
+}: {
+  userId: string;
+  planWeekStart: string;
+  todayISO: string;
+  visits: { monday_item_id: string; visited_on: string }[] | undefined;
+}) {
+  const testsQuery = useActivityTests(userId);
+  const reduced = usePrefersReducedMotion();
+  const [kaching, setKaching] = useState(false);
+  const prevLogged = useRef<number | null>(null);
+
+  const weekEnd = addDaysISO(planWeekStart, 6);
+  const weekRows = useMemo(
+    () => (visits ?? []).filter((v) => v.visited_on >= planWeekStart && v.visited_on <= weekEnd),
+    [visits, planWeekStart, weekEnd],
+  );
+  const logged = weekRows.length;
+  const hasToday = weekRows.some((v) => v.visited_on === todayISO);
+
+  const takes = testsQuery.data?.takes;
+  const latest = takes?.[0];
+  const said = latest ? claimedJipVisitsPerWeek(latest.answers) : null;
+
+  // Celebrate the markVisit that backs the claim: the refetched count
+  // crossing from below `said` to `said`, once per rep-week.
+  useEffect(() => {
+    if (visits === undefined || said === null || said < 1) return;
+    const prev = prevLogged.current;
+    prevLogged.current = logged;
+    if (prev === null || !(prev < said && logged >= said)) return;
+    try {
+      const key = `ti_jip_backed:${userId}:${planWeekStart}`;
+      if (localStorage.getItem(key)) return;
+      localStorage.setItem(key, "1");
+    } catch {
+      /* storage blocked — still celebrate this once */
+    }
+    if (!reduced) setKaching(true);
+    rewardToast("FIELD RECEIPTS", {
+      description: "Logged visits just backed your Power Level claim.",
+    });
+  }, [visits, said, logged, userId, planWeekStart, reduced]);
+  useEffect(() => {
+    if (!kaching) return;
+    const t = window.setTimeout(() => setKaching(false), 2600); // 1.2s × 2 beats
+    return () => window.clearTimeout(t);
+  }, [kaching]);
+
+  if (visits === undefined) return null;
+  if (testsQuery.isLoading || testsQuery.isError || !testsQuery.data) return null;
+  if (testsQuery.data.missingMigration) return null;
+  const noTest = testsQuery.data.takes.length === 0;
+  if (!noTest && (said === null || said < 1)) return null;
+  const target = noTest ? 0 : (said as number);
+
+  const pipCount = Math.min(target, 10);
+  const filled = Math.min(logged, pipCount);
+
+  return (
+    <Link
+      to="/close-kombat"
+      search={{ tab: "goals" }}
+      hash="field-receipts"
+      className={`flex items-center gap-2 rounded-lg border border-kombat-gold/40 bg-kombat-gold/5 px-3 py-1.5 min-h-11 md:min-h-9 ${kaching ? "kombat-kaching" : ""}`}
+    >
+      <Footprints className="w-4 h-4 text-kombat-gold shrink-0" aria-hidden />
+      <span className="shrink-0 font-display text-[10px] uppercase tracking-widest text-kombat-gold">
+        JIP Patrol
+      </span>
+      {noTest ? (
+        <span className="min-w-0 flex-1 text-[11px] leading-snug text-muted-foreground">
+          Logged {logged} this week — take the test to set your target
+        </span>
+      ) : (
+        <>
+          <span
+            className="min-w-0 flex-1 flex items-center gap-1"
+            aria-label={`${logged} of ${target} claimed visits logged this week`}
+          >
+            {Array.from({ length: pipCount }, (_, i) => {
+              const isFilled = i < filled;
+              const emphasize = isFilled && hasToday && i === filled - 1;
+              return (
+                <span
+                  key={i}
+                  aria-hidden
+                  className={`w-[7px] h-[7px] rounded-[2px] shrink-0 ${
+                    isFilled ? "bg-kombat-gold" : "border border-border"
+                  }`}
+                  style={
+                    isFilled
+                      ? {
+                          boxShadow: emphasize
+                            ? "0 0 10px var(--kombat-gold), 0 0 3px var(--kombat-gold)"
+                            : "0 0 6px var(--kombat-gold)",
+                        }
+                      : undefined
+                  }
+                />
+              );
+            })}
+            {target > 10 && (
+              <span className="text-[10px] tabular-nums text-muted-foreground">×{target}</span>
+            )}
+          </span>
+          {logged >= target ? (
+            <span className="shrink-0 text-[10px] font-display uppercase tabular-nums text-victory">
+              Claim backed <Check className="inline w-3.5 h-3.5 -mt-0.5" aria-hidden />
+            </span>
+          ) : (
+            <span className="shrink-0 text-[10px] font-display uppercase tabular-nums text-muted-foreground">
+              {logged} of {target} — test says {target}
+            </span>
+          )}
+        </>
+      )}
+    </Link>
+  );
+}
+
 function Agenda({
   agenda,
   planWeekStart,
@@ -367,7 +522,9 @@ function JobCard({
     <article className={`arcade-card p-4 space-y-3 ${atRisk ? "border-destructive/50" : ""}`}>
       <header className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
-          <h3 className="font-medium text-sm truncate">{job.homeowner_name ?? "Unknown homeowner"}</h3>
+          <h3 className="font-medium text-sm truncate">
+            {job.homeowner_name ?? "Unknown homeowner"}
+          </h3>
           <p className="text-xs text-muted-foreground truncate">
             {job.projects ?? "Project"}
             {job.address ? ` · ${job.address.split(",")[0]}` : ""}
@@ -415,7 +572,9 @@ function JobCard({
       {/* Visit guidance (recovery guide replaces phases on at-risk jobs) */}
       <div className="text-xs space-y-1">
         <p>
-          <span className="text-kombat-gold font-display uppercase tracking-widest text-[10px]">Goal</span>{" "}
+          <span className="text-kombat-gold font-display uppercase tracking-widest text-[10px]">
+            Goal
+          </span>{" "}
           {guide.goal}
         </p>
         <p className="text-muted-foreground">{guide.homeowner}</p>
@@ -426,13 +585,18 @@ function JobCard({
       {/* Opportunity pills */}
       <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-display uppercase tracking-widest">
         {job.advantage_plus && (
-          <span className={`px-2 py-0.5 rounded-full border ${atRisk ? "border-border text-muted-foreground" : "border-kombat-gold/50 text-kombat-gold"}`}>
+          <span
+            className={`px-2 py-0.5 rounded-full border ${atRisk ? "border-border text-muted-foreground" : "border-kombat-gold/50 text-kombat-gold"}`}
+          >
             Advantage+{atRisk ? " · hold" : ""}
           </span>
         )}
         {!atRisk &&
           reloadsAvailable.map((r) => (
-            <span key={r} className="px-2 py-0.5 rounded-full border border-victory/50 text-victory">
+            <span
+              key={r}
+              className="px-2 py-0.5 rounded-full border border-victory/50 text-victory"
+            >
               Reload: {r}
             </span>
           ))}
