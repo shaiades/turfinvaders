@@ -32,6 +32,7 @@ import { addDaysISO, laTodayISO, nextMonthStartISO, weekStartOfISO } from "@/lib
 import {
   cardOutcome,
   countReps,
+  customerTokens,
   isOfficeAppt,
   isReload,
   normalizeCustomer,
@@ -248,9 +249,17 @@ export const SALE_CATEGORIES = [
   "card.referral_sale",
 ] as const;
 
-/** Office-scoped customer keys (name + phone) used to decide whether a
- *  Sales-Report row already has a block card — so a report-only sale gets
- *  its kicker without ever double-counting one that a block card scored. */
+/** Office-scoped customer keys used to decide whether a Sales-Report row
+ *  already has a block card — so a report-only sale gets its kicker without
+ *  ever double-counting one that a block card scored. Three tiers, mirroring
+ *  the report matcher (bestSoldMatch): exact normalized name, order-insensitive
+ *  sorted tokens, and phone. The token tier is the one that catches the common
+ *  case — the office writes the block card "Ken and Katherine Mokan" and the
+ *  report "Mokan, Ken & Katherine", and with the block card carrying no phone
+ *  the old name+phone keys both missed, so Edward's reload scored on BOTH the
+ *  card and the report (owner 2026-10-02). Sorted tokens are order-free, so the
+ *  two spellings land on one key. Gated to ≥2 tokens: a lone common token must
+ *  never merge two different customers. */
 function customerKeys(
   office: string | null | undefined,
   name: string | null | undefined,
@@ -260,6 +269,8 @@ function customerKeys(
   const keys: string[] = [];
   const nk = normalizeCustomer(name ?? "");
   if (nk) keys.push(`${o}|n|${nk}`);
+  const toks = customerTokens(name ?? "");
+  if (toks.length >= 2) keys.push(`${o}|t|${toks.join(" ")}`);
   const pk = phoneKey(phone);
   if (pk) keys.push(`${o}|p|${pk}`);
   return keys;
