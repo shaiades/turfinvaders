@@ -71,9 +71,8 @@ export type KombatRules = {
     /** Volume — points per $1,000 written. SPLIT across the sale's reps
      *  (the board's own amount÷reps formula). */
     per_1000: number;
-    /** Report-side flat bonuses, FULL to each rep on the sale. */
+    /** Report-side flat bonus, FULL to each rep on the sale. */
     advantage_plus: number;
-    rep_reset: number;
   };
   /** The ONE kicker a block card earns, by outcome + source (never stacks —
    *  a card emits exactly one). FULL to each rep on the card (owner
@@ -122,7 +121,7 @@ export const DEFAULT_KOMBAT_RULES: KombatRules = {
   // Volume is the backbone: 1 pt per $1,000, split by rep count. The dinner
   // tier sits at 175 pts (owner 2026-10-02) because $3M ÷ ~17 reps ≈ $175k
   // each — so "dinner" == you wrote your share of the record month.
-  money: { per_1000: 1, advantage_plus: 3, rep_reset: 5 },
+  money: { per_1000: 1, advantage_plus: 3 },
   card: {
     sale: 5,
     reload: 10,
@@ -211,14 +210,16 @@ export function normalizeSalesCount(
   return "other";
 }
 
-/** Source → kicker token. Covers the board spellings for each. */
+/** Source → kicker token. Covers the board spellings for each. A "Rep Reset"
+ *  source is deliberately NOT a token (owner 2026-10-02: a rep-reset sale is
+ *  just a sale, not a rewarded behavior) — it falls through to null and scores
+ *  as a plain sale. */
 export function normalizeSource(
   v: string | null | undefined,
-): "self_gen" | "referral" | "rep_reset" | "job_walk" | null {
+): "self_gen" | "referral" | "job_walk" | null {
   const t = norm(v);
   if (/self\s*[-_]?\s*gen/.test(t)) return "self_gen";
   if (/referr?al/.test(t)) return "referral";
-  if (/rep\s*[-_]?\s*reset/.test(t)) return "rep_reset";
   if (/job\s*[-_]?\s*walk|jobwalk/.test(t)) return "job_walk";
   return null;
 }
@@ -323,9 +324,9 @@ export type KombatReportRow = ReportSaleRow & {
 export type CardScorePart = { category: string; label: string; points: number; split: boolean };
 
 /** Score one Sales-Report row's MONEY layer: volume (split) plus the flat
- *  Advantage+ / Rep Reset bonuses (full per rep). The sale/reload/self-gen/
- *  referral TYPE kicker is NOT here — it comes from the block card (one per
- *  card, non-stacking). A cancelled row earns nothing. */
+ *  Advantage+ bonus (full per rep). The sale/reload/self-gen/referral TYPE
+ *  kicker is NOT here — it comes from the block card (one per card,
+ *  non-stacking). A cancelled row earns nothing. */
 export function scoreReportCard(row: KombatReportRow, rules: KombatRules): CardScorePart[] {
   if (normalizeSalesCount(row.sales_count) === "cancelled") return [];
   const parts: CardScorePart[] = [];
@@ -343,14 +344,6 @@ export function scoreReportCard(row: KombatReportRow, rules: KombatRules): CardS
       category: "money.advantage_plus",
       label: "Advantage+",
       points: rules.money.advantage_plus,
-      split: false,
-    });
-  }
-  if (normalizeSource(row.source) === "rep_reset" && rules.money.rep_reset !== 0) {
-    parts.push({
-      category: "money.rep_reset",
-      label: "Rep Reset",
-      points: rules.money.rep_reset,
       split: false,
     });
   }
@@ -918,7 +911,6 @@ export function eligibilityStatus(
 
 export const CATEGORY_LABELS: Record<string, string> = {
   "money.volume": "Volume",
-  "money.rep_reset": "Rep Reset",
   "money.advantage_plus": "Advantage+",
   "card.sale": "Sales",
   "card.reload": "Reloads",
@@ -963,7 +955,6 @@ export function buildScorecard(rules: KombatRules): ScorecardGroup[] {
   const money: ScorecardMove[] = [
     { label: "Written volume", points: m.per_1000, per: "per $1,000 sold" },
     { label: "Advantage+", points: m.advantage_plus, per: "advantage+ member" },
-    { label: "Rep Reset", points: m.rep_reset, per: "rep reset" },
   ].filter((x) => x.points !== 0);
   // The one kicker a sold card earns — never stacks with the sit/volume.
   const close: ScorecardMove[] = [
