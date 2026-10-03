@@ -52,7 +52,6 @@ import {
 } from "@/lib/kombat-month";
 import { KombatMonthAdmin } from "@/components/KombatMonthAdmin";
 import { KombatBeltLadder } from "@/components/KombatBeltLadder";
-import { KombatPrizeFlyer } from "@/components/KombatPrizeFlyer";
 import { KombatScorecard } from "@/components/KombatScorecard";
 import { KombatLeaderboard } from "@/components/KombatLeaderboard";
 import { KombatBeltUpFx, type BeltUpFx } from "@/components/KombatBeltUpFx";
@@ -479,10 +478,9 @@ export function KombatMonthTab({
           </div>
         )}
 
-        {/* What you're fighting for — the premium prize flyer (live from rules) */}
-        <KombatPrizeFlyer rules={rules} />
-
-        {/* ① THE BELT — what you're fighting for + where you stand + the rules */}
+        {/* ① THE BELT — the premium "what you're fighting for" poster and the
+            live where-you-stand ladder, merged into one chart (the prize flyer
+            now lives inside the belt ladder's right column). */}
         <KombatBeltLadder
           rules={rules}
           loading={ledgerQuery.isPending}

@@ -21,6 +21,8 @@ import {
 import { RepAvatar } from "@/components/RepAvatar";
 import { cartoonFor, type RepCartoon } from "@/hooks/useRepCartoons";
 
+const SERIF = 'Georgia, Cambria, "Times New Roman", serif';
+
 const fmtMoney = (n: number) =>
   new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -197,10 +199,45 @@ export function KombatBeltLadder({
             </div>
           </div>
 
-          {/* Right: the belt ladder */}
-          <div className="min-w-0">
-            <ol className="space-y-1.5">
-              {belts.map((b) => {
+          {/* Right: the belt POSTER — the premium "what you're fighting for"
+              flyer and the live where-you-stand ladder, merged into one chart.
+              Feast backdrop + serif framing (the old KombatPrizeFlyer), with
+              each rung now carrying its points wall, cash, and your status. */}
+          <div
+            className="relative min-w-0 overflow-hidden rounded-xl border-2 border-kombat-gold/40"
+            style={{
+              boxShadow: "0 0 30px -12px color-mix(in oklab, var(--kombat-gold) 55%, transparent)",
+            }}
+          >
+            <img
+              src="/close-kombat-feast.jpg"
+              alt=""
+              aria-hidden
+              className="absolute inset-0 z-0 h-full w-full object-cover object-center"
+            />
+            <span
+              aria-hidden
+              className="absolute inset-0 z-0"
+              style={{
+                background:
+                  "linear-gradient(180deg, rgba(8,6,4,.93) 0%, rgba(8,6,4,.5) 32%, rgba(8,6,4,.58) 60%, rgba(8,6,4,.95) 100%)",
+              }}
+            />
+            <div className="relative z-10 p-4 sm:p-5">
+              <div className="font-display text-[9px] uppercase tracking-widest text-kombat-gold">
+                What you're fighting for
+              </div>
+              <div
+                className="text-2xl font-black text-kombat-gold sm:text-3xl"
+                style={{ fontFamily: SERIF, textShadow: "0 2px 18px rgba(0,0,0,.7)" }}
+              >
+                The Belt Ladder
+              </div>
+              <p className="mt-0.5 text-xs text-white/80">
+                Hit a belt by month end — the cash is yours.
+              </p>
+              <ol className="mt-4 space-y-1.5">
+                {belts.map((b) => {
                 const cleared = myTotal >= b.points;
                 const isTarget = tier.next?.key === b.key;
                 const accent = BELT_ACCENT[b.key] ?? "var(--kombat-gold)";
@@ -211,10 +248,10 @@ export function KombatBeltLadder({
                     className={
                       "flex items-center gap-3 rounded-md border px-3 py-2.5 transition-colors " +
                       (cleared
-                        ? "border-kombat-gold/60 bg-[color-mix(in_oklab,var(--kombat-gold)_10%,transparent)]"
+                        ? "border-kombat-gold/60 bg-[color-mix(in_oklab,var(--kombat-gold)_16%,rgba(0,0,0,.5))]"
                         : isTarget
-                          ? "border-kombat-red/60 bg-[color-mix(in_oklab,var(--kombat-red)_12%,transparent)]"
-                          : "border-border opacity-60")
+                          ? "border-kombat-red/60 bg-[color-mix(in_oklab,var(--kombat-red)_18%,rgba(0,0,0,.5))]"
+                          : "border-kombat-gold/20 bg-black/50")
                     }
                     style={cleared ? { boxShadow: `0 0 16px -6px ${accent}` } : undefined}
                   >
@@ -259,7 +296,8 @@ export function KombatBeltLadder({
                   </li>
                 );
               })}
-            </ol>
+              </ol>
+            </div>
           </div>
         </div>
       )}
