@@ -89,7 +89,18 @@ async function handle(request: Request): Promise<Response> {
     } catch (kombatErr) {
       kombat = { error: kombatErr instanceof Error ? kombatErr.message : String(kombatErr) };
     }
-    return json({ ok: true, ...summary, kombat });
+    // Rep fighter photos (owner, 2026-10-02): keep Monday profile photos fresh
+    // so new reps appear in the admin gallery ready to generate. Photos only —
+    // cartoon generation stays admin-triggered (it spends API budget and needs
+    // review). Best-effort: a photo hiccup must never fail the plan refresh.
+    let repPhotos: unknown = null;
+    try {
+      const { syncRepPhotos } = await import("@/lib/rep-photos.server");
+      repPhotos = await syncRepPhotos();
+    } catch (photoErr) {
+      repPhotos = { error: photoErr instanceof Error ? photoErr.message : String(photoErr) };
+    }
+    return json({ ok: true, ...summary, kombat, repPhotos });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     // Failure trail (cron doctrine: a dead 6 AM run must be visible in the

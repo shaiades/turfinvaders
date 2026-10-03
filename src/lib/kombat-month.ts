@@ -38,6 +38,7 @@ import {
   isReload,
   normalizeCustomer,
   pendingCardCredits,
+  pendingCardDollars,
   phoneKey,
   type BlockCard,
   type KombatWindow,
@@ -610,6 +611,24 @@ export function scoredCardKeys(cards: readonly BlockCard[], rules: KombatRules):
     for (const k of customerKeys(c.office_location, c.lead_name, c.phone)) keys.add(k);
   }
   return keys;
+}
+
+/** Total live block-price DOLLAR volume for the contest month — the block
+ *  price of every sold card the monthly report hasn't covered yet, summed once
+ *  per card (team total, no per-rep split). Added to the report's written total
+ *  so the $3M team goal moves the instant a sale is marked, counting the very
+ *  same cards the belt points count (buildCardVolumeCandidates) through the
+ *  SAME Shark Tank pending rule (pendingCardDollars → buildPendingReportCheck).
+ *  A report row stays the authority: once it covers a customer the estimate
+ *  drops and the book number takes over (owner 2026-10-02). */
+export function liveBlockVolumeDollars(
+  cards: readonly BlockCard[],
+  reportRows: readonly KombatReportRow[],
+  rules: KombatRules,
+): number {
+  const month = rules.contest.month;
+  const window: KombatWindow = { start: month, end: lastDayOfMonth(month) };
+  return pendingCardDollars([...cards], window, buildPendingReportCheck([...reportRows]));
 }
 
 /** Live VOLUME at the BLOCK price (owner 2026-10-02): a sold block card earns

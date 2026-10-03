@@ -653,22 +653,19 @@ function volumeSplit(
   return out;
 }
 
-/** Per-card, per-rep PENDING (block-price) volume credits — the Month/Year
- *  "count it now at the Block price" money (owner, 2026-09-23) broken out by
- *  card, so the Kombat contest can mint one ledger row per rep per sale from
- *  the SAME rule the standings use: linkSaves + the caller's pendingReport
- *  gate (buildPendingReportCheck) + volumeSplit. A card qualifies exactly when
- *  aggregateCloseKombat would tally it as pendingRevenue — it survives the
- *  save / Can-Save / window / excluded gates, is sold, and pendingReport(card)
- *  is true. `cardTotal` is the deal's full (effective) price for the caller's
- *  label; `amount` is this rep's dollar share. */
-export function pendingCardCredits(
+/** Internal: the sold cards still awaiting their Sales Report row, for the
+ *  window — each already save-revived, with its save effect and full effective
+ *  price (cardTotal). The ONE gate pendingCardCredits (belt POINTS, per rep)
+ *  and pendingCardDollars ($3M team goal, per deal) share, matching
+ *  aggregateCloseKombat's pendingRevenue branch exactly so the two can never
+ *  count a different set of cards. */
+function pendingSoldCards(
   cards: BlockCard[],
   window: KombatWindow | undefined,
   pendingReport: (card: BlockCard) => boolean,
-): Array<{ card: BlockCard; rep: string; amount: number; cardTotal: number }> {
+): Array<{ card: BlockCard; save: SaveEffect | undefined; cardTotal: number }> {
   const saves = linkSaves(cards);
-  const out: Array<{ card: BlockCard; rep: string; amount: number; cardTotal: number }> = [];
+  const out: Array<{ card: BlockCard; save: SaveEffect | undefined; cardTotal: number }> = [];
   for (let card of cards) {
     if (saves.consumed.has(card.monday_item_id)) continue;
     if (isCanSave(card)) continue;
@@ -680,11 +677,41 @@ export function pendingCardCredits(
     if (isExcludedCard(card) && !isCancelLabel(card.wcc) && !isFtdLabel(card.wcc)) continue;
     if (cardOutcome(card) !== "sold") continue;
     if (!pendingReport(card)) continue;
-    const cardTotal = save ? save.price : (card.sale_price ?? 0);
-    for (const c of volumeSplit(card, save))
-      out.push({ card, rep: c.rep, amount: c.amount, cardTotal });
+    out.push({ card, save, cardTotal: save ? save.price : (card.sale_price ?? 0) });
   }
   return out;
+}
+
+/** Per-card, per-rep PENDING (block-price) volume credits — the Month/Year
+ *  "count it now at the Block price" money (owner, 2026-09-23) broken out by
+ *  card, so the Kombat contest can mint one ledger row per rep per sale from
+ *  the SAME rule the standings use: linkSaves + the caller's pendingReport
+ *  gate (buildPendingReportCheck) + volumeSplit. `cardTotal` is the deal's full
+ *  (effective) price for the caller's label; `amount` is this rep's share. */
+export function pendingCardCredits(
+  cards: BlockCard[],
+  window: KombatWindow | undefined,
+  pendingReport: (card: BlockCard) => boolean,
+): Array<{ card: BlockCard; rep: string; amount: number; cardTotal: number }> {
+  const out: Array<{ card: BlockCard; rep: string; amount: number; cardTotal: number }> = [];
+  for (const { card, save, cardTotal } of pendingSoldCards(cards, window, pendingReport))
+    for (const c of volumeSplit(card, save))
+      out.push({ card, rep: c.rep, amount: c.amount, cardTotal });
+  return out;
+}
+
+/** Total PENDING (block-price) DOLLARS — each pending sold card's whole
+ *  effective price once (team total; no per-rep split). The $3M team goal adds
+ *  this to the report's written total, counting the very same cards the belt
+ *  points count, through the same gate (owner, 2026-10-02). */
+export function pendingCardDollars(
+  cards: BlockCard[],
+  window: KombatWindow | undefined,
+  pendingReport: (card: BlockCard) => boolean,
+): number {
+  let total = 0;
+  for (const { cardTotal } of pendingSoldCards(cards, window, pendingReport)) total += cardTotal;
+  return total;
 }
 
 export function aggregateCloseKombat(

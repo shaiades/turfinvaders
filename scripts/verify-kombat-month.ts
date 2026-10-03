@@ -25,6 +25,7 @@ import {
   DEFAULT_KOMBAT_RULES,
   eligibilityStatus,
   isSitCard,
+  liveBlockVolumeDollars,
   kombatWeeks,
   mergeKombatRules,
   normalizeSalesCount,
@@ -803,6 +804,74 @@ eq(
       "2026-11-04",
     )[0]?.status,
     "locked",
+  );
+}
+
+// ---- 14. $3M TEAM GOAL counts live block volume (owner 2026-10-02) --------
+// The team-goal bar used to read the monthly report only, so a sale sat a day
+// behind the belt points until the Sales Report synced. liveBlockVolumeDollars
+// adds the SAME uncovered sold cards the points count — through the shared
+// pending rule (pendingCardDollars → buildPendingReportCheck) — each card's
+// whole price once (team total), so the bar and the belt points never diverge.
+{
+  // Two fresh sold cards not yet in the book → their full prices, summed once
+  // each regardless of rep count (a 2-rep card still adds its whole price).
+  eq(
+    "team goal: uncovered sold cards sum their full prices",
+    liveBlockVolumeDollars(
+      [
+        card({ sale: "Sold", pm: null, sale_price: 3250, lead_name: "Yakup Test" }),
+        card({ sale: "Sold", pm: null, sale_price: 10000, reps: ["A", "B"], lead_name: "Leo" }),
+      ],
+      [],
+      R,
+    ),
+    13250,
+  );
+
+  // Blank price = $0 (never guessed); an unsold sit adds nothing.
+  eq(
+    "team goal: blank price and unsold sit add nothing",
+    liveBlockVolumeDollars(
+      [
+        card({ sale: "Sold", pm: null, sale_price: null, lead_name: "No Price" }),
+        card({ sale: null, pm: "PM", sale_price: 5000, lead_name: "Just A Sit" }),
+      ],
+      [],
+      R,
+    ),
+    0,
+  );
+
+  // Once a report row corroborates the customer (amount match), the block
+  // estimate drops (no double count) — the book's sale_amt is the authority.
+  eq(
+    "team goal: covered-by-report card is not added again",
+    liveBlockVolumeDollars(
+      [
+        card({
+          sale: "Sold",
+          pm: null,
+          sale_price: 9000,
+          lead_name: "Jane Q Customer",
+          office_location: "San Diego",
+        }),
+      ],
+      [row({ customer_name: "Jane Q Customer", office: "San Diego", sale_amt: 9000 })],
+      R,
+    ),
+    0,
+  );
+
+  // The sync's authoritative "in the book" stamp also drops the estimate.
+  eq(
+    "team goal: missing_from_report=false card is not added",
+    liveBlockVolumeDollars(
+      [card({ sale: "Sold", pm: null, sale_price: 9000, missing_from_report: false })],
+      [],
+      R,
+    ),
+    0,
   );
 }
 
