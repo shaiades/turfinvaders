@@ -628,6 +628,56 @@ export function reportCoveredKeys(
   return keys;
 }
 
+/** The ONE gate that decides whether a sold block card counts as live
+ *  block-price volume toward the contest this month — in-month, outcome Sold,
+ *  not an excluded Iss / office appt, a real Sale Price, with at least one
+ *  rep, and NOT yet covered by the monthly report (missing_from_report → false
+ *  or the book already has the customer). Shared by buildCardVolumeCandidates
+ *  (the belt POINTS) and the $3M team-goal DOLLARS so the two can never count
+ *  a different set of cards (owner 2026-10-02). */
+export function isLiveBlockVolumeCard(
+  card: BlockCard,
+  month: string,
+  reportCovered: ReadonlySet<string>,
+): boolean {
+  if (!inContestMonth(card.card_date, month)) return false;
+  if (cardOutcome(card) !== "sold") return false;
+  if (isExcludedIss(card) || isOfficeAppt(card)) return false;
+  const price = card.sale_price;
+  if (price === null || price <= 0) return false; // blank price = $0, never guess
+  // The report is the authority. Skip once the sync proves the card IS in the
+  // book (missing_from_report === false), or a live report row already covers
+  // this customer this month — either way the report volume will count it.
+  if (card.missing_from_report === false) return false;
+  const covered = customerKeys(card.office_location, card.lead_name, card.phone).some((k) =>
+    reportCovered.has(k),
+  );
+  if (covered) return false;
+  if (countReps(card).length === 0) return false;
+  return true;
+}
+
+/** Total live block-price DOLLAR volume for the contest month — the sum of
+ *  Sale Prices of the sold cards the monthly report hasn't covered yet. Added
+ *  to the report's own written total so the $3M team goal moves the instant a
+ *  card is marked, counting the very same sales the belt points already count
+ *  live (owner 2026-10-02) instead of waiting on the monthly Sales Report
+ *  sync. Each card's whole price counts once (team total — no per-rep split);
+ *  the bounty multiplier is a POINTS kicker and never inflates dollars. */
+export function liveBlockVolumeDollars(
+  cards: readonly BlockCard[],
+  rules: KombatRules,
+  reportCovered: ReadonlySet<string>,
+): number {
+  const month = rules.contest.month;
+  let total = 0;
+  for (const card of cards) {
+    if (!isLiveBlockVolumeCard(card, month, reportCovered)) continue;
+    total += card.sale_price ?? 0;
+  }
+  return total;
+}
+
 /** Live VOLUME at the BLOCK price (owner 2026-10-02): a sold block card earns
  *  its +per_1000 volume the moment it's marked — at the card's Sale Price — so
  *  a rep never waits on the monthly Sales Report to sync. The report_sales row
@@ -655,21 +705,11 @@ export function buildCardVolumeCandidates(
   const status: LedgerCandidate["status"] =
     todayISO > contestFinalizeAfterISO(rules) ? "locked" : "pending";
   for (const card of cards) {
-    if (!inContestMonth(card.card_date, month)) continue;
-    if (cardOutcome(card) !== "sold") continue;
-    if (isExcludedIss(card) || isOfficeAppt(card)) continue;
-    const price = card.sale_price;
-    if (price === null || price <= 0) continue; // blank price = $0, never guess
-    // The report is the authority. Skip once the sync proves the card IS in the
-    // book (missing_from_report === false), or a live report row already covers
-    // this customer this month — either way the report volume will count it.
-    if (card.missing_from_report === false) continue;
-    const covered = customerKeys(card.office_location, card.lead_name, card.phone).some((k) =>
-      reportCovered.has(k),
-    );
-    if (covered) continue;
-    const reps = countReps(card);
-    if (reps.length === 0) continue;
+    // Same gate as the $3M team-goal dollars (isLiveBlockVolumeCard) so the
+    // belt points and the team bar never count a different set of cards.
+    if (!isLiveBlockVolumeCard(card, month, reportCovered)) continue;
+    const price = card.sale_price as number; // gate guarantees a real price > 0
+    const reps = countReps(card); // gate guarantees at least one rep
     const mult = bountyMultiplier("money.volume", card.card_date, bounties);
     const cardPts = (price / 1000) * rules.money.per_1000;
     const perRep = (cardPts * mult) / reps.length;
