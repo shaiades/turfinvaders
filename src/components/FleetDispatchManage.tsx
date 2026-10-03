@@ -4,6 +4,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel, TeamBadge, ArcadeCard } from "@/components/arcade";
+import { RepAvatar } from "@/components/RepAvatar";
+import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -79,6 +81,7 @@ export function FleetDispatchManage({
 }) {
   const qc = useQueryClient();
   const { realRole } = useAuth();
+  const cartoons = useRepCartoons().data;
   const canManage = isManagerRole(realRole);
   const isAdmin = isAdminRole(realRole);
   const deleteProfileFn = useServerFn(deleteProfile);
@@ -595,6 +598,12 @@ export function FleetDispatchManage({
                   >
                     {/* Their full history page still renders — this is the
                         one list that reaches removed people, so link it. */}
+                    <RepAvatar
+                      name={p.display_name ?? "Unknown"}
+                      cartoon={cartoonFor(cartoons, p.display_name)}
+                      className="h-7 w-7 opacity-70 grayscale"
+                      textClassName="text-[10px]"
+                    />
                     <Link
                       to="/canvassers/$canvasserId"
                       params={{ canvasserId: p.id }}
@@ -705,6 +714,7 @@ function RosterRow({
   locked?: boolean;
   onToggleLock?: () => void;
 }) {
+  const cartoons = useRepCartoons().data;
   const isGhost = points === 0 && volume === 0;
   return (
     <div
@@ -712,6 +722,12 @@ function RosterRow({
       className="flex flex-wrap sm:flex-nowrap items-center gap-2 px-2 py-1.5 rounded border border-border bg-surface hover:border-neon/60"
     >
       <span className="text-sm truncate flex-1 flex items-center gap-2 min-w-0">
+        <RepAvatar
+          name={name}
+          cartoon={cartoonFor(cartoons, name)}
+          className="h-7 w-7"
+          textClassName="text-[10px]"
+        />
         <span className="truncate">{name}</span>
         {isCaptain && (
           <span className="shrink-0 text-[9px] font-display uppercase tracking-widest px-1.5 py-0.5 rounded border border-accent/60 text-accent bg-accent/10">

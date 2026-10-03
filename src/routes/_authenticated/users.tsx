@@ -19,6 +19,8 @@ import { InvitePlayerSheet } from "@/components/InvitePlayerSheet";
 import { MovePlayersSheet } from "@/components/MovePlayersSheet";
 import { AddPlayerDialog } from "@/components/AddPlayerDialog";
 import { PlayerSheet, type PlayerGroup } from "@/components/PlayerSheet";
+import { RepAvatar } from "@/components/RepAvatar";
+import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
 import { VansPanel } from "@/components/VansPanel";
 import { RenameCanvasserDialog, type NameGroupRef } from "@/components/RenameCanvasserDialog";
 import { MergeCanvasserDialog } from "@/components/MergeCanvasserDialog";
@@ -68,6 +70,7 @@ const NEW_DAYS = 30;
  */
 function UsersPage() {
   const { realRole } = useAuth();
+  const cartoons = useRepCartoons().data;
   const roster = useDispatchRoster();
   const { data: vans = [] } = useDispatchVans();
   const moveAgents = useMoveAgents(vans);
@@ -284,6 +287,12 @@ function UsersPage() {
                 >
                   <span className="text-sm truncate flex-1 flex items-center gap-2 min-w-0 basis-full sm:basis-auto">
                     <UserPlus className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+                    <RepAvatar
+                      name={p.display_name ?? "Unknown"}
+                      cartoon={cartoonFor(cartoons, p.display_name)}
+                      className="h-7 w-7"
+                      textClassName="text-[10px]"
+                    />
                     <span className="truncate font-medium">{p.display_name ?? "Unknown"}</span>
                     <span className="shrink-0 text-[10px] text-muted-foreground">
                       joined{" "}
@@ -448,6 +457,12 @@ function UsersPage() {
                     onClick={() => setSelectedKey(g.key)}
                     className="w-full min-h-12 flex items-center gap-2 px-3 py-2 rounded border border-border bg-surface text-left hover:border-neon/60 transition-colors min-w-0"
                   >
+                    <RepAvatar
+                      name={g.display_name ?? "Unknown"}
+                      cartoon={cartoonFor(cartoons, g.display_name)}
+                      className={`h-8 w-8 ${g.archivedOnly ? "opacity-70 grayscale" : ""}`}
+                      textClassName="text-[10px]"
+                    />
                     <span className="min-w-0 flex-1 flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-medium truncate max-w-full">
                         {g.display_name ?? "Unknown"}

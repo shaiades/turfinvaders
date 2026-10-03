@@ -1329,6 +1329,48 @@ export type Database = {
           },
         ]
       }
+      canvasser_photos: {
+        Row: {
+          cartoon_full_url: string | null
+          cartoon_meta: Json | null
+          cartoon_portrait_url: string | null
+          cartoon_prompt: string | null
+          cartoon_status: string
+          name: string
+          name_norm: string
+          photo_path: string | null
+          profile_id: string
+          source_hash: string | null
+          updated_at: string
+        }
+        Insert: {
+          cartoon_full_url?: string | null
+          cartoon_meta?: Json | null
+          cartoon_portrait_url?: string | null
+          cartoon_prompt?: string | null
+          cartoon_status?: string
+          name: string
+          name_norm: string
+          photo_path?: string | null
+          profile_id: string
+          source_hash?: string | null
+          updated_at?: string
+        }
+        Update: {
+          cartoon_full_url?: string | null
+          cartoon_meta?: Json | null
+          cartoon_portrait_url?: string | null
+          cartoon_prompt?: string | null
+          cartoon_status?: string
+          name?: string
+          name_norm?: string
+          photo_path?: string | null
+          profile_id?: string
+          source_hash?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       rep_photos: {
         Row: {
           cartoon_full_url: string | null

@@ -21,6 +21,8 @@ import {
 } from "@/lib/dispatch.functions";
 import { isAdminRole } from "@/lib/roles";
 import { RangeTabs } from "@/components/RangeTabs";
+import { RepAvatar } from "@/components/RepAvatar";
+import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
 type MemberRow = {
@@ -75,6 +77,7 @@ export function FieldStandingsSheet({
   onOpenChange: (v: boolean) => void;
 }) {
   const { user } = useAuth();
+  const cartoons = useRepCartoons().data;
   const controls = useDateRange({ initialTab: "day" });
   const { range } = controls;
   const [keyOpen, setKeyOpen] = useState(false);
@@ -329,6 +332,13 @@ export function FieldStandingsSheet({
                                   className="h-1.5 w-1.5 shrink-0 rounded-full border border-muted-foreground/60"
                                 />
                               )}
+                              <RepAvatar
+                                name={r.name}
+                                cartoon={cartoonFor(cartoons, r.name)}
+                                className="h-6 w-6"
+                                textClassName="text-[9px]"
+                                ring={mine}
+                              />
                               <span className="truncate">{r.name}</span>
                               {r.former ? " · former" : ""}
                             </div>

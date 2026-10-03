@@ -20,6 +20,7 @@ import { PlanPanel } from "@/components/PlanPanel";
 import { DailyLogPanel } from "@/components/DailyLogPanel";
 import { CanvasserStats, GrindCounter } from "@/components/CanvasserStats";
 import { PiggyBankHUD } from "@/components/PiggyBankHUD";
+import { MyFighterCard } from "@/components/MyFighterCard";
 import { usePiggyBank } from "@/hooks/usePiggyBank";
 import type { CanvasserStatsData } from "@/hooks/useCanvasserStats";
 import { CalendarClock, DoorOpen, MessageSquare, PhoneCall } from "lucide-react";
@@ -140,6 +141,7 @@ export function CanvasserMission({
         />
       </div>
       <SCCERankBanner userId={userId} />
+      <MyFighterCard />
       <PushAlertsCard
         title="Alerts"
         description="Turf drops and schedule changes, straight to your phone."
