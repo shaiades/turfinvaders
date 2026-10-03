@@ -53,6 +53,7 @@ import {
 } from "@/lib/kombat-month";
 import { KombatMonthAdmin } from "@/components/KombatMonthAdmin";
 import { KombatBeltLadder } from "@/components/KombatBeltLadder";
+import { KombatPrizeFlyer } from "@/components/KombatPrizeFlyer";
 import { KombatScorecard } from "@/components/KombatScorecard";
 import { KombatLeaderboard } from "@/components/KombatLeaderboard";
 import { KombatBeltUpFx, type BeltUpFx } from "@/components/KombatBeltUpFx";
@@ -473,6 +474,9 @@ export function KombatMonthTab({
             </div>
           </div>
         )}
+
+        {/* What you're fighting for — the premium prize flyer (live from rules) */}
+        <KombatPrizeFlyer rules={rules} />
 
         {/* ① THE BELT — what you're fighting for + where you stand + the rules */}
         <KombatBeltLadder

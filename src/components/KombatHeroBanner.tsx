@@ -1,8 +1,9 @@
-// The Close Kombat title screen (owner 2026-10-02: fix the "missing image").
-// A comic-book / arcade title card in the flyer house style — halftone field,
-// lightning, a starburst, and the inked "CLOSE KOMBAT" wordmark — that replaces
-// the old plain <Swords/> + text header. Pure CSS + inline SVG (no asset
-// pipeline), so it's crisp in both themes and costs nothing to ship.
+// The Close Kombat title screen (owner 2026-10-02; AI key-art added 2026-10-03).
+// A full-bleed arcade key-art banner (public/close-kombat-hero.jpg — two fighters
+// clashing, generated with Gemini) under a legibility scrim, with the inked
+// "CLOSE KOMBAT" wordmark + admin actions overlaid. The image is the real "missing
+// image"; the title stays crisp + responsive as CSS text over it. Falls back to
+// the kombat-black panel if the asset ever fails to load.
 
 import type { ReactNode } from "react";
 
@@ -15,27 +16,29 @@ export function KombatHeroBanner({
 }) {
   return (
     <section
-      className="relative overflow-hidden rounded-xl border-2 border-kombat-red/60 bg-kombat-black px-4 py-5 sm:px-6 sm:py-6"
+      className="relative flex min-h-[150px] items-center overflow-hidden rounded-xl border-2 border-kombat-red/60 bg-kombat-black px-4 py-5 sm:min-h-[184px] sm:px-6 sm:py-7"
       style={{
-        boxShadow:
-          "0 0 32px -10px color-mix(in oklab, var(--kombat-red) 70%, transparent), inset 0 0 60px -30px color-mix(in oklab, var(--kombat-gold) 60%, transparent)",
+        boxShadow: "0 0 32px -10px color-mix(in oklab, var(--kombat-red) 70%, transparent)",
       }}
     >
-      {/* Halftone wash + drifting arena light behind everything. */}
-      <span aria-hidden className="pop-halftone" />
-      <span aria-hidden className="kombat-arena" />
-
-      {/* Lightning bolts, flyer-style. */}
-      <svg
+      {/* Key-art backdrop + legibility scrim + a touch of halftone. */}
+      <img
+        src="/close-kombat-hero.jpg"
+        alt=""
         aria-hidden
-        viewBox="0 0 40 120"
-        className="pointer-events-none absolute -left-1 top-0 h-full w-10 opacity-70"
-        fill="none"
-      >
-        <path d="M24 2 L8 54 L20 54 L10 118 L34 46 L21 46 Z" fill="var(--kombat-gold)" />
-      </svg>
+        className="absolute inset-0 z-0 h-full w-full object-cover object-center"
+      />
+      <span
+        aria-hidden
+        className="absolute inset-0 z-0"
+        style={{
+          background:
+            "linear-gradient(90deg, rgba(10,8,12,.92) 0%, rgba(10,8,12,.42) 46%, rgba(10,8,12,.74) 100%)",
+        }}
+      />
+      <span aria-hidden className="pop-halftone z-0 opacity-25" />
 
-      <div className="relative z-10 flex flex-wrap items-center justify-between gap-3">
+      <div className="relative z-10 flex w-full flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-3">
             {/* Starburst emblem with the versus mark. */}
@@ -48,12 +51,12 @@ export function KombatHeroBanner({
             </span>
             <h1
               className="pop-ink font-display uppercase leading-[0.95] tracking-wide text-kombat-gold"
-              style={{ fontSize: "clamp(1.4rem, 7vw, 2.6rem)" }}
+              style={{ fontSize: "clamp(1.5rem, 7vw, 2.8rem)" }}
             >
               Close Kombat
             </h1>
           </div>
-          <p className="mt-2 max-w-prose text-xs text-muted-foreground">{subtitle}</p>
+          <p className="mt-2 max-w-prose text-xs text-white/75">{subtitle}</p>
         </div>
 
         {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
