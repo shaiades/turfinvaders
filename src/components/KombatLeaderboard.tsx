@@ -8,6 +8,8 @@ import { useCountUp } from "@/hooks/useCountUp";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { BELT_ACCENT, fmtPts, tierFor, type KombatRules, type RepTotals } from "@/lib/kombat-month";
 import type { RepMatcher } from "@/lib/rep-identity";
+import { RepAvatar } from "@/components/RepAvatar";
+import { cartoonFor, type RepCartoon } from "@/hooks/useRepCartoons";
 
 const firstName = (n: string) => n.trim().split(/\s+/)[0] || n;
 const PODIUM_ACCENT = ["var(--kombat-gold)", "var(--muted-foreground)", "var(--kombat-red)"];
@@ -17,11 +19,13 @@ export function KombatLeaderboard({
   rules,
   matcher,
   loading,
+  cartoons,
 }: {
   totals: RepTotals[];
   rules: KombatRules;
   matcher: RepMatcher;
   loading: boolean;
+  cartoons?: Map<string, RepCartoon>;
 }) {
   const reduced = usePrefersReducedMotion();
   const podium = totals.slice(0, 3);
@@ -50,6 +54,7 @@ export function KombatLeaderboard({
                     rules={rules}
                     me={matcher.isMe(t.rep_name)}
                     reduced={reduced}
+                    cartoon={cartoonFor(cartoons, t.rep_name)}
                   />
                 );
               })}
@@ -66,6 +71,7 @@ export function KombatLeaderboard({
                 rules={rules}
                 me={matcher.isMe(t.rep_name)}
                 reduced={reduced}
+                cartoon={cartoonFor(cartoons, t.rep_name)}
               />
             ))}
           </ol>
@@ -81,12 +87,14 @@ function PodiumCard({
   rules,
   me,
   reduced,
+  cartoon,
 }: {
   total: RepTotals;
   place: number;
   rules: KombatRules;
   me: boolean;
   reduced: boolean;
+  cartoon?: RepCartoon;
 }) {
   const accent = PODIUM_ACCENT[place];
   const pts = useCountUp(total.total, reduced);
@@ -106,6 +114,15 @@ function PodiumCard({
         background: `color-mix(in oklab, ${accent} 10%, transparent)`,
       }}
     >
+      <div className="mb-1 flex justify-center">
+        <RepAvatar
+          name={total.rep_name}
+          cartoon={cartoon}
+          className={place === 0 ? "h-16 w-16" : "h-12 w-12"}
+          textClassName={place === 0 ? "text-base" : "text-xs"}
+          ring={place === 0}
+        />
+      </div>
       <div className="text-lg leading-none">
         {place === 0 ? <span className="kombat-crown">👑</span> : place === 1 ? "🥈" : "🥉"}
       </div>
@@ -140,6 +157,7 @@ function LadderRow({
   rules,
   me,
   reduced,
+  cartoon,
 }: {
   total: RepTotals;
   rank: number;
@@ -147,6 +165,7 @@ function LadderRow({
   rules: KombatRules;
   me: boolean;
   reduced: boolean;
+  cartoon?: RepCartoon;
 }) {
   const pts = useCountUp(total.total, reduced);
   const belt = tierFor(total.total, rules).current;
@@ -170,6 +189,13 @@ function LadderRow({
       <span className={"w-6 shrink-0 text-right font-display text-xs tabular-nums " + rankColor}>
         {rank}
       </span>
+      <RepAvatar
+        name={total.rep_name}
+        cartoon={cartoon}
+        className="h-9 w-9"
+        textClassName="text-[0.7rem]"
+        ring={rank === 1}
+      />
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-1.5">
           <span className="truncate text-sm font-medium">{total.rep_name}</span>

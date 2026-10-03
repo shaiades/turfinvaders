@@ -1329,6 +1329,51 @@ export type Database = {
           },
         ]
       }
+      rep_photos: {
+        Row: {
+          cartoon_full_url: string | null
+          cartoon_meta: Json | null
+          cartoon_portrait_url: string | null
+          cartoon_prompt: string | null
+          cartoon_status: string
+          monday_user_id: number
+          name: string
+          name_norm: string
+          photo_url: string | null
+          source_hash: string | null
+          title: string | null
+          updated_at: string
+        }
+        Insert: {
+          cartoon_full_url?: string | null
+          cartoon_meta?: Json | null
+          cartoon_portrait_url?: string | null
+          cartoon_prompt?: string | null
+          cartoon_status?: string
+          monday_user_id: number
+          name: string
+          name_norm: string
+          photo_url?: string | null
+          source_hash?: string | null
+          title?: string | null
+          updated_at?: string
+        }
+        Update: {
+          cartoon_full_url?: string | null
+          cartoon_meta?: Json | null
+          cartoon_portrait_url?: string | null
+          cartoon_prompt?: string | null
+          cartoon_status?: string
+          monday_user_id?: number
+          name?: string
+          name_norm?: string
+          photo_url?: string | null
+          source_hash?: string | null
+          title?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       report_collections: {
         Row: {
           actual_amount: number
