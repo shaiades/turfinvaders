@@ -28,7 +28,6 @@ import {
   buildCardVolumeCandidates,
   buildMoneyCandidates,
   buildReloadPitchCandidates,
-  reportCoveredKeys,
   scoredCardKeys,
   mergeKombatRules,
   type KombatBounty,
@@ -144,14 +143,15 @@ export async function runKombatRecompute(): Promise<KombatRecomputeSummary> {
   // block card already scored.
   const coveredKeys = scoredCardKeys(cards, rules);
   const money = buildMoneyCandidates(reportRows, rules, bounties, today, coveredKeys);
-  // Live volume at block price (owner 2026-10-02): a sold card counts its
-  // $/1k immediately; the report row, once it lands, is the authority and the
-  // block estimate is dropped. reportCovered = customers the book already has.
-  const reportCovered = reportCoveredKeys(reportRows, rules);
+  // Live volume at block price (owner 2026-10-02): a sold card counts its $/1k
+  // immediately, through the SAME pending-money rule Shark Tank uses
+  // (buildCardVolumeCandidates → pendingCardCredits). Once the report row lands
+  // the card stops being pending and the estimate is dropped for the book's
+  // exact number.
   const candidates: LedgerCandidate[] = [
     ...money.candidates,
     ...buildCardCandidates(cards, rules, bounties, today),
-    ...buildCardVolumeCandidates(cards, rules, bounties, reportCovered, today),
+    ...buildCardVolumeCandidates(cards, reportRows, rules, bounties, today),
     ...buildReloadPitchCandidates(reloadRows, parentRepsById, rules, bounties, today),
   ];
 

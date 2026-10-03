@@ -30,7 +30,6 @@ import {
   normalizeSalesCount,
   normalizeSource,
   projectPayouts,
-  reportCoveredKeys,
   reportRowLockState,
   reportOnlyKicker,
   scoreReportCard,
@@ -647,19 +646,19 @@ eq(
   false,
 );
 
-// ---- 13. Volume at BLOCK PRICE (owner 2026-10-02) -----------------------
-// A sold card counts its $/1k immediately at the Block Sale Price so a rep
-// never waits on the Sales Report; the report row is the authority and the
-// estimate drops the instant it covers the sale (no double count).
+// ---- 13. Volume at BLOCK PRICE — Shark Tank parity (owner 2026-10-02) ----
+// A sold card counts its $/1k immediately at the Block price, through the SAME
+// rule Shark Tank's pending money uses: buildPendingReportCheck (missing ≠
+// false AND no corroborated report row) + the shared volumeSplit (saves
+// included). The report row is the authority and the estimate drops the
+// instant it corroborates the sale. New signature: (cards, reportRows, …).
 {
-  const noReport = reportCoveredKeys([], R);
-
   // Fresh sold card, $3,250, not in the book yet → 3.25 volume, one rep.
   const fresh = buildCardVolumeCandidates(
     [card({ sale: "Sold", pm: null, sale_price: 3250, lead_name: "Yakup Test" })],
+    [],
     R,
     [],
-    noReport,
     MID,
   );
   eq("block volume: fresh sold card emits one money.volume", fresh.length, 1);
@@ -667,13 +666,18 @@ eq(
   eq("block volume: category is money.volume", fresh[0]?.category, "money.volume");
   eq("block volume: tagged block_price", fresh[0]?.meta.block_price, true);
   eq("block volume: sourced on the card (sit)", fresh[0]?.source_kind, "sit");
+  eq(
+    "block volume: label is the full deal price",
+    fresh[0]?.meta.label,
+    "$3,250 written · block price",
+  );
 
   // Two reps split the block volume, same board formula as report volume.
   const twoRep = buildCardVolumeCandidates(
     [card({ sale: "Sold", pm: null, sale_price: 10000, reps: ["A", "B"] })],
+    [],
     R,
     [],
-    noReport,
     MID,
   );
   eq("block volume: 2-rep card → 2 rows", twoRep.length, 2);
@@ -682,35 +686,21 @@ eq(
   // Blank Sale Price scores nothing (never guessed), and an unsold sit too.
   eq(
     "block volume: blank price = nothing",
-    buildCardVolumeCandidates(
-      [card({ sale: "Sold", pm: null, sale_price: null })],
-      R,
-      [],
-      noReport,
-      MID,
-    ).length,
+    buildCardVolumeCandidates([card({ sale: "Sold", pm: null, sale_price: null })], [], R, [], MID)
+      .length,
     0,
   );
   eq(
     "block volume: unsold sit earns no volume",
-    buildCardVolumeCandidates(
-      [card({ sale: null, pm: "PM", sale_price: 5000 })],
-      R,
-      [],
-      noReport,
-      MID,
-    ).length,
+    buildCardVolumeCandidates([card({ sale: null, pm: "PM", sale_price: 5000 })], [], R, [], MID)
+      .length,
     0,
   );
 
-  // The report is the authority: a live report row covering the customer
-  // suppresses the block estimate (dedup with the report's own volume).
-  const covered = reportCoveredKeys(
-    [row({ customer_name: "Jane Q Customer", office: "San Diego", sale_amt: 9000 })],
-    R,
-  );
+  // The report is the authority: a report row corroborating by AMOUNT (the
+  // Shark Tank pending check) suppresses the block estimate — no double count.
   eq(
-    "block volume: covered by a report row → suppressed",
+    "block volume: report row (amount match) → suppressed",
     buildCardVolumeCandidates(
       [
         card({
@@ -721,12 +711,41 @@ eq(
           office_location: "San Diego",
         }),
       ],
+      [row({ customer_name: "Jane Q Customer", office: "San Diego", sale_amt: 9000 })],
       R,
       [],
-      covered,
       MID,
     ).length,
     0,
+  );
+  // A bare name hit with NO date/amount corroboration does NOT suppress — this
+  // is exactly where the old key-only gate went behind Shark Tank.
+  eq(
+    "block volume: bare name hit (no corroboration) still counts",
+    buildCardVolumeCandidates(
+      [
+        card({
+          sale: "Sold",
+          pm: null,
+          sale_price: 9000,
+          lead_name: "Jane Q Customer",
+          office_location: "San Diego",
+          card_date: "2026-10-06",
+        }),
+      ],
+      [
+        row({
+          customer_name: "Jane Q Customer",
+          office: "San Diego",
+          sale_amt: 1234, // different amount
+          date_sold: "2026-01-01", // far outside the date window
+        }),
+      ],
+      R,
+      [],
+      MID,
+    ).length,
+    1,
   );
 
   // The sync's authoritative "it's in the book" stamp also suppresses it.
@@ -734,22 +753,53 @@ eq(
     "block volume: missing_from_report=false → suppressed",
     buildCardVolumeCandidates(
       [card({ sale: "Sold", pm: null, sale_price: 9000, missing_from_report: false })],
+      [],
       R,
       [],
-      noReport,
       MID,
     ).length,
     0,
   );
+
+  // Save parity: a landed Can/Save re-prices the deal — saver 50%, original
+  // 50% — at the SAVE price, identical to Shark Tank's standings (volumeSplit).
+  {
+    const original = card({
+      lead_name: "Save Me",
+      office_location: "San Diego",
+      phone: "6195550000",
+      sale: "Sold",
+      pm: null,
+      wcc: "Cancelled",
+      sale_price: 5000,
+      reps: ["Orig"],
+    });
+    const saveCard = card({
+      lead_name: "Save Me",
+      office_location: "San Diego",
+      phone: "6195550000",
+      comments: "Can Save",
+      sale: null,
+      pm: null,
+      sale_price: 8000,
+      reps: ["Saver"],
+    });
+    const out = buildCardVolumeCandidates([original, saveCard], [], R, [], MID);
+    const byRep = new Map(out.map((c) => [c.rep_name, c.points]));
+    eq("save: two credits (saver + original)", out.length, 2);
+    eq("save: saver gets 50% of $8k → 4", byRep.get("Saver"), 4);
+    eq("save: original gets 50% of $8k → 4", byRep.get("Orig"), 4);
+    eq("save: label is the re-priced total", out[0]?.meta.label, "$8,000 written · block price");
+  }
 
   // Locks on the same month-end clock as every other pending point.
   eq(
     "block volume: locks after finalize",
     buildCardVolumeCandidates(
       [card({ sale: "Sold", pm: null, sale_price: 1000 })],
+      [],
       R,
       [],
-      noReport,
       "2026-11-04",
     )[0]?.status,
     "locked",

@@ -619,6 +619,74 @@ export type KombatOptions = {
   pendingReport?: (card: BlockCard) => boolean;
 };
 
+/** The per-rep VOLUME split for a sold card (owner, 2026-08-01) — the single
+ *  source of truth the standings AND the Kombat contest both credit through.
+ *  No save: the Sale Price divides evenly across the volume reps (the Sales
+ *  Report's rep pair when it disagrees with the block card). A landed save
+ *  re-prices the deal — the saver takes 50% off the top, the original rep(s)
+ *  split the rest — and a saver the block card itself names stays in the
+ *  originals' half (never paid twice). Returns rep → dollars; the caller owns
+ *  the revenue/pending bookkeeping. */
+function volumeSplit(
+  card: BlockCard,
+  save: SaveEffect | undefined,
+): Array<{ rep: string; amount: number }> {
+  const out: Array<{ rep: string; amount: number }> = [];
+  const volNames = volumeReps(card);
+  if (save) {
+    const savers = save.saverReps;
+    const saverPool = savers.length > 0 ? save.price / 2 : 0;
+    const originalPool = save.price - saverPool;
+    for (const name of savers) out.push({ rep: name, amount: saverPool / savers.length });
+    const blockSet = new Set(countReps(card).map((r) => r.toLowerCase()));
+    const saverSet = new Set(savers.map((r) => r.toLowerCase()));
+    const originals = volNames.filter(
+      (n) => !saverSet.has(n.toLowerCase()) || blockSet.has(n.toLowerCase()),
+    );
+    const originalNames = originals.length > 0 ? originals : volNames;
+    for (const name of originalNames)
+      out.push({ rep: name, amount: originalPool / originalNames.length });
+  } else {
+    const price = card.sale_price ?? 0;
+    for (const name of volNames) out.push({ rep: name, amount: price / volNames.length });
+  }
+  return out;
+}
+
+/** Per-card, per-rep PENDING (block-price) volume credits — the Month/Year
+ *  "count it now at the Block price" money (owner, 2026-09-23) broken out by
+ *  card, so the Kombat contest can mint one ledger row per rep per sale from
+ *  the SAME rule the standings use: linkSaves + the caller's pendingReport
+ *  gate (buildPendingReportCheck) + volumeSplit. A card qualifies exactly when
+ *  aggregateCloseKombat would tally it as pendingRevenue — it survives the
+ *  save / Can-Save / window / excluded gates, is sold, and pendingReport(card)
+ *  is true. `cardTotal` is the deal's full (effective) price for the caller's
+ *  label; `amount` is this rep's dollar share. */
+export function pendingCardCredits(
+  cards: BlockCard[],
+  window: KombatWindow | undefined,
+  pendingReport: (card: BlockCard) => boolean,
+): Array<{ card: BlockCard; rep: string; amount: number; cardTotal: number }> {
+  const saves = linkSaves(cards);
+  const out: Array<{ card: BlockCard; rep: string; amount: number; cardTotal: number }> = [];
+  for (let card of cards) {
+    if (saves.consumed.has(card.monday_item_id)) continue;
+    if (isCanSave(card)) continue;
+    if (!inWindow(card, window)) continue;
+    const save = saves.effects.get(card.monday_item_id);
+    // A landed save supersedes a stale Cancelled stamp (same revival the
+    // aggregation applies), so the original counts as the live sale it is.
+    if (save && cardOutcome(card) === "cancelled") card = { ...card, wcc: null };
+    if (isExcludedCard(card) && !isCancelLabel(card.wcc) && !isFtdLabel(card.wcc)) continue;
+    if (cardOutcome(card) !== "sold") continue;
+    if (!pendingReport(card)) continue;
+    const cardTotal = save ? save.price : (card.sale_price ?? 0);
+    for (const c of volumeSplit(card, save))
+      out.push({ card, rep: c.rep, amount: c.amount, cardTotal });
+  }
+  return out;
+}
+
 export function aggregateCloseKombat(
   cards: BlockCard[],
   window?: KombatWindow,
@@ -742,42 +810,13 @@ export function aggregateCloseKombat(
         totals.pendingRevenue += effectivePrice;
         if (effectivePrice > 0) totals.pendingDeals += 1;
       }
-      const volNames = volumeReps(card);
-      if (save) {
-        // saverReps comes out of linkSaves already cleaned/deduped.
-        const savers = save.saverReps;
-        // No saver names on the save card: nobody to pay the save half to —
-        // the originals split the whole re-priced deal instead.
-        const saverPool = savers.length > 0 ? save.price / 2 : 0;
-        const originalPool = save.price - saverPool;
-        for (const name of savers) {
-          repRow(name).revenue += saverPool / savers.length;
-          if (isPending) repRow(name).pendingRevenue += saverPool / savers.length;
-        }
-        // A saver who reached volNames only through the REPORT STAMP already
-        // took the save half above — drop them from the originals' half, or
-        // the office writing the split into the report pair pays them twice
-        // (75/25 on a one-seller deal instead of the owner's 50/50). A saver
-        // the BLOCK card itself names sold the deal too, and a rep on both
-        // cards earns both shares — they stay.
-        const blockSet = new Set(countNames.map((r) => r.toLowerCase()));
-        const saverSet = new Set(savers.map((r) => r.toLowerCase()));
-        const originals = volNames.filter(
-          (n) => !saverSet.has(n.toLowerCase()) || blockSet.has(n.toLowerCase()),
-        );
-        const originalNames = originals.length > 0 ? originals : volNames;
-        // No original reps recorded: their half stays uncredited (company
-        // totals keep the whole price) — never invent a recipient.
-        for (const name of originalNames) {
-          repRow(name).revenue += originalPool / originalNames.length;
-          if (isPending) repRow(name).pendingRevenue += originalPool / originalNames.length;
-        }
-      } else {
-        const price = card.sale_price ?? 0;
-        for (const name of volNames) {
-          repRow(name).revenue += price / volNames.length;
-          if (isPending) repRow(name).pendingRevenue += price / volNames.length;
-        }
+      // One rule for the split (volumeSplit), shared verbatim with the Kombat
+      // contest's pending credits (pendingCardCredits) so the two can never
+      // drift — saver 50% off the top, originals split the rest, no save = an
+      // even divide across the volume reps.
+      for (const { rep, amount } of volumeSplit(card, save)) {
+        repRow(rep).revenue += amount;
+        if (isPending) repRow(rep).pendingRevenue += amount;
       }
     }
   }
@@ -1280,9 +1319,7 @@ export function aggregateReportYear(rows: ReportSaleRow[]): YearAggregate {
   for (const r of reps) r.revenue = Math.round(r.revenue * 100) / 100;
   // Same ranking doctrine as the Block engine: volume first, then sales,
   // then name for a stable order.
-  reps.sort(
-    (a, b) => b.revenue - a.revenue || b.sold - a.sold || a.rep.localeCompare(b.rep),
-  );
+  reps.sort((a, b) => b.revenue - a.revenue || b.sold - a.sold || a.rep.localeCompare(b.rep));
   return { reps, totals };
 }
 
