@@ -14,6 +14,7 @@ import {
   SALE_CATEGORIES,
   bountyMultiplier,
   buildCardCandidates,
+  buildCardVolumeCandidates,
   buildMoneyCandidates,
   buildReloadPitchCandidates,
   buildScorecard,
@@ -29,6 +30,7 @@ import {
   normalizeSalesCount,
   normalizeSource,
   projectPayouts,
+  reportCoveredKeys,
   reportRowLockState,
   reportOnlyKicker,
   scoreReportCard,
@@ -644,6 +646,115 @@ eq(
   ),
   false,
 );
+
+// ---- 13. Volume at BLOCK PRICE (owner 2026-10-02) -----------------------
+// A sold card counts its $/1k immediately at the Block Sale Price so a rep
+// never waits on the Sales Report; the report row is the authority and the
+// estimate drops the instant it covers the sale (no double count).
+{
+  const noReport = reportCoveredKeys([], R);
+
+  // Fresh sold card, $3,250, not in the book yet → 3.25 volume, one rep.
+  const fresh = buildCardVolumeCandidates(
+    [card({ sale: "Sold", pm: null, sale_price: 3250, lead_name: "Yakup Test" })],
+    R,
+    [],
+    noReport,
+    MID,
+  );
+  eq("block volume: fresh sold card emits one money.volume", fresh.length, 1);
+  eq("block volume: $3,250 → 3.25", fresh[0]?.points, 3.25);
+  eq("block volume: category is money.volume", fresh[0]?.category, "money.volume");
+  eq("block volume: tagged block_price", fresh[0]?.meta.block_price, true);
+  eq("block volume: sourced on the card (sit)", fresh[0]?.source_kind, "sit");
+
+  // Two reps split the block volume, same board formula as report volume.
+  const twoRep = buildCardVolumeCandidates(
+    [card({ sale: "Sold", pm: null, sale_price: 10000, reps: ["A", "B"] })],
+    R,
+    [],
+    noReport,
+    MID,
+  );
+  eq("block volume: 2-rep card → 2 rows", twoRep.length, 2);
+  eq("block volume: $10k / 2 reps = 5 each", twoRep[0]?.points, 5);
+
+  // Blank Sale Price scores nothing (never guessed), and an unsold sit too.
+  eq(
+    "block volume: blank price = nothing",
+    buildCardVolumeCandidates(
+      [card({ sale: "Sold", pm: null, sale_price: null })],
+      R,
+      [],
+      noReport,
+      MID,
+    ).length,
+    0,
+  );
+  eq(
+    "block volume: unsold sit earns no volume",
+    buildCardVolumeCandidates(
+      [card({ sale: null, pm: "PM", sale_price: 5000 })],
+      R,
+      [],
+      noReport,
+      MID,
+    ).length,
+    0,
+  );
+
+  // The report is the authority: a live report row covering the customer
+  // suppresses the block estimate (dedup with the report's own volume).
+  const covered = reportCoveredKeys(
+    [row({ customer_name: "Jane Q Customer", office: "San Diego", sale_amt: 9000 })],
+    R,
+  );
+  eq(
+    "block volume: covered by a report row → suppressed",
+    buildCardVolumeCandidates(
+      [
+        card({
+          sale: "Sold",
+          pm: null,
+          sale_price: 9000,
+          lead_name: "Jane Q Customer",
+          office_location: "San Diego",
+        }),
+      ],
+      R,
+      [],
+      covered,
+      MID,
+    ).length,
+    0,
+  );
+
+  // The sync's authoritative "it's in the book" stamp also suppresses it.
+  eq(
+    "block volume: missing_from_report=false → suppressed",
+    buildCardVolumeCandidates(
+      [card({ sale: "Sold", pm: null, sale_price: 9000, missing_from_report: false })],
+      R,
+      [],
+      noReport,
+      MID,
+    ).length,
+    0,
+  );
+
+  // Locks on the same month-end clock as every other pending point.
+  eq(
+    "block volume: locks after finalize",
+    buildCardVolumeCandidates(
+      [card({ sale: "Sold", pm: null, sale_price: 1000 })],
+      R,
+      [],
+      noReport,
+      "2026-11-04",
+    )[0]?.status,
+    "locked",
+  );
+}
 
 console.log(`checks run, ${fails.length} failure(s)`);
 for (const f of fails) console.log("  FAIL " + f);

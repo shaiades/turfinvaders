@@ -53,6 +53,38 @@ export const recomputeKombat = createServerFn({ method: "POST" })
     return runKombatRecompute();
   });
 
+/** Public, THROTTLED ledger refresh (owner 2026-10-02: live data for everyone,
+ *  no admin click). ANY authed user may trigger it — unlike recomputeKombat it
+ *  only RE-DERIVES the ledger from the Monday mirrors (block cards are
+ *  webhook-fresh; no user input, no Monday API spend), so it's safe to open
+ *  past the admin gate. A short throttle collapses a tab-load stampede: if a
+ *  recompute already landed within the window, this is a no-op and the caller
+ *  just reads the realtime-updated ledger. The Kombat tab calls this on open
+ *  and on an interval, so every rep sees live points without pressing Sync. */
+const REFRESH_THROTTLE_MS = 60_000;
+
+export const refreshKombatLedger = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async (): Promise<{ recomputed: boolean }> => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: last } = await supabaseAdmin
+      .from("webhook_logs")
+      .select("created_at")
+      .eq("step", "Kombat_Ledger_Recomputed")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (
+      last?.created_at &&
+      Date.now() - new Date(last.created_at).getTime() < REFRESH_THROTTLE_MS
+    ) {
+      return { recomputed: false };
+    }
+    const { runKombatRecompute } = await import("@/lib/kombat-month.server");
+    await runKombatRecompute();
+    return { recomputed: true };
+  });
+
 const reviewInput = z.object({
   id: z.string().uuid(),
   approve: z.boolean(),

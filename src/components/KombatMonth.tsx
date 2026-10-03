@@ -53,6 +53,7 @@ import { KombatLeaderboard } from "@/components/KombatLeaderboard";
 import { KombatBeltUpFx, type BeltUpFx } from "@/components/KombatBeltUpFx";
 import { ArenaBackdrop } from "@/components/KombatArena";
 import { makeBeeper } from "@/components/intro-fx";
+import { refreshKombatLedger } from "@/lib/kombat-month.functions";
 import { RepAvatar } from "@/components/RepAvatar";
 import { KombatNextFight, type Fighter } from "@/components/KombatNextFight";
 import { KombatCartoonAdmin } from "@/components/KombatCartoonAdmin";
@@ -188,6 +189,34 @@ export function KombatMonthTab({
       ["kombat_pending_proofs"],
     ],
   });
+
+  // Live for everyone, no admin click (owner 2026-10-02): re-derive the ledger
+  // on open and every couple of minutes while the tab is up. The server fn is
+  // throttled, so many reps opening the tab collapse to one recompute; the
+  // realtime subscription above then fans the fresh rows out to every other
+  // open tab. Skipped while View-As browsing — a preview shouldn't drive it.
+  useEffect(() => {
+    if (isPreview) return;
+    let alive = true;
+    const tick = () => {
+      void refreshKombatLedger()
+        .then((r) => {
+          if (alive && r.recomputed) {
+            void qc.invalidateQueries({ queryKey: ["contest_ledger"] });
+            void qc.invalidateQueries({ queryKey: ["kombat_company_written"] });
+          }
+        })
+        .catch(() => {
+          /* best-effort — a refresh hiccup must never break the tab */
+        });
+    };
+    tick();
+    const id = window.setInterval(tick, 120_000);
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+    };
+  }, [qc, isPreview]);
 
   const ledger = useMemo(() => ledgerQuery.data ?? [], [ledgerQuery.data]);
   const totals = useMemo(() => totalsFromLedger(ledger), [ledger]);

@@ -609,6 +609,97 @@ export function scoredCardKeys(cards: readonly BlockCard[], rules: KombatRules):
   return keys;
 }
 
+/** Office-scoped customer keys of every NON-CANCELLED Sales-Report sale this
+ *  month — the "the book already has this customer" set that suppresses the
+ *  block-price volume estimate, because the report row is the authority once
+ *  it lands. Same three-tier keys as scoredCardKeys so a card and its report
+ *  row collapse onto one key (the #302 token tier catches reordered names). */
+export function reportCoveredKeys(
+  rows: readonly KombatReportRow[],
+  rules: KombatRules,
+): Set<string> {
+  const month = rules.contest.month;
+  const keys = new Set<string>();
+  for (const row of rows) {
+    if (row.report_month !== month) continue;
+    if (normalizeSalesCount(row.sales_count) === "cancelled" || isDeadWcc(row.wcc)) continue;
+    for (const k of customerKeys(row.office, row.customer_name, row.phone)) keys.add(k);
+  }
+  return keys;
+}
+
+/** Live VOLUME at the BLOCK price (owner 2026-10-02): a sold block card earns
+ *  its +per_1000 volume the moment it's marked — at the card's Sale Price — so
+ *  a rep never waits on the monthly Sales Report to sync. The report_sales row
+ *  is the authority: the instant it lands (missing_from_report → false, OR a
+ *  live report row already covers the customer this month) this estimate is
+ *  dropped and the report's exact volume takes over — the recompute deletes the
+ *  block row it no longer produces. Mirrors the Stats-tab "counting at Block
+ *  price" parity (missing_from_report, PR #263). Split across the card's reps,
+ *  same board formula as report volume; blank price = $0, never guessed.
+ *
+ *  Keyed (source_kind "sit", source_id card id, category "money.volume") — a
+ *  different ledger key from the card's TYPE kicker (card.sale/…) and from the
+ *  report's own volume (source_kind "report_sale"), so it stacks with the
+ *  kicker but is deduped against the report by the coverage gate above. */
+export function buildCardVolumeCandidates(
+  cards: readonly BlockCard[],
+  rules: KombatRules,
+  bounties: readonly KombatBounty[],
+  reportCovered: ReadonlySet<string>,
+  todayISO: string = laTodayISO(),
+): LedgerCandidate[] {
+  const month = rules.contest.month;
+  const out: LedgerCandidate[] = [];
+  if (rules.money.per_1000 === 0) return out;
+  const status: LedgerCandidate["status"] =
+    todayISO > contestFinalizeAfterISO(rules) ? "locked" : "pending";
+  for (const card of cards) {
+    if (!inContestMonth(card.card_date, month)) continue;
+    if (cardOutcome(card) !== "sold") continue;
+    if (isExcludedIss(card) || isOfficeAppt(card)) continue;
+    const price = card.sale_price;
+    if (price === null || price <= 0) continue; // blank price = $0, never guess
+    // The report is the authority. Skip once the sync proves the card IS in the
+    // book (missing_from_report === false), or a live report row already covers
+    // this customer this month — either way the report volume will count it.
+    if (card.missing_from_report === false) continue;
+    const covered = customerKeys(card.office_location, card.lead_name, card.phone).some((k) =>
+      reportCovered.has(k),
+    );
+    if (covered) continue;
+    const reps = countReps(card);
+    if (reps.length === 0) continue;
+    const mult = bountyMultiplier("money.volume", card.card_date, bounties);
+    const cardPts = (price / 1000) * rules.money.per_1000;
+    const perRep = (cardPts * mult) / reps.length;
+    if (perRep === 0) continue;
+    for (const rep of reps) {
+      out.push({
+        month,
+        rep_name: rep,
+        category: "money.volume",
+        points: perRep,
+        status,
+        source_kind: "sit",
+        source_id: card.monday_item_id,
+        occurred_on: card.card_date,
+        meta: {
+          label: `$${Math.round(price).toLocaleString()} written · block price`,
+          customer: card.lead_name,
+          office: card.office_location,
+          card_points: cardPts,
+          rep_count: reps.length,
+          board_id: card.board_id,
+          block_price: true,
+          ...(mult !== 1 ? { bounty_multiplier: mult } : {}),
+        },
+      });
+    }
+  }
+  return out;
+}
+
 export type ReloadSubitemRow = {
   subitem_id: string;
   parent_item_id: string;
