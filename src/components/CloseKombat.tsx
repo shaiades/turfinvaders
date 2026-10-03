@@ -71,6 +71,8 @@ import { ActivityTestPanel } from "@/components/ActivityTestPanel";
 import { CloseKombatLearnTab } from "@/components/CloseKombatLearnTab";
 import { KombatMonthTab } from "@/components/KombatMonth";
 import { KombatHeroBanner } from "@/components/KombatHeroBanner";
+import { RepAvatar } from "@/components/RepAvatar";
+import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
 import { toast } from "sonner";
 import { rewardToast } from "@/lib/reward-toast";
 import { useCountUp } from "@/hooks/useCountUp";
@@ -101,7 +103,14 @@ import {
 // alongside the existing stats screen). Separate from RangeTab below — that
 // one picks the day/week/month/year window, this one picks which SECTION of
 // the page is showing.
-export const CLOSE_KOMBAT_PAGE_TABS = ["stats", "plan", "kombat", "money", "goals", "learn"] as const;
+export const CLOSE_KOMBAT_PAGE_TABS = [
+  "stats",
+  "plan",
+  "kombat",
+  "money",
+  "goals",
+  "learn",
+] as const;
 export type CloseKombatPageTab = (typeof CLOSE_KOMBAT_PAGE_TABS)[number];
 export const isCloseKombatPageTab = (t: unknown): t is CloseKombatPageTab =>
   (CLOSE_KOMBAT_PAGE_TABS as readonly unknown[]).includes(t);
@@ -543,8 +552,7 @@ function CloseKombatInner({
         : totals,
     [monthBook, totals],
   );
-  const bookPending =
-    isMonthTab && (reportQuery.isPlaceholderData || reportQuery.isLoading);
+  const bookPending = isMonthTab && (reportQuery.isPlaceholderData || reportQuery.isLoading);
 
   // Board-hygiene callouts. Admins get the full office queue (realRole, so
   // "View as" previews don't hide it from the owner); reps get ONLY the flags
@@ -1014,6 +1022,7 @@ function CloseKombatInner({
   // Self rows go through the conservative match ladder (R-4) — the old
   // whole-string equality died on any board-name drift.
   const isMe = matcher.isMe;
+  const cartoons = useRepCartoons().data;
 
   return (
     <div className="space-y-4 md:space-y-6">
@@ -1350,7 +1359,10 @@ function CloseKombatInner({
           cards and can take seconds, and full-brightness stale numbers under
           a new label read as the new range's truth. */}
           {!isRep && !isYearTab && (
-            <CompanyTiles totals={displayTotals} dim={cardsQuery.isPlaceholderData || bookPending} />
+            <CompanyTiles
+              totals={displayTotals}
+              dim={cardsQuery.isPlaceholderData || bookPending}
+            />
           )}
           {!isRep && isYearTab && (
             <YearTiles totals={displayYearAgg.totals} dim={reportQuery.isPlaceholderData} />
@@ -1444,330 +1456,352 @@ function CloseKombatInner({
               </ArcadePanel>
             </div>
           ) : (
-          <div data-tour="kombat-standings">
-            <ArcadePanel
-              faction="kombat"
-              title={`Kombat Standings · ${range.label}`}
-              action={
-                cardsQuery.isPlaceholderData || bookPending ? (
-                  <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground animate-pulse">
-                    Counting…
-                  </span>
-                ) : range.isLive ? (
-                  <span className="text-[10px] font-display uppercase tracking-widest text-victory">
-                    Live
-                  </span>
-                ) : undefined
-              }
-            >
-              {/* Stamp freshness (R-5): the Live chip is about the RANGE — cancels
+            <div data-tour="kombat-standings">
+              <ArcadePanel
+                faction="kombat"
+                title={`Kombat Standings · ${range.label}`}
+                action={
+                  cardsQuery.isPlaceholderData || bookPending ? (
+                    <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground animate-pulse">
+                      Counting…
+                    </span>
+                  ) : range.isLive ? (
+                    <span className="text-[10px] font-display uppercase tracking-widest text-victory">
+                      Live
+                    </span>
+                  ) : undefined
+                }
+              >
+                {/* Stamp freshness (R-5): the Live chip is about the RANGE — cancels
             and report splits only move when the office runs a sync. On Month
             the MONEY is the book, so the caption must not claim it's live. */}
-              {isMonthTab ? (
-                <p className="mb-3 text-[10px] text-muted-foreground">
-                  Funnel results land live from the boards · money mirrors the monthly Sales Report
-                  book — the Shark Tank number — and moves when the office syncs
-                  {syncInfo.data ? ` — last sync ${relTime(syncInfo.data.lastSyncedAt)}` : ""}.
-                  {totals.pendingDeals > 0
-                    ? ` Includes ${fmtMoney(totals.pendingRevenue)} from ${totals.pendingDeals} just-sold ${totals.pendingDeals === 1 ? "deal" : "deals"} not on the Sales Report yet — each swaps to the book's number when its row lands.`
-                    : ""}
-                  {monthBook?.officeBlind
-                    ? " This month's book doesn't record offices — money shows both offices combined."
-                    : ""}
-                  {reportQuery.isSuccess && !reportQuery.isPlaceholderData && !monthBook?.hasRows
-                    ? totals.pendingDeals > 0
-                      ? ` No Sales Report rows for ${range.label} yet — money shows the Block boards' live dollars until the office syncs the book.`
-                      : ` No Sales Report rows for ${range.label} yet — money shows $0 until the office syncs the book.`
-                    : ""}
-                </p>
-              ) : (
-                <p className="mb-3 text-[10px] text-muted-foreground">
-                  Results land live from the boards · cancels &amp; rep splits update when the
-                  office syncs
-                  {syncInfo.data ? ` — last sync ${relTime(syncInfo.data.lastSyncedAt)}` : ""}.
-                </p>
-              )}
-              {cardsQuery.isLoading || (isMonthTab && reportQuery.isLoading) ? (
-                <p className="text-sm text-muted-foreground">Loading the bracket…</p>
-              ) : isMonthTab && reportQuery.isError ? (
-                <p className="text-sm text-destructive">
-                  Couldn&apos;t load the Sales Report rows — try again in a minute.
-                </p>
-              ) : displayReps.length === 0 ? (
-                <div className="text-sm text-muted-foreground space-y-1">
-                  <p>No Block cards with reps in this range yet.</p>
-                  {isAdmin && (
-                    <p className="text-xs">
-                      Hit <span className="text-foreground">Sync from Monday</span> to pull the
-                      active boards, or <span className="text-foreground">Full history</span> to
-                      backfill past weeks.
-                    </p>
-                  )}
-                </div>
-              ) : (
-                <div
-                  className={cn(
-                    "transition-opacity",
-                    (cardsQuery.isPlaceholderData || bookPending) && "opacity-50",
-                  )}
-                >
-                  {/* Desktop table (Monday's column language) */}
-                  <div className="hidden md:block overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border">
-                          <th className="text-left py-2 pr-2 font-normal">#</th>
-                          <th className="text-left py-2 pr-2 font-normal">Rep</th>
-                          <th className="text-right py-2 px-2 font-normal">Appts</th>
-                          <th className="text-right py-2 px-2 font-normal">No Show</th>
-                          <th className="text-right py-2 px-2 font-normal">No Demo</th>
-                          <th className="text-right py-2 px-2 font-normal">OL</th>
-                          <th className="text-right py-2 px-2 font-normal">Reset</th>
-                          <th className="text-right py-2 px-2 font-normal">PM</th>
-                          <th className="text-right py-2 px-2 font-normal">Sold</th>
-                          <th className="text-right py-2 px-2 font-normal">Reload</th>
-                          <th className="text-right py-2 px-2 font-normal">Cancels</th>
-                          <th className="text-right py-2 px-2 font-normal border-l border-border/60">
-                            Sit %
-                          </th>
-                          <th className="text-right py-2 px-2 font-normal">NS %</th>
-                          <th className="text-right py-2 px-2 font-normal">ND %</th>
-                          <th className="text-right py-2 px-2 font-normal">OL %</th>
-                          <th className="text-right py-2 px-2 font-normal">Reset %</th>
-                          <th className="text-right py-2 px-2 font-normal">PM %</th>
-                          <th className="text-right py-2 px-2 font-normal">Close %</th>
-                          <th className="text-right py-2 px-2 font-normal">Reload %</th>
-                          <th className="text-right py-2 px-2 font-normal">Cancel %</th>
-                          <th className="text-right py-2 px-2 font-normal">Leads / Sale</th>
-                          <th
-                            className="text-right py-2 pl-2 font-normal"
-                            title={
-                              isMonthTab
-                                ? "Sale Amt from the monthly Sales Report, split by its Sales Rep column — the Shark Tank number"
-                                : "Sale volume over the range on screen — Today shows today's money only"
-                            }
-                          >
-                            Volume
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {displayReps.map((r, i) => (
-                          <tr
-                            key={r.rep}
-                            className={`border-b border-border/40 transition-colors duration-200 hover:bg-surface-elevated ${
-                              isMe(r.rep)
-                                ? "bg-kombat-gold/5 ring-1 ring-inset ring-kombat-gold/30"
-                                : ""
-                            }`}
-                          >
-                            <td className="py-2.5 pr-2 text-muted-foreground tabular-nums">
-                              {i === 0 && r.revenue > 0 ? (
-                                <Crown
-                                  className="w-4 h-4 text-kombat-gold inline"
-                                  aria-label="Champion"
-                                />
-                              ) : (
-                                i + 1
-                              )}
-                            </td>
-                            <td className="py-2.5 pr-2 font-medium">
-                              {r.rep}
-                              {isMe(r.rep) && <YouTag />}
-                              <FlawlessBadge r={r} />
-                            </td>
-                            <td className={cn(kbCell, metricText(r.appts, "text-foreground"))}>
-                              {fmtCount(r.appts)}
-                            </td>
-                            <td className={cn(kbCell, metricText(r.noShow, "text-destructive"))}>
-                              {fmtCount(r.noShow)}
-                            </td>
-                            <td className={cn(kbCell, metricText(r.noDemo, "text-destructive"))}>
-                              {fmtCount(r.noDemo)}
-                            </td>
-                            <td className={cn(kbCell, metricText(r.ol, "text-warning"))}>
-                              {fmtCount(r.ol)}
-                            </td>
-                            <td className={cn(kbCell, metricText(r.reset, "text-accent"))}>
-                              {fmtCount(r.reset)}
-                            </td>
-                            <td className={cn(kbCell, metricText(r.pm, "text-warning"))}>
-                              {fmtCount(r.pm)}
-                            </td>
-                            <td
-                              className={cn(
-                                kbCell,
-                                "font-medium",
-                                metricText(r.sold, "text-kombat-gold"),
-                              )}
+                {isMonthTab ? (
+                  <p className="mb-3 text-[10px] text-muted-foreground">
+                    Funnel results land live from the boards · money mirrors the monthly Sales
+                    Report book — the Shark Tank number — and moves when the office syncs
+                    {syncInfo.data ? ` — last sync ${relTime(syncInfo.data.lastSyncedAt)}` : ""}.
+                    {totals.pendingDeals > 0
+                      ? ` Includes ${fmtMoney(totals.pendingRevenue)} from ${totals.pendingDeals} just-sold ${totals.pendingDeals === 1 ? "deal" : "deals"} not on the Sales Report yet — each swaps to the book's number when its row lands.`
+                      : ""}
+                    {monthBook?.officeBlind
+                      ? " This month's book doesn't record offices — money shows both offices combined."
+                      : ""}
+                    {reportQuery.isSuccess && !reportQuery.isPlaceholderData && !monthBook?.hasRows
+                      ? totals.pendingDeals > 0
+                        ? ` No Sales Report rows for ${range.label} yet — money shows the Block boards' live dollars until the office syncs the book.`
+                        : ` No Sales Report rows for ${range.label} yet — money shows $0 until the office syncs the book.`
+                      : ""}
+                  </p>
+                ) : (
+                  <p className="mb-3 text-[10px] text-muted-foreground">
+                    Results land live from the boards · cancels &amp; rep splits update when the
+                    office syncs
+                    {syncInfo.data ? ` — last sync ${relTime(syncInfo.data.lastSyncedAt)}` : ""}.
+                  </p>
+                )}
+                {cardsQuery.isLoading || (isMonthTab && reportQuery.isLoading) ? (
+                  <p className="text-sm text-muted-foreground">Loading the bracket…</p>
+                ) : isMonthTab && reportQuery.isError ? (
+                  <p className="text-sm text-destructive">
+                    Couldn&apos;t load the Sales Report rows — try again in a minute.
+                  </p>
+                ) : displayReps.length === 0 ? (
+                  <div className="text-sm text-muted-foreground space-y-1">
+                    <p>No Block cards with reps in this range yet.</p>
+                    {isAdmin && (
+                      <p className="text-xs">
+                        Hit <span className="text-foreground">Sync from Monday</span> to pull the
+                        active boards, or <span className="text-foreground">Full history</span> to
+                        backfill past weeks.
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div
+                    className={cn(
+                      "transition-opacity",
+                      (cardsQuery.isPlaceholderData || bookPending) && "opacity-50",
+                    )}
+                  >
+                    {/* Desktop table (Monday's column language) */}
+                    <div className="hidden md:block overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border">
+                            <th className="text-left py-2 pr-2 font-normal">#</th>
+                            <th className="text-left py-2 pr-2 font-normal">Rep</th>
+                            <th className="text-right py-2 px-2 font-normal">Appts</th>
+                            <th className="text-right py-2 px-2 font-normal">No Show</th>
+                            <th className="text-right py-2 px-2 font-normal">No Demo</th>
+                            <th className="text-right py-2 px-2 font-normal">OL</th>
+                            <th className="text-right py-2 px-2 font-normal">Reset</th>
+                            <th className="text-right py-2 px-2 font-normal">PM</th>
+                            <th className="text-right py-2 px-2 font-normal">Sold</th>
+                            <th className="text-right py-2 px-2 font-normal">Reload</th>
+                            <th className="text-right py-2 px-2 font-normal">Cancels</th>
+                            <th className="text-right py-2 px-2 font-normal border-l border-border/60">
+                              Sit %
+                            </th>
+                            <th className="text-right py-2 px-2 font-normal">NS %</th>
+                            <th className="text-right py-2 px-2 font-normal">ND %</th>
+                            <th className="text-right py-2 px-2 font-normal">OL %</th>
+                            <th className="text-right py-2 px-2 font-normal">Reset %</th>
+                            <th className="text-right py-2 px-2 font-normal">PM %</th>
+                            <th className="text-right py-2 px-2 font-normal">Close %</th>
+                            <th className="text-right py-2 px-2 font-normal">Reload %</th>
+                            <th className="text-right py-2 px-2 font-normal">Cancel %</th>
+                            <th className="text-right py-2 px-2 font-normal">Leads / Sale</th>
+                            <th
+                              className="text-right py-2 pl-2 font-normal"
+                              title={
+                                isMonthTab
+                                  ? "Sale Amt from the monthly Sales Report, split by its Sales Rep column — the Shark Tank number"
+                                  : "Sale volume over the range on screen — Today shows today's money only"
+                              }
                             >
-                              {fmtCount(r.sold)}
+                              Volume
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {displayReps.map((r, i) => (
+                            <tr
+                              key={r.rep}
+                              className={`border-b border-border/40 transition-colors duration-200 hover:bg-surface-elevated ${
+                                isMe(r.rep)
+                                  ? "bg-kombat-gold/5 ring-1 ring-inset ring-kombat-gold/30"
+                                  : ""
+                              }`}
+                            >
+                              <td className="py-2.5 pr-2 text-muted-foreground tabular-nums">
+                                {i === 0 && r.revenue > 0 ? (
+                                  <Crown
+                                    className="w-4 h-4 text-kombat-gold inline"
+                                    aria-label="Champion"
+                                  />
+                                ) : (
+                                  i + 1
+                                )}
+                              </td>
+                              <td className="py-2.5 pr-2 font-medium">
+                                <span className="flex items-center gap-2">
+                                  <RepAvatar
+                                    name={r.rep}
+                                    cartoon={cartoonFor(cartoons, r.rep)}
+                                    className="h-7 w-7"
+                                    textClassName="text-[10px]"
+                                    ring={isMe(r.rep)}
+                                  />
+                                  <span className="min-w-0 truncate">
+                                    {r.rep}
+                                    {isMe(r.rep) && <YouTag />}
+                                    <FlawlessBadge r={r} />
+                                  </span>
+                                </span>
+                              </td>
+                              <td className={cn(kbCell, metricText(r.appts, "text-foreground"))}>
+                                {fmtCount(r.appts)}
+                              </td>
+                              <td className={cn(kbCell, metricText(r.noShow, "text-destructive"))}>
+                                {fmtCount(r.noShow)}
+                              </td>
+                              <td className={cn(kbCell, metricText(r.noDemo, "text-destructive"))}>
+                                {fmtCount(r.noDemo)}
+                              </td>
+                              <td className={cn(kbCell, metricText(r.ol, "text-warning"))}>
+                                {fmtCount(r.ol)}
+                              </td>
+                              <td className={cn(kbCell, metricText(r.reset, "text-accent"))}>
+                                {fmtCount(r.reset)}
+                              </td>
+                              <td className={cn(kbCell, metricText(r.pm, "text-warning"))}>
+                                {fmtCount(r.pm)}
+                              </td>
+                              <td
+                                className={cn(
+                                  kbCell,
+                                  "font-medium",
+                                  metricText(r.sold, "text-kombat-gold"),
+                                )}
+                              >
+                                {fmtCount(r.sold)}
+                              </td>
+                              <td className={cn(kbCell, metricText(r.reloads, "text-kombat-gold"))}>
+                                {fmtCount(r.reloads)}
+                              </td>
+                              <td className={cn(kbCell, metricText(r.cancels, "text-destructive"))}>
+                                {fmtCount(r.cancels)}
+                              </td>
+                              <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs border-l border-border/60">
+                                {fmtPct(r.sitPct)}
+                              </td>
+                              <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-destructive">
+                                {fmtPct(r.noShowPct)}
+                              </td>
+                              <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-destructive">
+                                {fmtPct(r.noDemoPct)}
+                              </td>
+                              <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-warning">
+                                {fmtPct(r.olPct)}
+                              </td>
+                              <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-accent">
+                                {fmtPct(r.resetPct)}
+                              </td>
+                              <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-warning">
+                                {fmtPct(r.pmPct)}
+                              </td>
+                              <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                                {fmtPct(r.closePct)}
+                              </td>
+                              <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-victory">
+                                {fmtPct(r.reloadPct)}
+                              </td>
+                              <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-destructive">
+                                {fmtPct(r.cancelPct)}
+                              </td>
+                              <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                                {fmtRatio(r.leadsToSale)}
+                              </td>
+                              <td
+                                className={cn(
+                                  "py-2.5 pl-2 text-right tabular-nums",
+                                  metricText(r.revenue, "text-kombat-gold"),
+                                )}
+                              >
+                                {fmtMoney(r.revenue)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr className="border-t border-neon/40 text-foreground">
+                            <td className="py-2.5 pr-2" />
+                            <td className="py-2.5 pr-2 font-display text-[10px] uppercase tracking-widest">
+                              All cards
                             </td>
-                            <td className={cn(kbCell, metricText(r.reloads, "text-kombat-gold"))}>
-                              {fmtCount(r.reloads)}
+                            <td className="py-2.5 px-2 text-right tabular-nums">
+                              {fmtCount(totals.appts)}
                             </td>
-                            <td className={cn(kbCell, metricText(r.cancels, "text-destructive"))}>
-                              {fmtCount(r.cancels)}
+                            <td className="py-2.5 px-2 text-right tabular-nums">
+                              {fmtCount(totals.noShow)}
+                            </td>
+                            <td className="py-2.5 px-2 text-right tabular-nums">
+                              {fmtCount(totals.noDemo)}
+                            </td>
+                            <td className="py-2.5 px-2 text-right tabular-nums">
+                              {fmtCount(totals.ol)}
+                            </td>
+                            <td className="py-2.5 px-2 text-right tabular-nums">
+                              {fmtCount(totals.reset)}
+                            </td>
+                            <td className="py-2.5 px-2 text-right tabular-nums">
+                              {fmtCount(totals.pm)}
+                            </td>
+                            <td className="py-2.5 px-2 text-right tabular-nums">
+                              {fmtCount(totals.sold)}
+                            </td>
+                            <td className="py-2.5 px-2 text-right tabular-nums">
+                              {fmtCount(totals.reloads)}
+                            </td>
+                            <td className="py-2.5 px-2 text-right tabular-nums">
+                              {fmtCount(totals.cancels)}
                             </td>
                             <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs border-l border-border/60">
-                              {fmtPct(r.sitPct)}
-                            </td>
-                            <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-destructive">
-                              {fmtPct(r.noShowPct)}
-                            </td>
-                            <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-destructive">
-                              {fmtPct(r.noDemoPct)}
-                            </td>
-                            <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-warning">
-                              {fmtPct(r.olPct)}
-                            </td>
-                            <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-accent">
-                              {fmtPct(r.resetPct)}
-                            </td>
-                            <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-warning">
-                              {fmtPct(r.pmPct)}
+                              {fmtPct(totals.sitPct)}
                             </td>
                             <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
-                              {fmtPct(r.closePct)}
-                            </td>
-                            <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-victory">
-                              {fmtPct(r.reloadPct)}
-                            </td>
-                            <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs text-destructive">
-                              {fmtPct(r.cancelPct)}
+                              {fmtPct(totals.noShowPct)}
                             </td>
                             <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
-                              {fmtRatio(r.leadsToSale)}
+                              {fmtPct(totals.noDemoPct)}
                             </td>
-                            <td
-                              className={cn(
-                                "py-2.5 pl-2 text-right tabular-nums",
-                                metricText(r.revenue, "text-kombat-gold"),
-                              )}
-                            >
-                              {fmtMoney(r.revenue)}
+                            <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                              {fmtPct(totals.olPct)}
+                            </td>
+                            <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                              {fmtPct(totals.resetPct)}
+                            </td>
+                            <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                              {fmtPct(totals.pmPct)}
+                            </td>
+                            <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                              {fmtPct(totals.closePct)}
+                            </td>
+                            <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                              {fmtPct(totals.reloadPct)}
+                            </td>
+                            <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                              {fmtPct(totals.cancelPct)}
+                            </td>
+                            <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
+                              {fmtRatio(totals.leadsToSale)}
+                            </td>
+                            <td className="py-2.5 pl-2 text-right tabular-nums">
+                              {fmtMoney(displayTotals.revenue)}
                             </td>
                           </tr>
-                        ))}
-                      </tbody>
-                      <tfoot>
-                        <tr className="border-t border-neon/40 text-foreground">
-                          <td className="py-2.5 pr-2" />
-                          <td className="py-2.5 pr-2 font-display text-[10px] uppercase tracking-widest">
-                            All cards
-                          </td>
-                          <td className="py-2.5 px-2 text-right tabular-nums">
-                            {fmtCount(totals.appts)}
-                          </td>
-                          <td className="py-2.5 px-2 text-right tabular-nums">
-                            {fmtCount(totals.noShow)}
-                          </td>
-                          <td className="py-2.5 px-2 text-right tabular-nums">
-                            {fmtCount(totals.noDemo)}
-                          </td>
-                          <td className="py-2.5 px-2 text-right tabular-nums">
-                            {fmtCount(totals.ol)}
-                          </td>
-                          <td className="py-2.5 px-2 text-right tabular-nums">
-                            {fmtCount(totals.reset)}
-                          </td>
-                          <td className="py-2.5 px-2 text-right tabular-nums">
-                            {fmtCount(totals.pm)}
-                          </td>
-                          <td className="py-2.5 px-2 text-right tabular-nums">
-                            {fmtCount(totals.sold)}
-                          </td>
-                          <td className="py-2.5 px-2 text-right tabular-nums">
-                            {fmtCount(totals.reloads)}
-                          </td>
-                          <td className="py-2.5 px-2 text-right tabular-nums">
-                            {fmtCount(totals.cancels)}
-                          </td>
-                          <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs border-l border-border/60">
-                            {fmtPct(totals.sitPct)}
-                          </td>
-                          <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
-                            {fmtPct(totals.noShowPct)}
-                          </td>
-                          <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
-                            {fmtPct(totals.noDemoPct)}
-                          </td>
-                          <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
-                            {fmtPct(totals.olPct)}
-                          </td>
-                          <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
-                            {fmtPct(totals.resetPct)}
-                          </td>
-                          <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
-                            {fmtPct(totals.pmPct)}
-                          </td>
-                          <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
-                            {fmtPct(totals.closePct)}
-                          </td>
-                          <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
-                            {fmtPct(totals.reloadPct)}
-                          </td>
-                          <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
-                            {fmtPct(totals.cancelPct)}
-                          </td>
-                          <td className="py-2.5 px-2 text-right tabular-nums font-display text-xs">
-                            {fmtRatio(totals.leadsToSale)}
-                          </td>
-                          <td className="py-2.5 pl-2 text-right tabular-nums">
-                            {fmtMoney(displayTotals.revenue)}
-                          </td>
-                        </tr>
-                      </tfoot>
-                    </table>
-                  </div>
+                        </tfoot>
+                      </table>
+                    </div>
 
-                  {/* Mobile cards — same precomputed rows */}
-                  <MobileCardList>
-                    {displayReps.map((r, i) => (
-                      <MobileCard
-                        key={r.rep}
-                        className={
-                          isMe(r.rep) ? "border-kombat-gold/40 bg-kombat-gold/5" : undefined
-                        }
-                      >
+                    {/* Mobile cards — same precomputed rows */}
+                    <MobileCardList>
+                      {displayReps.map((r, i) => (
+                        <MobileCard
+                          key={r.rep}
+                          className={
+                            isMe(r.rep) ? "border-kombat-gold/40 bg-kombat-gold/5" : undefined
+                          }
+                        >
+                          <MobileCardHeader
+                            left={
+                              <span className="flex items-center gap-1.5">
+                                {i === 0 && r.revenue > 0 ? (
+                                  <Crown className="w-3.5 h-3.5 text-kombat-gold shrink-0" />
+                                ) : (
+                                  <span className="text-muted-foreground tabular-nums">
+                                    {i + 1}.
+                                  </span>
+                                )}
+                                <RepAvatar
+                                  name={r.rep}
+                                  cartoon={cartoonFor(cartoons, r.rep)}
+                                  className="h-6 w-6"
+                                  textClassName="text-[9px]"
+                                  ring={isMe(r.rep)}
+                                />
+                                {r.rep}
+                                {isMe(r.rep) && <YouTag />}
+                                <FlawlessBadge r={r} />
+                              </span>
+                            }
+                            right={
+                              <span className={metricText(r.revenue, "text-kombat-gold")}>
+                                {fmtMoney(r.revenue)}
+                              </span>
+                            }
+                          />
+                          <MobileStatBlock s={r} />
+                        </MobileCard>
+                      ))}
+                      <MobileCard className="border-neon/40">
                         <MobileCardHeader
                           left={
-                            <span className="flex items-center gap-1.5">
-                              {i === 0 && r.revenue > 0 ? (
-                                <Crown className="w-3.5 h-3.5 text-kombat-gold shrink-0" />
-                              ) : (
-                                <span className="text-muted-foreground tabular-nums">{i + 1}.</span>
-                              )}
-                              {r.rep}
-                              {isMe(r.rep) && <YouTag />}
-                              <FlawlessBadge r={r} />
+                            <span className="font-display text-[10px] uppercase tracking-widest">
+                              All cards
                             </span>
                           }
                           right={
-                            <span className={metricText(r.revenue, "text-kombat-gold")}>
-                              {fmtMoney(r.revenue)}
-                            </span>
+                            <span className="text-victory">{fmtMoney(displayTotals.revenue)}</span>
                           }
                         />
-                        <MobileStatBlock s={r} />
+                        <MobileStatBlock s={totals} />
                       </MobileCard>
-                    ))}
-                    <MobileCard className="border-neon/40">
-                      <MobileCardHeader
-                        left={
-                          <span className="font-display text-[10px] uppercase tracking-widest">
-                            All cards
-                          </span>
-                        }
-                        right={<span className="text-victory">{fmtMoney(displayTotals.revenue)}</span>}
-                      />
-                      <MobileStatBlock s={totals} />
-                    </MobileCard>
-                  </MobileCardList>
-                </div>
-              )}
-            </ArcadePanel>
-          </div>
+                    </MobileCardList>
+                  </div>
+                )}
+              </ArcadePanel>
+            </div>
           )}
 
           {/* Office war (R-15): SD vs OC over the range on screen. Ignores the
@@ -1777,69 +1811,69 @@ function CloseKombatInner({
           Month the lanes are the BOOK's sums — the dashboard's own SD/OC
           Sales tiles. */}
           {!isYearTab && !(isMonthTab && officeRaceMonth === null) && (
-          <ArcadePanel
-            faction="kombat"
-            title={`Office War · ${range.label}`}
-            action={
-              (isMonthTab ? bookPending : cardsQuery.isPlaceholderData) ? (
-                <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground animate-pulse">
-                  Counting…
-                </span>
-              ) : undefined
-            }
-          >
-            {isMonthTab && (
-              <p className="mb-2 text-[10px] text-muted-foreground">
-                From the monthly Sales Report book
-                {officeRaceMonth?.some((l) => l.pending > 0)
-                  ? ", plus just-sold cards awaiting a report row."
-                  : "."}
-              </p>
-            )}
-            <div
-              className={cn(
-                "space-y-3 transition-opacity",
-                (isMonthTab ? bookPending : cardsQuery.isPlaceholderData) && "opacity-50",
-              )}
+            <ArcadePanel
+              faction="kombat"
+              title={`Office War · ${range.label}`}
+              action={
+                (isMonthTab ? bookPending : cardsQuery.isPlaceholderData) ? (
+                  <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground animate-pulse">
+                    Counting…
+                  </span>
+                ) : undefined
+              }
             >
-              {(() => {
-                const race = isMonthTab && officeRaceMonth ? officeRaceMonth : officeRace;
-                const max = Math.max(1, ...race.map((o) => o.revenue));
-                const top = Math.max(...race.map((o) => o.revenue));
-                return race.map((o) => {
-                  const leads = o.revenue === top && o.revenue > 0;
-                  return (
-                    <div key={o.office} className="min-w-0">
-                      <div className="flex items-baseline justify-between gap-2 text-[10px] font-display uppercase tracking-widest">
-                        <span className={leads ? "text-kombat-gold" : "text-muted-foreground"}>
-                          {o.office}
-                          {leads ? " 👑" : ""}
-                        </span>
-                        <span
-                          className={cn(
-                            "tabular-nums",
-                            leads ? "text-kombat-gold" : "text-muted-foreground",
-                          )}
-                        >
-                          {fmtMoney(o.revenue)}
-                        </span>
+              {isMonthTab && (
+                <p className="mb-2 text-[10px] text-muted-foreground">
+                  From the monthly Sales Report book
+                  {officeRaceMonth?.some((l) => l.pending > 0)
+                    ? ", plus just-sold cards awaiting a report row."
+                    : "."}
+                </p>
+              )}
+              <div
+                className={cn(
+                  "space-y-3 transition-opacity",
+                  (isMonthTab ? bookPending : cardsQuery.isPlaceholderData) && "opacity-50",
+                )}
+              >
+                {(() => {
+                  const race = isMonthTab && officeRaceMonth ? officeRaceMonth : officeRace;
+                  const max = Math.max(1, ...race.map((o) => o.revenue));
+                  const top = Math.max(...race.map((o) => o.revenue));
+                  return race.map((o) => {
+                    const leads = o.revenue === top && o.revenue > 0;
+                    return (
+                      <div key={o.office} className="min-w-0">
+                        <div className="flex items-baseline justify-between gap-2 text-[10px] font-display uppercase tracking-widest">
+                          <span className={leads ? "text-kombat-gold" : "text-muted-foreground"}>
+                            {o.office}
+                            {leads ? " 👑" : ""}
+                          </span>
+                          <span
+                            className={cn(
+                              "tabular-nums",
+                              leads ? "text-kombat-gold" : "text-muted-foreground",
+                            )}
+                          >
+                            {fmtMoney(o.revenue)}
+                          </span>
+                        </div>
+                        <div className="mt-1 h-2 rounded-full bg-surface-elevated overflow-hidden">
+                          <div
+                            className="h-full rounded-full transition-all"
+                            style={{
+                              width: `${Math.round((o.revenue / max) * 100)}%`,
+                              background: leads ? "var(--kombat-gold)" : "var(--kombat-red)",
+                              boxShadow: leads ? "0 0 10px var(--kombat-gold)" : undefined,
+                            }}
+                          />
+                        </div>
                       </div>
-                      <div className="mt-1 h-2 rounded-full bg-surface-elevated overflow-hidden">
-                        <div
-                          className="h-full rounded-full transition-all"
-                          style={{
-                            width: `${Math.round((o.revenue / max) * 100)}%`,
-                            background: leads ? "var(--kombat-gold)" : "var(--kombat-red)",
-                            boxShadow: leads ? "0 0 10px var(--kombat-gold)" : undefined,
-                          }}
-                        />
-                      </div>
-                    </div>
-                  );
-                });
-              })()}
-            </div>
-          </ArcadePanel>
+                    );
+                  });
+                })()}
+              </div>
+            </ArcadePanel>
           )}
 
           {/* Reps still get the company pulse — just after their own story. */}
@@ -2420,7 +2454,10 @@ function CompanyTiles({ totals, dim }: { totals: KombatTotals; dim: boolean }) {
 function YearTiles({ totals, dim }: { totals: YearAggregate["totals"]; dim: boolean }) {
   return (
     <div
-      className={cn("grid grid-cols-2 sm:grid-cols-3 gap-3 transition-opacity", dim && "opacity-50")}
+      className={cn(
+        "grid grid-cols-2 sm:grid-cols-3 gap-3 transition-opacity",
+        dim && "opacity-50",
+      )}
     >
       <KombatTile label="Volume" value={fmtMoney(totals.revenue)} accent="victory" />
       <KombatTile label="Sales" value={fmtCount(totals.sold)} accent="neon" />
@@ -2541,6 +2578,7 @@ function YearStandings({
   dim: boolean;
   isMe: (name: string) => boolean;
 }) {
+  const cartoons = useRepCartoons().data;
   return (
     <div className={cn("transition-opacity", dim && "opacity-50")}>
       <div className="hidden md:block overflow-x-auto">
@@ -2574,8 +2612,19 @@ function YearStandings({
                   )}
                 </td>
                 <td className="py-2.5 pr-2 font-medium">
-                  {r.rep}
-                  {isMe(r.rep) && <YouTag />}
+                  <span className="flex items-center gap-2">
+                    <RepAvatar
+                      name={r.rep}
+                      cartoon={cartoonFor(cartoons, r.rep)}
+                      className="h-7 w-7"
+                      textClassName="text-[10px]"
+                      ring={isMe(r.rep)}
+                    />
+                    <span className="min-w-0 truncate">
+                      {r.rep}
+                      {isMe(r.rep) && <YouTag />}
+                    </span>
+                  </span>
                 </td>
                 <td className={cn(kbCell, metricText(r.sold, "text-kombat-gold"))}>
                   {fmtCount(r.sold)}
@@ -2619,6 +2668,13 @@ function YearStandings({
                   ) : (
                     <span className="text-muted-foreground tabular-nums">{i + 1}.</span>
                   )}
+                  <RepAvatar
+                    name={r.rep}
+                    cartoon={cartoonFor(cartoons, r.rep)}
+                    className="h-6 w-6"
+                    textClassName="text-[9px]"
+                    ring={isMe(r.rep)}
+                  />
                   {r.rep}
                   {isMe(r.rep) && <YouTag />}
                 </span>
