@@ -42,7 +42,6 @@ import {
   fmtPts,
   liveBlockVolumeDollars,
   mergeKombatRules,
-  reportCoveredKeys,
   tierFor,
   totalsFromLedger,
   type KombatBounty,
@@ -167,21 +166,26 @@ export function KombatMonthTab({
   // Live-volume parity (owner 2026-10-02): the report only counts a sale once
   // the monthly Sales Report syncs it, so the bar used to sit a day behind the
   // belt points. We now ADD the block-price dollars of sold cards the report
-  // hasn't covered yet — the exact same cards the points count live
-  // (isLiveBlockVolumeCard) — so a sale lands on the team goal the moment it's
-  // marked. A report row is still the authority: once it covers a customer the
-  // block estimate drops and the book number takes over (no double count).
+  // hasn't covered yet — the exact same cards the belt points count live,
+  // through the shared Shark Tank pending rule (liveBlockVolumeDollars) — so a
+  // sale lands on the team goal the moment it's marked. A report row is still
+  // the authority: once it covers a customer the block estimate drops and the
+  // book number takes over (no double count).
   const writtenQuery = useQuery({
     queryKey: ["kombat_company_written", month],
     queryFn: async (): Promise<number> => {
       const PAGE = 1000;
       // Report rows: sale_amt for the net written total, plus the fields
-      // reportCoveredKeys reads to decide which customers the book already has.
+      // buildPendingReportCheck (inside liveBlockVolumeDollars) corroborates a
+      // card against the book by name/phone AND date or amount — so fetch
+      // date_sold + cancel_amt too, matching the server recompute's check.
       const reportRows: KombatReportRow[] = [];
       for (let from = 0; ; from += PAGE) {
         const { data, error } = await supabase
           .from("report_sales")
-          .select("sale_amt, office, customer_name, phone, sales_count, wcc, report_month")
+          .select(
+            "sale_amt, cancel_amt, office, customer_name, phone, sales_count, wcc, report_month, date_sold",
+          )
           .eq("report_month", month)
           .order("monday_item_id")
           .range(from, from + PAGE - 1);
@@ -206,7 +210,7 @@ export function KombatMonthTab({
         cards.push(...((data ?? []) as unknown as BlockCard[]));
         if (!data || data.length < PAGE) break;
       }
-      const liveBlock = liveBlockVolumeDollars(cards, rules, reportCoveredKeys(reportRows, rules));
+      const liveBlock = liveBlockVolumeDollars(cards, reportRows, rules);
 
       return reportTotal + liveBlock;
     },

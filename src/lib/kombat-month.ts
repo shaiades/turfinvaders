@@ -30,14 +30,18 @@
 
 import { addDaysISO, laTodayISO, nextMonthStartISO, weekStartOfISO } from "@/lib/dates";
 import {
+  buildPendingReportCheck,
   cardOutcome,
   countReps,
   customerTokens,
   isOfficeAppt,
   isReload,
   normalizeCustomer,
+  pendingCardCredits,
+  pendingCardDollars,
   phoneKey,
   type BlockCard,
+  type KombatWindow,
   type ReportSaleRow,
 } from "@/lib/close-kombat";
 
@@ -609,94 +613,46 @@ export function scoredCardKeys(cards: readonly BlockCard[], rules: KombatRules):
   return keys;
 }
 
-/** Office-scoped customer keys of every NON-CANCELLED Sales-Report sale this
- *  month — the "the book already has this customer" set that suppresses the
- *  block-price volume estimate, because the report row is the authority once
- *  it lands. Same three-tier keys as scoredCardKeys so a card and its report
- *  row collapse onto one key (the #302 token tier catches reordered names). */
-export function reportCoveredKeys(
-  rows: readonly KombatReportRow[],
-  rules: KombatRules,
-): Set<string> {
-  const month = rules.contest.month;
-  const keys = new Set<string>();
-  for (const row of rows) {
-    if (row.report_month !== month) continue;
-    if (normalizeSalesCount(row.sales_count) === "cancelled" || isDeadWcc(row.wcc)) continue;
-    for (const k of customerKeys(row.office, row.customer_name, row.phone)) keys.add(k);
-  }
-  return keys;
-}
-
-/** The ONE gate that decides whether a sold block card counts as live
- *  block-price volume toward the contest this month — in-month, outcome Sold,
- *  not an excluded Iss / office appt, a real Sale Price, with at least one
- *  rep, and NOT yet covered by the monthly report (missing_from_report → false
- *  or the book already has the customer). Shared by buildCardVolumeCandidates
- *  (the belt POINTS) and the $3M team-goal DOLLARS so the two can never count
- *  a different set of cards (owner 2026-10-02). */
-export function isLiveBlockVolumeCard(
-  card: BlockCard,
-  month: string,
-  reportCovered: ReadonlySet<string>,
-): boolean {
-  if (!inContestMonth(card.card_date, month)) return false;
-  if (cardOutcome(card) !== "sold") return false;
-  if (isExcludedIss(card) || isOfficeAppt(card)) return false;
-  const price = card.sale_price;
-  if (price === null || price <= 0) return false; // blank price = $0, never guess
-  // The report is the authority. Skip once the sync proves the card IS in the
-  // book (missing_from_report === false), or a live report row already covers
-  // this customer this month — either way the report volume will count it.
-  if (card.missing_from_report === false) return false;
-  const covered = customerKeys(card.office_location, card.lead_name, card.phone).some((k) =>
-    reportCovered.has(k),
-  );
-  if (covered) return false;
-  if (countReps(card).length === 0) return false;
-  return true;
-}
-
-/** Total live block-price DOLLAR volume for the contest month — the sum of
- *  Sale Prices of the sold cards the monthly report hasn't covered yet. Added
- *  to the report's own written total so the $3M team goal moves the instant a
- *  card is marked, counting the very same sales the belt points already count
- *  live (owner 2026-10-02) instead of waiting on the monthly Sales Report
- *  sync. Each card's whole price counts once (team total — no per-rep split);
- *  the bounty multiplier is a POINTS kicker and never inflates dollars. */
+/** Total live block-price DOLLAR volume for the contest month — the block
+ *  price of every sold card the monthly report hasn't covered yet, summed once
+ *  per card (team total, no per-rep split). Added to the report's written total
+ *  so the $3M team goal moves the instant a sale is marked, counting the very
+ *  same cards the belt points count (buildCardVolumeCandidates) through the
+ *  SAME Shark Tank pending rule (pendingCardDollars → buildPendingReportCheck).
+ *  A report row stays the authority: once it covers a customer the estimate
+ *  drops and the book number takes over (owner 2026-10-02). */
 export function liveBlockVolumeDollars(
   cards: readonly BlockCard[],
+  reportRows: readonly KombatReportRow[],
   rules: KombatRules,
-  reportCovered: ReadonlySet<string>,
 ): number {
   const month = rules.contest.month;
-  let total = 0;
-  for (const card of cards) {
-    if (!isLiveBlockVolumeCard(card, month, reportCovered)) continue;
-    total += card.sale_price ?? 0;
-  }
-  return total;
+  const window: KombatWindow = { start: month, end: lastDayOfMonth(month) };
+  return pendingCardDollars([...cards], window, buildPendingReportCheck([...reportRows]));
 }
 
 /** Live VOLUME at the BLOCK price (owner 2026-10-02): a sold block card earns
- *  its +per_1000 volume the moment it's marked — at the card's Sale Price — so
- *  a rep never waits on the monthly Sales Report to sync. The report_sales row
- *  is the authority: the instant it lands (missing_from_report → false, OR a
- *  live report row already covers the customer this month) this estimate is
- *  dropped and the report's exact volume takes over — the recompute deletes the
- *  block row it no longer produces. Mirrors the Stats-tab "counting at Block
- *  price" parity (missing_from_report, PR #263). Split across the card's reps,
- *  same board formula as report volume; blank price = $0, never guessed.
+ *  its +per_1000 volume the moment it's marked — at the deal's Block price — so
+ *  a rep never waits on the monthly Sales Report. This runs through the SAME
+ *  rule Shark Tank's Month/Year money uses — pendingCardCredits applies
+ *  linkSaves (a landed save re-prices the deal; the saver takes 50% off the
+ *  top), the buildPendingReportCheck gate (a card is "still awaiting its report
+ *  row" when missing_from_report ≠ false AND no loaded report row corroborates
+ *  it by date or amount), and the shared volumeSplit — so the per-rep dollars
+ *  match the standings exactly, and Kombat is never BEHIND Shark Tank. The
+ *  report row is the authority: once it lands the card stops being pending,
+ *  this estimate is dropped, and the recompute deletes the block row it no
+ *  longer produces (report volume takes over).
  *
  *  Keyed (source_kind "sit", source_id card id, category "money.volume") — a
  *  different ledger key from the card's TYPE kicker (card.sale/…) and from the
  *  report's own volume (source_kind "report_sale"), so it stacks with the
- *  kicker but is deduped against the report by the coverage gate above. */
+ *  kicker but can never double the report. */
 export function buildCardVolumeCandidates(
   cards: readonly BlockCard[],
+  reportRows: readonly KombatReportRow[],
   rules: KombatRules,
   bounties: readonly KombatBounty[],
-  reportCovered: ReadonlySet<string>,
   todayISO: string = laTodayISO(),
 ): LedgerCandidate[] {
   const month = rules.contest.month;
@@ -704,38 +660,36 @@ export function buildCardVolumeCandidates(
   if (rules.money.per_1000 === 0) return out;
   const status: LedgerCandidate["status"] =
     todayISO > contestFinalizeAfterISO(rules) ? "locked" : "pending";
-  for (const card of cards) {
-    // Same gate as the $3M team-goal dollars (isLiveBlockVolumeCard) so the
-    // belt points and the team bar never count a different set of cards.
-    if (!isLiveBlockVolumeCard(card, month, reportCovered)) continue;
-    const price = card.sale_price as number; // gate guarantees a real price > 0
-    const reps = countReps(card); // gate guarantees at least one rep
+  const window: KombatWindow = { start: month, end: lastDayOfMonth(month) };
+  const pendingCheck = buildPendingReportCheck([...reportRows]);
+  for (const { card, rep, amount, cardTotal } of pendingCardCredits(
+    [...cards],
+    window,
+    pendingCheck,
+  )) {
+    if (amount <= 0) continue;
     const mult = bountyMultiplier("money.volume", card.card_date, bounties);
-    const cardPts = (price / 1000) * rules.money.per_1000;
-    const perRep = (cardPts * mult) / reps.length;
-    if (perRep === 0) continue;
-    for (const rep of reps) {
-      out.push({
-        month,
-        rep_name: rep,
-        category: "money.volume",
-        points: perRep,
-        status,
-        source_kind: "sit",
-        source_id: card.monday_item_id,
-        occurred_on: card.card_date,
-        meta: {
-          label: `$${Math.round(price).toLocaleString()} written · block price`,
-          customer: card.lead_name,
-          office: card.office_location,
-          card_points: cardPts,
-          rep_count: reps.length,
-          board_id: card.board_id,
-          block_price: true,
-          ...(mult !== 1 ? { bounty_multiplier: mult } : {}),
-        },
-      });
-    }
+    const points = (amount / 1000) * rules.money.per_1000 * mult;
+    if (points === 0) continue;
+    out.push({
+      month,
+      rep_name: rep,
+      category: "money.volume",
+      points,
+      status,
+      source_kind: "sit",
+      source_id: card.monday_item_id,
+      occurred_on: card.card_date,
+      meta: {
+        label: `$${Math.round(cardTotal).toLocaleString()} written · block price`,
+        customer: card.lead_name,
+        office: card.office_location,
+        card_points: (cardTotal / 1000) * rules.money.per_1000,
+        board_id: card.board_id,
+        block_price: true,
+        ...(mult !== 1 ? { bounty_multiplier: mult } : {}),
+      },
+    });
   }
   return out;
 }
