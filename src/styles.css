@@ -1067,6 +1067,111 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   POP-ART — the comic-book skin for the Close Kombat arena (owner directive
+   2026-10-02: "more video game", in the Nov/Jan flyer house style). Halftone
+   fields, inked headlines, starburst callouts, and a K.O. rank-up flash,
+   layered on the Kombat red/gold/black palette. Animations yield to
+   prefers-reduced-motion; the static look never disappears.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Halftone dot field — the flyer/Lichtenstein wash. Drop behind content in a
+   pointer-events-none layer; --pop-dot sets the ink color, --pop-dot-size the
+   spacing. Fades out toward the bottom so content stays legible. */
+@utility pop-halftone {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image: radial-gradient(
+    var(--pop-dot, color-mix(in oklab, var(--kombat-red) 55%, transparent)) 22%,
+    transparent 23%
+  );
+  background-size: var(--pop-dot-size, 14px) var(--pop-dot-size, 14px);
+  opacity: 0.5;
+  mask-image: linear-gradient(to bottom, black 35%, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, black 35%, transparent);
+}
+
+/* Thick comic ink around a headline — drawn stroke + layered offset shadow.
+   Pair with a bright fill color on the element itself. */
+@utility pop-ink {
+  -webkit-text-stroke: 2px #0b0b0f;
+  paint-order: stroke fill;
+  text-shadow:
+    3px 3px 0 #0b0b0f,
+    -1px -1px 0 #0b0b0f,
+    0 0 18px color-mix(in oklab, var(--kombat-gold) 50%, transparent);
+}
+
+/* Jagged starburst "POW" box via clip-path (apply to a solid-fill element). */
+@utility pop-burst {
+  clip-path: polygon(
+    50% 0%,
+    61% 13%,
+    78% 6%,
+    76% 25%,
+    95% 24%,
+    83% 39%,
+    100% 50%,
+    83% 61%,
+    95% 76%,
+    76% 75%,
+    78% 94%,
+    61% 87%,
+    50% 100%,
+    39% 87%,
+    22% 94%,
+    24% 75%,
+    5% 76%,
+    17% 61%,
+    0% 50%,
+    17% 39%,
+    5% 24%,
+    24% 25%,
+    22% 6%,
+    39% 13%
+  );
+}
+
+/* One-shot K.O. / rank-up flash: a comic burst punches in, holds, fades out.
+   The component places it full-screen and unmounts on animationend. */
+@keyframes pop-ko {
+  0% {
+    transform: scale(0.3) rotate(-12deg);
+    opacity: 0;
+  }
+  18% {
+    transform: scale(1.08) rotate(-4deg);
+    opacity: 1;
+  }
+  30% {
+    transform: scale(1) rotate(-6deg);
+    opacity: 1;
+  }
+  78% {
+    transform: scale(1) rotate(-6deg);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1.3) rotate(-2deg);
+    opacity: 0;
+  }
+}
+@utility pop-ko-flash {
+  animation: pop-ko 1.6s cubic-bezier(0.2, 0.9, 0.2, 1) forwards;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+/* Comic panel chrome — thick ink border + hard offset shadow (sticker look). */
+@utility pop-panel {
+  border: 2px solid #0b0b0f;
+  box-shadow: 4px 4px 0 0 color-mix(in oklab, var(--kombat-black) 92%, black);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
    MY PURPOSE — the calm surface. The workshop is deliberately NOT the arcade:
    deep tidal navy, warm off-white text, restrained sand for emphasis, sans
    headings (the Press Start 2P h1–h3 rule is overridden inside this scope).

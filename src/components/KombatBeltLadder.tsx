@@ -18,6 +18,8 @@ import {
   type KombatRules,
   type RepTotals,
 } from "@/lib/kombat-month";
+import { RepAvatar } from "@/components/RepAvatar";
+import { cartoonFor, type RepCartoon } from "@/hooks/useRepCartoons";
 
 const fmtMoney = (n: number) =>
   new Intl.NumberFormat("en-US", {
@@ -35,6 +37,8 @@ export function KombatBeltLadder({
   eligibility,
   canSubmit,
   onSubmitProof,
+  totals = [],
+  cartoons,
 }: {
   rules: KombatRules;
   loading: boolean;
@@ -45,6 +49,9 @@ export function KombatBeltLadder({
   eligibility: EligibilityStatus;
   canSubmit: boolean;
   onSubmitProof: () => void;
+  /** All reps — to stack everyone's fighter on the belt they've reached. */
+  totals?: RepTotals[];
+  cartoons?: Map<string, RepCartoon>;
 }) {
   const reduced = usePrefersReducedMotion();
   const myTotal = myTotals?.total ?? 0;
@@ -54,6 +61,16 @@ export function KombatBeltLadder({
   // Belts highest-first — climbing the ladder reads as rising.
   const belts = [...rules.prizes.tiers].sort((a, b) => b.points - a.points);
   const unlocked = written >= rules.prizes.unlock_threshold;
+
+  // Who sits on each belt right now (their highest cleared tier) — the shared
+  // climb: every rep's fighter stacked on their current rung.
+  const byBelt = new Map<string, RepTotals[]>();
+  for (const t of totals) {
+    const key = tierFor(t.total, rules).current?.key ?? "__none__";
+    const arr = byBelt.get(key);
+    if (arr) arr.push(t);
+    else byBelt.set(key, [t]);
+  }
 
   // Carrot progress: from the current belt's floor to the next belt's wall.
   const floor = tier.current?.points ?? 0;
@@ -187,6 +204,7 @@ export function KombatBeltLadder({
                 const cleared = myTotal >= b.points;
                 const isTarget = tier.next?.key === b.key;
                 const accent = BELT_ACCENT[b.key] ?? "var(--kombat-gold)";
+                const atBelt = byBelt.get(b.key) ?? [];
                 return (
                   <li
                     key={b.key}
@@ -211,6 +229,24 @@ export function KombatBeltLadder({
                       <span className="block text-[10px] text-muted-foreground tabular-nums">
                         {b.points} pts{isTarget && matched ? ` · ${fmtPts(tier.toNext)} to go` : ""}
                       </span>
+                      {atBelt.length > 0 && (
+                        <span className="mt-1.5 flex flex-wrap items-center gap-1">
+                          {atBelt.slice(0, 6).map((t) => (
+                            <RepAvatar
+                              key={t.rep_name}
+                              name={t.rep_name}
+                              cartoon={cartoonFor(cartoons, t.rep_name)}
+                              className="h-6 w-6"
+                              textClassName="text-[0.5rem]"
+                            />
+                          ))}
+                          {atBelt.length > 6 && (
+                            <span className="text-[10px] text-muted-foreground tabular-nums">
+                              +{atBelt.length - 6}
+                            </span>
+                          )}
+                        </span>
+                      )}
                     </span>
                     <span className="shrink-0 text-right">
                       <span className="block text-sm font-semibold tabular-nums">

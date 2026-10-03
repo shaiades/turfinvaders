@@ -59,6 +59,11 @@ import { KombatBeltUpFx, type BeltUpFx } from "@/components/KombatBeltUpFx";
 import { ArenaBackdrop } from "@/components/KombatArena";
 import { makeBeeper } from "@/components/intro-fx";
 import { refreshKombatLedger } from "@/lib/kombat-month.functions";
+import { RepAvatar } from "@/components/RepAvatar";
+import { KombatNextFight, type Fighter } from "@/components/KombatNextFight";
+import { KombatCartoonAdmin } from "@/components/KombatCartoonAdmin";
+import { KombatKoFlash } from "@/components/KombatKoFlash";
+import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
 
 const MONDAY_HOST = "https://tidal-remodeling.monday.com";
 
@@ -254,6 +259,50 @@ export function KombatMonthTab({
   const myTotal = myTotals?.total ?? 0;
   const tier = tierFor(myTotal, rules);
 
+  // Fighters: approved Street Fighter cartoons keyed by normalized rep name.
+  const cartoons = useRepCartoons().data;
+
+  // Your rank + your next opponent: the rep one rank ahead (chasing), or the
+  // challenger right below when you're #1 (defending). Feeds YOUR NEXT FIGHT.
+  const myRank = matcher.matched ? totals.findIndex((t) => t.rep_name === matcher.matched) + 1 : 0;
+  const meFighter: Fighter | null = myTotals
+    ? {
+        name: myTotals.rep_name,
+        total: myTotals.total,
+        cartoon: cartoonFor(cartoons, myTotals.rep_name),
+      }
+    : null;
+  const defending = myRank === 1;
+  const rivalTotals = myRank >= 2 ? totals[myRank - 2] : myRank === 1 ? totals[1] : undefined;
+  const rival: Fighter | null = rivalTotals
+    ? {
+        name: rivalTotals.rep_name,
+        total: rivalTotals.total,
+        cartoon: cartoonFor(cartoons, rivalTotals.rep_name),
+      }
+    : null;
+
+  // K.O. flash the instant YOU climb past whoever was directly ahead.
+  const [ko, setKo] = useState<{ seq: number; name: string } | null>(null);
+  const koSeqRef = useRef(0);
+  const prevRankRef = useRef<number | null>(null);
+  const prevAheadRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!matcher.matched || myRank <= 0) {
+      prevRankRef.current = null;
+      prevAheadRef.current = null;
+      return;
+    }
+    const prevRank = prevRankRef.current;
+    const prevAhead = prevAheadRef.current;
+    if (prevRank !== null && myRank < prevRank && prevAhead) {
+      koSeqRef.current += 1;
+      setKo({ seq: koSeqRef.current, name: prevAhead.split(/\s+/)[0] || prevAhead });
+    }
+    prevRankRef.current = myRank;
+    prevAheadRef.current = myRank >= 2 ? (totals[myRank - 2]?.rep_name ?? null) : null;
+  }, [myRank, matcher.matched, totals]);
+
   // ── Eligibility (own data; RLS scopes both tables to the viewer) ──
   const purposeQuery = usePurposeProfile(userId ?? undefined);
   const testsQuery = useActivityTests(userId);
@@ -382,6 +431,7 @@ export function KombatMonthTab({
         {beltFx && (
           <KombatBeltUpFx key={`belt-${beltFx.seq}`} fx={beltFx} onDone={() => setBeltFx(null)} />
         )}
+        {ko && <KombatKoFlash key={`ko-${ko.seq}`} name={ko.name} onDone={() => setKo(null)} />}
 
         {/* Bounty banners */}
         {activeBounties.map((b) => (
@@ -399,6 +449,31 @@ export function KombatMonthTab({
           </div>
         ))}
 
+        {/* Reigning champion spotlight — the #1 fighter, front and center */}
+        {totals[0] && (
+          <div className="pop-panel relative flex items-center gap-3 overflow-hidden rounded-xl border-2 border-kombat-gold/60 bg-kombat-black px-4 py-3">
+            <span aria-hidden className="pop-halftone" />
+            <RepAvatar
+              name={totals[0].rep_name}
+              cartoon={cartoonFor(cartoons, totals[0].rep_name)}
+              variant="full"
+              rounded="lg"
+              className="relative z-10 h-20 w-16 shrink-0"
+              textClassName="text-lg"
+              ring
+            />
+            <div className="relative z-10 min-w-0">
+              <div className="font-display text-[10px] uppercase tracking-widest text-kombat-gold">
+                Reigning champion <span className="kombat-crown">👑</span>
+              </div>
+              <div className="truncate text-lg font-bold">{totals[0].rep_name}</div>
+              <div className="font-mono text-sm tabular-nums text-kombat-gold">
+                {fmtPts(totals[0].total)} pts
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ① THE BELT — what you're fighting for + where you stand + the rules */}
         <KombatBeltLadder
           rules={rules}
@@ -409,6 +484,16 @@ export function KombatMonthTab({
           eligibility={eligibility}
           canSubmit={!!userId && !isPreview}
           onSubmitProof={() => setProofOpen(true)}
+          totals={totals}
+          cartoons={cartoons}
+        />
+
+        {/* YOUR NEXT FIGHT — you vs the rep one rank ahead (or defend at #1) */}
+        <KombatNextFight
+          matched={matcher.matched !== null}
+          me={meFighter}
+          rival={rival}
+          defending={defending}
         />
 
         {/* ② THE SCORECARD — exactly what everything is worth */}
@@ -420,6 +505,7 @@ export function KombatMonthTab({
           rules={rules}
           matcher={matcher}
           loading={ledgerQuery.isPending}
+          cartoons={cartoons}
         />
 
         {/* Live feed */}
@@ -460,6 +546,12 @@ export function KombatMonthTab({
                     >
                       {r.status === "cancelled" ? `−${fmtPts(r.points)}` : `+${fmtPts(r.points)}`}
                     </span>
+                    <RepAvatar
+                      name={r.rep_name}
+                      cartoon={cartoonFor(cartoons, r.rep_name)}
+                      className="h-7 w-7"
+                      textClassName="text-[0.6rem]"
+                    />
                     <span className="min-w-0 flex-1 truncate">
                       <span className="font-medium">{r.rep_name}</span>
                       <span className="text-muted-foreground">
@@ -483,19 +575,22 @@ export function KombatMonthTab({
 
         {/* Admin tools */}
         {isAdmin && !isPreview && (
-          <KombatMonthAdmin
-            rules={rules}
-            totals={totals}
-            ledger={ledger}
-            written={written}
-            bounties={bountiesQuery.data ?? []}
-            onChanged={() => {
-              void qc.invalidateQueries({ queryKey: ["contest_rules"] });
-              void qc.invalidateQueries({ queryKey: ["contest_ledger"] });
-              void qc.invalidateQueries({ queryKey: ["contest_bounties"] });
-              void qc.invalidateQueries({ queryKey: ["kombat_admin_board"] });
-            }}
-          />
+          <>
+            <KombatCartoonAdmin />
+            <KombatMonthAdmin
+              rules={rules}
+              totals={totals}
+              ledger={ledger}
+              written={written}
+              bounties={bountiesQuery.data ?? []}
+              onChanged={() => {
+                void qc.invalidateQueries({ queryKey: ["contest_rules"] });
+                void qc.invalidateQueries({ queryKey: ["contest_ledger"] });
+                void qc.invalidateQueries({ queryKey: ["contest_bounties"] });
+                void qc.invalidateQueries({ queryKey: ["kombat_admin_board"] });
+              }}
+            />
+          </>
         )}
 
         {userId && (

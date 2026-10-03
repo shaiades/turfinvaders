@@ -70,6 +70,7 @@ import { CloseKombatGoalsTab } from "@/components/CloseKombatGoalsTab";
 import { ActivityTestPanel } from "@/components/ActivityTestPanel";
 import { CloseKombatLearnTab } from "@/components/CloseKombatLearnTab";
 import { KombatMonthTab } from "@/components/KombatMonth";
+import { KombatHeroBanner } from "@/components/KombatHeroBanner";
 import { toast } from "sonner";
 import { rewardToast } from "@/lib/reward-toast";
 import { useCountUp } from "@/hooks/useCountUp";
@@ -83,7 +84,6 @@ import {
   CircleHelp,
   Crown,
   RefreshCw,
-  Swords,
 } from "lucide-react";
 
 /**
@@ -1017,49 +1017,42 @@ function CloseKombatInner({
 
   return (
     <div className="space-y-4 md:space-y-6">
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="font-display text-sm text-kombat-gold uppercase tracking-widest flex items-center gap-2">
-            <Swords className="w-4 h-4 text-kombat-red" />
-            Close Kombat
-          </h1>
-          <p className="text-xs text-muted-foreground mt-1">
-            Sales rep results · straight from the Monday.com Block boards
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {isAdmin && (
-            <>
-              <NeonButton
-                tone="kombat-gold"
-                disabled={sync.isPending}
-                onClick={() => sync.mutate("active")}
-                title="Re-pull this week's two active Block boards"
-              >
-                <RefreshCw className={`w-4 h-4 ${sync.isPending ? "animate-spin" : ""}`} />
-                Sync from Monday
-              </NeonButton>
-              <NeonButton
-                tone="kombat-red"
-                disabled={sync.isPending}
-                onClick={() => sync.mutate("all")}
-                title="Backfill every SD/OC Block board Monday still lists"
-              >
-                Full history
-              </NeonButton>
-            </>
-          )}
-          {/* The Year tab is company-wide by design (the Shark Tank YTD is
-              combined and the Jan–Apr books carry no office) — showing the
-              pills there would promise a filter that doesn't apply. The Plan
-              tab is the rep's own jobs regardless of office, same rule. */}
-          {/* Kombat Month is company-wide (SD + OC, one contest) — no pills. */}
-          {!(pageTab === "stats" && isYearTab) && pageTab !== "plan" && pageTab !== "kombat" && (
-            <OfficeFilterToggle />
-          )}
-        </div>
-      </div>
+      {/* Header — pop-art arcade title banner (owner 2026-10-02: "missing image") */}
+      <KombatHeroBanner
+        actions={
+          <>
+            {isAdmin && (
+              <>
+                <NeonButton
+                  tone="kombat-gold"
+                  disabled={sync.isPending}
+                  onClick={() => sync.mutate("active")}
+                  title="Re-pull this week's two active Block boards"
+                >
+                  <RefreshCw className={`w-4 h-4 ${sync.isPending ? "animate-spin" : ""}`} />
+                  Sync from Monday
+                </NeonButton>
+                <NeonButton
+                  tone="kombat-red"
+                  disabled={sync.isPending}
+                  onClick={() => sync.mutate("all")}
+                  title="Backfill every SD/OC Block board Monday still lists"
+                >
+                  Full history
+                </NeonButton>
+              </>
+            )}
+            {/* The Year tab is company-wide by design (the Shark Tank YTD is
+                combined and the Jan–Apr books carry no office) — showing the
+                pills there would promise a filter that doesn't apply. The Plan
+                tab is the rep's own jobs regardless of office, same rule. */}
+            {/* Kombat Month is company-wide (SD + OC, one contest) — no pills. */}
+            {!(pageTab === "stats" && isYearTab) && pageTab !== "plan" && pageTab !== "kombat" && (
+              <OfficeFilterToggle />
+            )}
+          </>
+        }
+      />
 
       {/* Page tabs (owner, 2026-09-17): Money/Goals are personal, Stats/Learn
           are visible to anyone who reaches this route. */}
