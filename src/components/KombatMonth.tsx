@@ -18,7 +18,8 @@ import { usePurposeProfile } from "@/hooks/usePurposeProfile";
 import { useActivityTests } from "@/hooks/useActivityTests";
 import { buildRepMatcher } from "@/lib/rep-identity";
 import { rewardToast } from "@/lib/reward-toast";
-import { laTodayISO } from "@/lib/dates";
+import { laTodayISO, nextMonthStartISO } from "@/lib/dates";
+import { CARD_COLUMNS, type BlockCard } from "@/lib/close-kombat";
 import { ArcadePanel, ArcadePill, NeonButton } from "@/components/arcade";
 import {
   Sheet,
@@ -36,12 +37,16 @@ import {
   PROOF_CATEGORIES,
   PROOF_LABELS,
   SALE_CATEGORIES,
+  companyWritten,
   eligibilityStatus,
   fmtPts,
+  liveBlockVolumeDollars,
   mergeKombatRules,
+  reportCoveredKeys,
   tierFor,
   totalsFromLedger,
   type KombatBounty,
+  type KombatReportRow,
   type KombatRules,
   type LedgerStatus,
   type ProofCategory,
@@ -152,24 +157,52 @@ export function KombatMonthTab({
   });
 
   // Company progress to the unlock: October written volume, SD + OC. The
-  // office zeroes a cancelled row's Sale Amt, so the sum is already net.
+  // office zeroes a cancelled row's Sale Amt, so the report sum is already net.
+  // Live-volume parity (owner 2026-10-02): the report only counts a sale once
+  // the monthly Sales Report syncs it, so the bar used to sit a day behind the
+  // belt points. We now ADD the block-price dollars of sold cards the report
+  // hasn't covered yet — the exact same cards the points count live
+  // (isLiveBlockVolumeCard) — so a sale lands on the team goal the moment it's
+  // marked. A report row is still the authority: once it covers a customer the
+  // block estimate drops and the book number takes over (no double count).
   const writtenQuery = useQuery({
     queryKey: ["kombat_company_written", month],
     queryFn: async (): Promise<number> => {
-      let total = 0;
       const PAGE = 1000;
+      // Report rows: sale_amt for the net written total, plus the fields
+      // reportCoveredKeys reads to decide which customers the book already has.
+      const reportRows: KombatReportRow[] = [];
       for (let from = 0; ; from += PAGE) {
         const { data, error } = await supabase
           .from("report_sales")
-          .select("sale_amt")
+          .select("sale_amt, office, customer_name, phone, sales_count, wcc, report_month")
           .eq("report_month", month)
           .order("monday_item_id")
           .range(from, from + PAGE - 1);
         if (error) throw new Error(error.message);
-        total += (data ?? []).reduce((s, r) => s + (r.sale_amt ?? 0), 0);
+        reportRows.push(...((data ?? []) as unknown as KombatReportRow[]));
         if (!data || data.length < PAGE) break;
       }
-      return total;
+      const reportTotal = companyWritten(reportRows, month);
+
+      // Sold block cards for the month, same window as the server recompute.
+      const monthEnd = nextMonthStartISO(month);
+      const cards: BlockCard[] = [];
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await supabase
+          .from("block_cards")
+          .select(CARD_COLUMNS)
+          .gte("card_date", month)
+          .lt("card_date", monthEnd)
+          .order("monday_item_id")
+          .range(from, from + PAGE - 1);
+        if (error) throw new Error(error.message);
+        cards.push(...((data ?? []) as unknown as BlockCard[]));
+        if (!data || data.length < PAGE) break;
+      }
+      const liveBlock = liveBlockVolumeDollars(cards, rules, reportCoveredKeys(reportRows, rules));
+
+      return reportTotal + liveBlock;
     },
   });
 
