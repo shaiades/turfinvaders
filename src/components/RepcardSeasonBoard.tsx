@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel } from "@/components/arcade";
+import { RepAvatar } from "@/components/RepAvatar";
+import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
 
 /**
  * RepCard 2026 season board — a read-only ops view of imported RepCard field
@@ -80,6 +82,7 @@ const pct = (part: number, whole: number) => (whole > 0 ? `${((part / whole) * 1
 
 export function RepcardSeasonBoard() {
   const [office, setOffice] = useState<(typeof OFFICE_FILTERS)[number]["id"]>("all");
+  const cartoons = useRepCartoons().data;
 
   const query = useQuery({
     // Distinct key from the profile page's ["repcard_results_all"] — that query
@@ -158,15 +161,25 @@ export function RepcardSeasonBoard() {
                 <tr key={r.name} className="border-t border-border/40">
                   <td className="py-2 pr-2 text-muted-foreground tabular-nums">{i + 1}</td>
                   <td className="py-2 pr-2">
-                    <span className={r.active ? "" : "text-muted-foreground"}>
-                      {r.active ? "" : "❌ "}
-                      {r.name}
-                    </span>
-                    {r.team ? (
-                      <span className="ml-1.5 text-[10px] uppercase tracking-widest text-muted-foreground">
-                        {r.team}
+                    <span className="flex items-center gap-2">
+                      <RepAvatar
+                        name={r.name}
+                        cartoon={cartoonFor(cartoons, r.name)}
+                        className={`h-7 w-7 ${r.active ? "" : "opacity-50 grayscale"}`}
+                        textClassName="text-[10px]"
+                      />
+                      <span className="min-w-0">
+                        <span className={`truncate ${r.active ? "" : "text-muted-foreground"}`}>
+                          {r.active ? "" : "❌ "}
+                          {r.name}
+                        </span>
+                        {r.team ? (
+                          <span className="ml-1.5 text-[10px] uppercase tracking-widest text-muted-foreground">
+                            {r.team}
+                          </span>
+                        ) : null}
                       </span>
-                    ) : null}
+                    </span>
                   </td>
                   <td className="py-2 px-2 text-right tabular-nums text-neon">{num(r.doors)}</td>
                   <td className="py-2 px-2 text-right tabular-nums">{num(r.verified)}</td>

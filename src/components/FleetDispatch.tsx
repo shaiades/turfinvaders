@@ -77,6 +77,8 @@ import { syncCollections } from "@/lib/collections.functions";
 import { FleetDispatchManage } from "@/components/FleetDispatchManage";
 import { GlossarySheet } from "@/components/GlossarySheet";
 import { RepcardSeasonBoard } from "@/components/RepcardSeasonBoard";
+import { RepAvatar } from "@/components/RepAvatar";
+import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
 import { FormerBadge } from "@/components/FormerBadge";
 import { AddPlayerDialog } from "@/components/AddPlayerDialog";
 import { RenameCanvasserDialog, type NameGroupRef } from "@/components/RenameCanvasserDialog";
@@ -558,8 +560,10 @@ function FleetDispatchInner({
   // nobody is hidden because of it.
   const excusedByDay = useMemo(() => {
     const m = new Map<string, Map<string, string>>();
-    const raw = (clockQ.data as { excusedByDate?: Record<string, Array<{ user_id: string; kind: string }>> } | undefined)
-      ?.excusedByDate;
+    const raw = (
+      clockQ.data as
+        { excusedByDate?: Record<string, Array<{ user_id: string; kind: string }>> } | undefined
+    )?.excusedByDate;
     for (const [d, list] of Object.entries(raw ?? {})) {
       m.set(d, new Map(list.map((e) => [e.user_id, e.kind])));
     }
@@ -1782,6 +1786,7 @@ function DispatchRow({
   excused?: string | null;
 }) {
   const { realRole, user } = useAuth();
+  const cartoons = useRepCartoons().data;
   // Your own line glows (audit C-9) — the ladder does it for reps; the
   // board does it for the captain reading their van.
   const self = !!user && r.g.ids.includes(user.id);
@@ -1823,6 +1828,13 @@ function DispatchRow({
           )
         )}
         <span aria-hidden>{r.sub > 0 ? "🔥" : "🍩"}</span>
+        <RepAvatar
+          name={name}
+          cartoon={cartoonFor(cartoons, name)}
+          className="h-6 w-6"
+          textClassName="text-[9px]"
+          ring={self}
+        />
         {profileId ? (
           <>
             <Link
@@ -2399,6 +2411,7 @@ function SuspensionBoard({
     display_name: string | null;
   }) => void;
 }) {
+  const cartoons = useRepCartoons().data;
   return (
     <ArcadePanel
       title="Suspension Board"
@@ -2441,6 +2454,12 @@ function SuspensionBoard({
                   <span className="frozen-doughnut" aria-hidden>
                     🍩
                   </span>
+                  <RepAvatar
+                    name={r.g.display_name ?? "—"}
+                    cartoon={cartoonFor(cartoons, r.g.display_name)}
+                    className="h-7 w-7 opacity-80 grayscale"
+                    textClassName="text-[10px]"
+                  />
                   <span className="text-sm font-medium">{r.g.display_name ?? "—"}</span>
                 </div>
                 <div className="text-[10px] font-mono text-muted-foreground mt-0.5">

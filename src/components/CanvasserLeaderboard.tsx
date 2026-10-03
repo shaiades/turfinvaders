@@ -13,6 +13,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { isLeadSourceName } from "@/lib/lead-sources";
 import { ArcadeCard, ArcadePanel } from "@/components/arcade";
+import { RepAvatar } from "@/components/RepAvatar";
+import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
 
 /**
  * The canvasser-facing Leaders page (audit P1-4, owner: full rebuild): a
@@ -54,6 +56,7 @@ type LadderRow = {
 export function CanvasserLeaderboard() {
   const { user } = useAuth();
   const selfId = user?.id;
+  const cartoons = useRepCartoons().data;
   const [range, setRange] = useState<RangeKey>("day");
   const { start, end } = rangeFor(range);
 
@@ -235,10 +238,22 @@ export function CanvasserLeaderboard() {
                             <span
                               aria-hidden
                               className="h-2 w-2 shrink-0 rounded-full"
-                              style={{ background: r.teamColor, boxShadow: `0 0 6px ${r.teamColor}` }}
+                              style={{
+                                background: r.teamColor,
+                                boxShadow: `0 0 6px ${r.teamColor}`,
+                              }}
                             />
                           )}
-                          <span className={`truncate text-sm ${self ? "text-neon font-medium" : ""}`}>
+                          <RepAvatar
+                            name={r.name}
+                            cartoon={cartoonFor(cartoons, r.name)}
+                            className="h-8 w-8"
+                            textClassName="text-[10px]"
+                            ring={self}
+                          />
+                          <span
+                            className={`truncate text-sm ${self ? "text-neon font-medium" : ""}`}
+                          >
                             {r.name}
                             {self && (
                               <span className="ml-1.5 font-display text-[9px] uppercase tracking-widest text-neon/80">
@@ -249,7 +264,9 @@ export function CanvasserLeaderboard() {
                         </div>
                         <div className="flex shrink-0 items-center gap-3 font-display text-[11px] uppercase tracking-wider tabular-nums">
                           <span className="text-victory">{r.pts} pts</span>
-                          <span className={r.vol > 0 ? "text-victory/90" : "text-muted-foreground/50"}>
+                          <span
+                            className={r.vol > 0 ? "text-victory/90" : "text-muted-foreground/50"}
+                          >
                             {fmtVol(r.vol)}
                           </span>
                           <span className={r.lds > 0 ? "text-neon" : "text-muted-foreground/50"}>
@@ -262,7 +279,8 @@ export function CanvasserLeaderboard() {
                         {self && gap && (
                           <span className="text-[var(--warning)]">
                             {" "}
-                            · {gap.pts > 0
+                            ·{" "}
+                            {gap.pts > 0
                               ? `${gap.pts} pt${gap.pts === 1 ? "" : "s"} behind ${gap.ahead.name.split(" ")[0]}`
                               : `${fmtVol(Math.max(0, gap.vol))} behind ${gap.ahead.name.split(" ")[0]}`}
                           </span>

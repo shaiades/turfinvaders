@@ -29,15 +29,15 @@ const FULL_BODY_FRAMING =
 
 export type CartoonKind = "portrait" | "full";
 
-function portraitPrompt(style: string): string {
+export function portraitPrompt(style: string): string {
   return `${style} ${PORTRAIT_FRAMING}`;
 }
-function fullPrompt(style: string): string {
+export function fullPrompt(style: string): string {
   return `${style} ${FULL_BODY_FRAMING}`;
 }
 
 /** Fetch an image URL server-side → base64 + mime (Monday photo URLs are public). */
-async function fetchImageInline(url: string): Promise<{ data: string; mimeType: string }> {
+export async function fetchImageInline(url: string): Promise<{ data: string; mimeType: string }> {
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`source photo fetch failed: HTTP ${resp.status}`);
   const mimeType = resp.headers.get("content-type")?.split(";")[0] || "image/jpeg";
@@ -52,7 +52,7 @@ type GeminiPart = {
 };
 
 /** One Gemini image generation: text prompt + the source face → PNG bytes. */
-async function callGemini(
+export async function callGemini(
   apiKey: string,
   prompt: string,
   source: { data: string; mimeType: string },
@@ -96,7 +96,7 @@ async function callGemini(
   throw new Error(`Gemini returned no image${text ? `: ${text.slice(0, 200)}` : ""}`);
 }
 
-function extFor(contentType: string): string {
+export function extFor(contentType: string): string {
   if (contentType.includes("jpeg") || contentType.includes("jpg")) return "jpg";
   if (contentType.includes("webp")) return "webp";
   return "png";

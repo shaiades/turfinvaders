@@ -29,6 +29,8 @@ import {
   useSetVanLock,
 } from "@/hooks/useRosterActions";
 import { useAuth } from "@/hooks/useAuth";
+import { RepAvatar } from "@/components/RepAvatar";
+import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
 import {
   assignableRolesFor,
   isAdminRole,
@@ -91,6 +93,7 @@ export function PlayerSheet({
 }) {
   const qc = useQueryClient();
   const { realRole } = useAuth();
+  const cartoons = useRepCartoons().data;
   const isAdminActor = isAdminRole(realRole);
   const setRole = useSetUserRole();
   const moveAgents = useMoveAgents(vans);
@@ -175,6 +178,14 @@ export function PlayerSheet({
       <SheetContent className="h-[85dvh]">
         <SheetHeader className="pr-10">
           <SheetTitle className="font-display uppercase tracking-widest text-neon text-base flex items-center gap-2 flex-wrap">
+            <RepAvatar
+              name={name}
+              cartoon={cartoonFor(cartoons, name)}
+              variant="full"
+              rounded="lg"
+              className="h-11 w-11"
+              textClassName="text-sm"
+            />
             <span className="min-w-0 truncate">{name}</span>
             <span
               className={`shrink-0 text-[9px] px-1.5 py-0.5 rounded border ${ROLE_TONE[g.primary]}`}

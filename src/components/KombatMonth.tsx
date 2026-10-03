@@ -62,6 +62,7 @@ import { refreshKombatLedger } from "@/lib/kombat-month.functions";
 import { RepAvatar } from "@/components/RepAvatar";
 import { KombatNextFight, type Fighter } from "@/components/KombatNextFight";
 import { KombatCartoonAdmin } from "@/components/KombatCartoonAdmin";
+import { CanvasserCartoonAdmin } from "@/components/CanvasserCartoonAdmin";
 import { KombatKoFlash } from "@/components/KombatKoFlash";
 import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
 
@@ -577,6 +578,7 @@ export function KombatMonthTab({
         {isAdmin && !isPreview && (
           <>
             <KombatCartoonAdmin />
+            <CanvasserCartoonAdmin />
             <KombatMonthAdmin
               rules={rules}
               totals={totals}
