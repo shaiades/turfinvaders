@@ -25,8 +25,10 @@ import { laTodayISO, nextMonthStartISO } from "@/lib/dates";
 import { CARD_COLUMNS, type BlockCard } from "@/lib/close-kombat";
 import {
   buildCardCandidates,
+  buildCardVolumeCandidates,
   buildMoneyCandidates,
   buildReloadPitchCandidates,
+  reportCoveredKeys,
   scoredCardKeys,
   mergeKombatRules,
   type KombatBounty,
@@ -142,9 +144,14 @@ export async function runKombatRecompute(): Promise<KombatRecomputeSummary> {
   // block card already scored.
   const coveredKeys = scoredCardKeys(cards, rules);
   const money = buildMoneyCandidates(reportRows, rules, bounties, today, coveredKeys);
+  // Live volume at block price (owner 2026-10-02): a sold card counts its
+  // $/1k immediately; the report row, once it lands, is the authority and the
+  // block estimate is dropped. reportCovered = customers the book already has.
+  const reportCovered = reportCoveredKeys(reportRows, rules);
   const candidates: LedgerCandidate[] = [
     ...money.candidates,
     ...buildCardCandidates(cards, rules, bounties, today),
+    ...buildCardVolumeCandidates(cards, rules, bounties, reportCovered, today),
     ...buildReloadPitchCandidates(reloadRows, parentRepsById, rules, bounties, today),
   ];
 
