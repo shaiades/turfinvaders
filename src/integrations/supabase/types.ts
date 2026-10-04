@@ -2165,6 +2165,7 @@ export type Database = {
       }
       respawn_requests: {
         Row: {
+          approved_shifts: string[] | null
           created_at: string
           decided_at: string | null
           decided_by: string | null
@@ -2182,6 +2183,7 @@ export type Database = {
           week_start: string
         }
         Insert: {
+          approved_shifts?: string[] | null
           created_at?: string
           decided_at?: string | null
           decided_by?: string | null
@@ -2199,6 +2201,7 @@ export type Database = {
           week_start: string
         }
         Update: {
+          approved_shifts?: string[] | null
           created_at?: string
           decided_at?: string | null
           decided_by?: string | null

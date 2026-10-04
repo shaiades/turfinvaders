@@ -36,7 +36,9 @@ function StatusChip({ status, late }: { status: RespawnStatus; late?: boolean })
       ? "border-victory/50 text-victory"
       : status === "denied"
         ? "border-destructive/50 text-destructive"
-        : "border-kombat-gold/50 text-kombat-gold";
+        : status === "partial"
+          ? "border-neon/50 text-neon"
+          : "border-kombat-gold/50 text-kombat-gold";
   return (
     <span className="inline-flex items-center gap-1.5">
       <span
@@ -66,6 +68,25 @@ function ShiftChips({ shifts }: { shifts: string[] }) {
           {SHIFT_LABEL[s]}
         </span>
       ))}
+    </div>
+  );
+}
+
+/** Shows the granted vs declined split once a request has been decided. */
+function GrantBreakdown({ row }: { row: RespawnRow }) {
+  if (row.status === "pending") return null;
+  const granted = normalizeShifts(row.approved_shifts ?? []) as ShiftKey[];
+  const requested = normalizeShifts(row.shifts) as ShiftKey[];
+  const declined = requested.filter((s) => !granted.includes(s));
+  if (row.status === "denied") {
+    return <p className="text-xs text-destructive">Declined: {summarizeShifts(requested)}</p>;
+  }
+  return (
+    <div className="space-y-0.5 text-xs">
+      {granted.length > 0 && <p className="text-victory">Approved: {summarizeShifts(granted)}</p>}
+      {declined.length > 0 && (
+        <p className="text-destructive">Declined: {summarizeShifts(declined)}</p>
+      )}
     </div>
   );
 }
@@ -177,15 +198,18 @@ function RepRespawn({ userId }: { userId: string }) {
           </div>
 
           {row && (
-            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-surface/50 p-3">
-              <StatusChip status={row.status} late={row.late} />
+            <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-surface/50 p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <StatusChip status={row.status} late={row.late} />
+                {(row.status === "approved" || row.status === "partial") && (
+                  <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                    Editing sends it back to pending
+                  </span>
+                )}
+              </div>
+              <GrantBreakdown row={row} />
               {row.decision_note && (
                 <span className="text-xs text-muted-foreground">“{row.decision_note}”</span>
-              )}
-              {row.status === "approved" && (
-                <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-                  Editing sends it back to pending
-                </span>
               )}
             </div>
           )}
@@ -306,19 +330,42 @@ function AdminRow({ r }: { r: RespawnRow }) {
   const { review, cancel } = useRespawnMutations();
   const [denying, setDenying] = useState(false);
   const [note, setNote] = useState("");
+  // Which requested shifts the approver is granting. Starts as all of them;
+  // deselect any to grant a partial set (e.g. requested Thu–Sat, keep Fri+Sat).
+  const requested = normalizeShifts(r.shifts) as ShiftKey[];
+  const [granted, setGranted] = useState<Set<ShiftKey>>(() => new Set(requested));
+  const toggleGrant = (s: ShiftKey) =>
+    setGranted((prev) => {
+      const next = new Set(prev);
+      if (next.has(s)) next.delete(s);
+      else next.add(s);
+      return next;
+    });
+  const grantList = requested.filter((s) => granted.has(s));
+  const isPartial = grantList.length > 0 && grantList.length < requested.length;
 
   const decide = (approve: boolean) =>
     review.mutate(
-      { id: r.id, approve, note: note.trim() || undefined },
       {
-        onSuccess: (res) =>
-          toast.success(
-            approve
-              ? res.attendanceApplied
-                ? "Approved — attendance updated."
-                : "Approved (attendance applies when the week is live)."
-              : "Denied.",
-          ),
+        id: r.id,
+        approve,
+        note: note.trim() || undefined,
+        approvedShifts: approve ? grantList : undefined,
+      },
+      {
+        onSuccess: (res) => {
+          const msg =
+            res.status === "denied"
+              ? "Denied."
+              : res.status === "partial"
+                ? res.attendanceApplied
+                  ? "Partially approved — attendance updated."
+                  : "Partially approved (attendance applies when the week is live)."
+                : res.attendanceApplied
+                  ? "Approved — attendance updated."
+                  : "Approved (attendance applies when the week is live).";
+          toast.success(msg);
+        },
         onError: (e) => toast.error(e instanceof Error ? e.message : "Could not save decision."),
       },
     );
@@ -335,7 +382,29 @@ function AdminRow({ r }: { r: RespawnRow }) {
         <StatusChip status={r.status} late={r.late} />
       </div>
 
-      <ShiftChips shifts={r.shifts} />
+      {r.status === "pending" ? (
+        <p className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+          Tap a shift to exclude it, then Approve
+        </p>
+      ) : null}
+      {r.status === "pending" ? (
+        <div className="flex flex-wrap gap-1.5">
+          {requested.map((s) => (
+            <ArcadePill
+              key={s}
+              tone="kombat-gold"
+              active={granted.has(s)}
+              onClick={() => toggleGrant(s)}
+            >
+              {SHIFT_LABEL[s]}
+            </ArcadePill>
+          ))}
+        </div>
+      ) : (
+        <ShiftChips shifts={r.shifts} />
+      )}
+
+      {r.status !== "pending" && <GrantBreakdown row={r} />}
       {r.reason && <p className="text-xs text-muted-foreground">“{r.reason}”</p>}
       {r.decision_note && r.status !== "pending" && (
         <p className="text-xs text-muted-foreground">Office note: “{r.decision_note}”</p>
@@ -356,9 +425,10 @@ function AdminRow({ r }: { r: RespawnRow }) {
             <Button
               className="min-h-11 flex-1"
               onClick={() => decide(true)}
-              disabled={review.isPending}
+              disabled={review.isPending || grantList.length === 0}
             >
-              <Check className="mr-1 h-4 w-4" /> Approve
+              <Check className="mr-1 h-4 w-4" />{" "}
+              {isPartial ? `Approve ${grantList.length}` : "Approve"}
             </Button>
             {denying ? (
               <>

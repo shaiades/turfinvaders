@@ -6,7 +6,6 @@
 import { monday } from "@/lib/monday.server";
 import { normalizeName } from "@/lib/utils";
 import {
-  APPROVAL_LABEL,
   ATTENDANCE_BOARD_ID,
   ATTENDANCE_OFF_LABEL,
   DAY_OFF_BOARD_ID,
@@ -15,6 +14,8 @@ import {
   OFFICE_DAYOFF_LABEL,
   SHIFT_ATTENDANCE_COL,
   SHIFT_LABEL,
+  mondayApprovalLabel,
+  summarizeShifts,
   type RepOffice,
   type RespawnStatus,
   type ShiftKey,
@@ -25,9 +26,23 @@ const UPSERT_VALS = `mutation ($b: ID!, $i: ID!, $vals: JSON!) {
 }`;
 
 /** Create or update the rep's item on the Day-Off board. Returns the item id. */
+/** Is a Day-Off item still live (not deleted/archived/missing)? */
+async function itemIsActive(token: string, itemId: string): Promise<boolean> {
+  try {
+    const data = await monday(token, `query ($ids: [ID!]) { items(ids: $ids) { id state } }`, {
+      ids: [itemId],
+    });
+    const items = (data.items as Array<{ id: string; state: string }>) ?? [];
+    return items[0]?.state === "active";
+  } catch {
+    return false; // can't confirm → treat as gone and recreate
+  }
+}
+
 export async function syncDayOffItem(
   token: string,
   input: {
+    rowId: string;
     repName: string;
     office: RepOffice;
     weekStart: string;
@@ -42,10 +57,14 @@ export async function syncDayOffItem(
     [DAY_OFF_COL.week]: { date: input.weekStart },
     [DAY_OFF_COL.shifts]: { labels: input.shifts.map((s) => SHIFT_LABEL[s]) },
     [DAY_OFF_COL.reason]: { text: input.reason ?? "" },
-    [DAY_OFF_COL.approval]: { label: APPROVAL_LABEL[input.status] },
+    [DAY_OFF_COL.approval]: { label: mondayApprovalLabel(input.status) },
   };
 
-  if (input.existingItemId) {
+  // Update the existing item only if it is still live. A withdraw deletes the
+  // item (and, before this guard, a same-week resubmit within Monday's ~30-min
+  // idempotency window could inherit the deleted id) — so verify first and
+  // recreate if it's gone, instead of silently no-op'ing on a dead item.
+  if (input.existingItemId && (await itemIsActive(token, input.existingItemId))) {
     await monday(
       token,
       UPSERT_VALS,
@@ -55,6 +74,8 @@ export async function syncDayOffItem(
     return input.existingItemId;
   }
 
+  // Key the create by the Supabase row id (stable per request, fresh after a
+  // withdraw-and-resubmit) so Monday never replays a stale/deleted item.
   const data = await monday(
     token,
     `mutation ($b: ID!, $g: String!, $name: String!, $vals: JSON!) {
@@ -66,26 +87,45 @@ export async function syncDayOffItem(
       name: input.repName,
       vals: JSON.stringify(colVals),
     },
-    { idempotencyKey: `respawn-new-${normalizeName(input.repName)}-${input.weekStart}` },
+    { idempotencyKey: `respawn-new-${input.rowId}` },
   );
   return (data.create_item as { id: string }).id;
 }
 
-/** Flip the Approval column on an existing Day-Off item. */
-export async function setDayOffApproval(
+/** Write a review decision to the Day-Off item: flip the Approval column, and
+ *  on a PARTIAL grant append the granted/declined breakdown to the reason note
+ *  (the board's Approval column has no "partial" label, so the detail lives in
+ *  the note). The requested-shifts dropdown is left intact as the request log;
+ *  the attendance board is what reflects the granted subset. */
+export async function setDayOffDecision(
   token: string,
   itemId: string,
-  status: RespawnStatus,
+  input: {
+    status: RespawnStatus;
+    baseReason: string | null;
+    grantedShifts: ShiftKey[];
+    declinedShifts: ShiftKey[];
+    note: string | null;
+  },
 ): Promise<void> {
+  const vals: Record<string, unknown> = {
+    [DAY_OFF_COL.approval]: { label: mondayApprovalLabel(input.status) },
+  };
+  if (input.status === "partial") {
+    const parts = [
+      `Office: granted ${summarizeShifts(input.grantedShifts)}`,
+      `declined ${summarizeShifts(input.declinedShifts)}`,
+    ];
+    if (input.note) parts.push(input.note);
+    const line = `[${parts.join(" · ")}]`;
+    const base = (input.baseReason ?? "").trim();
+    vals[DAY_OFF_COL.reason] = { text: base ? `${base}\n${line}` : line };
+  }
   await monday(
     token,
     UPSERT_VALS,
-    {
-      b: DAY_OFF_BOARD_ID,
-      i: itemId,
-      vals: JSON.stringify({ [DAY_OFF_COL.approval]: { label: APPROVAL_LABEL[status] } }),
-    },
-    { idempotencyKey: `respawn-appr-${itemId}-${status}` },
+    { b: DAY_OFF_BOARD_ID, i: itemId, vals: JSON.stringify(vals) },
+    { idempotencyKey: `respawn-appr-${itemId}-${input.status}-${input.grantedShifts.join(",")}` },
   );
 }
 

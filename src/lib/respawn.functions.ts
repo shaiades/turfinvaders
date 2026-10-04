@@ -7,6 +7,7 @@ import {
   isMondayISO,
   normalizeShifts,
   officeToRep,
+  settleApproval,
   type RepOffice,
   type RespawnStatus,
   type ShiftKey,
@@ -31,6 +32,9 @@ const reviewInput = z.object({
   id: z.string().uuid(),
   approve: z.boolean(),
   note: z.string().max(1000).optional(),
+  // The granted subset for a partial approval. Omitted/undefined = grant every
+  // requested shift (a plain approve). Ignored when approve is false.
+  approvedShifts: z.array(z.string()).max(14).optional(),
 });
 
 const cancelInput = z.object({ id: z.string().uuid() });
@@ -104,24 +108,29 @@ export const submitRespawnRequest = createServerFn({ method: "POST" })
 
     // Supabase first (source of truth). Editing resets an approved/denied
     // request back to Pending and clears the decision stamp.
-    const { error: upErr } = await supabaseAdmin.from("respawn_requests").upsert(
-      {
-        user_id: userId,
-        rep_name: repName,
-        office,
-        week_start: weekStart,
-        shifts,
-        reason,
-        status: "pending",
-        late,
-        decided_by: null,
-        decided_at: null,
-        decision_note: null,
-        monday_item_id: existingItemId,
-      },
-      { onConflict: "user_id,week_start" },
-    );
+    const { data: saved, error: upErr } = await supabaseAdmin
+      .from("respawn_requests")
+      .upsert(
+        {
+          user_id: userId,
+          rep_name: repName,
+          office,
+          week_start: weekStart,
+          shifts,
+          reason,
+          status: "pending",
+          late,
+          decided_by: null,
+          decided_at: null,
+          decision_note: null,
+          monday_item_id: existingItemId,
+        },
+        { onConflict: "user_id,week_start" },
+      )
+      .select("id")
+      .single();
     if (upErr) throw new Error(upErr.message);
+    const rowId = saved.id as string;
 
     // Mirror to Monday (best-effort).
     let mondaySynced = false;
@@ -130,6 +139,7 @@ export const submitRespawnRequest = createServerFn({ method: "POST" })
       if (token) {
         const { syncDayOffItem } = await import("@/lib/respawn.server");
         const itemId = await syncDayOffItem(token, {
+          rowId,
           repName,
           office,
           weekStart,
@@ -157,56 +167,76 @@ export const submitRespawnRequest = createServerFn({ method: "POST" })
 export const reviewRespawnRequest = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => reviewInput.parse(d))
-  .handler(async ({ data, context }): Promise<{ ok: true; attendanceApplied: boolean }> => {
-    await assertAdmin(context.supabase as unknown as AdminClient, context.userId);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  .handler(
+    async ({
+      data,
+      context,
+    }): Promise<{ ok: true; status: string; attendanceApplied: boolean }> => {
+      await assertAdmin(context.supabase as unknown as AdminClient, context.userId);
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-    const { data: row, error: rowErr } = await supabaseAdmin
-      .from("respawn_requests")
-      .select("id, rep_name, office, week_start, shifts, status, monday_item_id")
-      .eq("id", data.id)
-      .maybeSingle();
-    if (rowErr) throw new Error(rowErr.message);
-    if (!row) throw new Error("That request no longer exists.");
+      const { data: row, error: rowErr } = await supabaseAdmin
+        .from("respawn_requests")
+        .select("id, rep_name, office, week_start, shifts, reason, status, monday_item_id")
+        .eq("id", data.id)
+        .maybeSingle();
+      if (rowErr) throw new Error(rowErr.message);
+      if (!row) throw new Error("That request no longer exists.");
 
-    const status: RespawnStatus = data.approve ? "approved" : "denied";
-    const { error: updErr } = await supabaseAdmin
-      .from("respawn_requests")
-      .update({
-        status,
-        decided_by: context.userId,
-        decided_at: new Date().toISOString(),
-        decision_note: data.note?.trim() ? data.note.trim() : null,
-      })
-      .eq("id", data.id);
-    if (updErr) throw new Error(updErr.message);
+      // Resolve the decision: the approver may grant a subset (partial).
+      const requested = normalizeShifts(row.shifts) as ShiftKey[];
+      const { status, approvedShifts, declinedShifts } = settleApproval(
+        requested,
+        data.approve ? ((data.approvedShifts ?? null) as ShiftKey[] | null) : [],
+        data.approve,
+      );
 
-    // Mirror: flip Approval, and for an APPROVED request whose week is the one
-    // the attendance board currently represents (the current LA week), mark
-    // the shifts Off now. Approvals for a future week wait for the Sunday-noon
-    // apply job (applyApprovedRespawnsForWeek) once that week goes live.
-    let attendanceApplied = false;
-    try {
-      const token = await mondayToken();
-      if (token) {
-        const { setDayOffApproval, applyAttendance } = await import("@/lib/respawn.server");
-        if (row.monday_item_id)
-          await setDayOffApproval(token, row.monday_item_id as string, status);
-        const isCurrentWeek = (row.week_start as string) === laWeekStartISO(new Date());
-        if (data.approve && isCurrentWeek) {
-          attendanceApplied = await applyAttendance(token, {
-            office: row.office as RepOffice,
-            repName: row.rep_name as string,
-            shifts: normalizeShifts(row.shifts) as ShiftKey[],
-          });
+      const { error: updErr } = await supabaseAdmin
+        .from("respawn_requests")
+        .update({
+          status,
+          approved_shifts: approvedShifts,
+          decided_by: context.userId,
+          decided_at: new Date().toISOString(),
+          decision_note: data.note?.trim() ? data.note.trim() : null,
+        })
+        .eq("id", data.id);
+      if (updErr) throw new Error(updErr.message);
+
+      // Mirror: write the decision to the Day-Off item, and for a granted
+      // request whose week is the one the attendance board currently
+      // represents (the current LA week), mark the GRANTED shifts Off now.
+      // Grants for a future week wait for applyApprovedRespawnsForWeek.
+      let attendanceApplied = false;
+      try {
+        const token = await mondayToken();
+        if (token) {
+          const { setDayOffDecision, applyAttendance } = await import("@/lib/respawn.server");
+          if (row.monday_item_id) {
+            await setDayOffDecision(token, row.monday_item_id as string, {
+              status,
+              baseReason: (row.reason as string | null) ?? null,
+              grantedShifts: approvedShifts,
+              declinedShifts,
+              note: data.note?.trim() ? data.note.trim() : null,
+            });
+          }
+          const isCurrentWeek = (row.week_start as string) === laWeekStartISO(new Date());
+          if (approvedShifts.length > 0 && isCurrentWeek) {
+            attendanceApplied = await applyAttendance(token, {
+              office: row.office as RepOffice,
+              repName: row.rep_name as string,
+              shifts: approvedShifts,
+            });
+          }
         }
+      } catch (e) {
+        console.error("[respawn] review Monday sync failed", e);
       }
-    } catch (e) {
-      console.error("[respawn] review Monday sync failed", e);
-    }
 
-    return { ok: true, attendanceApplied };
-  });
+      return { ok: true, status, attendanceApplied };
+    },
+  );
 
 export const cancelRespawnRequest = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -215,7 +245,9 @@ export const cancelRespawnRequest = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: row } = await supabaseAdmin
       .from("respawn_requests")
-      .select("id, user_id, rep_name, office, week_start, shifts, status, monday_item_id")
+      .select(
+        "id, user_id, rep_name, office, week_start, shifts, approved_shifts, status, monday_item_id",
+      )
       .eq("id", data.id)
       .maybeSingle();
     if (!row) return { ok: true };
@@ -235,14 +267,18 @@ export const cancelRespawnRequest = createServerFn({ method: "POST" })
       const token = await mondayToken();
       if (token) {
         const { deleteDayOffItem, applyAttendance } = await import("@/lib/respawn.server");
-        // If an approved current-week request is withdrawn, put the shifts
-        // back ON before clearing the Day-Off item.
+        // If a granted current-week request is withdrawn, put the GRANTED
+        // shifts back ON before clearing the Day-Off item.
         const isCurrentWeek = (row.week_start as string) === laWeekStartISO(new Date());
-        if ((row.status as string) === "approved" && isCurrentWeek) {
+        const wasGranted = ["approved", "partial"].includes(row.status as string);
+        const grantedShifts = normalizeShifts(
+          (row.approved_shifts as string[] | null) ?? [],
+        ) as ShiftKey[];
+        if (wasGranted && isCurrentWeek && grantedShifts.length > 0) {
           await applyAttendance(token, {
             office: row.office as RepOffice,
             repName: row.rep_name as string,
-            shifts: normalizeShifts(row.shifts) as ShiftKey[],
+            shifts: grantedShifts,
             label: "On",
           });
         }
@@ -267,8 +303,8 @@ export const applyApprovedRespawnsForWeek = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: rows } = await supabaseAdmin
       .from("respawn_requests")
-      .select("rep_name, office, shifts")
-      .eq("status", "approved")
+      .select("rep_name, office, shifts, approved_shifts, status")
+      .in("status", ["approved", "partial"])
       .eq("week_start", data.weekStart);
 
     const token = await mondayToken();
@@ -281,11 +317,16 @@ export const applyApprovedRespawnsForWeek = createServerFn({ method: "POST" })
       rep_name: string;
       office: string;
       shifts: string[];
+      approved_shifts: string[] | null;
     }> | null) ?? []) {
+      // Granted shifts (approved_shifts); fall back to the full request for any
+      // legacy row approved before the partial column existed.
+      const granted = normalizeShifts(r.approved_shifts ?? r.shifts) as ShiftKey[];
+      if (granted.length === 0) continue;
       const ok = await applyAttendance(token, {
         office: r.office as RepOffice,
         repName: r.rep_name,
-        shifts: normalizeShifts(r.shifts) as ShiftKey[],
+        shifts: granted,
       });
       if (ok) applied += 1;
       else missing += 1;

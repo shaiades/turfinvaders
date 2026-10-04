@@ -6,7 +6,6 @@
  *  Fri 6 PM → Sun 12 PM reminder window, week_start math, and office coding.
  *  October 2026 is PDT (UTC−7), so a PT wall time T is the instant T+7:00Z. */
 import {
-  APPROVAL_LABEL,
   ATTENDANCE_BOARD_ID,
   OFFICE_DAYOFF_LABEL,
   SHIFT_ATTENDANCE_COL,
@@ -17,9 +16,11 @@ import {
   isLateForWeek,
   isMondayISO,
   laWeekdayHour,
+  mondayApprovalLabel,
   normalizeShifts,
   officeToRep,
   respawnDeadlineMs,
+  settleApproval,
   summarizeShifts,
   type ShiftKey,
 } from "../src/lib/respawn";
@@ -62,8 +63,51 @@ expectEq("mon_pm → dup__of_mon_am", SHIFT_ATTENDANCE_COL.mon_pm, "dup__of_mon_
 expectEq("tue_am → status", SHIFT_ATTENDANCE_COL.tue_am, "status");
 expectEq("sun_pm → status_mkn3rnr9", SHIFT_ATTENDANCE_COL.sun_pm, "status_mkn3rnr9");
 expectEq("SD/OC attendance boards differ", ATTENDANCE_BOARD_ID.SD !== ATTENDANCE_BOARD_ID.OC, true);
-expectEq("approval label pending", APPROVAL_LABEL.pending, "Pending");
+expectEq("monday label pending", mondayApprovalLabel("pending"), "Pending");
+expectEq("monday label partial reads Approved", mondayApprovalLabel("partial"), "Approved");
+expectEq("monday label denied", mondayApprovalLabel("denied"), "Denied");
 expectEq("office label OC", OFFICE_DAYOFF_LABEL.OC, "Orange County");
+
+// ── partial approval resolver ───────────────────────────────────────────────
+const req3 = ["thu_am", "fri_pm", "sat_am"] as ShiftKey[];
+expectEq("grant all → approved", settleApproval(req3, req3, true), {
+  status: "approved",
+  approvedShifts: ["thu_am", "fri_pm", "sat_am"],
+  declinedShifts: [],
+});
+expectEq("grant none specified → approved (defaults to all)", settleApproval(req3, null, true), {
+  status: "approved",
+  approvedShifts: ["thu_am", "fri_pm", "sat_am"],
+  declinedShifts: [],
+});
+expectEq(
+  "grant subset → partial (Thu–Sat, keep Fri+Sat)",
+  settleApproval(req3, ["fri_pm", "sat_am"] as ShiftKey[], true),
+  {
+    status: "partial",
+    approvedShifts: ["fri_pm", "sat_am"],
+    declinedShifts: ["thu_am"],
+  },
+);
+expectEq("grant empty → denied", settleApproval(req3, [], true), {
+  status: "denied",
+  approvedShifts: [],
+  declinedShifts: ["thu_am", "fri_pm", "sat_am"],
+});
+expectEq("deny → denied regardless of granted", settleApproval(req3, req3, false), {
+  status: "denied",
+  approvedShifts: [],
+  declinedShifts: ["thu_am", "fri_pm", "sat_am"],
+});
+expectEq(
+  "granted shift not in request is dropped",
+  settleApproval(req3, ["fri_pm", "sun_am"] as ShiftKey[], true),
+  {
+    status: "partial",
+    approvedShifts: ["fri_pm"],
+    declinedShifts: ["thu_am", "sat_am"],
+  },
+);
 
 // ── shift normalization ──────────────────────────────────────────────────
 expectEq(
