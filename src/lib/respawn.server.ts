@@ -25,9 +25,23 @@ const UPSERT_VALS = `mutation ($b: ID!, $i: ID!, $vals: JSON!) {
 }`;
 
 /** Create or update the rep's item on the Day-Off board. Returns the item id. */
+/** Is a Day-Off item still live (not deleted/archived/missing)? */
+async function itemIsActive(token: string, itemId: string): Promise<boolean> {
+  try {
+    const data = await monday(token, `query ($ids: [ID!]) { items(ids: $ids) { id state } }`, {
+      ids: [itemId],
+    });
+    const items = (data.items as Array<{ id: string; state: string }>) ?? [];
+    return items[0]?.state === "active";
+  } catch {
+    return false; // can't confirm → treat as gone and recreate
+  }
+}
+
 export async function syncDayOffItem(
   token: string,
   input: {
+    rowId: string;
     repName: string;
     office: RepOffice;
     weekStart: string;
@@ -45,7 +59,11 @@ export async function syncDayOffItem(
     [DAY_OFF_COL.approval]: { label: APPROVAL_LABEL[input.status] },
   };
 
-  if (input.existingItemId) {
+  // Update the existing item only if it is still live. A withdraw deletes the
+  // item (and, before this guard, a same-week resubmit within Monday's ~30-min
+  // idempotency window could inherit the deleted id) — so verify first and
+  // recreate if it's gone, instead of silently no-op'ing on a dead item.
+  if (input.existingItemId && (await itemIsActive(token, input.existingItemId))) {
     await monday(
       token,
       UPSERT_VALS,
@@ -55,6 +73,8 @@ export async function syncDayOffItem(
     return input.existingItemId;
   }
 
+  // Key the create by the Supabase row id (stable per request, fresh after a
+  // withdraw-and-resubmit) so Monday never replays a stale/deleted item.
   const data = await monday(
     token,
     `mutation ($b: ID!, $g: String!, $name: String!, $vals: JSON!) {
@@ -66,7 +86,7 @@ export async function syncDayOffItem(
       name: input.repName,
       vals: JSON.stringify(colVals),
     },
-    { idempotencyKey: `respawn-new-${normalizeName(input.repName)}-${input.weekStart}` },
+    { idempotencyKey: `respawn-new-${input.rowId}` },
   );
   return (data.create_item as { id: string }).id;
 }

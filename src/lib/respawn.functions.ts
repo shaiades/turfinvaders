@@ -104,24 +104,29 @@ export const submitRespawnRequest = createServerFn({ method: "POST" })
 
     // Supabase first (source of truth). Editing resets an approved/denied
     // request back to Pending and clears the decision stamp.
-    const { error: upErr } = await supabaseAdmin.from("respawn_requests").upsert(
-      {
-        user_id: userId,
-        rep_name: repName,
-        office,
-        week_start: weekStart,
-        shifts,
-        reason,
-        status: "pending",
-        late,
-        decided_by: null,
-        decided_at: null,
-        decision_note: null,
-        monday_item_id: existingItemId,
-      },
-      { onConflict: "user_id,week_start" },
-    );
+    const { data: saved, error: upErr } = await supabaseAdmin
+      .from("respawn_requests")
+      .upsert(
+        {
+          user_id: userId,
+          rep_name: repName,
+          office,
+          week_start: weekStart,
+          shifts,
+          reason,
+          status: "pending",
+          late,
+          decided_by: null,
+          decided_at: null,
+          decision_note: null,
+          monday_item_id: existingItemId,
+        },
+        { onConflict: "user_id,week_start" },
+      )
+      .select("id")
+      .single();
     if (upErr) throw new Error(upErr.message);
+    const rowId = saved.id as string;
 
     // Mirror to Monday (best-effort).
     let mondaySynced = false;
@@ -130,6 +135,7 @@ export const submitRespawnRequest = createServerFn({ method: "POST" })
       if (token) {
         const { syncDayOffItem } = await import("@/lib/respawn.server");
         const itemId = await syncDayOffItem(token, {
+          rowId,
           repName,
           office,
           weekStart,
