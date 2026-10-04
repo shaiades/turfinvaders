@@ -80,6 +80,26 @@ export const generateCanvasserCartoonFn = createServerFn({ method: "POST" })
     return await generateCanvasserCartoon(data.profileId, { styleOverride: data.prompt });
   });
 
+const rerollAllInput = z.object({ limit: z.number().int().min(1).max(10).optional() });
+
+/** Admin: re-roll fighters whose background color is stale vs their current van. */
+export const rerollCanvasserCartoonsFn = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => rerollAllInput.parse(d))
+  .handler(async ({ data, context }) => {
+    const { data: roleRows, error: roleErr } = await context.supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId);
+    if (roleErr) throw new Error(roleErr.message);
+    const roles = (roleRows ?? []).map((r: { role: string }) => r.role);
+    if (!roles.includes("owner") && !roles.includes("office_staff")) {
+      throw new Error("Only Owners or Managers can manage canvasser fighters.");
+    }
+    const { rerollOutdatedCanvasserCartoons } = await import("@/lib/canvasser-cartoons.server");
+    return await rerollOutdatedCanvasserCartoons({ limit: data.limit });
+  });
+
 export type CanvasserFighterRow = {
   profile_id: string;
   name: string;
