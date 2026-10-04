@@ -70,6 +70,8 @@ import { CloseKombatGoalsTab } from "@/components/CloseKombatGoalsTab";
 import { ActivityTestPanel } from "@/components/ActivityTestPanel";
 import { CloseKombatLearnTab } from "@/components/CloseKombatLearnTab";
 import { CloseKombatRespawnTab } from "@/components/CloseKombatRespawnTab";
+import { CloseKombatOohTab } from "@/components/CloseKombatOohTab";
+import { usePendingOohCount } from "@/hooks/usePendingOohCount";
 import { KombatMonthTab } from "@/components/KombatMonth";
 import { KombatHeroBanner } from "@/components/KombatHeroBanner";
 import { RepAvatar } from "@/components/RepAvatar";
@@ -111,6 +113,7 @@ export const CLOSE_KOMBAT_PAGE_TABS = [
   "money",
   "goals",
   "respawn",
+  "ooh",
   "learn",
 ] as const;
 export type CloseKombatPageTab = (typeof CLOSE_KOMBAT_PAGE_TABS)[number];
@@ -120,6 +123,9 @@ export const isCloseKombatPageTab = (t: unknown): t is CloseKombatPageTab =>
 // View As switched back mid-preview) coerces to Stats — the TabsContent is
 // `isRep &&`-gated, so without this they'd get an empty page.
 const REP_ONLY_TABS = new Set<CloseKombatPageTab>(["plan", "money", "goals"]);
+// Admin-only sections (owner / office_staff): the OOH write-back cockpit. A
+// non-admin landing here coerces to Stats (the TabsContent is `isAdmin &&`-gated).
+const ADMIN_ONLY_TABS = new Set<CloseKombatPageTab>(["ooh"]);
 
 export function CloseKombat({
   rawTab,
@@ -251,6 +257,9 @@ function CloseKombatInner({
   const { user, realRole, role, displayName, realDisplayName } = useAuth();
   const { matches, office } = useOfficeFilter();
   const isAdmin = isAdminRole(realRole);
+  // OOH admin-queue badge (needs-review + errors) — admins only (hook returns 0
+  // for everyone else), mirrors the Respawn badge discipline.
+  const pendingOoh = usePendingOohCount();
   // The rep-first layout keys off the EFFECTIVE role so View As previews it;
   // the admin controls above keep keying off realRole (the sync buttons must
   // not vanish from the owner mid-preview).
@@ -259,7 +268,11 @@ function CloseKombatInner({
   // from a non-rep session) and rep-only tabs under a non-rep role coerce to
   // Stats rather than rendering an empty page.
   const pageTab: CloseKombatPageTab =
-    isCloseKombatPageTab(rawTab) && (isRep || !REP_ONLY_TABS.has(rawTab)) ? rawTab : "stats";
+    isCloseKombatPageTab(rawTab) &&
+    (isRep || !REP_ONLY_TABS.has(rawTab)) &&
+    (isAdmin || !ADMIN_ONLY_TABS.has(rawTab))
+      ? rawTab
+      : "stats";
   // View As doesn't swap user.id (useAuth.ts) — only role/displayName are
   // overridden — so a preview must never let Goals write to the admin's own
   // profile row believing it's the previewed rep's.
@@ -1088,6 +1101,17 @@ function CloseKombatInner({
                 Tyler/Shai/Jorge (admin tier) get the approval queue. Visible
                 to both, so it stays ungated. */}
             <KombatTab value="respawn">Respawn</KombatTab>
+            {/* OOH write-back cockpit (owner, 2026-10-03): office only. */}
+            {isAdmin && (
+              <KombatTab value="ooh">
+                OOH
+                {pendingOoh > 0 && (
+                  <span className="ml-1.5 inline-flex min-w-5 items-center justify-center rounded-full bg-kombat-red px-1.5 text-[10px] font-display text-white">
+                    {pendingOoh}
+                  </span>
+                )}
+              </KombatTab>
+            )}
             <KombatTab value="learn">Learn</KombatTab>
           </TabsList>
         </div>
@@ -1997,6 +2021,10 @@ function CloseKombatInner({
             displayName={displayName}
             isPreview={isPreview}
           />
+        </TabsContent>
+
+        <TabsContent value="ooh" className="mt-4">
+          {isAdmin && <CloseKombatOohTab />}
         </TabsContent>
 
         <TabsContent value="learn" className="mt-4">

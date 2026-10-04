@@ -1600,6 +1600,11 @@ export type Database = {
           monday_api_token: string | null
           monday_template_board_id: string | null
           monday_webhooks: Json
+          ooh_autocreate: boolean
+          ooh_form_url: string | null
+          ooh_go_live_at: string | null
+          ooh_writeback_board_allowlist: string | null
+          ooh_writeback_mode: string
           updated_at: string
         }
         Insert: {
@@ -1611,6 +1616,11 @@ export type Database = {
           monday_api_token?: string | null
           monday_template_board_id?: string | null
           monday_webhooks?: Json
+          ooh_autocreate?: boolean
+          ooh_form_url?: string | null
+          ooh_go_live_at?: string | null
+          ooh_writeback_board_allowlist?: string | null
+          ooh_writeback_mode?: string
           updated_at?: string
         }
         Update: {
@@ -1622,6 +1632,11 @@ export type Database = {
           monday_api_token?: string | null
           monday_template_board_id?: string | null
           monday_webhooks?: Json
+          ooh_autocreate?: boolean
+          ooh_form_url?: string | null
+          ooh_go_live_at?: string | null
+          ooh_writeback_board_allowlist?: string | null
+          ooh_writeback_mode?: string
           updated_at?: string
         }
         Relationships: []
@@ -2160,6 +2175,102 @@ export type Database = {
           reviewed_by?: string | null
           status?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      ooh_processed_reports: {
+        Row: {
+          board_id: string | null
+          form_item_id: string
+          outcome: string | null
+          processed_at: string
+          target_item_id: string | null
+          trigger_uuid: string | null
+        }
+        Insert: {
+          board_id?: string | null
+          form_item_id: string
+          outcome?: string | null
+          processed_at?: string
+          target_item_id?: string | null
+          trigger_uuid?: string | null
+        }
+        Update: {
+          board_id?: string | null
+          form_item_id?: string
+          outcome?: string | null
+          processed_at?: string
+          target_item_id?: string | null
+          trigger_uuid?: string | null
+        }
+        Relationships: []
+      }
+      ooh_report_queue: {
+        Row: {
+          board_id: string | null
+          created_at: string
+          decided_at: string | null
+          decided_by: string | null
+          details_line: string | null
+          error: string | null
+          form_item_id: string
+          id: string
+          lead_id: string | null
+          office: string | null
+          on_block: number | null
+          partner: string | null
+          plan: Json | null
+          raw: Json | null
+          reason: string | null
+          rep_name: string | null
+          result: number | null
+          status: string
+          target_item_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          board_id?: string | null
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          details_line?: string | null
+          error?: string | null
+          form_item_id: string
+          id?: string
+          lead_id?: string | null
+          office?: string | null
+          on_block?: number | null
+          partner?: string | null
+          plan?: Json | null
+          raw?: Json | null
+          reason?: string | null
+          rep_name?: string | null
+          result?: number | null
+          status?: string
+          target_item_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          board_id?: string | null
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          details_line?: string | null
+          error?: string | null
+          form_item_id?: string
+          id?: string
+          lead_id?: string | null
+          office?: string | null
+          on_block?: number | null
+          partner?: string | null
+          plan?: Json | null
+          raw?: Json | null
+          reason?: string | null
+          rep_name?: string | null
+          result?: number | null
+          status?: string
+          target_item_id?: string | null
+          updated_at?: string
         }
         Relationships: []
       }
