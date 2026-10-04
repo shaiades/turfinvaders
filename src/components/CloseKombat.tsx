@@ -69,6 +69,7 @@ import { CloseKombatPlanTab, PlanTabBadge } from "@/components/CloseKombatPlanTa
 import { CloseKombatGoalsTab } from "@/components/CloseKombatGoalsTab";
 import { ActivityTestPanel } from "@/components/ActivityTestPanel";
 import { CloseKombatLearnTab } from "@/components/CloseKombatLearnTab";
+import { CloseKombatRespawnTab } from "@/components/CloseKombatRespawnTab";
 import { KombatMonthTab } from "@/components/KombatMonth";
 import { KombatHeroBanner } from "@/components/KombatHeroBanner";
 import { RepAvatar } from "@/components/RepAvatar";
@@ -109,6 +110,7 @@ export const CLOSE_KOMBAT_PAGE_TABS = [
   "kombat",
   "money",
   "goals",
+  "respawn",
   "learn",
 ] as const;
 export type CloseKombatPageTab = (typeof CLOSE_KOMBAT_PAGE_TABS)[number];
@@ -1082,6 +1084,10 @@ function CloseKombatInner({
             <KombatTab value="kombat">Kombat</KombatTab>
             {isRep && <KombatTab value="money">Money</KombatTab>}
             {isRep && <KombatTab value="goals">Goals</KombatTab>}
+            {/* Respawn (owner, 2026-10-03): shift-off requests. Reps request;
+                Tyler/Shai/Jorge (admin tier) get the approval queue. Visible
+                to both, so it stays ungated. */}
+            <KombatTab value="respawn">Respawn</KombatTab>
             <KombatTab value="learn">Learn</KombatTab>
           </TabsList>
         </div>
@@ -1982,6 +1988,16 @@ function CloseKombatInner({
             />
           </TabsContent>
         )}
+
+        <TabsContent value="respawn" className="mt-4">
+          <CloseKombatRespawnTab
+            userId={user?.id ?? null}
+            isRep={isRep}
+            isAdmin={isAdmin}
+            displayName={displayName}
+            isPreview={isPreview}
+          />
+        </TabsContent>
 
         <TabsContent value="learn" className="mt-4">
           <CloseKombatLearnTab userId={user?.id ?? null} />

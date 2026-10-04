@@ -2163,6 +2163,60 @@ export type Database = {
         }
         Relationships: []
       }
+      respawn_requests: {
+        Row: {
+          created_at: string
+          decided_at: string | null
+          decided_by: string | null
+          decision_note: string | null
+          id: string
+          late: boolean
+          monday_item_id: string | null
+          office: string
+          reason: string | null
+          rep_name: string
+          shifts: string[]
+          status: string
+          updated_at: string
+          user_id: string
+          week_start: string
+        }
+        Insert: {
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          decision_note?: string | null
+          id?: string
+          late?: boolean
+          monday_item_id?: string | null
+          office: string
+          reason?: string | null
+          rep_name: string
+          shifts?: string[]
+          status?: string
+          updated_at?: string
+          user_id: string
+          week_start: string
+        }
+        Update: {
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          decision_note?: string | null
+          id?: string
+          late?: boolean
+          monday_item_id?: string | null
+          office?: string
+          reason?: string | null
+          rep_name?: string
+          shifts?: string[]
+          status?: string
+          updated_at?: string
+          user_id?: string
+          week_start?: string
+        }
+        Relationships: []
+      }
       time_week_attestations: {
         Row: {
           created_at: string

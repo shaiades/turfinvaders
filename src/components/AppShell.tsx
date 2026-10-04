@@ -13,6 +13,7 @@ import { useSwipeNav } from "@/hooks/useSwipeNav";
 import { useTheme } from "@/hooks/useTheme";
 import { usePendingDojoCount } from "@/hooks/usePendingDojoCount";
 import { usePendingProofCount } from "@/hooks/usePendingProofCount";
+import { usePendingRespawnCount } from "@/hooks/usePendingRespawnCount";
 import { AccessRevokedScreen, useLiveAccessRevoked } from "@/components/AccessRevokedScreen";
 import { CanvasserHUD } from "@/components/CanvasserHUD";
 import { CrewBeacon } from "@/components/CrewBeacon";
@@ -27,6 +28,7 @@ import {
   isPurposeReminderForced,
 } from "@/components/purpose/PurposeReminderCard";
 import { WeeklyPlanPopup, isWeeklyPlanPopupForced } from "@/components/WeeklyPlanPopup";
+import { RespawnPopup, isRespawnPopupForced } from "@/components/RespawnPopup";
 import { usePurposeConfig, readCachedPurposeEnabled } from "@/hooks/usePurposeConfig";
 import { CLOSE_KOMBAT_ROLES, ROLE_LABEL, canUseViewAs, privilegeRole } from "@/lib/roles";
 import {
@@ -113,6 +115,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   // Dojo submissions awaiting review — 0 for everyone outside the Admin tier.
   const pendingDojo = usePendingDojoCount();
   const pendingProofs = usePendingProofCount();
+  // Shift-off requests awaiting a decision — 0 outside the Admin tier.
+  const pendingRespawn = usePendingRespawnCount();
   // My Purpose launch flag — only reps (and owners, incl. View-As previews)
   // pay this query. The localStorage warm cache keeps a launched rep's
   // 2-item bottom bar from popping in on every cold load; pre-launch the
@@ -144,6 +148,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   // End-of-day recap cutscene: same hold for the tour. Play order on a
   // morning open that owes both: intro → EOD recap → page tour.
   const [eodActive, setEodActive] = useState(false);
+  // Respawn reminder (Fri 6 PM → Sun 12 PM): held behind intro + plan +
+  // purpose; active while UNSETTLED so the page tour waits for it too.
+  const [respawnPopupActive, setRespawnPopupActive] = useState(false);
   // Compare against the COLLAPSED real role: a confirmer's `role` is always
   // "canvasser" (privilegeRole in useAuth) and must not read as a View As
   // override.
@@ -299,8 +306,16 @@ export function AppShell({ children }: { children: ReactNode }) {
       // the in-app companion to the notify-dojo push, so work waiting is
       // visible even with push alerts off on this device.
       { to: "/confirmation-desk", label: "Desk", icon: PhoneCall, badge: pendingDojo + pendingProofs },
+      // Badge = shift-off (Respawn) requests waiting on Tyler/Shai/Jorge.
       ...(role && CLOSE_KOMBAT_ROLES.includes(role)
-        ? [{ to: "/close-kombat", label: "Close Kombat", icon: Swords } as NavItem]
+        ? [
+            {
+              to: "/close-kombat",
+              label: "Close Kombat",
+              icon: Swords,
+              badge: pendingRespawn,
+            } as NavItem,
+          ]
         : []),
     ];
   })();
@@ -708,6 +723,19 @@ export function AppShell({ children }: { children: ReactNode }) {
         />
       )}
 
+      {/* Respawn reminder — reps only, Fri 6 PM → Sun 12 PM PT, once per coming
+          week. Held behind the intro, weekly plan, and purpose reminder so the
+          first-open overlays never stack; gated on the REAL role so a View-As
+          preview can't burn the owner's week stamp (`?respawn_pop=1` previews
+          without stamping). */}
+      {user && (isRespawnPopupForced() || privilegeRole(realRole) === "sales_rep") && (
+        <RespawnPopup
+          userId={user.id}
+          heldBack={introActive || planPopupActive || purposeReminderActive}
+          onActiveChange={setRespawnPopupActive}
+        />
+      )}
+
       {/* Per-page discovery tips: each screen's mini-tour auto-pops the first
           time this account opens it; the header "?" replays the current
           screen's tips. Canvasser tier + captains + sales reps (the kombat
@@ -723,7 +751,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             !introActive &&
             !eodActive &&
             !planPopupActive &&
-            !purposeReminderActive && (
+            !purposeReminderActive &&
+            !respawnPopupActive && (
               <CanvasserTutorial
                 userId={user.id}
                 missionRoute={tourRole === "captain" ? "/mission" : "/dashboard"}
