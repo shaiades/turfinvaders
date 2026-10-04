@@ -68,13 +68,16 @@ serve(async (req) => {
     });
   }
 
-  // Soft shared-secret gate (same recipe as monday-live-dispatch).
-  const secret = denoEnv?.get("MONDAY_WEBHOOK_SECRET");
+  // Secret gate. Prefer a dedicated MONDAY_OOH_SECRET so this webhook is
+  // independent of the shared live-dispatch secret; fall back to the shared one.
+  const secret = denoEnv?.get("MONDAY_OOH_SECRET") ?? denoEnv?.get("MONDAY_WEBHOOK_SECRET");
   if (secret) {
     const url = new URL(req.url);
     const provided = req.headers.get("x-monday-secret") ?? url.searchParams.get("secret");
     if (provided !== secret) {
-      const enforce = denoEnv?.get("MONDAY_WEBHOOK_ENFORCE_SECRET") === "true";
+      const enforce =
+        denoEnv?.get("MONDAY_OOH_ENFORCE_SECRET") === "true" ||
+        denoEnv?.get("MONDAY_WEBHOOK_ENFORCE_SECRET") === "true";
       console.warn("[ooh] webhook secret mismatch", { enforce });
       if (enforce) return new Response("unauthorized", { status: 401, headers: corsHeaders });
     }
