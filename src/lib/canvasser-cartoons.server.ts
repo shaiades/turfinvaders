@@ -11,20 +11,50 @@
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { normalizeName } from "@/lib/utils";
-import {
-  CARTOON_STYLE,
-  callGemini,
-  extFor,
-  fullPrompt,
-  portraitPrompt,
-  type CartoonKind,
-} from "@/lib/rep-cartoons.server";
+import { CARTOON_STYLE, callGemini, extFor, type CartoonKind } from "@/lib/rep-cartoons.server";
 
 const OUTPUT_BUCKET = "rep-cartoons"; // public — shared with reps
 const SOURCE_BUCKET = "canvasser-photos"; // private — raw selfies, never team-facing
 const MAX_SOURCE_BYTES = 8 * 1024 * 1024;
 
 type InlineSource = { data: string; mimeType: string };
+
+// Canvasser avatars carry their VAN's color as the background, so a whole van
+// reads as one squad on the board (owner 2026-10-03). The van = the player's
+// team; teams.color is a hex. Unlike reps (shared red-and-gold halftone), the
+// background here is per-van — resolved fresh at every generate/re-roll, so a
+// van move + re-roll picks up the new color.
+async function vanBackground(
+  profileId: string,
+): Promise<{ desc: string; color: string | null; van: string | null }> {
+  const { data: prof } = await supabaseAdmin
+    .from("profiles")
+    .select("team_id")
+    .eq("id", profileId)
+    .maybeSingle();
+  let color: string | null = null;
+  let van: string | null = null;
+  if (prof?.team_id) {
+    const { data: team } = await supabaseAdmin
+      .from("teams")
+      .select("name, color")
+      .eq("id", prof.team_id)
+      .maybeSingle();
+    color = team?.color ?? null;
+    van = team?.name ?? null;
+  }
+  const desc = color
+    ? `a completely solid flat background filled edge to edge with the exact color ${color} — one single uniform color, no gradient, no pattern, no scenery, no text`
+    : "a completely solid flat dark charcoal (#1f2430) background — one single uniform color, no gradient, no pattern, no text";
+  return { desc, color, van };
+}
+
+function portraitFraming(bg: string): string {
+  return `Head-and-shoulders portrait, confident three-quarter hero pose, ${bg}, square composition.`;
+}
+function fullFraming(bg: string): string {
+  return `Full body head to feet, dynamic ready-to-fight stance, athletic hero proportions, generic modern fighter outfit, ${bg}, vertical composition.`;
+}
 
 // Tiny stable hash (same idiom as rep-photos.server.ts) — the regen signal when
 // a canvasser swaps their selfie.
@@ -127,10 +157,11 @@ export async function generateCanvasserCartoon(
     .eq("profile_id", profileId);
 
   try {
+    const bg = await vanBackground(profileId);
     const source = opts?.source ?? (await downloadSource(row.photo_path!));
     // Sequential (not parallel) to stay gentle on the per-key rate limit.
-    const portrait = await callGemini(apiKey, portraitPrompt(style), source);
-    const full = await callGemini(apiKey, fullPrompt(style), source);
+    const portrait = await callGemini(apiKey, `${style} ${portraitFraming(bg.desc)}`, source);
+    const full = await callGemini(apiKey, `${style} ${fullFraming(bg.desc)}`, source);
     const portraitUrl = await uploadCartoon(
       profileId,
       "portrait",
@@ -150,6 +181,8 @@ export async function generateCanvasserCartoon(
         cartoon_meta: {
           model: "gemini-2.5-flash-image",
           generated_at: new Date().toISOString(),
+          van: bg.van,
+          van_color: bg.color,
         } as never,
         updated_at: new Date().toISOString(),
       })

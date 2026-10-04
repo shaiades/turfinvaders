@@ -4,54 +4,22 @@
 // review gate: it goes live the moment it generates (owner: we iterate later).
 // Lives on the canvasser Mission page; any signed-in player sets only their own.
 
-import { useRef, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { useRef } from "react";
 import { ArcadePanel, NeonButton } from "@/components/arcade";
 import { RepAvatar } from "@/components/RepAvatar";
 import { useAuth } from "@/hooks/useAuth";
-import { useRepCartoons, cartoonFor, repCartoonsKey } from "@/hooks/useRepCartoons";
-import { uploadMyCanvasserPhotoFn } from "@/lib/canvasser-fighters.functions";
-import { fileToResizedDataUrl } from "@/lib/image-upload";
+import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
+import { useMyFighterUpload } from "@/hooks/useMyFighterUpload";
 
 export function MyFighterCard() {
   const { user, displayName } = useAuth();
-  const qc = useQueryClient();
   const cartoons = useRepCartoons().data;
   const fileRef = useRef<HTMLInputElement>(null);
-  const [prepping, setPrepping] = useState(false);
+  const { onPick, busy } = useMyFighterUpload();
 
   const name = displayName ?? "You";
   const mine = cartoonFor(cartoons, displayName);
   const hasFighter = !!mine?.portrait || !!mine?.full;
-
-  const upload = useMutation({
-    mutationFn: async (dataUrl: string) => uploadMyCanvasserPhotoFn({ data: { dataUrl } }),
-    onSuccess: (r) => {
-      if (r.ok) {
-        toast.success("Your fighter is live! 🥊");
-        void qc.invalidateQueries({ queryKey: repCartoonsKey });
-      } else {
-        toast.error(`Couldn't generate your fighter: ${r.error ?? "try another photo"}`);
-      }
-    },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "Upload failed"),
-  });
-
-  const busy = prepping || upload.isPending;
-
-  const onPick = async (file: File | undefined) => {
-    if (!file) return;
-    setPrepping(true);
-    try {
-      const dataUrl = await fileToResizedDataUrl(file);
-      setPrepping(false);
-      upload.mutate(dataUrl);
-    } catch (e) {
-      setPrepping(false);
-      toast.error(e instanceof Error ? e.message : "Couldn't read that photo");
-    }
-  };
 
   if (!user?.id) return null;
 
