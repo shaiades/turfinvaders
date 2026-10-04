@@ -6,14 +6,22 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 export const OOH_FORM_BOARD_ID = "18433859050"; // "Out of House Reports"
+/** The public form URL (fallback). The live value is read from
+ *  system_settings.ooh_form_url via getOohConfig; this is just a sane default. */
+export const OOH_FORM_URL =
+  "https://forms.monday.com/forms/bf0baa57c8250e7cddf123349a65cfce?r=use1";
 
-/** Form column ids used to prefill the "Report" deep-link (verified live). */
-export const OOH_FORM_PREFILL_COL = {
-  repName: "single_selectct0w80q", // "Your name"
-  partner: "single_selectmrnw9q8", // "Who ran this appointment with you?"
-  address: "short_textcdqow6xq", // "Customer address"
-  onBlock: "single_selectg8mobdl", // "Was this appointment on today's block?"
-  leadId: "short_texttlxjsw57", // "Lead ID (auto)"
+/** Monday WorkForms URL-prefill lookup keys (read live from the form's
+ *  settings 2026-10-04 — these are the friendly `?key=` names, NOT column ids).
+ *  Each field has prefill.enabled + source "queryParam" + these lookups. */
+export const OOH_FORM_PREFILL_KEY = {
+  rep: "rep", // "Your name"
+  partner: "partner", // "Who ran this appointment with you?"
+  customer: "customer", // name question "Customer name (as it shows on the block)"
+  address: "address", // "Customer address"
+  onBlock: "onblock", // "Was this appointment on today's block?"
+  date: "date", // "Appointment date"
+  lead: "lead", // "Lead ID (auto)"
 } as const;
 
 /** Form Result (single_selectorxwgbu) index → short label (for the admin queue). */
@@ -78,10 +86,12 @@ export type OohConfig = {
 };
 
 /**
- * Build the prefilled "Report" form link for a rep's lead. Appends Monday form
- * prefill params keyed by column id (requires "allow prefilled values via URL"
- * on the form — see the PR "Decisions for Shai"). Returns null without a base
- * form URL so the button can hide itself.
+ * Build the prefilled "Report" form link for a rep's lead. Uses the Monday
+ * WorkForms URL-prefill lookup keys (verified live — the form has prefill
+ * enabled per field). Falls back to OOH_FORM_URL when no form URL is passed, and
+ * returns null only if even that is unusable — so the button can hide itself.
+ * Verified in a real browser 2026-10-04: `?rep=Yakup Sancakli` prefilled the
+ * "Your name" field.
  */
 export function buildOohReportUrl(
   formUrl: string | null | undefined,
@@ -89,25 +99,28 @@ export function buildOohReportUrl(
     leadId?: string | null;
     repName?: string | null;
     partner?: string | null;
+    customer?: string | null;
     address?: string | null;
     onBlockLabel?: string | null; // e.g. "Yes"
+    apptDate?: string | null; // YYYY-MM-DD
   },
 ): string | null {
-  if (!formUrl) return null;
   let url: URL;
   try {
-    url = new URL(formUrl);
+    url = new URL(formUrl || OOH_FORM_URL);
   } catch {
     return null;
   }
-  const set = (col: string, v: string | null | undefined) => {
-    if (v != null && v !== "") url.searchParams.set(col, v);
+  const set = (key: string, v: string | null | undefined) => {
+    if (v != null && v !== "") url.searchParams.set(key, v);
   };
-  set(OOH_FORM_PREFILL_COL.leadId, params.leadId ?? undefined);
-  set(OOH_FORM_PREFILL_COL.repName, params.repName ?? undefined);
-  set(OOH_FORM_PREFILL_COL.partner, params.partner ?? undefined);
-  set(OOH_FORM_PREFILL_COL.address, params.address ?? undefined);
-  set(OOH_FORM_PREFILL_COL.onBlock, params.onBlockLabel ?? undefined);
+  set(OOH_FORM_PREFILL_KEY.lead, params.leadId ?? undefined);
+  set(OOH_FORM_PREFILL_KEY.rep, params.repName ?? undefined);
+  set(OOH_FORM_PREFILL_KEY.partner, params.partner ?? undefined);
+  set(OOH_FORM_PREFILL_KEY.customer, params.customer ?? undefined);
+  set(OOH_FORM_PREFILL_KEY.address, params.address ?? undefined);
+  set(OOH_FORM_PREFILL_KEY.onBlock, params.onBlockLabel ?? undefined);
+  set(OOH_FORM_PREFILL_KEY.date, params.apptDate ?? undefined);
   return url.toString();
 }
 

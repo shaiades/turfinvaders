@@ -71,6 +71,7 @@ import { ActivityTestPanel } from "@/components/ActivityTestPanel";
 import { CloseKombatLearnTab } from "@/components/CloseKombatLearnTab";
 import { CloseKombatRespawnTab } from "@/components/CloseKombatRespawnTab";
 import { CloseKombatOohTab } from "@/components/CloseKombatOohTab";
+import { MyLeads } from "@/components/MyLeads";
 import { usePendingOohCount } from "@/hooks/usePendingOohCount";
 import { KombatMonthTab } from "@/components/KombatMonth";
 import { KombatHeroBanner } from "@/components/KombatHeroBanner";
@@ -108,6 +109,7 @@ import {
 // the page is showing.
 export const CLOSE_KOMBAT_PAGE_TABS = [
   "stats",
+  "leads",
   "plan",
   "kombat",
   "money",
@@ -122,7 +124,7 @@ export const isCloseKombatPageTab = (t: unknown): t is CloseKombatPageTab =>
 // Rep-only sections: a non-rep landing on one of these (leadership link,
 // View As switched back mid-preview) coerces to Stats — the TabsContent is
 // `isRep &&`-gated, so without this they'd get an empty page.
-const REP_ONLY_TABS = new Set<CloseKombatPageTab>(["plan", "money", "goals"]);
+const REP_ONLY_TABS = new Set<CloseKombatPageTab>(["leads", "plan", "money", "goals"]);
 // Admin-only sections (owner / office_staff): the OOH write-back cockpit. A
 // non-admin landing here coerces to Stats (the TabsContent is `isAdmin &&`-gated).
 const ADMIN_ONLY_TABS = new Set<CloseKombatPageTab>(["ooh"]);
@@ -1084,7 +1086,10 @@ function CloseKombatInner({
         <div className="-mx-4 px-4 sm:mx-0 sm:px-0 overflow-x-auto scrollbar-hide">
           <TabsList className="flex w-max min-w-full flex-nowrap whitespace-nowrap bg-surface border border-border p-1 h-auto">
             <KombatTab value="stats">Stats</KombatTab>
-            {/* Plan rides second so it's on-screen inside the 375px strip —
+            {/* Leads (owner, 2026-10-04): the rep's daily driver — today's
+                appointments with tap-to-call / map and the one-tap Report. */}
+            {isRep && <KombatTab value="leads">Leads</KombatTab>}
+            {/* Plan rides next so it's on-screen inside the 375px strip —
                 it's the rep's always-available reopen of the weekly popup. */}
             {isRep && (
               <KombatTab value="plan">
@@ -2021,6 +2026,10 @@ function CloseKombatInner({
             displayName={displayName}
             isPreview={isPreview}
           />
+        </TabsContent>
+
+        <TabsContent value="leads" className="mt-4">
+          {isRep && <MyLeads displayName={displayName} />}
         </TabsContent>
 
         <TabsContent value="ooh" className="mt-4">
