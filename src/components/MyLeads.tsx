@@ -2,26 +2,20 @@ import { useMemo } from "react";
 import { ArcadePanel } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 import { OohReportButton } from "@/components/OohReportButton";
-import { MapPin, Phone, Users, Loader2, CheckCircle2 } from "lucide-react";
+import { MapPin, Users, Loader2, CheckCircle2 } from "lucide-react";
 import { laTodayISO } from "@/lib/dates";
 import { buildRepMatcher } from "@/lib/rep-identity";
 import { useMyLeads, type MyLeadCard } from "@/hooks/useMyLeads";
 
 /**
  * "My Leads" — the rep's daily driver. Today's block appointments assigned to
- * the logged-in rep, each with everything they need to run it (customer,
- * address → tap to map, phone → tap to call, partner) and ONE "Report result"
- * button that opens the Out of House form fully pre-filled. "Not home?" is the
- * same button → pick "At the door". Rep-only; mobile-first (≥44px targets).
+ * the logged-in rep, each with what they need to run it (customer, address →
+ * tap to map, partner) and ONE "Report result" button that opens the Out of
+ * House form fully pre-filled. "Not home?" is the same button → "At the door",
+ * which texts the customer and has the OFFICE call — reps never call homeowners.
+ * No phone number is shown, by design. Rep-only; mobile-first (≥44px targets).
  */
 
-function digitsOf(phone: string | null | undefined): string {
-  return (phone ?? "").replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
-}
-function prettyPhone(phone: string | null | undefined): string {
-  const d = digitsOf(phone);
-  return d.length === 10 ? `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}` : (phone ?? "");
-}
 function mapsHref(address: string): string {
   return `https://maps.google.com/?q=${encodeURIComponent(address)}`;
 }
@@ -54,8 +48,6 @@ function LeadCard({
   partner: string | null;
 }) {
   const pill = statusPill(card);
-  const phone = prettyPhone(card.phone);
-  const tel = digitsOf(card.phone);
   return (
     <div className="rounded-lg border border-border/50 bg-surface/60 p-4 space-y-3">
       <div className="flex items-start justify-between gap-2">
@@ -86,15 +78,6 @@ function LeadCard({
             <span className="truncate">{card.address}</span>
           </a>
         )}
-        {tel && (
-          <a
-            href={`tel:${tel}`}
-            className="flex min-h-11 items-center gap-2 rounded-md border border-border/40 bg-background/40 px-3 text-sm text-foreground active:bg-background/70"
-          >
-            <Phone className="size-4 shrink-0 text-victory" />
-            <span>{phone}</span>
-          </a>
-        )}
         {partner && (
           <div className="flex min-h-11 items-center gap-2 rounded-md border border-border/40 bg-background/40 px-3 text-sm text-muted-foreground">
             <Users className="size-4 shrink-0" />
@@ -115,7 +98,7 @@ function LeadCard({
       />
       {!pill.done && (
         <p className="text-center text-[11px] text-muted-foreground">
-          No answer at the door? Tap Report → “At the door”.
+          No answer at the door? Tap Report → “At the door” — the office calls them, you don’t.
         </p>
       )}
     </div>
