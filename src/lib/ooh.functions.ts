@@ -65,7 +65,9 @@ const pushInput = z.object({
   itemId: z.string().regex(/^\d+$/),
 });
 
-/** Manager override: issue (press "Iss" on) a lead right now. */
+/** Manager override: issue (press "Iss" on) a specific lead item right now.
+ *  The item id is resolved by `nextLeadForRep` first (the rep's NEXT not-issued
+ *  lead), so this never re-presses Iss on an already-issued missing lead. */
 export const pushLeadIssue = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => pushInput.parse(d))
@@ -76,6 +78,31 @@ export const pushLeadIssue = createServerFn({ method: "POST" })
     const { pushLeadIss } = await import("@/lib/ooh.server");
     await pushLeadIss(s.token, data.boardId, data.itemId);
     return { ok: true };
+  });
+
+const nextLeadInput = z.object({
+  boardId: z.string().regex(/^\d+$/),
+  repName: z.string().min(1).max(200),
+});
+
+export type NextLeadResult = {
+  itemId: string;
+  name: string;
+  apptLabel: string | null;
+} | null;
+
+/** Resolve the rep's NEXT not-issued lead (earliest appointment after now) so
+ *  the admin UI can show its name + time before confirming a Push (#12). */
+export const nextLeadForRep = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => nextLeadInput.parse(d))
+  .handler(async ({ data, context }): Promise<NextLeadResult> => {
+    await assertAdmin(context.supabase as unknown as AdminClient, context.userId);
+    const s = await settings();
+    if (!s.token) throw new Error("No Monday API token configured.");
+    const { fetchNextLeadForRep } = await import("@/lib/ooh.server");
+    const next = await fetchNextLeadForRep(s.token, data.boardId, data.repName);
+    return next ? { itemId: next.itemId, name: next.name, apptLabel: next.apptLabel } : null;
   });
 
 const resolveInput = z.object({

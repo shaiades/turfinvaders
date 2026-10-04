@@ -97,6 +97,65 @@ export const LABEL = {
 /** Block Iss-column labels that keep their OWN flow — never auto-released. */
 export const RELEASE_EXCLUDED_STATUSES = ["Office Appt", "CTC", "Reload", "Add Rep"] as const;
 
+/** A status label is "blank" when it's empty or the explicit Monday "None". */
+export function isBlankStatus(label: string | null | undefined): boolean {
+  const t = (label ?? "").trim();
+  return t === "" || t.toLowerCase() === "none";
+}
+
+/** The five disposition columns on a block item (everything except Iss). */
+export type DispositionLabels = {
+  pm: string | null; // status_1
+  rs: string | null; // status_2
+  ol: string | null; // status_3
+  bo: string | null; // status4
+  sale: string | null; // status9
+};
+
+/**
+ * True when a disposition column is already set on a block item — the rep or
+ * office already dispositioned it, so the write-back must NOT press again
+ * (Rule: a lead can never be routed twice). The at-the-door "No show text"
+ * marker is the ONE exception: it holds the lead open (rep still waiting), so a
+ * real report may still land on top of it.
+ */
+export function hasExistingDisposition(d: DispositionLabels): boolean {
+  if (
+    !isBlankStatus(d.pm) ||
+    !isBlankStatus(d.rs) ||
+    !isBlankStatus(d.ol) ||
+    !isBlankStatus(d.sale)
+  )
+    return true;
+  if (!isBlankStatus(d.bo) && (d.bo ?? "").trim() !== LABEL.noShowText) return true;
+  return false;
+}
+
+/**
+ * Rule 7 "open lead": the rep still holds the lead and owes a report. True iff
+ * Iss is pressed AND no disposition column is set — with the single exception
+ * that status4 = "No show text" (at the door) keeps the lead open. A lead that
+ * was dispositioned KEEPS its Iss label, so counting it as "held" is the bug
+ * that stranded every next lead — this rule is the fix.
+ */
+export function isOpenLead(d: DispositionLabels & { iss: string | null }): boolean {
+  if ((d.iss ?? "").trim() !== LABEL.iss) return false;
+  return !hasExistingDisposition(d);
+}
+
+/** Accept a webhook only from the OOH form board. An event with no resolvable
+ *  boardId is allowed through (the webhook is registered on the form board);
+ *  a resolvable board that is not the form board is ignored. */
+export function isAllowedOohBoard(boardId: string | number | null | undefined): boolean {
+  if (boardId === null || boardId === undefined || boardId === "") return true;
+  return String(boardId) === FORM_BOARD_ID;
+}
+
+/** Idempotency key for the per-submission activity-log update. Keyed by the
+ *  FORM item id (unique per submission) so a second report on the SAME block
+ *  item still posts — keying by block item id dropped the second note. */
+export const oohUpdateKey = (formItemId: string): string => `ooh-update-${formItemId}`;
+
 /** Monday weekday (0=Sun..6=Sat) → block day-group id (same on SD + OC). */
 export const BLOCK_DAY_GROUP: Record<number, string> = {
   1: "new_group67742", // Monday
@@ -159,6 +218,26 @@ export function laDate(ms: number): string {
 export function laWeekday(ms: number): number {
   const wd = LA_PARTS.formatToParts(new Date(ms)).find((p) => p.type === "weekday")?.value ?? "Sun";
   return { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }[wd] ?? 0;
+}
+
+/**
+ * LA wall-minutes (hour*60 + minute) for a Monday date-column value. Monday
+ * stores a date column's {date,time} in UTC; this converts to the Pacific wall
+ * clock so same-day ordering and "later than" comparisons use real local time
+ * (a 5:30 PM PT appointment is stored "00:30" the NEXT UTC day — read raw, it
+ * sorts before a 1 PM appointment). Returns null when there is no time.
+ */
+export function laWallMinutesFromUtc(
+  date: string | null | undefined,
+  time: string | null | undefined,
+): number | null {
+  if (!date || !time) return null;
+  const [y, mo, d] = date.split("-").map(Number);
+  const [hh, mm] = time.split(":").map(Number);
+  if (![y, mo, d, hh].every(Number.isFinite)) return null;
+  const ms = Date.UTC(y, mo - 1, d, hh || 0, mm || 0);
+  const { hour, minute } = laHourMinute(ms);
+  return hour * 60 + minute;
 }
 
 /** "H:MM" elapsed between two wall-clock minute counts (same LA day). null if
@@ -430,16 +509,25 @@ export function buildDetailsLine(
   return `${parts.join(". ")} (${laClock(submitMs)})`;
 }
 
+const WD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
 function fmtReset(r: { date: string; time: string | null }): string {
+  // With a time, the {date,time} is a UTC instant (Monday stores date columns
+  // in UTC) — convert to the Pacific wall clock so the weekday, m/d AND time
+  // all read in LA (a late-day reset can roll to the next UTC date). A
+  // date-only reset has no instant to shift, so use its calendar date as-is.
+  if (r.time) {
+    const [y, mo, d] = r.date.split("-").map(Number);
+    const [hh, mm] = r.time.split(":").map(Number);
+    const ms = Date.UTC(y, mo - 1, d, hh || 0, mm || 0);
+    const [, lm, ld] = laDate(ms).split("-").map(Number);
+    const { hour, minute } = laHourMinute(ms);
+    return `${WD[laWeekday(ms)]} ${lm}/${ld} ${fmtClock12(hour, minute)}`;
+  }
   const [y, m, d] = r.date.split("-").map(Number);
-  const wd = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][
-    new Date(Date.UTC(y, m - 1, d, 12)).getUTCDay()
-  ];
-  const t = r.time ? ` ${fmtTime(r.time)}` : "";
-  return `${wd} ${m}/${d}${t}`;
+  return `${WD[new Date(Date.UTC(y, m - 1, d, 12)).getUTCDay()]} ${m}/${d}`;
 }
-function fmtTime(t: string): string {
-  const [hh, mm] = t.split(":").map(Number);
+function fmtClock12(hh: number, mm: number): string {
   const ampm = hh >= 12 ? "pm" : "am";
   const h12 = hh % 12 === 0 ? 12 : hh % 12;
   return mm ? `${h12}:${String(mm).padStart(2, "0")}${ampm}` : `${h12}${ampm}`;
@@ -485,6 +573,48 @@ export function sourceCodeToWrite(
   return { code: 1, unknownSource: true };
 }
 
+// ── Reloads dropdown (dropdown2) — map the quoted products onto its labels ────
+/** The exact Reloads dropdown (dropdown2) labels on the block boards (read live
+ *  2026-10-04). A Reload maps its QUOTED products onto these — never "Room". */
+export const RELOAD_DROPDOWN_LABELS = [
+  "Roof",
+  "Windows",
+  "Gutters",
+  "Stucco/Paint",
+  "Patio Cover",
+  "Pavers",
+  "Turf",
+  "Concrete",
+  "Retaining Walls",
+  "Hvac",
+  "Flat roof",
+  "Fence",
+  "Insulation",
+  "Solar",
+  "GT Trim",
+] as const;
+
+const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/**
+ * Map a rep's quoted-products answer (the form's multi-select, comma-joined
+ * text) onto the Reloads dropdown labels, in canonical order, deduped. Matches
+ * case / spacing / punctuation insensitively; unmatched products are dropped
+ * (we NEVER invent "Room"). Returns [] when nothing maps.
+ */
+export function reloadDropdownLabels(quoted: string | null | undefined): string[] {
+  if (!quoted) return [];
+  // Split on the multi-select's joiners only (comma / semicolon) — NOT on "/",
+  // which lives inside a label ("Stucco/Paint").
+  const want = new Set(
+    quoted
+      .split(/[,;]/)
+      .map((p) => norm(p))
+      .filter(Boolean),
+  );
+  return RELOAD_DROPDOWN_LABELS.filter((l) => want.has(norm(l)));
+}
+
 // ── Rules 1,2,5 + branch: the disposition plan ───────────────────────────────
 export type MondayValue = unknown;
 export type WritePlan = {
@@ -496,6 +626,9 @@ export type WritePlan = {
   fillSourceCodeIfBlank: boolean;
   /** This submission releases nothing and holds the rep at the door (Rule 6/7). */
   atTheDoor: boolean;
+  /** When set, the submission can't be auto-applied — queue it for the office
+   *  with this reason and press NOTHING (e.g. a reset result with no date). */
+  needsReview: string | null;
 };
 
 /**
@@ -508,101 +641,63 @@ export function planDisposition(form: OohForm): WritePlan {
   const resetDateValue = form.resetDate
     ? { date: form.resetDate.date, ...(form.resetDate.time ? { time: form.resetDate.time } : {}) }
     : null;
+  const base = {
+    fieldWrites,
+    fillSourceCodeIfBlank: false,
+    atTheDoor: false,
+    needsReview: null as string | null,
+  };
 
   switch (form.result) {
     case RESULT.SOLD: {
       if (form.salePrice != null) fieldWrites[BLOCK_COL.salePrice] = String(form.salePrice);
       if (form.onBlock === ON_BLOCK.UPSELL) {
-        return {
-          fieldWrites,
-          status: { col: BLOCK_COL.sale, label: LABEL.upsell },
-          fillSourceCodeIfBlank: false,
-          atTheDoor: false,
-        };
+        return { ...base, status: { col: BLOCK_COL.sale, label: LABEL.upsell } };
       }
       if (form.onBlock === ON_BLOCK.RELOAD) {
-        fieldWrites[BLOCK_COL.reloads] = { labels: ["Room"] };
-        return {
-          fieldWrites,
-          status: { col: BLOCK_COL.sale, label: LABEL.saleReload },
-          fillSourceCodeIfBlank: false,
-          atTheDoor: false,
-        };
+        // Map the quoted products onto the Reloads dropdown — never "Room".
+        const labels = reloadDropdownLabels(form.quotedText);
+        if (labels.length > 0) fieldWrites[BLOCK_COL.reloads] = { labels };
+        return { ...base, status: { col: BLOCK_COL.sale, label: LABEL.saleReload } };
       }
       // On-block Yes (0) or self-gen/own (2): a Sold that must reach Sales
       // Processing — fill a blank Source Code (Rule 4).
       return {
-        fieldWrites,
+        ...base,
         status: { col: BLOCK_COL.sale, label: LABEL.sold },
         fillSourceCodeIfBlank: true,
-        atTheDoor: false,
       };
     }
     case RESULT.PITCH_MISS:
-      return {
-        fieldWrites,
-        status: { col: BLOCK_COL.pm, label: LABEL.pm },
-        fillSourceCodeIfBlank: false,
-        atTheDoor: false,
-      };
+      return { ...base, status: { col: BLOCK_COL.pm, label: LABEL.pm } };
     case RESULT.PM_WITH_RESET:
-      if (resetDateValue) fieldWrites[BLOCK_COL.resetDate] = resetDateValue;
-      return {
-        fieldWrites,
-        status: { col: BLOCK_COL.pm, label: LABEL.pmReset },
-        fillSourceCodeIfBlank: false,
-        atTheDoor: false,
-      };
+      // A PM w/ reset with NO reset date can't be routed to Confirmed — queue it
+      // for the office instead of pressing the button (Rule 4-adjacent).
+      if (!resetDateValue)
+        return { ...base, status: null, needsReview: "PM w/ reset but no reset date" };
+      fieldWrites[BLOCK_COL.resetDate] = resetDateValue;
+      return { ...base, status: { col: BLOCK_COL.pm, label: LABEL.pmReset } };
     case RESULT.RESET:
-      if (resetDateValue) fieldWrites[BLOCK_COL.resetDate] = resetDateValue;
-      return {
-        fieldWrites,
-        status: { col: BLOCK_COL.rs, label: LABEL.reset },
-        fillSourceCodeIfBlank: false,
-        atTheDoor: false,
-      };
+      if (!resetDateValue) return { ...base, status: null, needsReview: "Reset but no reset date" };
+      fieldWrites[BLOCK_COL.resetDate] = resetDateValue;
+      return { ...base, status: { col: BLOCK_COL.rs, label: LABEL.reset } };
     case RESULT.ONE_LEGGER:
       // Reset-call done (0) → Reset to Confirmed; no reset (1) → OL to Blowout.
       if (form.resetCall === 0) {
         if (resetDateValue) fieldWrites[BLOCK_COL.resetDate] = resetDateValue;
-        return {
-          fieldWrites,
-          status: { col: BLOCK_COL.rs, label: LABEL.reset },
-          fillSourceCodeIfBlank: false,
-          atTheDoor: false,
-        };
+        return { ...base, status: { col: BLOCK_COL.rs, label: LABEL.reset } };
       }
-      return {
-        fieldWrites,
-        status: { col: BLOCK_COL.ol, label: LABEL.ol },
-        fillSourceCodeIfBlank: false,
-        atTheDoor: false,
-      };
+      return { ...base, status: { col: BLOCK_COL.ol, label: LABEL.ol } };
     case RESULT.NO_DEMO:
-      return {
-        fieldWrites,
-        status: { col: BLOCK_COL.bo, label: LABEL.noDemo },
-        fillSourceCodeIfBlank: false,
-        atTheDoor: false,
-      };
+      return { ...base, status: { col: BLOCK_COL.bo, label: LABEL.noDemo } };
     case RESULT.NO_SHOW_FINAL:
-      return {
-        fieldWrites,
-        status: { col: BLOCK_COL.bo, label: LABEL.noShow },
-        fillSourceCodeIfBlank: false,
-        atTheDoor: false,
-      };
+      return { ...base, status: { col: BLOCK_COL.bo, label: LABEL.noShow } };
     case RESULT.AT_THE_DOOR:
       // Rule 6: press "No show text" (the office automation texts the customer),
       // append a Details note, message the office — and release nothing.
-      return {
-        fieldWrites,
-        status: { col: BLOCK_COL.bo, label: LABEL.noShowText },
-        fillSourceCodeIfBlank: false,
-        atTheDoor: true,
-      };
+      return { ...base, status: { col: BLOCK_COL.bo, label: LABEL.noShowText }, atTheDoor: true };
     default:
-      return { fieldWrites, status: null, fillSourceCodeIfBlank: false, atTheDoor: false };
+      return { ...base, status: null };
   }
 }
 
@@ -672,10 +767,29 @@ export function matchTarget(form: OohForm): Target {
 export type DayItem = {
   id: string;
   reps: string[]; // normalized rep names in people6
-  statusLabel: string | null; // Iss column label
-  timeMs: number | null; // appointment time (date9)
+  statusLabel: string | null; // Iss column label (status)
+  timeMs: number | null; // appointment time (date9), LA wall-minutes
+  // Disposition column labels (status_1/_2/_3/4/9). Absent on legacy callers →
+  // treated as all-blank, so an Iss item with no disposition reads as open.
+  pm?: string | null;
+  rs?: string | null;
+  ol?: string | null;
+  bo?: string | null;
+  sale?: string | null;
 };
 export type ReleasePlan = { action: "issue"; itemId: string } | { action: "hold"; reason: string };
+
+/** Is a day item an OPEN lead (held, unreported) per the Rule 7 open-lead rule? */
+function dayItemIsOpen(it: DayItem): boolean {
+  return isOpenLead({
+    iss: it.statusLabel,
+    pm: it.pm ?? null,
+    rs: it.rs ?? null,
+    ol: it.ol ?? null,
+    bo: it.bo ?? null,
+    sale: it.sale ?? null,
+  });
+}
 
 /** Normalize a rep name for matching (lowercase, collapse whitespace). */
 export function normName(n: string | null | undefined): string {
@@ -686,23 +800,30 @@ export function normName(n: string | null | undefined): string {
  * After a report is processed, decide the rep's NEXT lead to issue (Rule 7):
  * the earliest Not-Issued item on today's block that still has the rep, with a
  * time after the reported lead. "At the door" releases nothing. A paired next
- * lead waits until BOTH reps hold no other Iss lead. Excluded statuses
+ * lead waits until BOTH reps hold no OTHER open lead. Excluded statuses
  * (Office Appt / CTC / Reload / Add Rep) are never auto-issued.
+ *
+ * Crucially, "holds another lead" means an OPEN lead (Iss with no disposition),
+ * not merely one still labelled Iss — a dispositioned lead keeps its Iss label,
+ * so the old `statusLabel === Iss` test made the rep (or partner) look busy
+ * forever and nothing ever released. The just-reported lead is always excluded.
  */
 export function planRelease(input: {
   atTheDoor: boolean;
   rep: string | null;
   dayItems: DayItem[];
   reportedLeadTimeMs: number | null;
+  reportedLeadId?: string | null;
 }): ReleasePlan {
   if (input.atTheDoor) return { action: "hold", reason: "at the door — rep still waiting" };
   const rep = normName(input.rep);
   if (!rep) return { action: "hold", reason: "no rep to release to" };
   const after = input.reportedLeadTimeMs;
+  const reportedId = input.reportedLeadId ?? null;
 
   const candidates = input.dayItems
-    .filter((it) => it.statusLabel === LABEL.notIssued)
-    .filter((it) => !RELEASE_EXCLUDED_STATUSES.includes(it.statusLabel as never))
+    .filter((it) => it.id !== reportedId)
+    .filter((it) => (it.statusLabel ?? "").trim() === LABEL.notIssued)
     .filter((it) => it.reps.map(normName).includes(rep))
     .filter((it) => after == null || it.timeMs == null || it.timeMs > after)
     .sort((a, b) => (a.timeMs ?? Infinity) - (b.timeMs ?? Infinity));
@@ -710,20 +831,24 @@ export function planRelease(input: {
   const next = candidates[0];
   if (!next) return { action: "hold", reason: "no next Not-Issued lead for this rep today" };
 
-  // Pairs: release only when every rep on the next lead holds no OTHER open
-  // Iss lead right now. A partner with an unreported Iss lead → wait.
+  // Pairs: release only when every rep on the next lead holds no OTHER OPEN
+  // lead right now (the just-reported lead excluded). A dispositioned lead
+  // keeps Iss but is no longer open, so it no longer blocks.
   const otherRepsBusy = next.reps
     .map(normName)
     .some((r) =>
       input.dayItems.some(
         (it) =>
-          it.id !== next.id && it.statusLabel === LABEL.iss && it.reps.map(normName).includes(r),
+          it.id !== next.id &&
+          it.id !== reportedId &&
+          dayItemIsOpen(it) &&
+          it.reps.map(normName).includes(r),
       ),
     );
   if (otherRepsBusy) {
     return {
       action: "hold",
-      reason: "paired next lead waits — a partner still holds an issued lead",
+      reason: "paired next lead waits — a partner still holds an open lead",
     };
   }
   return { action: "issue", itemId: next.id };
@@ -751,6 +876,27 @@ export function lateReportCheck(input: {
     input.apptTimeMs - input.nowMs <= 45 * 60 * 1000 &&
     input.apptTimeMs - input.nowMs > -24 * 60 * 60 * 1000;
   return { alert: within45, keepHeld: true };
+}
+
+// ── Admin-queue / error row (shared so rep + lead detail survive everywhere) ─
+/** The common queue-row fields for a submission — rep, partner, result, lead,
+ *  the Details line, the plan and the raw form. Used for EVERY queue/error row
+ *  (incl. the catch-all error path) so a row is never just a bare form id. */
+export function buildBaseQueueRow(
+  form: OohForm,
+  detailsLine: string,
+  plan: WritePlan,
+): Record<string, unknown> {
+  return {
+    rep_name: form.repName,
+    partner: form.partner,
+    result: form.result,
+    on_block: form.onBlock,
+    lead_id: form.leadId,
+    details_line: detailsLine,
+    plan: plan as unknown,
+    raw: form as unknown,
+  };
 }
 
 // ── Rule: idempotency ────────────────────────────────────────────────────────

@@ -232,6 +232,64 @@ export function comingWeekStartISO(now: Date = new Date()): string {
   return addDaysISO(weekStartOfISO(laDateISO(now)), 7);
 }
 
+// ── Attendance "current week" (Sunday-noon rollover) ────────────────────────
+// Which week the attendance boards currently represent for WRITES. Normally the
+// LA Mon–Sun week containing `now`; from Sunday 12:00 PM PT onward it rolls to
+// the COMING week, so a weekend approval for next week actually reaches
+// attendance (before this, `laWeekStartISO(now)` never matched a coming-week
+// request on a Sun afternoon, and the write was silently skipped).
+
+export function attendanceWeekStartISO(now: Date = new Date()): string {
+  const thisWeek = weekStartOfISO(laDateISO(now));
+  const { weekday, hour } = laWeekdayHour(now);
+  if (weekday === 0 && hour >= 12) return addDaysISO(thisWeek, 7); // Sun ≥ noon → next week
+  return thisWeek;
+}
+
+// ── Withdraw / edit rules ───────────────────────────────────────────────────
+
+/** Who may WITHDRAW a request: an approver (admin) may withdraw any; the rep who
+ *  owns it may withdraw ONLY while it is still pending (an approved/denied one
+ *  must be EDITED, which sends it back to pending first). */
+export function canWithdrawRespawn(input: {
+  isOwner: boolean;
+  isAdmin: boolean;
+  status: RespawnStatus;
+}): boolean {
+  if (input.isAdmin) return true;
+  if (input.isOwner) return input.status === "pending";
+  return false;
+}
+
+/** The granted shifts whose attendance writes must be REVERTED (set back On)
+ *  when a request is edited back to pending — only when it had actually been
+ *  applied: a previously approved/partial request for the current attendance
+ *  week. [] otherwise. */
+export function shiftsToRevertOnResubmit(
+  prev: { status: RespawnStatus; approvedShifts: unknown; weekStart: string } | null,
+  attendanceWeek: string,
+): ShiftKey[] {
+  if (!prev) return [];
+  if (prev.weekStart !== attendanceWeek) return [];
+  if (prev.status !== "approved" && prev.status !== "partial") return [];
+  return normalizeShifts(prev.approvedShifts);
+}
+
+// ── Office validation (roster, not self-reported) ───────────────────────────
+
+/** Resolve the office to store on a respawn request from the rep's ROSTER
+ *  office (profiles.office_location) — never a value the rep typed. Returns the
+ *  roster office plus whether a supplied answer disagreed (for logging). e.g.
+ *  Sam Corona's roster is OC, so an "answer" of "San Diego" is ignored. */
+export function resolveRosterOffice(
+  rosterOfficeLocation: string | null | undefined,
+  answeredOffice?: string | null,
+): { office: RepOffice; mismatch: boolean } {
+  const office = officeToRep(rosterOfficeLocation);
+  const mismatch = answeredOffice != null && officeToRep(answeredOffice) !== office;
+  return { office, mismatch };
+}
+
 // ── Shared summary helpers (UI chips + Monday notes) ────────────────────────
 
 /** "Mon AM · Mon PM · Fri AM" from a shift list, in canonical order. */

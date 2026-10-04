@@ -24,9 +24,13 @@ import { sendDispatcherIMessage } from "./inkbox.ts";
 import {
   BLOCK_COL,
   FORM_BOARD_ID,
+  buildBaseQueueRow,
   buildDetailsLine,
+  hasExistingDisposition,
+  isAllowedOohBoard,
   laClock,
   matchTarget,
+  oohUpdateKey,
   parseOohForm,
   planDisposition,
   planRelease,
@@ -95,6 +99,13 @@ serve(async (req) => {
   );
   if (!formItemId || !/^\d+$/.test(formItemId)) return ok({ ignored: "no form item id" });
 
+  // Only accept events from the OOH form board — ignore anything else so a
+  // mis-wired webhook on another board can never drive a disposition.
+  const eventBoardId = event.boardId ?? event.board_id ?? null;
+  if (!isAllowedOohBoard(eventBoardId as string | number | null)) {
+    return ok({ ignored: "wrong board", boardId: String(eventBoardId) });
+  }
+
   const SUPABASE_URL = denoEnv?.get("SUPABASE_URL") ?? "";
   const SERVICE_ROLE = denoEnv?.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   const supabase = createClient(SUPABASE_URL, SERVICE_ROLE);
@@ -134,6 +145,10 @@ serve(async (req) => {
       ).catch(() => undefined);
     }
   };
+
+  // Hoisted so the catch-all error row still carries rep + lead detail (never a
+  // bare form id). Filled in once the form is parsed.
+  let baseRow: Record<string, unknown> = {};
 
   try {
     // ── settings ──────────────────────────────────────────────────────────
@@ -175,18 +190,20 @@ serve(async (req) => {
     const form = parseOohForm(formItemId, formItem.cols);
     const plan = planDisposition(form);
     const target = matchTarget(form);
+    // Preliminary Details (no appointment fallback — used by the queue paths
+    // that have no block). The write path rebuilds it once the block is known,
+    // so a blank arrival can fall back to the appointment time (Rule 3 / #6).
     const detailsLine = buildDetailsLine(form, formItem.createdAtMs);
     const formLink = `https://tidal-remodeling.monday.com/boards/${FORM_BOARD_ID}/pulses/${formItemId}`;
-    const baseRow: Record<string, unknown> = {
-      rep_name: form.repName,
-      partner: form.partner,
-      result: form.result,
-      on_block: form.onBlock,
-      lead_id: form.leadId,
-      details_line: detailsLine,
-      plan: plan as unknown,
-      raw: form as unknown,
-    };
+    baseRow = buildBaseQueueRow(form, detailsLine, plan);
+
+    // A plan the engine refuses to auto-apply (e.g. a reset result with no
+    // reset date) goes to the office — press nothing (#4).
+    if (plan.needsReview) {
+      await finish("queued");
+      await queue("needs_review", plan.needsReview, baseRow);
+      return ok({ queued: plan.needsReview });
+    }
 
     // Only the matched-lead path writes automatically. Create (self-gen /
     // upsell / reload) is queued unless auto-create is explicitly enabled.
@@ -215,8 +232,30 @@ serve(async (req) => {
       });
       return ok({ queued: "lead not found" });
     }
+
+    // Already-dispositioned guard (#3): if the office pressed a disposition by
+    // hand, write NOTHING — so a lead can never be routed twice. (The
+    // at-the-door "No show text" marker doesn't count; the lead is still open.)
+    if (hasExistingDisposition(block)) {
+      await finish("queued", { target_item_id: leadId, board_id: block.boardId });
+      await queue("needs_review", "already dispositioned by office", {
+        ...baseRow,
+        target_item_id: leadId,
+        board_id: block.boardId,
+      });
+      return ok({ queued: "already dispositioned" });
+    }
+
     const isCurrentBlock = block.boardId === activeSd || block.boardId === activeOc;
     const liveAllowed = mode === "live" && allowedBoards.has(block.boardId);
+
+    // Details (Rule 3 / #6): rebuild now that the block is known, so a blank
+    // arrival time falls back to the appointment time (date9, PT).
+    const apptFallback =
+      block.apptWallMinutes != null
+        ? { hour: Math.floor(block.apptWallMinutes / 60), minute: block.apptWallMinutes % 60 }
+        : null;
+    const detailsLineForBlock = buildDetailsLine(form, formItem.createdAtMs, apptFallback);
 
     // Source Code fill (Rule 4), computed against the block's live values.
     const fieldWrites: Record<string, unknown> = { ...plan.fieldWrites };
@@ -233,8 +272,8 @@ serve(async (req) => {
     }
     // Details: APPEND, never overwrite (Rule 3).
     const combinedDetails = block.details?.trim()
-      ? `${block.details.trim()}\n${detailsLine}`
-      : detailsLine;
+      ? `${block.details.trim()}\n${detailsLineForBlock}`
+      : detailsLineForBlock;
     const columnValues: Record<string, unknown> = {
       ...fieldWrites,
       [BLOCK_COL.details]: { text: combinedDetails },
@@ -242,6 +281,7 @@ serve(async (req) => {
 
     const rowWithTarget = {
       ...baseRow,
+      details_line: detailsLineForBlock,
       target_item_id: leadId,
       board_id: block.boardId,
       office: isCurrentBlock ? (block.boardId === activeSd ? "SD" : "OC") : null,
@@ -282,11 +322,13 @@ serve(async (req) => {
       if (r2.error) throw new Error(`setStatus: ${r2.error}`);
     }
 
-    // Activity-log note on the block item.
+    // Activity-log note on the block item. Keyed by the FORM item id so a
+    // SECOND report on the same lead still posts its note (#7).
     await postUpdate(
       token,
       leadId,
       `OOH report from ${form.repName ?? "rep"} at ${laClock(formItem.createdAtMs)} — ${formLink}${sourceCodeNote}`,
+      oohUpdateKey(formItemId),
     ).catch(() => undefined);
 
     // ── Rule 6: at-the-door → message the office; release nothing ───────────
@@ -303,6 +345,7 @@ serve(async (req) => {
         rep: form.repName,
         dayItems,
         reportedLeadTimeMs: block.apptWallMinutes,
+        reportedLeadId: leadId,
       });
       if (rel.action === "issue") {
         const r = await setStatus(
@@ -331,7 +374,9 @@ serve(async (req) => {
     // never re-presses / re-appends; otherwise drop it so Monday can redeliver.
     if (mondayTouched) await finish("error");
     else await releaseClaimForRetry();
-    await queue("error", msg, { form_item_id: formItemId });
+    // Keep rep + lead detail on the error row (#9) — baseRow is {} only if we
+    // failed before parsing the form.
+    await queue("error", msg, { ...baseRow, error: msg });
     // 200 so Monday doesn't hammer redelivery; the admin queue carries the error.
     return ok({ error: msg, mondayTouched });
   }

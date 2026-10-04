@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   getOohConfig,
   listMissingReports,
+  nextLeadForRep,
   pushLeadIssue,
   resolveOohQueueItem,
 } from "@/lib/ooh.functions";
@@ -69,5 +70,11 @@ export function useOohMutations() {
     onSuccess: refresh,
   });
 
-  return { resolve, pushLead };
+  // Resolve the rep's NEXT not-issued lead (name + time) before a Push (#12).
+  // A read, not a write — so it does NOT invalidate the queue.
+  const nextLead = useMutation({
+    mutationFn: (vars: { boardId: string; repName: string }) => nextLeadForRep({ data: vars }),
+  });
+
+  return { resolve, pushLead, nextLead };
 }

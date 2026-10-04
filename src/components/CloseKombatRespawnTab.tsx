@@ -283,7 +283,9 @@ function RepRespawn({ userId }: { userId: string }) {
                 "Send request"
               )}
             </Button>
-            {row && (
+            {/* A rep may withdraw only a PENDING request; an approved/denied
+                one is changed by editing (which sends it back to pending). */}
+            {row && row.status === "pending" && (
               <Button
                 variant="outline"
                 className="min-h-11"
@@ -354,16 +356,25 @@ function AdminRow({ r }: { r: RespawnRow }) {
       },
       {
         onSuccess: (res) => {
+          // "Next week" note: a weekend approval for the coming week that the
+          // Sunday-noon rollover applied to attendance now (#14).
+          const nextWeek = r.week_start === comingWeekStartISO();
+          const appliedMsg =
+            res.attendanceApplied && nextWeek
+              ? "Approved for next week — applied to attendance."
+              : res.attendanceApplied
+                ? "Approved — attendance updated."
+                : "Approved (attendance applies when the week is live).";
           const msg =
             res.status === "denied"
               ? "Denied."
               : res.status === "partial"
                 ? res.attendanceApplied
-                  ? "Partially approved — attendance updated."
+                  ? nextWeek
+                    ? "Partially approved for next week — applied to attendance."
+                    : "Partially approved — attendance updated."
                   : "Partially approved (attendance applies when the week is live)."
-                : res.attendanceApplied
-                  ? "Approved — attendance updated."
-                  : "Approved (attendance applies when the week is live).";
+                : appliedMsg;
           toast.success(msg);
         },
         onError: (e) => toast.error(e instanceof Error ? e.message : "Could not save decision."),
