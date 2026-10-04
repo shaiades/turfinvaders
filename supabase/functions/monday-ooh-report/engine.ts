@@ -351,12 +351,23 @@ export function buildDetailsLine(
   apptFallback: { hour: number; minute: number } | null = null,
 ): string {
   const parts: string[] = [];
+  // Only Sold / Pitch miss / PM-with-reset carry quote, pricing and objection
+  // (those are the only Results whose form shows those questions). Gating by
+  // Result — not just by "is the value present" — keeps a stray/hidden answer
+  // (e.g. a leftover objection on an At-the-door report) out of the block note.
+  const isQuoteResult =
+    form.result === RESULT.SOLD ||
+    form.result === RESULT.PITCH_MISS ||
+    form.result === RESULT.PM_WITH_RESET;
+  const isObjectionResult =
+    form.result === RESULT.PITCH_MISS || form.result === RESULT.PM_WITH_RESET;
+
   const quoted = form.quantities || form.quotedText;
-  const head = quoted ? `${resultPrefix(form)} – ${quoted}` : resultPrefix(form);
+  const head = isQuoteResult && quoted ? `${resultPrefix(form)} – ${quoted}` : resultPrefix(form);
   parts.push(head);
 
   // Pricing (Sold / PM branches).
-  if (form.highPrice != null || form.lowPrice != null) {
+  if (isQuoteResult && (form.highPrice != null || form.lowPrice != null)) {
     const hi = form.highPrice != null ? `High $${form.highPrice.toLocaleString("en-US")}` : null;
     const lo = form.lowPrice != null ? `Low $${form.lowPrice.toLocaleString("en-US")}` : null;
     parts.push([hi, lo].filter(Boolean).join(" / "));
@@ -365,8 +376,8 @@ export function buildDetailsLine(
     parts.push(`Sale $${form.salePrice.toLocaleString("en-US")}`);
   }
 
-  // Objection (PM branch).
-  if (form.objection) {
+  // Objection (PM branches only).
+  if (isObjectionResult && form.objection) {
     parts.push(
       `Obj: ${form.objection}${form.objectionDetails ? ` – ${form.objectionDetails}` : ""}`,
     );

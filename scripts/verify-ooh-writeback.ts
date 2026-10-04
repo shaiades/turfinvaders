@@ -621,6 +621,49 @@ expectEq("nothing is auto-issued without a report", AUTO_ISSUE_WITHOUT_REPORT, f
     line.startsWith("No answer at door") && line.endsWith("(10:08)") && !line.includes("In "),
   );
 }
+// A stray/hidden objection or price must NOT leak onto an at-the-door line
+// (gated by Result, not by presence — regression from the live E2E test).
+{
+  const f = parseOohForm(
+    "door2",
+    form({
+      [FORM_COL.result]: status(RESULT.AT_THE_DOOR),
+      [FORM_COL.onBlock]: status(ON_BLOCK.YES),
+      [FORM_COL.objection]: status(5, "Financing didn't work"),
+      [FORM_COL.highPrice]: num(40000),
+      [FORM_COL.quoted]: { text: "Roof", value: null },
+    }),
+  );
+  const line = buildDetailsLine(f, SUBMIT);
+  expect(
+    "at the door drops stray objection / price / quote",
+    !line.includes("Obj:") && !line.includes("High $") && !line.includes("Roof"),
+  );
+}
+// Objection only rides Pitch-miss lines, never a Reset line.
+{
+  const pm = parseOohForm(
+    "pmobj",
+    form({
+      [FORM_COL.result]: status(RESULT.PITCH_MISS),
+      [FORM_COL.onBlock]: status(ON_BLOCK.YES),
+      [FORM_COL.objection]: status(3, "Want more bids"),
+    }),
+  );
+  expect(
+    "pitch miss keeps objection",
+    buildDetailsLine(pm, SUBMIT).includes("Obj: Want more bids"),
+  );
+  const reset = parseOohForm(
+    "rsobj",
+    form({
+      [FORM_COL.result]: status(RESULT.RESET),
+      [FORM_COL.onBlock]: status(ON_BLOCK.YES),
+      [FORM_COL.objection]: status(3, "Want more bids"),
+    }),
+  );
+  expect("reset drops objection", !buildDetailsLine(reset, SUBMIT).includes("Obj:"));
+}
 
 // ════════════════════════════════════════════════════════════════════════════
 // 9) IDEMPOTENCY (Rule)
