@@ -17,7 +17,8 @@ import { addDaysISO, laDateISO, laMidnightUtcISO, weekStartOfISO } from "@/lib/d
 import { type OfficeLocation } from "@/lib/offices";
 
 export type RepOffice = "SD" | "OC";
-export type RespawnStatus = "pending" | "approved" | "denied";
+// "partial" = the approver granted some but not all requested shifts.
+export type RespawnStatus = "pending" | "approved" | "denied" | "partial";
 
 // Mon–Sun, AM then PM: 14 half-day shifts. Order is the canonical display and
 // storage order (the Monday dropdown + the day grid both read it).
@@ -135,12 +136,14 @@ export const OFFICE_DAYOFF_LABEL: Record<RepOffice, string> = {
   SD: "San Diego",
   OC: "Orange County",
 };
-/** The Day-Off board Approval status label per request status. */
-export const APPROVAL_LABEL: Record<RespawnStatus, string> = {
-  pending: "Pending",
-  approved: "Approved",
-  denied: "Denied",
-};
+/** The Day-Off board Approval status label for a request status. The board's
+ *  Approval column has only Pending/Approved/Denied, so a PARTIAL grant reads
+ *  as Approved there (the granted/declined detail rides the reason note). */
+export function mondayApprovalLabel(status: RespawnStatus): string {
+  if (status === "pending") return "Pending";
+  if (status === "denied") return "Denied";
+  return "Approved"; // approved + partial
+}
 /** The attendance boards mark a shift OFF by this exact label (not index — the
  *  Sunday PM column uses a different index than the rest). */
 export const ATTENDANCE_OFF_LABEL = "Off";
@@ -236,4 +239,24 @@ export function summarizeShifts(shifts: ShiftKey[]): string {
   return normalizeShifts(shifts)
     .map((s) => SHIFT_LABEL[s])
     .join(" · ");
+}
+
+/** Resolve a review decision. The approver may grant a SUBSET of what was
+ *  requested (trim-then-approve); `granted` is clamped to the requested set.
+ *  - deny, or grant nothing → "denied" (approvedShifts empty)
+ *  - grant every requested shift → "approved"
+ *  - grant some but not all → "partial"
+ *  declinedShifts is what the rep asked for but didn't get. */
+export function settleApproval(
+  requested: ShiftKey[],
+  granted: ShiftKey[] | null | undefined,
+  approve: boolean,
+): { status: RespawnStatus; approvedShifts: ShiftKey[]; declinedShifts: ShiftKey[] } {
+  const req = normalizeShifts(requested);
+  if (!approve) return { status: "denied", approvedShifts: [], declinedShifts: req };
+  const g = normalizeShifts(granted ?? req).filter((s) => req.includes(s));
+  const declined = req.filter((s) => !g.includes(s));
+  if (g.length === 0) return { status: "denied", approvedShifts: [], declinedShifts: req };
+  if (declined.length === 0) return { status: "approved", approvedShifts: g, declinedShifts: [] };
+  return { status: "partial", approvedShifts: g, declinedShifts: declined };
 }

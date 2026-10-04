@@ -6,7 +6,6 @@
 import { monday } from "@/lib/monday.server";
 import { normalizeName } from "@/lib/utils";
 import {
-  APPROVAL_LABEL,
   ATTENDANCE_BOARD_ID,
   ATTENDANCE_OFF_LABEL,
   DAY_OFF_BOARD_ID,
@@ -15,6 +14,8 @@ import {
   OFFICE_DAYOFF_LABEL,
   SHIFT_ATTENDANCE_COL,
   SHIFT_LABEL,
+  mondayApprovalLabel,
+  summarizeShifts,
   type RepOffice,
   type RespawnStatus,
   type ShiftKey,
@@ -56,7 +57,7 @@ export async function syncDayOffItem(
     [DAY_OFF_COL.week]: { date: input.weekStart },
     [DAY_OFF_COL.shifts]: { labels: input.shifts.map((s) => SHIFT_LABEL[s]) },
     [DAY_OFF_COL.reason]: { text: input.reason ?? "" },
-    [DAY_OFF_COL.approval]: { label: APPROVAL_LABEL[input.status] },
+    [DAY_OFF_COL.approval]: { label: mondayApprovalLabel(input.status) },
   };
 
   // Update the existing item only if it is still live. A withdraw deletes the
@@ -91,21 +92,40 @@ export async function syncDayOffItem(
   return (data.create_item as { id: string }).id;
 }
 
-/** Flip the Approval column on an existing Day-Off item. */
-export async function setDayOffApproval(
+/** Write a review decision to the Day-Off item: flip the Approval column, and
+ *  on a PARTIAL grant append the granted/declined breakdown to the reason note
+ *  (the board's Approval column has no "partial" label, so the detail lives in
+ *  the note). The requested-shifts dropdown is left intact as the request log;
+ *  the attendance board is what reflects the granted subset. */
+export async function setDayOffDecision(
   token: string,
   itemId: string,
-  status: RespawnStatus,
+  input: {
+    status: RespawnStatus;
+    baseReason: string | null;
+    grantedShifts: ShiftKey[];
+    declinedShifts: ShiftKey[];
+    note: string | null;
+  },
 ): Promise<void> {
+  const vals: Record<string, unknown> = {
+    [DAY_OFF_COL.approval]: { label: mondayApprovalLabel(input.status) },
+  };
+  if (input.status === "partial") {
+    const parts = [
+      `Office: granted ${summarizeShifts(input.grantedShifts)}`,
+      `declined ${summarizeShifts(input.declinedShifts)}`,
+    ];
+    if (input.note) parts.push(input.note);
+    const line = `[${parts.join(" · ")}]`;
+    const base = (input.baseReason ?? "").trim();
+    vals[DAY_OFF_COL.reason] = { text: base ? `${base}\n${line}` : line };
+  }
   await monday(
     token,
     UPSERT_VALS,
-    {
-      b: DAY_OFF_BOARD_ID,
-      i: itemId,
-      vals: JSON.stringify({ [DAY_OFF_COL.approval]: { label: APPROVAL_LABEL[status] } }),
-    },
-    { idempotencyKey: `respawn-appr-${itemId}-${status}` },
+    { b: DAY_OFF_BOARD_ID, i: itemId, vals: JSON.stringify(vals) },
+    { idempotencyKey: `respawn-appr-${itemId}-${input.status}-${input.grantedShifts.join(",")}` },
   );
 }
 

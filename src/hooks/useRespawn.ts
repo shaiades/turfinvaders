@@ -24,6 +24,7 @@ export type RespawnRow = {
   office: RepOffice | string;
   week_start: string;
   shifts: string[];
+  approved_shifts: string[] | null;
   reason: string | null;
   status: RespawnStatus;
   late: boolean;
@@ -104,8 +105,12 @@ export function useRespawnMutations() {
   });
 
   const review = useMutation({
-    mutationFn: (vars: { id: string; approve: boolean; note?: string }) =>
-      reviewRespawnRequest({ data: vars }),
+    mutationFn: (vars: {
+      id: string;
+      approve: boolean;
+      note?: string;
+      approvedShifts?: string[];
+    }) => reviewRespawnRequest({ data: vars }),
     onSuccess: refresh,
   });
 
