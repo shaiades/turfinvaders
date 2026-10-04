@@ -103,7 +103,17 @@ export const submitRespawnRequest = createServerFn({ method: "POST" })
     const repName = (profile?.display_name as string | null)?.trim() || "Unknown";
     // Office is the rep's ROSTER office (profiles.office_location) — never a
     // value the rep typed (Sam Corona is OC even if a form said "San Diego").
-    const { office } = resolveRosterOffice(profile?.office_location as string | null);
+    const { office, rosterProvided } = resolveRosterOffice(
+      profile?.office_location as string | null,
+    );
+    // Warn when the roster has no office for this rep: we defaulted to SD, and a
+    // wrong office writes the day-off to the wrong attendance board (SD vs OC).
+    // Surfaces a data fix (set the office in Manage Players / /users).
+    if (!rosterProvided) {
+      console.warn(
+        `[respawn] ${repName} (${userId}) has no roster office_location — defaulting to ${office}. Set their office in Manage Players so approved shifts hit the right attendance board.`,
+      );
+    }
     const late = isLateForWeek(weekStart);
 
     const { data: existing } = await supabaseAdmin

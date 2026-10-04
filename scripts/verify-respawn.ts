@@ -295,19 +295,34 @@ expectEq("revert: no previous row → nothing", shiftsToRevertOnResubmit(null, a
 expectEq(
   "office: roster OC ignores a typed 'San Diego' (Sam Corona)",
   resolveRosterOffice("Orange County", "San Diego"),
-  { office: "OC", mismatch: true },
+  { office: "OC", mismatch: true, rosterProvided: true },
 );
 expectEq("office: roster SD + matching answer", resolveRosterOffice("San Diego", "San Diego"), {
   office: "SD",
   mismatch: false,
+  rosterProvided: true,
 });
 expectEq("office: no answer → roster, no mismatch", resolveRosterOffice("Orange County"), {
   office: "OC",
   mismatch: false,
+  rosterProvided: true,
 });
-expectEq("office: null roster → SD (pre-OC default)", resolveRosterOffice(null), {
+// Blank / missing roster office → defaulted to SD, FLAGGED so the office can
+// fix the roster (a wrong office writes the day-off to the wrong board).
+expectEq("office: null roster → SD, flagged not provided", resolveRosterOffice(null), {
   office: "SD",
   mismatch: false,
+  rosterProvided: false,
+});
+expectEq("office: empty-string roster → SD, flagged not provided", resolveRosterOffice(""), {
+  office: "SD",
+  mismatch: false,
+  rosterProvided: false,
+});
+expectEq("office: whitespace roster → SD, flagged not provided", resolveRosterOffice("   "), {
+  office: "SD",
+  mismatch: false,
+  rosterProvided: false,
 });
 
 if (failures > 0) {

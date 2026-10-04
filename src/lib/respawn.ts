@@ -279,15 +279,19 @@ export function shiftsToRevertOnResubmit(
 
 /** Resolve the office to store on a respawn request from the rep's ROSTER
  *  office (profiles.office_location) — never a value the rep typed. Returns the
- *  roster office plus whether a supplied answer disagreed (for logging). e.g.
- *  Sam Corona's roster is OC, so an "answer" of "San Diego" is ignored. */
+ *  roster office, whether a supplied answer disagreed, and whether the roster
+ *  actually provided an office (false = blank/missing → defaulted to SD, so the
+ *  caller can warn: a wrong office sends the day-off to the wrong attendance
+ *  board). e.g. Sam Corona's roster is OC, so an "answer" of "San Diego" is
+ *  ignored. */
 export function resolveRosterOffice(
   rosterOfficeLocation: string | null | undefined,
   answeredOffice?: string | null,
-): { office: RepOffice; mismatch: boolean } {
+): { office: RepOffice; mismatch: boolean; rosterProvided: boolean } {
+  const rosterProvided = (rosterOfficeLocation ?? "").trim() !== "";
   const office = officeToRep(rosterOfficeLocation);
   const mismatch = answeredOffice != null && officeToRep(answeredOffice) !== office;
-  return { office, mismatch };
+  return { office, mismatch, rosterProvided };
 }
 
 // ── Shared summary helpers (UI chips + Monday notes) ────────────────────────
