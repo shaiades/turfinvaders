@@ -241,3 +241,65 @@ export async function saveCanvasserPhotoAndGenerate(
     source: { data: bytes.toString("base64"), mimeType: contentType },
   });
 }
+
+/**
+ * Re-roll the fighters whose baked-in background no longer matches their van's
+ * current color (owner 2026-10-03: "re-roll everyone so they get their van
+ * colors"). Only touches rows that actually need it — a fighter whose stored
+ * cartoon_meta.van_color already equals its current team color is left alone, so
+ * this is idempotent and never wastes Gemini budget. Bounded per call (slow: two
+ * image gens each); the admin button loops it until `remaining` hits 0.
+ */
+export async function rerollOutdatedCanvasserCartoons(opts?: {
+  limit?: number;
+}): Promise<{ attempted: number; ok: number; failed: number; remaining: number }> {
+  const limit = Math.max(1, Math.min(opts?.limit ?? 4, 10));
+
+  // Every fighter that has a source selfie to redraw from.
+  const { data: rows, error } = await supabaseAdmin
+    .from("canvasser_photos")
+    .select("profile_id, cartoon_meta")
+    .not("photo_path", "is", null);
+  if (error) throw new Error(error.message);
+  const all = rows ?? [];
+  if (all.length === 0) return { attempted: 0, ok: 0, failed: 0, remaining: 0 };
+
+  // Current van color per profile (team_id -> teams.color).
+  const ids = all.map((r) => r.profile_id);
+  const { data: profs } = await supabaseAdmin.from("profiles").select("id, team_id").in("id", ids);
+  const teamByProfile = new Map((profs ?? []).map((p) => [p.id, p.team_id]));
+  const teamIds = [...new Set((profs ?? []).map((p) => p.team_id).filter(Boolean))] as string[];
+  const colorByTeam = new Map<string, string>();
+  if (teamIds.length > 0) {
+    const { data: teams } = await supabaseAdmin.from("teams").select("id, color").in("id", teamIds);
+    for (const t of teams ?? []) colorByTeam.set(t.id, t.color);
+  }
+
+  const currentColor = (profileId: string): string | null => {
+    const teamId = teamByProfile.get(profileId) ?? null;
+    return teamId ? (colorByTeam.get(teamId) ?? null) : null;
+  };
+
+  // Outdated = the color baked into the art differs from the van's color now
+  // (covers never-colored fighters and van moves alike).
+  const outdated = all.filter((r) => {
+    const baked = ((r.cartoon_meta as { van_color?: string | null } | null)?.van_color ?? null) as
+      string | null;
+    return currentColor(r.profile_id) !== baked;
+  });
+
+  const batch = outdated.slice(0, limit);
+  let ok = 0;
+  let failed = 0;
+  for (const r of batch) {
+    const res = await generateCanvasserCartoon(r.profile_id);
+    if (res.ok) ok++;
+    else failed++;
+  }
+  return {
+    attempted: batch.length,
+    ok,
+    failed,
+    remaining: Math.max(0, outdated.length - batch.length),
+  };
+}

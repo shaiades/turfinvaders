@@ -8,13 +8,14 @@
 import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArcadePanel } from "@/components/arcade";
+import { ArcadePanel, NeonButton } from "@/components/arcade";
 import { RepAvatar } from "@/components/RepAvatar";
 import { Input } from "@/components/ui/input";
 import {
   listCanvasserFightersFn,
   uploadCanvasserPhotoFn,
   generateCanvasserCartoonFn,
+  rerollCanvasserCartoonsFn,
   type CanvasserFighterRow,
 } from "@/lib/canvasser-fighters.functions";
 import { fileToResizedDataUrl } from "@/lib/image-upload";
@@ -66,6 +67,40 @@ export function CanvasserCartoonAdmin() {
     onError: (e) => toast.error(e instanceof Error ? e.message : "Re-roll failed"),
   });
 
+  // Re-roll everyone whose background is stale vs their current van. Loops the
+  // bounded server fn (each call does a few — two image gens apiece) until the
+  // queue drains, so one click refreshes the whole roster.
+  const [bulk, setBulk] = useState<{ running: boolean; done: number; failed: number }>({
+    running: false,
+    done: 0,
+    failed: 0,
+  });
+  const runRerollAll = async () => {
+    setBulk({ running: true, done: 0, failed: 0 });
+    let done = 0;
+    let failed = 0;
+    try {
+      for (let i = 0; i < 100; i++) {
+        const r = await rerollCanvasserCartoonsFn({ data: { limit: 4 } });
+        done += r.ok;
+        failed += r.failed;
+        setBulk({ running: true, done, failed });
+        refresh();
+        if (r.remaining <= 0) break;
+      }
+      toast.success(
+        done === 0 && failed === 0
+          ? "Everyone's background already matches their van"
+          : `Re-rolled ${done} fighter${done === 1 ? "" : "s"} to van colors${failed ? ` · ${failed} failed` : ""}`,
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Re-roll all failed");
+    } finally {
+      setBulk((s) => ({ ...s, running: false }));
+      refresh();
+    }
+  };
+
   const rows = useMemo(() => list.data ?? [], [list.data]);
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
@@ -84,7 +119,7 @@ export function CanvasserCartoonAdmin() {
     );
   }, [rows, q]);
 
-  const pending = upload.isPending || reroll.isPending;
+  const pending = upload.isPending || reroll.isPending || bulk.running;
 
   return (
     <ArcadePanel
@@ -95,6 +130,15 @@ export function CanvasserCartoonAdmin() {
         <span className="font-display text-[10px] uppercase tracking-widest text-muted-foreground">
           {counts.approved ?? 0} live · {counts.none ?? 0} need a photo
         </span>
+      }
+      action={
+        !list.isError && (counts.approved ?? 0) > 0 ? (
+          <NeonButton tone="kombat-gold" disabled={pending} onClick={() => void runRerollAll()}>
+            {bulk.running
+              ? `Re-rolling… ${bulk.done}${bulk.failed ? ` · ${bulk.failed} failed` : ""}`
+              : "Re-roll all to van colors"}
+          </NeonButton>
+        ) : undefined
       }
     >
       {list.isError ? (
