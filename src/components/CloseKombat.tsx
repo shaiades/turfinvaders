@@ -75,6 +75,7 @@ import { MyLeads } from "@/components/MyLeads";
 import { usePendingOohCount } from "@/hooks/usePendingOohCount";
 import { KombatMonthTab } from "@/components/KombatMonth";
 import { KombatHeroBanner } from "@/components/KombatHeroBanner";
+import { ArcadeFxToggle } from "@/components/ArcadeFxToggle";
 import { RepAvatar } from "@/components/RepAvatar";
 import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
 import { useRepAliases } from "@/hooks/useRepAliases";
@@ -1052,6 +1053,9 @@ function CloseKombatInner({
       <KombatHeroBanner
         actions={
           <>
+            {/* Sound/haptics switch — reps' easy on-switch for the Kombat FX
+                (sound is off by default app-wide). Always shown. */}
+            <ArcadeFxToggle />
             {isAdmin && (
               <>
                 <NeonButton
