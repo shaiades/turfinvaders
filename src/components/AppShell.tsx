@@ -365,91 +365,96 @@ export function AppShell({ children }: { children: ReactNode }) {
   // inside explicit overflow-x-auto wrappers.
   return (
     <div className="min-h-dvh w-full max-w-full overflow-x-hidden flex flex-col bg-background px-safe">
-      {/* Owner-only tool (owner decision 2026-08-12): View As never renders
-          for captains, Admins, canvassers, or sales reps — and useAuth
-          ignores the stored override for them too. */}
-      {user && canUseViewAs(realRole) && !isOverridden && !viewAsOpen && (
-        <div className="border-b border-[var(--neon-magenta)]/20 bg-background">
-          <div className="max-w-7xl mx-auto px-3 sm:px-6">
-            <button
-              type="button"
-              onClick={() => setViewAsOpen(true)}
-              title="Preview the app as another role"
-              className="inline-flex min-h-8 items-center gap-1.5 text-[10px] font-display uppercase tracking-widest text-[var(--neon-magenta)]/60 hover:text-[var(--neon-magenta)] transition-colors"
-            >
-              <FlaskConical className="h-3 w-3" /> View As
-            </button>
+      {/* pt-safe: the sticky header owns the status-bar strip in the
+          installed (standalone) PWA; zero everywhere else. It also covers
+          the owner-only View As strip below, which lives as the header's
+          top row — previously it rendered ABOVE the header with no inset,
+          so on an iPhone it drew up under the status bar / Dynamic Island
+          and was untappable. Keeping it inside the one sticky, inset-padded
+          header makes the chip clear the notch and stay reachable. */}
+      <header className="border-b border-border bg-background/95 backdrop-blur sticky top-0 z-20 pt-safe">
+        {/* Owner-only tool (owner decision 2026-08-12): View As never renders
+            for captains, Admins, canvassers, or sales reps — and useAuth
+            ignores the stored override for them too. */}
+        {user && canUseViewAs(realRole) && !isOverridden && !viewAsOpen && (
+          <div className="border-b border-[var(--neon-magenta)]/20">
+            <div className="max-w-7xl mx-auto px-3 sm:px-6">
+              <button
+                type="button"
+                onClick={() => setViewAsOpen(true)}
+                title="Preview the app as another role"
+                className="inline-flex min-h-11 md:min-h-8 items-center gap-1.5 pr-2 text-[11px] md:text-[10px] font-display uppercase tracking-widest text-[var(--neon-magenta)]/70 hover:text-[var(--neon-magenta)] transition-colors"
+              >
+                <FlaskConical className="h-3.5 w-3.5" /> View As
+              </button>
+            </div>
           </div>
-        </div>
-      )}
-      {user && canUseViewAs(realRole) && (isOverridden || viewAsOpen) && (
-        <div className="border-b border-[var(--neon-magenta)]/30 bg-background text-xs">
-          <div className="max-w-7xl mx-auto px-3 sm:px-6 py-1 sm:py-2 flex items-center gap-2 overflow-x-auto scrollbar-hide whitespace-nowrap">
-            <FlaskConical className="w-3.5 h-3.5 text-[var(--neon-magenta)] shrink-0" />
-            <span className="font-display uppercase tracking-widest text-[10px] text-[var(--neon-magenta)] shrink-0">
-              View As
-            </span>
+        )}
+        {user && canUseViewAs(realRole) && (isOverridden || viewAsOpen) && (
+          <div className="border-b border-[var(--neon-magenta)]/30 text-xs">
+            <div className="max-w-7xl mx-auto px-3 sm:px-6 py-1 sm:py-2 flex items-center gap-2 overflow-x-auto scrollbar-hide whitespace-nowrap">
+              <FlaskConical className="w-3.5 h-3.5 text-[var(--neon-magenta)] shrink-0" />
+              <span className="font-display uppercase tracking-widest text-[10px] text-[var(--neon-magenta)] shrink-0">
+                View As
+              </span>
 
-            <select
-              value={role ?? ""}
-              onChange={(e) => {
-                const v = e.target.value as AppRole;
-                setDevRoleOverride(v === realRole ? null : v);
-                if (v !== "sales_rep") applyNameOverride(null);
-              }}
-              className="bg-surface border border-border rounded px-2 py-1.5 min-h-11 md:min-h-9 text-base md:text-xs font-medium focus:outline-none focus:ring-1 focus:ring-[var(--neon-magenta)]"
-            >
-              <option value="owner">Owner</option>
-              <option value="captain">Captain</option>
-              <option value="canvasser">Canvasser</option>
-              <option value="sales_rep">Sales Rep</option>
-              <option value="office_staff">Manager</option>
-            </select>
-            {showRepPicker && (
               <select
-                value={nameOverride ?? ""}
-                onChange={(e) => applyNameOverride(e.target.value || null)}
-                aria-label="Preview as a specific rep"
+                value={role ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value as AppRole;
+                  setDevRoleOverride(v === realRole ? null : v);
+                  if (v !== "sales_rep") applyNameOverride(null);
+                }}
                 className="bg-surface border border-border rounded px-2 py-1.5 min-h-11 md:min-h-9 text-base md:text-xs font-medium focus:outline-none focus:ring-1 focus:ring-[var(--neon-magenta)]"
               >
-                <option value="">Yourself</option>
-                {/* Keep a stale/still-loading selection visible so the select
-                    never silently snaps back to "Yourself". */}
-                {nameOverride && !(repNamesQuery.data ?? []).includes(nameOverride) && (
-                  <option value={nameOverride}>{nameOverride}</option>
-                )}
-                {(repNamesQuery.data ?? []).map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))}
+                <option value="owner">Owner</option>
+                <option value="captain">Captain</option>
+                <option value="canvasser">Canvasser</option>
+                <option value="sales_rep">Sales Rep</option>
+                <option value="office_staff">Manager</option>
               </select>
-            )}
-            {isOverridden && (
-              <button
-                onClick={() => {
-                  setDevRoleOverride(null);
-                  applyNameOverride(null);
-                }}
-                className="ml-auto min-h-11 md:min-h-9 px-2 rounded border border-[var(--neon-magenta)]/40 text-[10px] uppercase tracking-widest text-[var(--neon-magenta)]"
-              >
-                Reset to {realRole}
-              </button>
-            )}
-            {!isOverridden && (
-              <button
-                onClick={() => setViewAsOpen(false)}
-                className="ml-auto min-h-11 md:min-h-9 px-2 text-[10px] uppercase tracking-widest text-muted-foreground hover:text-foreground"
-              >
-                Hide
-              </button>
-            )}
+              {showRepPicker && (
+                <select
+                  value={nameOverride ?? ""}
+                  onChange={(e) => applyNameOverride(e.target.value || null)}
+                  aria-label="Preview as a specific rep"
+                  className="bg-surface border border-border rounded px-2 py-1.5 min-h-11 md:min-h-9 text-base md:text-xs font-medium focus:outline-none focus:ring-1 focus:ring-[var(--neon-magenta)]"
+                >
+                  <option value="">Yourself</option>
+                  {/* Keep a stale/still-loading selection visible so the select
+                      never silently snaps back to "Yourself". */}
+                  {nameOverride && !(repNamesQuery.data ?? []).includes(nameOverride) && (
+                    <option value={nameOverride}>{nameOverride}</option>
+                  )}
+                  {(repNamesQuery.data ?? []).map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {isOverridden && (
+                <button
+                  onClick={() => {
+                    setDevRoleOverride(null);
+                    applyNameOverride(null);
+                  }}
+                  className="ml-auto min-h-11 md:min-h-9 px-3 rounded border border-[var(--neon-magenta)]/40 text-[10px] uppercase tracking-widest text-[var(--neon-magenta)]"
+                >
+                  Reset to {realRole}
+                </button>
+              )}
+              {!isOverridden && (
+                <button
+                  onClick={() => setViewAsOpen(false)}
+                  className="ml-auto min-h-11 md:min-h-9 px-3 text-[10px] uppercase tracking-widest text-muted-foreground hover:text-foreground"
+                >
+                  Hide
+                </button>
+              )}
+            </div>
           </div>
-        </div>
-      )}
-      {/* pt-safe: in the installed (standalone) PWA the sticky header owns
-          the status-bar strip; zero everywhere else. */}
-      <header className="border-b border-border bg-background/95 backdrop-blur sticky top-0 z-20 pt-safe">
+        )}
         {/* Mobile header: centered logo only. Side slots are equal-width
             twins so the wordmark stays optically centered — signed-out is
             44px each, signed-in is 88px each (theme toggle joins the left
