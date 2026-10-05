@@ -125,12 +125,20 @@ expectEq("loot base folds clocked components", loot[0].amount, 460);
 expectEq("loot base is silver", loot[0].coin, "silver");
 expectEq("loot commission is gems", loot.find((l) => l.kind === "commission")?.coin, "gems");
 expectEq("loot sit bonus is gold", loot.find((l) => l.kind === "sitBonus")?.coin, "gold");
-expectEq("loot volume bonus folds OT true-up", loot.find((l) => l.kind === "volumeBonus")?.amount, 1_525);
+expectEq(
+  "loot volume bonus folds OT true-up",
+  loot.find((l) => l.kind === "volumeBonus")?.amount,
+  1_525,
+);
 expectEq("loot total sums every line", lootTotal(loot), 460 + 320 + 150 + 500 + 1_525);
 expectEq("empty input → all-zero lines", lootTotal(lootLines({})), 0);
 
 // ── XP & levels ──────────────────────────────────────────────────────────
-expectEq("xpFor bag", xpFor({ appts: 2, sits: 1, solds: 1, bossesDefeated: 1 }), 20 + 30 + 100 + 1000);
+expectEq(
+  "xpFor bag",
+  xpFor({ appts: 2, sits: 1, solds: 1, bossesDefeated: 1 }),
+  20 + 30 + 100 + 1000,
+);
 expectEq("cumXp L1 = 0", cumXpForLevel(1), 0);
 expectEq("cumXp L2 = 100", cumXpForLevel(2), 100);
 expectEq("cumXp L3 = 300", cumXpForLevel(3), 300);
@@ -166,8 +174,16 @@ const all = evaluateBadges({
   vanMvp: true,
 });
 expectEq("full snapshot → all 6 badges", all.size, 6);
-expectEq("first sale → First Blood", evaluateBadges({ ...base0(), weekSales: 1 }).has("first_blood"), true);
-expectEq("2 sits → no Hat Trick", evaluateBadges({ ...base0(), bestDaySits: 2 }).has("hat_trick"), false);
+expectEq(
+  "first sale → First Blood",
+  evaluateBadges({ ...base0(), weekSales: 1 }).has("first_blood"),
+  true,
+);
+expectEq(
+  "2 sits → no Hat Trick",
+  evaluateBadges({ ...base0(), bestDaySits: 2 }).has("hat_trick"),
+  false,
+);
 expectEq(
   "sniper needs 20+ leads",
   evaluateBadges({ ...base0(), sitRate: 0.9, sitRateLeads: 19 }).has("sniper"),
@@ -178,7 +194,11 @@ expectEq(
   evaluateBadges({ ...base0(), sitRate: 0.5, sitRateLeads: 20 }).has("sniper"),
   true,
 );
-expectEq("1-day streak → no On Fire", evaluateBadges({ ...base0(), sitStreakDays: 1 }).has("streak"), false);
+expectEq(
+  "1-day streak → no On Fire",
+  evaluateBadges({ ...base0(), sitStreakDays: 1 }).has("streak"),
+  false,
+);
 
 function base0() {
   return {

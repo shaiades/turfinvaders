@@ -139,7 +139,9 @@ export function PaycheckHud({ userId }: { userId: string }) {
                   </span>
                 </button>
                 {isOpen && (
-                  <p className="px-2 pb-2 pl-9 text-[11px] text-muted-foreground">{derive(l.kind)}</p>
+                  <p className="px-2 pb-2 pl-9 text-[11px] text-muted-foreground">
+                    {derive(l.kind)}
+                  </p>
                 )}
               </li>
             );

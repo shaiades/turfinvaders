@@ -284,13 +284,7 @@ export function levelForXp(totalXp: number): LevelState {
 // Each unlocks once, with an animation. Definitions are pure data; the
 // unlock test is pure so the Wrap and the profile strip agree on what's lit.
 
-export type BadgeId =
-  | "first_blood"
-  | "hat_trick"
-  | "sniper"
-  | "boss_slayer"
-  | "streak"
-  | "van_mvp";
+export type BadgeId = "first_blood" | "hat_trick" | "sniper" | "boss_slayer" | "streak" | "van_mvp";
 
 export type BadgeDef = {
   id: BadgeId;

@@ -85,7 +85,9 @@ export function BossMeter({ userId }: { userId: string }) {
           }`}
         >
           {boss.enraged ? (
-            <>ONE BIG ROOF AWAY — {money(boss.hpLeft)} to the next {money(BOSS_BOUNTY)}</>
+            <>
+              ONE BIG ROOF AWAY — {money(boss.hpLeft)} to the next {money(BOSS_BOUNTY)}
+            </>
           ) : (
             <>
               {money(boss.hpLeft)} to defeat Boss {boss.level} · {money(BOSS_BOUNTY)} chest
