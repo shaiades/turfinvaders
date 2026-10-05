@@ -192,9 +192,22 @@ export function isFreeRep(rep: DispatchRep): boolean {
 /** Iss-column labels that keep their own flow — never auto-issued. */
 const EXCLUDED_ISS = new Set(["office appt", "ctc", "reload", "add rep"].map((s) => s));
 
-/** First name (lowercased) for strength / OC-first / can-save matching. */
+/** First name (lowercased) for strength / OC-first / attendance matching. */
 export function firstName(name: string | null | undefined): string {
   return normName(name).split(" ")[0] ?? "";
+}
+
+/**
+ * Do two names refer to the same rep? Matched on FIRST NAME only, because the
+ * attendance boards label rows loosely — SD uses nicknames + annotations
+ * ("Jaxon no day off reply", "Nick S", "Josh O'Conner") while the form/people6
+ * carry full names ("Jaxon Heilman"). Every dispatchable rep has a unique first
+ * name within their office (verified against the live roster 2026-10-05), so
+ * the first token is a safe key; a full-name match would miss every SD row.
+ */
+export function sameRep(a: string | null | undefined, b: string | null | undefined): boolean {
+  const fa = firstName(a);
+  return fa !== "" && fa === firstName(b);
 }
 
 /** Is this an issuable, still-open-for-assignment lead at all? (Not Issued, and

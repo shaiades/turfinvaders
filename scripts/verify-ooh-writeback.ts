@@ -75,6 +75,7 @@ import {
   nowWallMinutes as dispatchNowWall,
   planIssue,
   planWatchdog,
+  sameRep,
   scoreCandidate,
   strengthBonus,
   wallClock12,
@@ -1659,6 +1660,16 @@ function mkRep(over: Partial<DispatchRep>): DispatchRep {
   expectEq("nowWall: 10:08 PT", dispatchNowWall(pdt("2026-10-04", 10, 8)), 608);
 
   expectEq("firstName: Yakup", firstName("Yakup Sancakli"), "yakup");
+  // Attendance match is by FIRST NAME — the SD board labels rows loosely.
+  expectEq("firstName: annotated SD row", firstName("Jaxon no day off reply"), "jaxon");
+  expect(
+    "sameRep: Jaxon full ↔ 'Jaxon no day off reply'",
+    sameRep("Jaxon Heilman", "Jaxon no day off reply"),
+  );
+  expect("sameRep: Josh O'Connor ↔ O'Conner typo", sameRep("Josh O'Connor", "Josh O'Conner"));
+  expect("sameRep: Nick Schoeben ↔ 'Nick S'", sameRep("Nick Schoeben", "Nick S"));
+  expect("sameRep: Jovanny Paz ≠ Jonathan Paz", !sameRep("Jovanny Paz unsure", "Jonathan Paz"));
+  expect("sameRep: empty never matches", !sameRep("", "Anyone"));
   expectEq("lang: prefers spanish", detectRequestedLanguage("HO prefers Spanish only"), "Spanish");
   expectEq("lang: habla espanol", detectRequestedLanguage("cliente habla espanol"), "Spanish");
   expectEq("lang: none", detectRequestedLanguage("regular roof lead"), null);

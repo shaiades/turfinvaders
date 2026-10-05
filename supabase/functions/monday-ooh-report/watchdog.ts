@@ -14,7 +14,6 @@ import {
   isOpenLead,
   laHourMinute,
   laWeekday,
-  normName,
 } from "./engine.ts";
 import { fetchAttendance, fetchDispatchDayItems } from "./monday.ts";
 import {
@@ -26,6 +25,7 @@ import {
   isFreeRep,
   nowWallMinutes,
   planWatchdog,
+  sameRep,
   wallClock12,
 } from "./dispatch.ts";
 import { sendDispatcherIMessage } from "./inkbox.ts";
@@ -82,7 +82,9 @@ export async function runWatchdog(supabase: Supa): Promise<WatchdogSummary> {
     ]);
     if (dayItems.length === 0) continue;
 
-    // Working reps + their open-lead counts → free set.
+    // Working reps + their open-lead counts → free set. Attendance is keyed by
+    // FIRST NAME (the boards label rows loosely), so match day-item reps —
+    // which carry full people6 names — by first name too.
     const workingReps: DispatchRep[] = [];
     for (const [name, att] of attendance as Map<
       string,
@@ -93,7 +95,7 @@ export async function runWatchdog(supabase: Supa): Promise<WatchdogSummary> {
       const off = att.amOff && att.pmOff && !att.amOn && !att.pmOn;
       const openLeadCount = dayItems.filter(
         (l) =>
-          l.reps.map(normName).includes(name) &&
+          l.reps.some((r) => sameRep(r, name)) &&
           isOpenLead({ iss: l.issLabel, pm: l.pm, rs: l.rs, ol: l.ol, bo: l.bo, sale: l.sale }),
       ).length;
       workingReps.push({ name, office, working: true, off, openLeadCount, lastCoords: null });

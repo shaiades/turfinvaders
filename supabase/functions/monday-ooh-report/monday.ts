@@ -9,6 +9,7 @@ import {
   type DispatchLead,
   type LatLng,
   detectRequestedLanguage,
+  firstName,
   isCanSaveMarker,
   isJobWalkMarker,
   isOlderHomeownerMarker,
@@ -490,7 +491,10 @@ export async function fetchAttendance(
     const cv = (it.column_values as Array<{ id: string; text: string | null }>) ?? [];
     const amText = (cv.find((c) => c.id === cols.am)?.text ?? "").trim();
     const pmText = (cv.find((c) => c.id === cols.pm)?.text ?? "").trim();
-    out.set(normName(String(it.name ?? "")), {
+    // Key by FIRST NAME: the SD board labels rows loosely ("Jaxon no day off
+    // reply", "Nick S", "Josh O'Conner"), so a full-name key would never match
+    // the form/people6 full name. First names are unique within an office.
+    out.set(firstName(String(it.name ?? "")), {
       amOn: amText === "On",
       pmOn: pmText === "On",
       amOff: amText === "Off",

@@ -52,6 +52,7 @@ import {
   type DispatchRep,
   buildFreeRepsLine,
   buildIssuedText,
+  firstName,
   nowWallMinutes,
   planIssue,
 } from "./dispatch.ts";
@@ -568,7 +569,7 @@ async function runDispatch(p: {
   const freeNone: string[] = [];
 
   for (const repName of p.repNames) {
-    const att = attendance.get(normName(repName));
+    const att = attendance.get(firstName(repName));
     const working = !!att && (att.amOn || att.pmOn);
     const off = !!att && att.amOff && att.pmOff && !att.amOn && !att.pmOn;
     const openLeadCount = dayItems.filter(
