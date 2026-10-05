@@ -20,6 +20,9 @@ import { PlanPanel } from "@/components/PlanPanel";
 import { DailyLogPanel } from "@/components/DailyLogPanel";
 import { CanvasserStats, GrindCounter } from "@/components/CanvasserStats";
 import { PiggyBankHUD } from "@/components/PiggyBankHUD";
+import { CanvasserProgress } from "@/components/CanvasserProgress";
+import { PaycheckHud } from "@/components/PaycheckHud";
+import { BossMeter } from "@/components/BossMeter";
 import { MyFighterCard } from "@/components/MyFighterCard";
 import { usePiggyBank } from "@/hooks/usePiggyBank";
 import type { CanvasserStatsData } from "@/hooks/useCanvasserStats";
@@ -170,7 +173,10 @@ export function CanvasserMission({
           <TodayPanel userId={userId} stats={stats} />
         </TabsContent>
 
-        <TabsContent value="stats" className="mt-6">
+        <TabsContent value="stats" className="mt-6 space-y-5">
+          <CanvasserProgress />
+          <PaycheckHud userId={userId} />
+          <BossMeter userId={userId} />
           <CanvasserStats stats={stats} userId={userId} onEditGoal={() => setTab("plan")} />
         </TabsContent>
       </Tabs>
