@@ -251,7 +251,7 @@ export function CloseKombatOohTab() {
 
   return (
     <div className="space-y-4 md:space-y-6">
-      <ArcadePanel title="Out of House — write-back" faction="kombat">
+      <ArcadePanel title="Disp — write-back" faction="kombat">
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
             <Chip cls={modeCopy.cls}>Write-back: {modeCopy.label}</Chip>
