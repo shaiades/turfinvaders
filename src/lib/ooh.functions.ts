@@ -20,7 +20,7 @@ async function assertAdmin(supabase: AdminClient, userId: string): Promise<void>
   const { data } = await supabase.from("user_roles").select("role").eq("user_id", userId);
   const roles = ((data as Array<{ role: string }> | null) ?? []).map((r) => r.role);
   if (!roles.includes("owner") && !roles.includes("office_staff")) {
-    throw new Error("Only the office (owner / office_staff) can use Disp admin tools.");
+    throw new Error("Only the office (owner / office_staff) can use Dispo admin tools.");
   }
 }
 
