@@ -12,6 +12,8 @@ export function RepAvatar({
   name,
   cartoon,
   variant = "portrait",
+  fit,
+  position,
   className,
   textClassName = "text-xs",
   rounded = "full",
@@ -21,6 +23,17 @@ export function RepAvatar({
   cartoon?: RepCartoon;
   /** "full" uses the full-body art (falls back to the portrait, then initials). */
   variant?: "portrait" | "full";
+  /**
+   * How the art fills its box. "cover" (default) crops to fill; "contain"
+   * shows the whole figure head-to-feet on the box's backdrop — use it for the
+   * big character-select / champion frames where the full fighter should show.
+   */
+  fit?: "cover" | "contain";
+  /**
+   * CSS object-position. Defaults to "center top" for full-body art (so the
+   * head is never the part that gets cropped) and "center" for portraits.
+   */
+  position?: string;
   /** Sizing from the caller, e.g. "h-9 w-9" or "h-full w-full". */
   className?: string;
   textClassName?: string;
@@ -32,6 +45,10 @@ export function RepAvatar({
     variant === "full" ? (cartoon?.full ?? cartoon?.portrait ?? null) : (cartoon?.portrait ?? null);
   const showImg = !!url && !broken;
   const radius = rounded === "full" ? "rounded-full" : rounded === "lg" ? "rounded-lg" : "";
+  const objectFit = fit ?? "cover";
+  // Full-body art is framed head-to-feet, so a centered cover crop lands on the
+  // hips and decapitates the fighter — anchor it to the top instead.
+  const objectPosition = position ?? (variant === "full" ? "center top" : "center");
 
   return (
     <span
@@ -49,7 +66,11 @@ export function RepAvatar({
           src={url!}
           alt={name}
           loading="lazy"
-          className="h-full w-full object-cover"
+          className={cn(
+            "h-full w-full",
+            objectFit === "contain" ? "object-contain" : "object-cover",
+          )}
+          style={{ objectPosition }}
           onError={() => setBroken(true)}
         />
       ) : (

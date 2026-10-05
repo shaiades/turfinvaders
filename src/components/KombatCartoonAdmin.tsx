@@ -276,7 +276,9 @@ function Thumb({
     <div>
       <div className="aspect-square overflow-hidden rounded border border-border bg-kombat-black/40">
         {src ? (
-          <img src={src} alt={alt} loading="lazy" className="h-full w-full object-cover" />
+          // Reviewers judge the WHOLE image before approving — contain, never a
+          // center-crop that hides the head/feet of the full-body art.
+          <img src={src} alt={alt} loading="lazy" className="h-full w-full object-contain" />
         ) : (
           <div className="grid h-full w-full place-items-center text-[9px] text-muted-foreground">
             {fallback ? "—" : ""}

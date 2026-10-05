@@ -463,7 +463,7 @@ export function KombatMonthTab({
               cartoon={cartoonFor(cartoons, totals[0].rep_name)}
               variant="full"
               rounded="lg"
-              className="relative z-10 h-20 w-16 shrink-0"
+              className="relative z-10 h-24 w-20 shrink-0"
               textClassName="text-lg"
               ring
             />
