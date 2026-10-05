@@ -1109,7 +1109,7 @@ function CloseKombatInner({
             {/* OOH write-back cockpit (owner, 2026-10-03): office only. */}
             {isAdmin && (
               <KombatTab value="ooh">
-                OOH
+                Disp
                 {pendingOoh > 0 && (
                   <span className="ml-1.5 inline-flex min-w-5 items-center justify-center rounded-full bg-kombat-red px-1.5 text-[10px] font-display text-white">
                     {pendingOoh}
