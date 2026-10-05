@@ -99,7 +99,7 @@ function LeadCard({
       />
       {!pill.done && (
         <p className="text-center text-[11px] text-muted-foreground">
-          No answer at the door? Tap Report → “At the door” — the office calls them, you don’t.
+          No answer at the door? Tap Open Dispo → “At the door” — the office calls them, you don’t.
         </p>
       )}
     </div>
