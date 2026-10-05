@@ -11,6 +11,7 @@ import {
   type RangeKey,
   type VanRow,
 } from "@/hooks/useCanvasserArcade";
+import { captureMorningRank } from "@/hooks/useWrapData";
 import { BOSS_HP } from "@/lib/canvasserPay";
 
 /**
@@ -72,6 +73,12 @@ export function CanvasserLeaderboard() {
       return () => clearTimeout(t);
     }
   }, [rows]);
+
+  // Remember today's rank the first time they look, so the Daily Wrap can show
+  // the morning → night climb. Only the live "Today" standing counts as morning.
+  useEffect(() => {
+    if (tab === "day" && selfId && self) captureMorningRank(selfId, self.rank);
+  }, [tab, selfId, self]);
 
   const podium = rows.slice(0, 3);
   const rest = rows.slice(3);
