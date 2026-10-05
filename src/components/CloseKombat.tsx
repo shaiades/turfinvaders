@@ -77,6 +77,7 @@ import { KombatMonthTab } from "@/components/KombatMonth";
 import { KombatHeroBanner } from "@/components/KombatHeroBanner";
 import { RepAvatar } from "@/components/RepAvatar";
 import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
+import { useRepAliases } from "@/hooks/useRepAliases";
 import { toast } from "sonner";
 import { rewardToast } from "@/lib/reward-toast";
 import { useCountUp } from "@/hooks/useCountUp";
@@ -258,6 +259,10 @@ function CloseKombatInner({
   const { user, realRole, role, displayName, realDisplayName } = useAuth();
   const { matches, office } = useOfficeFilter();
   const isAdmin = isAdminRole(realRole);
+  // Handle→board-name aliases feed every self-identity matcher on this page
+  // (Stats, Year, Goals), so a rep with a stylized display_name still binds
+  // to their own rows. Omitting it would leave handles unmatched here.
+  const repAliases = useRepAliases().data;
   // OOH admin-queue badge (needs-review + errors) — admins only (hook returns 0
   // for everyone else), mirrors the Respawn badge discipline.
   const pendingOoh = usePendingOohCount();
@@ -501,8 +506,8 @@ function CloseKombatInner({
     const names = new Set<string>();
     for (const r of reportQuery.data ?? []) for (const n of r.reps) names.add(n);
     for (const r of yearPending?.reps ?? []) if (r.pendingRevenue > 0) names.add(r.rep);
-    return buildRepMatcher(displayName, [...names]);
-  }, [displayName, reportQuery.data, yearPending]);
+    return buildRepMatcher(displayName, [...names], repAliases);
+  }, [displayName, reportQuery.data, yearPending, repAliases]);
   const myYearIdx = useMemo(
     () => displayYearAgg.reps.findIndex((r) => yearMatcher.isMe(r.rep)),
     [displayYearAgg.reps, yearMatcher],
@@ -602,8 +607,8 @@ function CloseKombatInner({
     return [...names];
   }, [officeCards]);
   const matcher = useMemo(
-    () => buildRepMatcher(displayName, allBoardNames),
-    [displayName, allBoardNames],
+    () => buildRepMatcher(displayName, allBoardNames, repAliases),
+    [displayName, allBoardNames, repAliases],
   );
   // Self rows read the DISPLAY standings, so on Month the hero's money,
   // rank and gap follow the book while its funnel strip stays card-based
@@ -665,8 +670,8 @@ function CloseKombatInner({
       for (const n of countReps(c)) names.add(n);
       for (const n of volumeReps(c)) names.add(n);
     }
-    return buildRepMatcher(displayName, [...names]);
-  }, [displayName, goalsCards]);
+    return buildRepMatcher(displayName, [...names], repAliases);
+  }, [displayName, goalsCards, repAliases]);
   const weekRow = useMemo(() => {
     if (!isRep || !goalsMatcher.matched) return null;
     const { reps: weekReps } = aggregateCloseKombat(goalsCards ?? [], {

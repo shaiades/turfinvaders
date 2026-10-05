@@ -13,12 +13,16 @@ import { normalizeName } from "@/lib/utils";
  * The ladder is deliberately CONSERVATIVE — a false positive paints someone
  * else's money as yours, which is worse than no match (the house has two
  * distinct Ryans AND a "Jorge N" / "Jorge Najera" pair as separate people):
+ *   0. alias — an admin has explicitly bound this handle to a board name
+ *      (kombat_rep_aliases). The only tier that can resolve a single-token
+ *      handle ("CurtofWest" → "Curtis Westergard"); authoritative, so it wins
+ *      outright and never falls through to a guess.
  *   1. exact normalized match
  *   2. same token multiset (order swaps, "Paz Jonathan")
  *   3. exact last token (≥4 chars) + first-token prefix ≥3 either direction
  *      ("Jon Paz" ↔ "Jonathan Paz")
- * A tier only wins when it matches EXACTLY ONE candidate — ambiguity means
- * no match, never a guess.
+ * A string tier (1–3) only wins when it matches EXACTLY ONE candidate —
+ * ambiguity means no match, never a guess.
  */
 
 // Curly quotes included: iOS smart punctuation types ’, and a profile saved
@@ -49,6 +53,12 @@ export type RepMatcher = {
 export function buildRepMatcher(
   displayName: string | null | undefined,
   boardReps: readonly string[],
+  /**
+   * Optional handle→board-name aliases, keyed by NORMALIZED display name
+   * (normalizeName), value = the raw canonical board name. Pass
+   * `useRepAliases()` here. Omitted → pure string matching, exactly as before.
+   */
+  aliases?: ReadonlyMap<string, string>,
 ): RepMatcher {
   const me = normalizeName(displayName);
   if (me === "" || boardReps.length === 0) {
@@ -65,6 +75,21 @@ export function buildRepMatcher(
     if (k !== "" && !byNorm.has(k)) byNorm.set(k, r);
   }
   const uniq = [...byNorm.values()];
+
+  // Tier 0 — alias. An admin has explicitly declared "this handle IS this
+  // board name", so it's authoritative: resolve the canonical against the
+  // pool and stop. If the aliased name isn't in THIS pool the rep just has
+  // nothing here — return no match rather than letting a stylized handle
+  // ("CurtofWest") fall through to a fuzzy tier and mis-bind onto a stranger.
+  if (aliases) {
+    const canon = aliases.get(me);
+    if (canon !== undefined) {
+      const key = normalizeName(canon);
+      const hit = byNorm.get(key) ?? null;
+      if (hit) return { matched: hit, isMe: (rep) => normalizeName(rep) === key };
+      return { matched: null, isMe: () => false };
+    }
+  }
 
   const pick = (candidates: string[]): string | null =>
     candidates.length === 1 ? candidates[0] : null;

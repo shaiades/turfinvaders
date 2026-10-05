@@ -5,7 +5,7 @@
 // lives on /confirmation-desk next to the Dojo queue.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { ArcadePanel, ArcadePill, NeonButton } from "@/components/arcade";
@@ -13,6 +13,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { csvCell, downloadCsvFile } from "@/lib/csv";
 import { buildRepMatcher } from "@/lib/rep-identity";
+import { useRepAliases, repAliasesKey } from "@/hooks/useRepAliases";
+import { useAuth } from "@/hooks/useAuth";
 import { getKombatAdminBoard, recomputeKombat } from "@/lib/kombat-month.functions";
 import {
   CATEGORY_LABELS,
@@ -70,8 +72,11 @@ export function KombatMonthAdmin({
   });
 
   // Eligibility per LEDGER rep name: profile rows bind by the same matcher
-  // the Stats tab uses; a ledger name with no profile stays ineligible and
-  // is called out so the owner can fix the name, not wonder about the math.
+  // the Stats tab uses (aliases included), so a handle like "CurtofWest"
+  // binds its board name; a ledger name with no profile OR alias stays
+  // ineligible and is called out so the owner fixes the name or adds an
+  // alias, not wonder about the math.
+  const aliases = useRepAliases().data;
   const repNames = useMemo(() => totals.map((t) => t.rep_name), [totals]);
   const { eligibleByRep, unmatched } = useMemo(() => {
     const map = new Map<string, boolean>();
@@ -79,7 +84,7 @@ export function KombatMonthAdmin({
     const countedSaleSet = new Set(boardQuery.data?.counted_sale_reps ?? []);
     const claimed = new Map<string, string>();
     for (const rep of boardQuery.data?.reps ?? []) {
-      const m = buildRepMatcher(rep.display_name, repNames);
+      const m = buildRepMatcher(rep.display_name, repNames, aliases);
       if (!m.matched) continue;
       claimed.set(m.matched, rep.display_name);
       const s = eligibilityStatus(
@@ -94,7 +99,7 @@ export function KombatMonthAdmin({
     }
     for (const name of repNames) if (!claimed.has(name)) un.push(name);
     return { eligibleByRep: map, unmatched: un };
-  }, [boardQuery.data, repNames, rules]);
+  }, [boardQuery.data, repNames, rules, aliases]);
 
   const projection = useMemo(
     () => projectPayouts(totals, eligibleByRep, written, rules),
@@ -219,7 +224,7 @@ export function KombatMonthAdmin({
         {unmatched.length > 0 && (
           <p className="mb-3 text-xs text-muted-foreground">
             No profile matched for: {unmatched.join(", ")} — they show as ineligible until the name
-            matches a player profile.
+            matches a player profile, or you bind their handle in Name aliases below.
           </p>
         )}
         <div className="overflow-x-auto">
@@ -252,9 +257,194 @@ export function KombatMonthAdmin({
         </div>
       </ArcadePanel>
 
+      <AliasPanel repNames={repNames} unmatched={unmatched} onChanged={onChanged} />
       <BountyPanel bounties={bounties} onChanged={onChanged} />
       <RulesEditor rules={rules} onChanged={onChanged} />
     </div>
+  );
+}
+
+// ── Name aliases ───────────────────────────────────────────────────────────
+// Bind a player's chosen handle to their board name so they keep the handle
+// AND their points bind (buildRepMatcher's alias tier). One alias per rep;
+// re-pointing a board name just overwrites the row that owns it.
+
+type AliasRow = { profile_id: string; display_name: string; board_name: string };
+
+function AliasPanel({
+  repNames,
+  unmatched,
+  onChanged,
+}: {
+  repNames: string[];
+  unmatched: string[];
+  onChanged: () => void;
+}) {
+  const { user } = useAuth();
+  const qc = useQueryClient();
+  const [profileId, setProfileId] = useState("");
+  const [boardName, setBoardName] = useState("");
+
+  // Every sales-rep profile — the handle side of an alias. Also the lookup
+  // for rendering existing aliases (display_name by id).
+  const repsQuery = useQuery({
+    queryKey: ["kombat_alias_rep_profiles"],
+    queryFn: async () => {
+      const { data: roleRows, error: rErr } = await supabase
+        .from("user_roles")
+        .select("user_id")
+        .eq("role", "sales_rep");
+      if (rErr) throw new Error(rErr.message);
+      const ids = [...new Set((roleRows ?? []).map((r) => r.user_id))];
+      if (ids.length === 0) return [] as { id: string; display_name: string }[];
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, display_name")
+        .in("id", ids)
+        .order("display_name");
+      if (error) throw new Error(error.message);
+      return (data ?? []).map((p) => ({ id: p.id, display_name: p.display_name ?? "" }));
+    },
+  });
+
+  const aliasesQuery = useQuery({
+    queryKey: ["kombat_alias_rows"],
+    queryFn: async (): Promise<AliasRow[]> => {
+      const { data, error } = await supabase
+        .from("kombat_rep_aliases")
+        .select("profile_id, board_name");
+      if (error) throw new Error(error.message);
+      const nameById = new Map((repsQuery.data ?? []).map((p) => [p.id, p.display_name]));
+      return (data ?? []).map((a) => ({
+        profile_id: a.profile_id,
+        board_name: a.board_name,
+        display_name: nameById.get(a.profile_id) ?? "(unknown profile)",
+      }));
+    },
+    enabled: repsQuery.isSuccess,
+  });
+
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: repAliasesKey });
+    qc.invalidateQueries({ queryKey: ["kombat_alias_rows"] });
+    onChanged();
+  };
+
+  const save = useMutation({
+    mutationFn: async () => {
+      if (profileId === "" || boardName === "") {
+        throw new Error("Pick both a player and a board name.");
+      }
+      const { error } = await supabase.from("kombat_rep_aliases").upsert(
+        { profile_id: profileId, board_name: boardName, created_by: user?.id ?? null },
+        { onConflict: "profile_id" },
+      );
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: () => {
+      toast.success("Alias saved — their points bind on the next refresh.");
+      setProfileId("");
+      setBoardName("");
+      refresh();
+    },
+    onError: (e) => toast.error((e as Error).message),
+  });
+
+  const remove = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("kombat_rep_aliases").delete().eq("profile_id", id);
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: () => {
+      toast.success("Alias removed.");
+      refresh();
+    },
+    onError: (e) => toast.error((e as Error).message),
+  });
+
+  const selectClass =
+    "min-h-11 md:min-h-9 w-full rounded-md border border-border bg-background px-3 text-base md:text-xs";
+  const rows = aliasesQuery.data ?? [];
+
+  return (
+    <ArcadePanel title="Name aliases" status={unmatched.length > 0 ? "warn" : "good"}>
+      <div className="space-y-3">
+        <p className="text-xs text-muted-foreground">
+          Bind a player&apos;s handle to their board name so they keep the handle (e.g.
+          &ldquo;CurtofWest&rdquo;) and still see their points. One alias per player.
+        </p>
+
+        {rows.length > 0 && (
+          <ul className="space-y-1.5">
+            {rows.map((a) => (
+              <li
+                key={a.profile_id}
+                className="flex flex-wrap items-center gap-2 rounded-md border border-border px-3 py-2 text-sm"
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="font-medium">{a.display_name}</span>
+                  <span className="text-muted-foreground"> → {a.board_name}</span>
+                </span>
+                <NeonButton
+                  tone="kombat-red"
+                  disabled={remove.isPending}
+                  onClick={() => remove.mutate(a.profile_id)}
+                >
+                  Remove
+                </NeonButton>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr_auto] md:items-end">
+          <div className="space-y-1.5">
+            <Label htmlFor="alias-profile">Player (handle)</Label>
+            <select
+              id="alias-profile"
+              className={selectClass}
+              value={profileId}
+              onChange={(e) => setProfileId(e.target.value)}
+            >
+              <option value="">Select a player…</option>
+              {(repsQuery.data ?? []).map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.display_name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="alias-board">Board name</Label>
+            <select
+              id="alias-board"
+              className={selectClass}
+              value={boardName}
+              onChange={(e) => setBoardName(e.target.value)}
+            >
+              <option value="">Select a board name…</option>
+              {repNames.map((n) => (
+                <option key={n} value={n}>
+                  {unmatched.includes(n) ? `${n} — unclaimed` : n}
+                </option>
+              ))}
+            </select>
+          </div>
+          <NeonButton
+            tone="kombat-gold"
+            disabled={save.isPending || profileId === "" || boardName === ""}
+            onClick={() => save.mutate()}
+          >
+            {save.isPending ? "Saving…" : "Add alias"}
+          </NeonButton>
+        </div>
+        {repNames.length === 0 && (
+          <p className="text-xs text-muted-foreground">
+            Board names appear once the ledger has rows for the month.
+          </p>
+        )}
+      </div>
+    </ArcadePanel>
   );
 }
 
