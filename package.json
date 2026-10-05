@@ -27,7 +27,9 @@
     "verify:capital": "npx tsx scripts/verify-capital.ts",
     "verify:deviations": "npx tsx scripts/verify-deviations.ts",
     "verify:plan": "npx tsx scripts/verify-action-plan.ts",
-    "verify:activity": "npx tsx scripts/verify-activity.ts"
+    "verify:activity": "npx tsx scripts/verify-activity.ts",
+    "verify:respawn": "npx tsx scripts/verify-respawn.ts",
+    "verify:ooh": "npx tsx scripts/verify-ooh-writeback.ts"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",

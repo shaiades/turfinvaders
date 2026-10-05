@@ -69,6 +69,10 @@ import { CloseKombatPlanTab, PlanTabBadge } from "@/components/CloseKombatPlanTa
 import { CloseKombatGoalsTab } from "@/components/CloseKombatGoalsTab";
 import { ActivityTestPanel } from "@/components/ActivityTestPanel";
 import { CloseKombatLearnTab } from "@/components/CloseKombatLearnTab";
+import { CloseKombatRespawnTab } from "@/components/CloseKombatRespawnTab";
+import { CloseKombatOohTab } from "@/components/CloseKombatOohTab";
+import { MyLeads } from "@/components/MyLeads";
+import { usePendingOohCount } from "@/hooks/usePendingOohCount";
 import { KombatMonthTab } from "@/components/KombatMonth";
 import { KombatHeroBanner } from "@/components/KombatHeroBanner";
 import { RepAvatar } from "@/components/RepAvatar";
@@ -105,10 +109,12 @@ import {
 // the page is showing.
 export const CLOSE_KOMBAT_PAGE_TABS = [
   "stats",
+  "leads",
   "plan",
   "kombat",
   "money",
   "goals",
+  "respawn",
   "learn",
 ] as const;
 export type CloseKombatPageTab = (typeof CLOSE_KOMBAT_PAGE_TABS)[number];
@@ -118,6 +124,9 @@ export const isCloseKombatPageTab = (t: unknown): t is CloseKombatPageTab =>
 // View As switched back mid-preview) coerces to Stats — the TabsContent is
 // `isRep &&`-gated, so without this they'd get an empty page.
 const REP_ONLY_TABS = new Set<CloseKombatPageTab>(["plan", "money", "goals"]);
+// The combined "Leads/Dispo" tab: reps see their leads + the Dispo buttons;
+// the office (admin) additionally sees the write-back cockpit below. Visible to
+// either, so a user who is NEITHER coerces to Stats (both halves are gated).
 
 export function CloseKombat({
   rawTab,
@@ -249,6 +258,9 @@ function CloseKombatInner({
   const { user, realRole, role, displayName, realDisplayName } = useAuth();
   const { matches, office } = useOfficeFilter();
   const isAdmin = isAdminRole(realRole);
+  // OOH admin-queue badge (needs-review + errors) — admins only (hook returns 0
+  // for everyone else), mirrors the Respawn badge discipline.
+  const pendingOoh = usePendingOohCount();
   // The rep-first layout keys off the EFFECTIVE role so View As previews it;
   // the admin controls above keep keying off realRole (the sync buttons must
   // not vanish from the owner mid-preview).
@@ -257,7 +269,12 @@ function CloseKombatInner({
   // from a non-rep session) and rep-only tabs under a non-rep role coerce to
   // Stats rather than rendering an empty page.
   const pageTab: CloseKombatPageTab =
-    isCloseKombatPageTab(rawTab) && (isRep || !REP_ONLY_TABS.has(rawTab)) ? rawTab : "stats";
+    isCloseKombatPageTab(rawTab) &&
+    (isRep || !REP_ONLY_TABS.has(rawTab)) &&
+    // Leads/Dispo is for reps (their leads) OR admins (the office cockpit).
+    (rawTab !== "leads" || isRep || isAdmin)
+      ? rawTab
+      : "stats";
   // View As doesn't swap user.id (useAuth.ts) — only role/displayName are
   // overridden — so a preview must never let Goals write to the admin's own
   // profile row believing it's the previewed rep's.
@@ -1069,7 +1086,21 @@ function CloseKombatInner({
         <div className="-mx-4 px-4 sm:mx-0 sm:px-0 overflow-x-auto scrollbar-hide">
           <TabsList className="flex w-max min-w-full flex-nowrap whitespace-nowrap bg-surface border border-border p-1 h-auto">
             <KombatTab value="stats">Stats</KombatTab>
-            {/* Plan rides second so it's on-screen inside the 375px strip —
+            {/* Leads/Dispo (owner, 2026-10-05): one tab — reps get their daily
+                driver (today's appointments + the one-tap Dispo buttons); the
+                office additionally gets the write-back cockpit below. The badge
+                (needs-review count) is admin-only. */}
+            {(isRep || isAdmin) && (
+              <KombatTab value="leads">
+                Leads/Dispo
+                {isAdmin && pendingOoh > 0 && (
+                  <span className="ml-1.5 inline-flex min-w-5 items-center justify-center rounded-full bg-kombat-red px-1.5 text-[10px] font-display text-white">
+                    {pendingOoh}
+                  </span>
+                )}
+              </KombatTab>
+            )}
+            {/* Plan rides next so it's on-screen inside the 375px strip —
                 it's the rep's always-available reopen of the weekly popup. */}
             {isRep && (
               <KombatTab value="plan">
@@ -1082,6 +1113,10 @@ function CloseKombatInner({
             <KombatTab value="kombat">Kombat</KombatTab>
             {isRep && <KombatTab value="money">Money</KombatTab>}
             {isRep && <KombatTab value="goals">Goals</KombatTab>}
+            {/* Respawn (owner, 2026-10-03): shift-off requests. Reps request;
+                Tyler/Shai/Jorge (admin tier) get the approval queue. Visible
+                to both, so it stays ungated. */}
+            <KombatTab value="respawn">Respawn</KombatTab>
             <KombatTab value="learn">Learn</KombatTab>
           </TabsList>
         </div>
@@ -1982,6 +2017,53 @@ function CloseKombatInner({
             />
           </TabsContent>
         )}
+
+        <TabsContent value="respawn" className="mt-4">
+          <CloseKombatRespawnTab
+            userId={user?.id ?? null}
+            isRep={isRep}
+            isAdmin={isAdmin}
+            displayName={displayName}
+            isPreview={isPreview}
+          />
+        </TabsContent>
+
+        {/* Leads/Dispo: the rep's leads (reps) + the office write-back cockpit
+            (admins) in one tab. A user who is both (owner previewing a rep via
+            View As) sees their leads first, then the cockpit — the Reps/Office
+            headers show only then, so a single-section view stays uncluttered. */}
+        <TabsContent value="leads" className="mt-4 space-y-4 md:space-y-6">
+          {isRep && (
+            <div className="space-y-3">
+              {isAdmin && (
+                <div className="flex flex-wrap items-baseline gap-x-2 border-b border-border/40 pb-1.5">
+                  <span className="font-display text-base uppercase tracking-widest text-neon">
+                    Reps
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    what the field sees &amp; submits
+                  </span>
+                </div>
+              )}
+              <MyLeads displayName={displayName} />
+            </div>
+          )}
+          {isAdmin && (
+            <div className="space-y-3">
+              {isRep && (
+                <div className="flex flex-wrap items-baseline gap-x-2 border-b border-border/40 pb-1.5">
+                  <span className="font-display text-base uppercase tracking-widest text-kombat-gold">
+                    Office
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    review &amp; what didn't make it into Monday
+                  </span>
+                </div>
+              )}
+              <CloseKombatOohTab />
+            </div>
+          )}
+        </TabsContent>
 
         <TabsContent value="learn" className="mt-4">
           <CloseKombatLearnTab userId={user?.id ?? null} />
