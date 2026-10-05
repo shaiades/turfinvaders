@@ -1,13 +1,15 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
-import { laWeekStartISO } from "@/lib/dates";
 import {
+  attendanceWeekStartISO,
+  canWithdrawRespawn,
   isLateForWeek,
   isMondayISO,
   normalizeShifts,
-  officeToRep,
+  resolveRosterOffice,
   settleApproval,
+  shiftsToRevertOnResubmit,
   type RepOffice,
   type RespawnStatus,
   type ShiftKey,
@@ -49,10 +51,14 @@ type AdminClient = {
   };
 };
 
-async function assertAdmin(supabase: AdminClient, userId: string): Promise<void> {
+async function userIsAdmin(supabase: AdminClient, userId: string): Promise<boolean> {
   const { data } = await supabase.from("user_roles").select("role").eq("user_id", userId);
   const roles = ((data as Array<{ role: string }> | null) ?? []).map((r) => r.role);
-  if (!roles.includes("owner") && !roles.includes("office_staff")) {
+  return roles.includes("owner") || roles.includes("office_staff");
+}
+
+async function assertAdmin(supabase: AdminClient, userId: string): Promise<void> {
+  if (!(await userIsAdmin(supabase, userId))) {
     throw new Error("Only Tyler, Shai or Jorge can review time-off requests.");
   }
 }
@@ -95,12 +101,24 @@ export const submitRespawnRequest = createServerFn({ method: "POST" })
       .maybeSingle();
     if (profErr) throw new Error(profErr.message);
     const repName = (profile?.display_name as string | null)?.trim() || "Unknown";
-    const office: RepOffice = officeToRep(profile?.office_location as string | null);
+    // Office is the rep's ROSTER office (profiles.office_location) — never a
+    // value the rep typed (Sam Corona is OC even if a form said "San Diego").
+    const { office, rosterProvided } = resolveRosterOffice(
+      profile?.office_location as string | null,
+    );
+    // Warn when the roster has no office for this rep: we defaulted to SD, and a
+    // wrong office writes the day-off to the wrong attendance board (SD vs OC).
+    // Surfaces a data fix (set the office in Manage Players / /users).
+    if (!rosterProvided) {
+      console.warn(
+        `[respawn] ${repName} (${userId}) has no roster office_location — defaulting to ${office}. Set their office in Manage Players so approved shifts hit the right attendance board.`,
+      );
+    }
     const late = isLateForWeek(weekStart);
 
     const { data: existing } = await supabaseAdmin
       .from("respawn_requests")
-      .select("id, monday_item_id")
+      .select("id, monday_item_id, status, approved_shifts, week_start")
       .eq("user_id", userId)
       .eq("week_start", weekStart)
       .maybeSingle();
@@ -137,7 +155,21 @@ export const submitRespawnRequest = createServerFn({ method: "POST" })
     try {
       const token = await mondayToken();
       if (token) {
-        const { syncDayOffItem } = await import("@/lib/respawn.server");
+        const { syncDayOffItem, applyAttendance } = await import("@/lib/respawn.server");
+        // Editing an already-approved request sends it back to pending — so
+        // first UN-apply its attendance writes (set the previously-granted
+        // shifts back On) for the current attendance week (#13).
+        const revert = shiftsToRevertOnResubmit(
+          {
+            status: (existing?.status as RespawnStatus | null) ?? "pending",
+            approvedShifts: (existing?.approved_shifts as string[] | null) ?? [],
+            weekStart: (existing?.week_start as string | null) ?? weekStart,
+          },
+          attendanceWeekStartISO(new Date()),
+        );
+        if (revert.length > 0) {
+          await applyAttendance(token, { office, repName, shifts: revert, label: "On" });
+        }
         const itemId = await syncDayOffItem(token, {
           rowId,
           repName,
@@ -221,7 +253,9 @@ export const reviewRespawnRequest = createServerFn({ method: "POST" })
               note: data.note?.trim() ? data.note.trim() : null,
             });
           }
-          const isCurrentWeek = (row.week_start as string) === laWeekStartISO(new Date());
+          // From Sunday noon PT, the coming week is the "current" attendance
+          // week — so a weekend approval for next week applies now (#14).
+          const isCurrentWeek = (row.week_start as string) === attendanceWeekStartISO(new Date());
           if (approvedShifts.length > 0 && isCurrentWeek) {
             attendanceApplied = await applyAttendance(token, {
               office: row.office as RepOffice,
@@ -252,9 +286,19 @@ export const cancelRespawnRequest = createServerFn({ method: "POST" })
       .maybeSingle();
     if (!row) return { ok: true };
 
-    // Own pending row, or an approver, may withdraw.
-    if ((row.user_id as string) !== context.userId) {
-      await assertAdmin(context.supabase as unknown as AdminClient, context.userId);
+    // A rep may withdraw ONLY their own PENDING request; an approver may
+    // withdraw any. An approved/denied request must be edited (→ pending)
+    // instead (#13).
+    const isOwner = (row.user_id as string) === context.userId;
+    const isAdmin = await userIsAdmin(context.supabase as unknown as AdminClient, context.userId);
+    if (
+      !canWithdrawRespawn({ isOwner, isAdmin, status: (row.status as RespawnStatus) ?? "pending" })
+    ) {
+      throw new Error(
+        isOwner
+          ? "Approved or denied requests can't be withdrawn — edit the request to send it back to pending first."
+          : "Only the requester or an approver can withdraw this request.",
+      );
     }
 
     const { error: delErr } = await supabaseAdmin
@@ -269,7 +313,7 @@ export const cancelRespawnRequest = createServerFn({ method: "POST" })
         const { deleteDayOffItem, applyAttendance } = await import("@/lib/respawn.server");
         // If a granted current-week request is withdrawn, put the GRANTED
         // shifts back ON before clearing the Day-Off item.
-        const isCurrentWeek = (row.week_start as string) === laWeekStartISO(new Date());
+        const isCurrentWeek = (row.week_start as string) === attendanceWeekStartISO(new Date());
         const wasGranted = ["approved", "partial"].includes(row.status as string);
         const grantedShifts = normalizeShifts(
           (row.approved_shifts as string[] | null) ?? [],

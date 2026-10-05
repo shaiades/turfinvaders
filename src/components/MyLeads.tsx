@@ -5,6 +5,7 @@ import { OohReportButton } from "@/components/OohReportButton";
 import { MapPin, Users, Loader2, CheckCircle2 } from "lucide-react";
 import { laTodayISO } from "@/lib/dates";
 import { buildRepMatcher } from "@/lib/rep-identity";
+import { isMyLeadVisible } from "@/lib/ooh";
 import { useMyLeads, type MyLeadCard } from "@/hooks/useMyLeads";
 
 /**
@@ -116,7 +117,12 @@ export function MyLeads({ displayName }: { displayName: string | null }) {
   }, [cards, displayName]);
 
   const mine = useMemo(() => {
-    const rows = cards.filter((c) => (c.reps ?? []).some((r) => matcher.isMe(r)));
+    // Only leads actually issued to the rep (Iss / Office Appt) or already
+    // reported today — never a Not-Issued lead (one-lead-at-a-time; and a
+    // Not-Issued lead's address must not leak). See isMyLeadVisible.
+    const rows = cards
+      .filter((c) => (c.reps ?? []).some((r) => matcher.isMe(r)))
+      .filter((c) => isMyLeadVisible(c));
     // Unreported first, then by name.
     return rows.sort((a, b) => {
       const ad = outcomeOf(a) ? 1 : 0;

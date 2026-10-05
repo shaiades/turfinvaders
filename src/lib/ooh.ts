@@ -130,3 +130,99 @@ export function oohResultLabel(result: number | null | undefined): string {
 export function oohOnBlockLabel(onBlock: number | null | undefined): string {
   return onBlock == null ? "—" : (OOH_ON_BLOCK_LABEL[onBlock] ?? `#${onBlock}`);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Open-lead rule (app side). MIRRORS isOpenLead / hasExistingDisposition in
+// supabase/functions/monday-ooh-report/engine.ts — the edge fn can't be imported
+// here (Deno/URL imports) so the rule is duplicated, with the same exact text,
+// and both copies are asserted in scripts/verify-ooh-writeback.ts.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** The disposition column labels on a block card (everything except Iss). */
+export type OohDispositionLabels = {
+  pm: string | null; // status_1
+  rs: string | null; // status_2
+  ol: string | null; // status_3
+  bo: string | null; // status4
+  sale: string | null; // status9
+};
+
+const OOH_ISS = "Iss";
+const OOH_NOT_ISSUED = "Not Issued";
+const OOH_NO_SHOW_TEXT = "No show text";
+
+/** Blank = empty or Monday's explicit "None". */
+export function oohIsBlankStatus(label: string | null | undefined): boolean {
+  const t = (label ?? "").trim();
+  return t === "" || t.toLowerCase() === "none";
+}
+
+/** A disposition is already set (lead no longer open). The at-the-door
+ *  "No show text" marker is the ONE exception — it holds the lead open. */
+export function oohHasDisposition(d: OohDispositionLabels): boolean {
+  if (
+    !oohIsBlankStatus(d.pm) ||
+    !oohIsBlankStatus(d.rs) ||
+    !oohIsBlankStatus(d.ol) ||
+    !oohIsBlankStatus(d.sale)
+  )
+    return true;
+  if (!oohIsBlankStatus(d.bo) && (d.bo ?? "").trim() !== OOH_NO_SHOW_TEXT) return true;
+  return false;
+}
+
+/** Rule 7 "open lead": Iss pressed AND no disposition yet (No show text aside).
+ *  A reported lead keeps its Iss label, so this — not `iss === "Iss"` — is what
+ *  tells a missing-report scan that the lead is still outstanding (#5). */
+export function oohIsOpenLead(d: OohDispositionLabels & { iss: string | null }): boolean {
+  if ((d.iss ?? "").trim() !== OOH_ISS) return false;
+  return !oohHasDisposition(d);
+}
+
+/** Normalize a rep name for matching (lowercase, collapse whitespace). */
+export function oohNormName(n: string | null | undefined): string {
+  return (n ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/**
+ * The rep "My Leads" visibility rule (#11): show a lead only when it is issued
+ * (Iss) or an Office Appt, OR already reported today (any disposition). Never
+ * surface a Not-Issued lead — that breaks one-lead-at-a-time and would leak the
+ * address of a lead the rep hasn't been given yet.
+ */
+export function isMyLeadVisible(c: OohDispositionLabels & { iss: string | null }): boolean {
+  const iss = (c.iss ?? "").trim();
+  const reported = oohHasDisposition(c) || (c.bo ?? "").trim() === OOH_NO_SHOW_TEXT;
+  return reported || iss === OOH_ISS || /^office appt/i.test(iss);
+}
+
+/** A block item as the "push next lead" planner needs it. */
+export type OohNextLeadItem = {
+  itemId: string;
+  name: string;
+  reps: string[];
+  iss: string | null;
+  apptMs: number | null;
+};
+
+/**
+ * The rep's NEXT lead to issue for a manager "Push lead" (#12): the earliest
+ * Not-Issued lead that still has the rep, with an appointment time after `now`.
+ * Pressing Iss on an already-Iss late/missing lead did nothing — this picks the
+ * next one to hand the rep. null when there is none.
+ */
+export function planNextLeadToIssue(
+  items: OohNextLeadItem[],
+  repName: string,
+  nowMs: number,
+): OohNextLeadItem | null {
+  const rep = oohNormName(repName);
+  if (!rep) return null;
+  return (
+    items
+      .filter((it) => (it.iss ?? "").trim() === OOH_NOT_ISSUED)
+      .filter((it) => it.reps.map(oohNormName).includes(rep))
+      .filter((it) => it.apptMs == null || it.apptMs > nowMs)
+      .sort((a, b) => (a.apptMs ?? Infinity) - (b.apptMs ?? Infinity))[0] ?? null
+  );
+}

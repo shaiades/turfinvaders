@@ -11,6 +11,8 @@ import {
   SHIFT_ATTENDANCE_COL,
   SHIFT_KEYS,
   SHIFT_LABEL,
+  attendanceWeekStartISO,
+  canWithdrawRespawn,
   comingWeekStartISO,
   inReminderWindow,
   isLateForWeek,
@@ -19,8 +21,10 @@ import {
   mondayApprovalLabel,
   normalizeShifts,
   officeToRep,
+  resolveRosterOffice,
   respawnDeadlineMs,
   settleApproval,
+  shiftsToRevertOnResubmit,
   summarizeShifts,
   type ShiftKey,
 } from "../src/lib/respawn";
@@ -181,6 +185,145 @@ expectEq("Orange County → OC", officeToRep("Orange County"), "OC");
 expectEq("null office → SD (pre-OC default)", officeToRep(null), "SD");
 expectEq("SD Corporate → SD", officeToRep("SD Corporate"), "SD");
 expectEq("short code OC → OC", officeToRep("OC"), "OC");
+
+// ── FIX-UP PASS (review against the live boards) — #13–#15 ───────────────────
+
+// — #14 attendance "current week" rolls to the coming week from Sunday noon PT
+// Week of Mon 2026-10-05; Mon 2026-10-12 is the coming week.
+expectEq(
+  "attendance week: a weekday → this week's Monday",
+  attendanceWeekStartISO(pdt("2026-10-07", 14)),
+  "2026-10-05",
+);
+expectEq(
+  "attendance week: Sat → still this week",
+  attendanceWeekStartISO(pdt("2026-10-10", 20)),
+  "2026-10-05",
+);
+expectEq(
+  "attendance week: Sun 11 AM → still this week",
+  attendanceWeekStartISO(pdt("2026-10-11", 11)),
+  "2026-10-05",
+);
+expectEq(
+  "attendance week: Sun 12 PM → rolls to coming week",
+  attendanceWeekStartISO(pdt("2026-10-11", 12)),
+  "2026-10-12",
+);
+expectEq(
+  "attendance week: Sun 3 PM → coming week",
+  attendanceWeekStartISO(pdt("2026-10-11", 15)),
+  "2026-10-12",
+);
+expectEq(
+  "attendance week: Mon 9 AM → this (new) week",
+  attendanceWeekStartISO(pdt("2026-10-12", 9)),
+  "2026-10-12",
+);
+
+// — #13 who may WITHDRAW: reps only their own PENDING; approvers anything -------
+expectEq(
+  "withdraw: admin withdraws any",
+  canWithdrawRespawn({ isOwner: false, isAdmin: true, status: "approved" }),
+  true,
+);
+expectEq(
+  "withdraw: owner withdraws pending",
+  canWithdrawRespawn({ isOwner: true, isAdmin: false, status: "pending" }),
+  true,
+);
+expectEq(
+  "withdraw: owner CANNOT withdraw approved",
+  canWithdrawRespawn({ isOwner: true, isAdmin: false, status: "approved" }),
+  false,
+);
+expectEq(
+  "withdraw: owner CANNOT withdraw partial",
+  canWithdrawRespawn({ isOwner: true, isAdmin: false, status: "partial" }),
+  false,
+);
+expectEq(
+  "withdraw: owner CANNOT withdraw denied",
+  canWithdrawRespawn({ isOwner: true, isAdmin: false, status: "denied" }),
+  false,
+);
+expectEq(
+  "withdraw: a stranger cannot",
+  canWithdrawRespawn({ isOwner: false, isAdmin: false, status: "pending" }),
+  false,
+);
+expectEq(
+  "withdraw: owner who is also admin can withdraw approved",
+  canWithdrawRespawn({ isOwner: true, isAdmin: true, status: "approved" }),
+  true,
+);
+
+// — #13 editing an approved request reverts its attendance writes first --------
+const attWeek = "2026-10-12";
+expectEq(
+  "revert: approved current-week → its granted shifts go back On",
+  shiftsToRevertOnResubmit(
+    { status: "approved", approvedShifts: ["mon_am", "tue_pm"], weekStart: attWeek },
+    attWeek,
+  ),
+  ["mon_am", "tue_pm"] as ShiftKey[],
+);
+expectEq(
+  "revert: partial current-week → the granted subset",
+  shiftsToRevertOnResubmit(
+    { status: "partial", approvedShifts: ["fri_pm"], weekStart: attWeek },
+    attWeek,
+  ),
+  ["fri_pm"] as ShiftKey[],
+);
+expectEq(
+  "revert: pending → nothing to revert",
+  shiftsToRevertOnResubmit({ status: "pending", approvedShifts: [], weekStart: attWeek }, attWeek),
+  [],
+);
+expectEq(
+  "revert: approved but a DIFFERENT week → nothing (never applied yet)",
+  shiftsToRevertOnResubmit(
+    { status: "approved", approvedShifts: ["mon_am"], weekStart: "2026-11-02" },
+    attWeek,
+  ),
+  [],
+);
+expectEq("revert: no previous row → nothing", shiftsToRevertOnResubmit(null, attWeek), []);
+
+// — #15 office comes from the rep's ROSTER, not the answer they typed ----------
+expectEq(
+  "office: roster OC ignores a typed 'San Diego' (Sam Corona)",
+  resolveRosterOffice("Orange County", "San Diego"),
+  { office: "OC", mismatch: true, rosterProvided: true },
+);
+expectEq("office: roster SD + matching answer", resolveRosterOffice("San Diego", "San Diego"), {
+  office: "SD",
+  mismatch: false,
+  rosterProvided: true,
+});
+expectEq("office: no answer → roster, no mismatch", resolveRosterOffice("Orange County"), {
+  office: "OC",
+  mismatch: false,
+  rosterProvided: true,
+});
+// Blank / missing roster office → defaulted to SD, FLAGGED so the office can
+// fix the roster (a wrong office writes the day-off to the wrong board).
+expectEq("office: null roster → SD, flagged not provided", resolveRosterOffice(null), {
+  office: "SD",
+  mismatch: false,
+  rosterProvided: false,
+});
+expectEq("office: empty-string roster → SD, flagged not provided", resolveRosterOffice(""), {
+  office: "SD",
+  mismatch: false,
+  rosterProvided: false,
+});
+expectEq("office: whitespace roster → SD, flagged not provided", resolveRosterOffice("   "), {
+  office: "SD",
+  mismatch: false,
+  rosterProvided: false,
+});
 
 if (failures > 0) {
   console.error(`\n${failures} failure(s)`);

@@ -4,7 +4,7 @@
 // read-only live-dispatch client (../monday-live-dispatch/monday.ts) is kept
 // separate on purpose: this one adds the write mutations the OOH flow needs,
 // and the edge runtime cannot share modules across functions safely.
-import { BLOCK_COL, type ColMap, type DayItem, normName } from "./engine.ts";
+import { BLOCK_COL, type ColMap, type DayItem, laWallMinutesFromUtc, normName } from "./engine.ts";
 
 const denoEnv = (globalThis as { Deno?: { env: { get(k: string): string | undefined } } }).Deno
   ?.env;
@@ -132,6 +132,13 @@ export type BlockItem = {
   details: string | null;
   apptWallMinutes: number | null;
   reps: string[];
+  // Current disposition column labels (for the already-dispositioned guard).
+  iss: string | null;
+  pm: string | null;
+  rs: string | null;
+  ol: string | null;
+  bo: string | null;
+  sale: string | null;
 };
 
 const BLOCK_READ_COLS = [
@@ -140,22 +147,29 @@ const BLOCK_READ_COLS = [
   BLOCK_COL.details,
   BLOCK_COL.apptDateTime,
   BLOCK_COL.reps,
+  BLOCK_COL.iss,
+  BLOCK_COL.pm,
+  BLOCK_COL.rs,
+  BLOCK_COL.ol,
+  BLOCK_COL.bo,
+  BLOCK_COL.sale,
 ];
 
 function wallMinutesFromDate(value: string | null, text: string | null): number | null {
-  // date9 value JSON: {date,time}; time is LA wall "HH:MM:SS". All items in one
-  // day group share a date, so wall-minutes is a valid ordering key.
+  // date9 value JSON: {date,time} in UTC (Monday stores date columns in UTC).
+  // Convert to LA wall-minutes — reading the UTC time raw mis-orders late-day
+  // appointments (5:30 PM PT is stored "00:30" the NEXT UTC day). All items in
+  // one day group share a date, so LA wall-minutes is a valid ordering key.
   try {
     if (value) {
-      const v = JSON.parse(value) as { time?: string | null };
-      if (v.time) {
-        const [h, m] = v.time.split(":").map(Number);
-        return h * 60 + m;
-      }
+      const v = JSON.parse(value) as { date?: string | null; time?: string | null };
+      const la = laWallMinutesFromUtc(v.date ?? null, v.time ?? null);
+      if (la != null) return la;
     }
   } catch {
     /* fall through */
   }
+  // Fallback: `text` is already rendered in the account's timezone (Pacific).
   const m = (text ?? "").match(/(\d{1,2}):(\d{2})/);
   return m ? Number(m[1]) * 60 + Number(m[2]) : null;
 }
@@ -165,7 +179,7 @@ export async function fetchBlockItem(token: string, itemId: string): Promise<Blo
   const { data } = await graphql(
     token,
     `
-      query ($ids: [ID!]) {
+      query ($ids: [ID!], $cols: [String!]) {
         items(ids: $ids) {
           id
           name
@@ -176,7 +190,7 @@ export async function fetchBlockItem(token: string, itemId: string): Promise<Blo
           group {
             id
           }
-          column_values {
+          column_values(ids: $cols) {
             id
             text
             value
@@ -184,7 +198,7 @@ export async function fetchBlockItem(token: string, itemId: string): Promise<Blo
         }
       }
     `,
-    { ids: [itemId] },
+    { ids: [itemId], cols: BLOCK_READ_COLS },
   );
   const it = ((data?.items as Array<Record<string, unknown>>) ?? [])[0];
   if (!it) return null;
@@ -192,6 +206,7 @@ export async function fetchBlockItem(token: string, itemId: string): Promise<Blo
     it.column_values as Array<{ id: string; text: string | null; value: string | null }>,
   );
   const sc = cols[BLOCK_COL.sourceCode]?.text ?? "";
+  const label = (id: string) => cols[id]?.text?.trim() || null;
   return {
     id: String(it.id),
     name: String(it.name ?? ""),
@@ -209,6 +224,12 @@ export async function fetchBlockItem(token: string, itemId: string): Promise<Blo
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean),
+    iss: label(BLOCK_COL.iss),
+    pm: label(BLOCK_COL.pm),
+    rs: label(BLOCK_COL.rs),
+    ol: label(BLOCK_COL.ol),
+    bo: label(BLOCK_COL.bo),
+    sale: label(BLOCK_COL.sale),
   };
 }
 
@@ -227,7 +248,18 @@ export async function fetchDayGroupItems(
             items_page(limit: 200) {
               items {
                 id
-                column_values(ids: ["people6", "status", "date9"]) {
+                column_values(
+                  ids: [
+                    "people6"
+                    "status"
+                    "date9"
+                    "status_1"
+                    "status_2"
+                    "status_3"
+                    "status4"
+                    "status9"
+                  ]
+                ) {
                   id
                   text
                   value
@@ -245,6 +277,7 @@ export async function fetchDayGroupItems(
       groups?: Array<{ items_page?: { items?: Array<Record<string, unknown>> } }>;
     }>) ?? [];
   const items = boards[0]?.groups?.[0]?.items_page?.items ?? [];
+  const label = (c: ColMap, id: string) => c[id]?.text?.trim() || null;
   return items.map((it) => {
     const cols = colMapOf(
       it.column_values as Array<{ id: string; text: string | null; value: string | null }>,
@@ -255,8 +288,13 @@ export async function fetchDayGroupItems(
         .split(",")
         .map((s) => normName(s))
         .filter(Boolean),
-      statusLabel: cols["status"]?.text?.trim() || null,
+      statusLabel: label(cols, BLOCK_COL.iss),
       timeMs: wallMinutesFromDate(cols["date9"]?.value ?? null, cols["date9"]?.text ?? null),
+      pm: label(cols, BLOCK_COL.pm),
+      rs: label(cols, BLOCK_COL.rs),
+      ol: label(cols, BLOCK_COL.ol),
+      bo: label(cols, BLOCK_COL.bo),
+      sale: label(cols, BLOCK_COL.sale),
     };
   });
 }
@@ -306,11 +344,15 @@ export async function setStatus(
   );
 }
 
-/** Post a Monday update (activity-log note) on the block item. */
+/** Post a Monday update (activity-log note) on the block item. The caller passes
+ *  a per-SUBMISSION idempotency key (keyed by the form item id) — keying by the
+ *  block item id made a SECOND report on the same lead replay the first and the
+ *  note was dropped. */
 export async function postUpdate(
   token: string,
   itemId: string,
   body: string,
+  idempotencyKey: string,
 ): Promise<MondayResult> {
   return graphql(
     token,
@@ -322,7 +364,7 @@ export async function postUpdate(
       }
     `,
     { i: itemId, b: body },
-    `ooh-update-${itemId}`,
+    idempotencyKey,
   );
 }
 

@@ -15,14 +15,22 @@ import {
   ON_BLOCK,
   RESULT,
   applyDisposition,
+  buildBaseQueueRow,
   buildDetailsLine,
+  hasExistingDisposition,
+  isAllowedOohBoard,
+  isBlankStatus,
   isDuplicate,
+  isOpenLead,
   laClock,
+  laWallMinutesFromUtc,
   lateReportCheck,
   matchTarget,
+  oohUpdateKey,
   parseOohForm,
   planDisposition,
   planRelease,
+  reloadDropdownLabels,
   sourceCodeToWrite,
   timeInHouseMins,
   type AppliedOp,
@@ -32,6 +40,12 @@ import {
   type MondayWriter,
   type OohForm,
 } from "../supabase/functions/monday-ooh-report/engine";
+import {
+  isMyLeadVisible,
+  oohHasDisposition,
+  oohIsOpenLead,
+  planNextLeadToIssue,
+} from "../src/lib/ooh";
 
 let failures = 0;
 function expectEq(label: string, got: unknown, want: unknown) {
@@ -197,14 +211,19 @@ expectEq("Pitch miss → status_1 PM", mapCase(RESULT.PITCH_MISS, ON_BLOCK.YES).
   col: BLOCK_COL.pm,
   label: LABEL.pm,
 });
-expectEq("PM w/ reset → status_1 PM w/ RS", mapCase(RESULT.PM_WITH_RESET, ON_BLOCK.YES).status, {
-  col: BLOCK_COL.pm,
-  label: LABEL.pmReset,
-});
-expectEq("Reset → status_2 Reset", mapCase(RESULT.RESET, ON_BLOCK.YES).status, {
-  col: BLOCK_COL.rs,
-  label: LABEL.reset,
-});
+expectEq(
+  "PM w/ reset → status_1 PM w/ RS",
+  mapCase(RESULT.PM_WITH_RESET, ON_BLOCK.YES, {
+    [FORM_COL.resetDate]: date("2026-10-09", "18:00:00"),
+  }).status,
+  { col: BLOCK_COL.pm, label: LABEL.pmReset },
+);
+expectEq(
+  "Reset → status_2 Reset",
+  mapCase(RESULT.RESET, ON_BLOCK.YES, { [FORM_COL.resetDate]: date("2026-10-09", "18:00:00") })
+    .status,
+  { col: BLOCK_COL.rs, label: LABEL.reset },
+);
 expectEq("No demo → status4 No Demo", mapCase(RESULT.NO_DEMO, ON_BLOCK.YES).status, {
   col: BLOCK_COL.bo,
   label: LABEL.noDemo,
@@ -218,11 +237,18 @@ expectEq("At the door → status4 No show text", mapCase(RESULT.AT_THE_DOOR, ON_
   label: LABEL.noShowText,
 });
 
-// Reload also writes the Reloads dropdown "Room"; Sold writes Sale Price.
+// Reload maps the QUOTED products onto the Reloads dropdown (never "Room");
+// Sold writes Sale Price.
 expectEq(
-  "Reload writes Reloads=Room",
-  mapCase(RESULT.SOLD, ON_BLOCK.RELOAD).fieldWrites[BLOCK_COL.reloads],
-  { labels: ["Room"] },
+  "Reload maps quoted products to the Reloads dropdown (not Room)",
+  mapCase(RESULT.SOLD, ON_BLOCK.RELOAD, {
+    [FORM_COL.quoted]: { text: "Roof, Turf", value: null },
+  }).fieldWrites[BLOCK_COL.reloads],
+  { labels: ["Roof", "Turf"] },
+);
+expect(
+  "Reload with no quoted products writes nothing to the dropdown (never Room)",
+  mapCase(RESULT.SOLD, ON_BLOCK.RELOAD).fieldWrites[BLOCK_COL.reloads] === undefined,
 );
 expectEq(
   "Sold writes Sale Price",
@@ -231,9 +257,14 @@ expectEq(
   ],
   "50000",
 );
-// Only ONE disposition status is ever set.
+// Only ONE disposition status is ever set (reset results need a date, else
+// they queue — see section 4b).
 for (const r of Object.values(RESULT)) {
-  const p = mapCase(r, ON_BLOCK.YES);
+  const extra: ColMap =
+    r === RESULT.PM_WITH_RESET || r === RESULT.RESET
+      ? { [FORM_COL.resetDate]: date("2026-10-09", "18:00:00") }
+      : {};
+  const p = mapCase(r, ON_BLOCK.YES, extra);
   expect(`single status for result ${r}`, p.status !== null && typeof p.status.col === "string");
 }
 
@@ -453,7 +484,8 @@ const di = (
   reps: string[],
   statusLabel: string | null,
   timeMs: number | null,
-): DayItem => ({ id, reps, statusLabel, timeMs });
+  dispo: Partial<Pick<DayItem, "pm" | "rs" | "ol" | "bo" | "sale">> = {},
+): DayItem => ({ id, reps, statusLabel, timeMs, ...dispo });
 {
   const dayItems = [
     di("A", [JAXON], LABEL.notIssued, pdt("2026-10-04", 9, 0)), // before reported — skip
@@ -726,6 +758,359 @@ expectEq(
   expectEq("parse result", f.result, RESULT.SOLD);
   expectEq("parse lead id", f.leadId, "12345");
   expectEq("parse sale price", f.salePrice, 42000);
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 10) FIX-UP PASS (review against the live boards) — #1–#12
+// ════════════════════════════════════════════════════════════════════════════
+
+// — #1 open-lead rule: a dispositioned lead KEEPS its Iss label ---------------
+expectEq("isBlankStatus empty", isBlankStatus(""), true);
+expectEq("isBlankStatus None", isBlankStatus("None"), true);
+expectEq("isBlankStatus Sold", isBlankStatus("Sold"), false);
+expectEq(
+  "hasExistingDisposition: all blank → false",
+  hasExistingDisposition({ pm: null, rs: null, ol: null, bo: null, sale: null }),
+  false,
+);
+expectEq(
+  "hasExistingDisposition: None labels → false",
+  hasExistingDisposition({ pm: "None", rs: "None", ol: "None", bo: "None", sale: "None" }),
+  false,
+);
+expectEq(
+  "hasExistingDisposition: a Sold → true",
+  hasExistingDisposition({ pm: null, rs: null, ol: null, bo: null, sale: "Sold" }),
+  true,
+);
+expectEq(
+  "hasExistingDisposition: No show text alone → false (still open)",
+  hasExistingDisposition({ pm: null, rs: null, ol: null, bo: "No show text", sale: null }),
+  false,
+);
+expectEq(
+  "hasExistingDisposition: No Show (final) → true",
+  hasExistingDisposition({ pm: null, rs: null, ol: null, bo: "No Show", sale: null }),
+  true,
+);
+expectEq(
+  "isOpenLead: Iss + no disposition → open",
+  isOpenLead({ iss: "Iss", pm: null, rs: null, ol: null, bo: null, sale: null }),
+  true,
+);
+expectEq(
+  "isOpenLead: dispositioned (keeps Iss) → not open",
+  isOpenLead({ iss: "Iss", pm: null, rs: null, ol: null, bo: null, sale: "Sold" }),
+  false,
+);
+expectEq(
+  "isOpenLead: Not Issued → not open",
+  isOpenLead({ iss: "Not Issued", pm: null, rs: null, ol: null, bo: null, sale: null }),
+  false,
+);
+expectEq(
+  "isOpenLead: Iss + No show text → still open (at the door)",
+  isOpenLead({ iss: "Iss", pm: null, rs: null, ol: null, bo: "No show text", sale: null }),
+  true,
+);
+
+// a rep with 3 leads, the first reported → next lead releases (the whole bug)
+{
+  const dayItems = [
+    di("L1", [JAXON], LABEL.iss, pdt("2026-10-04", 9, 0), { sale: LABEL.sold }), // reported
+    di("L2", [JAXON], LABEL.notIssued, pdt("2026-10-04", 11, 0)), // next — pick
+    di("L3", [JAXON], LABEL.notIssued, pdt("2026-10-04", 13, 0)),
+  ];
+  expectEq(
+    "release: first-of-three reported → issues the next (excludes reported id)",
+    planRelease({
+      atTheDoor: false,
+      rep: JAXON,
+      dayItems,
+      reportedLeadTimeMs: pdt("2026-10-04", 9, 0),
+      reportedLeadId: "L1",
+    }),
+    { action: "issue", itemId: "L2" },
+  );
+  // even without the id exclusion, the dispositioned L1 no longer blocks
+  expectEq(
+    "release: dispositioned Iss lead no longer blocks the rep",
+    planRelease({
+      atTheDoor: false,
+      rep: JAXON,
+      dayItems,
+      reportedLeadTimeMs: pdt("2026-10-04", 9, 0),
+    }),
+    { action: "issue", itemId: "L2" },
+  );
+}
+// pairs: partner's OTHER lead is reported (dispositioned) → no longer busy
+{
+  const dayItems = [
+    di("B", [JAXON, NICK], LABEL.notIssued, pdt("2026-10-04", 13, 0)),
+    di("P", [NICK], LABEL.iss, pdt("2026-10-04", 12, 0), { pm: LABEL.pm }), // Nick reported
+  ];
+  expectEq(
+    "pairs: partner's reported lead no longer blocks → issue",
+    planRelease({
+      atTheDoor: false,
+      rep: JAXON,
+      dayItems,
+      reportedLeadTimeMs: pdt("2026-10-04", 11, 0),
+    }),
+    { action: "issue", itemId: "B" },
+  );
+}
+
+// — #2 Monday stores date columns in UTC → read as Pacific wall-minutes -------
+// 1 PM PDT is stored "20:00" UTC same day; 7 PM PDT is "02:00" UTC the NEXT day.
+expectEq(
+  "1 PM PT from UTC 20:00 → 780 wall-min",
+  laWallMinutesFromUtc("2026-10-04", "20:00:00"),
+  780,
+);
+expectEq(
+  "7 PM PT from UTC 02:00 (next day) → 1140 wall-min",
+  laWallMinutesFromUtc("2026-10-05", "02:00:00"),
+  1140,
+);
+expect("later-PT appt sorts after earlier one once converted", 780 < 1140);
+expectEq("no time → null", laWallMinutesFromUtc("2026-10-04", null), null);
+{
+  // the brief's case: a 7 PM lead and a 1 PM lead, the 1 PM reported first.
+  const onePm = laWallMinutesFromUtc("2026-10-04", "20:00:00")!; // 780
+  const sevenPm = laWallMinutesFromUtc("2026-10-05", "02:00:00")!; // 1140
+  const dayItems = [
+    di("ONE", [JAXON], LABEL.iss, onePm, { sale: LABEL.sold }), // 1 PM, reported
+    di("SEVEN", [JAXON], LABEL.notIssued, sevenPm), // 7 PM, next
+  ];
+  expectEq(
+    "release: 7 PM lead issues after the 1 PM one is reported (UTC→PT fix)",
+    planRelease({
+      atTheDoor: false,
+      rep: JAXON,
+      dayItems,
+      reportedLeadTimeMs: onePm,
+      reportedLeadId: "ONE",
+    }),
+    { action: "issue", itemId: "SEVEN" },
+  );
+}
+// reset time in the Details text reads in Pacific, not UTC.
+{
+  // UTC 02:30 Oct 10 = 7:30 PM PDT Fri Oct 9.
+  const f = parseOohForm(
+    "rsla",
+    form({
+      [FORM_COL.result]: status(RESULT.PM_WITH_RESET),
+      [FORM_COL.onBlock]: status(ON_BLOCK.YES),
+      [FORM_COL.resetDate]: date("2026-10-10", "02:30:00"),
+    }),
+  );
+  const line = buildDetailsLine(f, SUBMIT);
+  expect("reset time shown in Pacific (Fri 10/9 7:30pm)", line.includes("reset Fri 10/9 7:30pm"));
+}
+
+// — #3 already-dispositioned block: guard helper ------------------------------
+expectEq(
+  "guard: office already pressed Sold → already dispositioned",
+  hasExistingDisposition({ pm: null, rs: null, ol: null, bo: null, sale: "Sold" }),
+  true,
+);
+expectEq(
+  "guard: only No show text → not yet dispositioned (write allowed)",
+  hasExistingDisposition({ pm: null, rs: null, ol: null, bo: "No show text", sale: null }),
+  false,
+);
+
+// — #4 reset result with no reset date → queue, press nothing -----------------
+{
+  const pm = mapCase(RESULT.PM_WITH_RESET, ON_BLOCK.YES);
+  expectEq(
+    "PM w/ reset + no date → needsReview, no status",
+    { status: pm.status, needsReview: pm.needsReview },
+    { status: null, needsReview: "PM w/ reset but no reset date" },
+  );
+  const rs = mapCase(RESULT.RESET, ON_BLOCK.YES);
+  expectEq(
+    "Reset + no date → needsReview, no status",
+    { status: rs.status, needsReview: rs.needsReview },
+    { status: null, needsReview: "Reset but no reset date" },
+  );
+  const ok = mapCase(RESULT.PM_WITH_RESET, ON_BLOCK.YES, {
+    [FORM_COL.resetDate]: date("2026-10-09", "18:00:00"),
+  });
+  expect(
+    "PM w/ reset + date → presses, no review",
+    ok.needsReview === null && ok.status?.label === LABEL.pmReset,
+  );
+}
+
+// — #5 missing-reports uses the same open-lead rule (app-side mirror) ----------
+expectEq(
+  "app mirror: dispositioned lead is not open (not 'missing')",
+  oohIsOpenLead({ iss: "Iss", pm: null, rs: null, ol: null, bo: null, sale: "Sold" }),
+  false,
+);
+expectEq(
+  "app mirror: Iss + no disposition is open (truly missing)",
+  oohIsOpenLead({ iss: "Iss", pm: null, rs: null, ol: null, bo: null, sale: null }),
+  true,
+);
+expectEq(
+  "app mirror matches engine on No show text",
+  oohHasDisposition({ pm: null, rs: null, ol: null, bo: "No show text", sale: null }),
+  hasExistingDisposition({ pm: null, rs: null, ol: null, bo: "No show text", sale: null }),
+);
+
+// — #6 Details falls back to the appointment time when arrival is blank -------
+{
+  const f = parseOohForm(
+    "fb",
+    form({
+      [FORM_COL.result]: status(RESULT.PITCH_MISS),
+      [FORM_COL.onBlock]: status(ON_BLOCK.YES),
+    }),
+  );
+  const line = buildDetailsLine(f, SUBMIT, { hour: 9, minute: 0 }); // appt 9:00 → 68 min
+  expect("blank arrival uses the appt fallback in the Details line", line.includes("In 1:08"));
+}
+
+// — #7 the activity-log update key is per SUBMISSION (unique per form item) ----
+expect("update key is per form item", oohUpdateKey("900") !== oohUpdateKey("901"));
+expectEq("update key shape", oohUpdateKey("900"), "ooh-update-900");
+
+// — #8 only the form board drives a disposition -------------------------------
+expectEq("accept: the form board", isAllowedOohBoard("18433859050"), true);
+expectEq("ignore: a different board", isAllowedOohBoard("18432844990"), false);
+expectEq("accept: no board id present", isAllowedOohBoard(null), true);
+
+// — #9 every queue/error row keeps rep + lead detail --------------------------
+{
+  const f = parseOohForm(
+    "q1",
+    form({
+      [FORM_COL.repName]: status(4, "Jaxon Heilman"),
+      [FORM_COL.partner]: status(10, "Nick Schoeben"),
+      [FORM_COL.result]: status(RESULT.SOLD),
+      [FORM_COL.onBlock]: status(ON_BLOCK.YES),
+      [FORM_COL.leadId]: text("12345"),
+    }),
+  );
+  const row = buildBaseQueueRow(f, buildDetailsLine(f, SUBMIT), planDisposition(f));
+  expect(
+    "queue row keeps rep / partner / lead / details",
+    row.rep_name === "Jaxon Heilman" &&
+      row.partner === "Nick Schoeben" &&
+      row.lead_id === "12345" &&
+      typeof row.details_line === "string" &&
+      (row.details_line as string).length > 0,
+  );
+}
+
+// — #10 Reloads: quoted products map to the dropdown; never "Room" ------------
+expectEq("reload map: Roof, Turf", reloadDropdownLabels("Roof, Turf"), ["Roof", "Turf"]);
+expectEq("reload map keeps canonical order", reloadDropdownLabels("Turf, Roof"), ["Roof", "Turf"]);
+expectEq(
+  "reload map: slash label survives (Stucco/Paint)",
+  reloadDropdownLabels("Stucco/Paint, Gutters"),
+  ["Gutters", "Stucco/Paint"],
+);
+expectEq("reload map: case-insensitive + GT Trim", reloadDropdownLabels("gt trim"), ["GT Trim"]);
+expectEq("reload map: unknown product dropped (never Room)", reloadDropdownLabels("Room"), []);
+expectEq("reload map: empty", reloadDropdownLabels(null), []);
+
+// — #11 My Leads shows only issued / office / reported leads ------------------
+expectEq(
+  "myleads: Iss lead is visible",
+  isMyLeadVisible({ iss: "Iss", pm: null, rs: null, ol: null, bo: null, sale: null }),
+  true,
+);
+expectEq(
+  "myleads: Office Appt is visible",
+  isMyLeadVisible({ iss: "Office Appt", pm: null, rs: null, ol: null, bo: null, sale: null }),
+  true,
+);
+expectEq(
+  "myleads: Not Issued lead is HIDDEN",
+  isMyLeadVisible({ iss: "Not Issued", pm: null, rs: null, ol: null, bo: null, sale: null }),
+  false,
+);
+expectEq(
+  "myleads: a reported lead (keeps Iss) stays visible",
+  isMyLeadVisible({ iss: "Iss", pm: null, rs: null, ol: null, bo: null, sale: "Sold" }),
+  true,
+);
+expectEq(
+  "myleads: CTC / Add Rep hidden",
+  isMyLeadVisible({ iss: "CTC", pm: null, rs: null, ol: null, bo: null, sale: null }),
+  false,
+);
+
+// — #12 Push lead = the rep's NEXT not-issued lead (earliest after now) --------
+{
+  const now = pdt("2026-10-04", 12, 0);
+  const items = [
+    {
+      itemId: "A",
+      name: "Early",
+      reps: [JAXON],
+      iss: "Not Issued",
+      apptMs: pdt("2026-10-04", 10, 0),
+    }, // before now
+    {
+      itemId: "LATE",
+      name: "The late lead",
+      reps: [JAXON],
+      iss: "Iss",
+      apptMs: pdt("2026-10-04", 11, 0),
+    }, // already Iss (the one pressed before — wrong)
+    {
+      itemId: "NEXT",
+      name: "Up next",
+      reps: [JAXON],
+      iss: "Not Issued",
+      apptMs: pdt("2026-10-04", 13, 0),
+    }, // earliest Not-Issued after now
+    {
+      itemId: "LATER",
+      name: "Later still",
+      reps: [JAXON],
+      iss: "Not Issued",
+      apptMs: pdt("2026-10-04", 15, 0),
+    },
+  ];
+  expectEq(
+    "push: picks the earliest Not-Issued after now",
+    planNextLeadToIssue(items, JAXON, now)?.itemId,
+    "NEXT",
+  );
+  expectEq(
+    "push: none upcoming → null",
+    planNextLeadToIssue(
+      [{ itemId: "X", name: "x", reps: [JAXON], iss: "Iss", apptMs: pdt("2026-10-04", 13, 0) }],
+      JAXON,
+      now,
+    ),
+    null,
+  );
+  expectEq(
+    "push: matches only this rep's leads",
+    planNextLeadToIssue(
+      [
+        {
+          itemId: "Y",
+          name: "y",
+          reps: [NICK],
+          iss: "Not Issued",
+          apptMs: pdt("2026-10-04", 13, 0),
+        },
+      ],
+      JAXON,
+      now,
+    ),
+    null,
+  );
 }
 
 if (failures > 0) {

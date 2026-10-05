@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { ArcadePanel } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -47,9 +47,106 @@ function Chip({ children, cls = "" }: { children: React.ReactNode; cls?: string 
   );
 }
 
+/**
+ * Push lead = give the rep their NEXT not-issued lead (#12). Pressing Iss on the
+ * already-issued late/missing lead did nothing; this resolves the rep's next
+ * lead first and shows its name + time for confirmation before issuing it.
+ */
+function PushNextLeadButton({
+  boardId,
+  repName,
+  label = "Push lead",
+  className = "",
+}: {
+  boardId: string | null;
+  repName: string | null;
+  label?: string;
+  className?: string;
+}) {
+  const { pushLead, nextLead } = useOohMutations();
+  const [confirm, setConfirm] = useState<{
+    itemId: string;
+    name: string;
+    apptLabel: string | null;
+  } | null>(null);
+  const disabled = !boardId || !repName;
+
+  const findNext = () => {
+    if (!boardId || !repName) return;
+    nextLead
+      .mutateAsync({ boardId, repName })
+      .then((n) => {
+        if (!n) {
+          toast.info(`No upcoming lead to issue for ${repName}.`);
+          return;
+        }
+        setConfirm(n);
+      })
+      .catch((e) => toast.error(String(e instanceof Error ? e.message : e)));
+  };
+
+  const doIssue = () => {
+    if (!boardId || !confirm) return;
+    pushLead
+      .mutateAsync({ boardId, itemId: confirm.itemId })
+      .then(() => {
+        toast.success(`Issued ${confirm.name} to ${repName}.`);
+        setConfirm(null);
+      })
+      .catch((e) => toast.error(String(e instanceof Error ? e.message : e)));
+  };
+
+  if (confirm) {
+    return (
+      <div
+        className={`flex flex-col gap-2 rounded-md border border-kombat-gold/40 bg-background/40 p-2 ${className}`}
+      >
+        <p className="text-xs text-foreground">
+          Issue next lead to {repName}: <span className="font-medium">{confirm.name}</span>
+          {confirm.apptLabel ? ` · ${confirm.apptLabel}` : ""}
+        </p>
+        <div className="flex gap-2">
+          <Button className="min-h-11 flex-1" disabled={pushLead.isPending} onClick={doIssue}>
+            {pushLead.isPending ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Send className="size-4" />
+            )}
+            Confirm
+          </Button>
+          <Button
+            variant="ghost"
+            className="min-h-11"
+            disabled={pushLead.isPending}
+            onClick={() => setConfirm(null)}
+          >
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <Button
+      variant="outline"
+      className={className}
+      disabled={disabled || nextLead.isPending}
+      onClick={findNext}
+    >
+      {nextLead.isPending ? (
+        <Loader2 className="size-4 animate-spin" />
+      ) : (
+        <Send className="size-4" />
+      )}
+      {label}
+    </Button>
+  );
+}
+
 function QueueCard({ row }: { row: OohQueueRow }) {
-  const { resolve, pushLead } = useOohMutations();
-  const canPush = !!row.target_item_id && !!row.board_id;
+  const { resolve } = useOohMutations();
+  const canPush = !!row.board_id && !!row.rep_name;
   return (
     <div className="rounded-lg border border-border/40 bg-surface/50 p-3 space-y-2.5">
       <div className="flex items-start justify-between gap-2">
@@ -81,24 +178,11 @@ function QueueCard({ row }: { row: OohQueueRow }) {
       {row.error && <p className="text-xs text-destructive">{row.error}</p>}
       <div className="flex flex-wrap gap-2">
         {canPush && (
-          <Button
-            variant="outline"
+          <PushNextLeadButton
+            boardId={row.board_id}
+            repName={row.rep_name}
             className="flex-1 min-w-[8rem]"
-            disabled={pushLead.isPending}
-            onClick={() =>
-              pushLead
-                .mutateAsync({ boardId: row.board_id!, itemId: row.target_item_id! })
-                .then(() => toast.success("Lead issued (Iss)"))
-                .catch((e) => toast.error(String(e instanceof Error ? e.message : e)))
-            }
-          >
-            {pushLead.isPending ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Send className="size-4" />
-            )}
-            Push lead
-          </Button>
+          />
         )}
         <Button
           variant="ghost"
@@ -155,7 +239,6 @@ export function CloseKombatOohTab() {
   const cfg = useOohConfig();
   const queue = useOohQueue();
   const missing = useMissingReports();
-  const { pushLead } = useOohMutations();
 
   const rows = useMemo(() => queue.data ?? [], [queue.data]);
   const review = useMemo(
@@ -255,19 +338,12 @@ export function CloseKombatOohTab() {
                   </div>
                   <AlertTriangle className="size-4 shrink-0 text-kombat-gold" />
                 </div>
-                <Button
-                  variant="outline"
+                <PushNextLeadButton
+                  boardId={m.boardId}
+                  repName={m.reps[0] ?? null}
+                  label="Push next lead"
                   className="w-full"
-                  disabled={pushLead.isPending}
-                  onClick={() =>
-                    pushLead
-                      .mutateAsync({ boardId: m.boardId, itemId: m.itemId })
-                      .then(() => toast.success("Lead re-issued"))
-                      .catch((e) => toast.error(String(e instanceof Error ? e.message : e)))
-                  }
-                >
-                  <Send className="size-4" /> Push lead
-                </Button>
+                />
               </div>
             ))}
           </div>
