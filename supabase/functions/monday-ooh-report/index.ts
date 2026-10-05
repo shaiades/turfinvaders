@@ -20,7 +20,7 @@ import {
   setColumns,
   setStatus,
 } from "./monday.ts";
-import { sendDispatcherIMessage } from "./inkbox.ts";
+import { sendDispatcherIMessage, type InkboxResult } from "./inkbox.ts";
 import {
   BLOCK_COL,
   FORM_BOARD_ID,
@@ -210,15 +210,23 @@ serve(async (req) => {
     // A self-gen / off-block SALE still texts leadership immediately, even
     // though its card is queued for the office (a rep who sold on their own
     // shouldn't wait on card-creation for the SALE to land). Only in live mode;
-    // never in dry_run. Best-effort.
+    // never in dry_run. Best-effort — the send never throws.
     const saleAlertSent = { done: false };
-    const alertSaleOnce = async (customer: string | null) => {
-      if (saleAlertSent.done) return;
-      if (mode === "live" && isSaleResult(form)) {
-        saleAlertSent.done = true;
-        await sendDispatcherIMessage(buildSaleAlert(form, customer)).catch(() => undefined);
+    const alertSaleOnce = async (customer: string | null): Promise<InkboxResult | null> => {
+      if (saleAlertSent.done || mode !== "live" || !isSaleResult(form)) return null;
+      saleAlertSent.done = true;
+      try {
+        return await sendDispatcherIMessage(buildSaleAlert(form, customer));
+      } catch (e) {
+        return { sent: false, attempted: 0, delivered: 0, errors: [String(e)] };
       }
     };
+    // A genuine send failure (not just "not configured") → a short note so the
+    // office can see leadership wasn't texted. Never a reason to fail the write.
+    const saleTextError = (r: InkboxResult | null): string | null =>
+      r && !r.sent && !r.skipped && r.errors?.length
+        ? `SALE written but leadership text failed: ${r.errors.join("; ").slice(0, 280)}`
+        : null;
 
     // Only the matched-lead path writes automatically. Create (self-gen /
     // upsell / reload) is queued unless auto-create is explicitly enabled.
@@ -226,8 +234,12 @@ serve(async (req) => {
       const autocreate = (settings?.ooh_autocreate as boolean | null) ?? false;
       if (target.kind === "create" && !autocreate) {
         await finish("queued");
-        await queue("needs_review", `auto-create off — ${target.reason}`, baseRow);
-        await alertSaleOnce(formItem.name || form.address); // self-gen SALE → text now
+        const saleRes = await alertSaleOnce(formItem.name || form.address); // self-gen SALE → text now
+        const ste = saleTextError(saleRes);
+        await queue("needs_review", `auto-create off — ${target.reason}`, {
+          ...baseRow,
+          ...(ste ? { error: ste } : {}),
+        });
         return ok({ queued: "create (auto-create off)" });
       }
       if (target.kind === "queue") {
@@ -348,8 +360,24 @@ serve(async (req) => {
     ).catch(() => undefined);
 
     // SALE → text leadership (Tyler / Shai / Jorge) with a loud banner: the
-    // rep(s), what they sold, how much. Best-effort; live mode only.
-    await alertSaleOnce(block.name);
+    // rep(s), what they sold, how much. Best-effort; live mode only. A send
+    // failure is logged to the queue (never blocks the write-back).
+    const saleRes = await alertSaleOnce(block.name);
+    const saleErr = saleTextError(saleRes);
+    if (saleErr) {
+      await supabase.from("ooh_report_queue").upsert(
+        {
+          form_item_id: formItemId,
+          status: "error",
+          reason: saleErr,
+          error: saleErr,
+          ...baseRow,
+          target_item_id: leadId,
+          board_id: block.boardId,
+        },
+        { onConflict: "form_item_id" },
+      );
+    }
 
     // ── Rule 6: at-the-door → message the office; release nothing ───────────
     let released: string | null = null;
