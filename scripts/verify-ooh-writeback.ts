@@ -53,6 +53,32 @@ import {
   type InkboxConfig,
   type InkboxFetch,
 } from "../supabase/functions/monday-ooh-report/inkbox";
+import {
+  DISPATCH_CONFIG,
+  type DispatchLead,
+  type DispatchRep,
+  type WatchdogLead,
+  buildFreeRepsLine,
+  buildIssuedText,
+  detectRequestedLanguage,
+  driveMinutes,
+  findLateReporters,
+  firstName,
+  hardRuleCheck,
+  haversineMiles,
+  inWatchdogWindow,
+  isCanSaveMarker,
+  isFreeRep,
+  isJobWalkMarker,
+  isOlderHomeownerMarker,
+  isRehashMarker,
+  nowWallMinutes as dispatchNowWall,
+  planIssue,
+  planWatchdog,
+  scoreCandidate,
+  strengthBonus,
+  wallClock12,
+} from "../supabase/functions/monday-ooh-report/dispatch";
 
 let failures = 0;
 function expectEq(label: string, got: unknown, want: unknown) {
@@ -1276,6 +1302,371 @@ const inkboxCfg = (recipients: string[], apiKey: string | null = "test-key"): In
     noRecip.skipped,
     "INKBOX_DISPATCH_RECIPIENTS not set",
   );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 13) LIVE DISPATCH (Step 7) — drive time, free rep, hard rules, scoring,
+//     the planner, manager texts, the watchdog, markers + language.
+// ════════════════════════════════════════════════════════════════════════════
+const SD_A = { lat: 32.8, lng: -117.1 };
+const SD_NEAR = { lat: 32.81, lng: -117.11 };
+const SD_FAR = { lat: 32.98, lng: -117.26 };
+
+function mkLead(over: Partial<DispatchLead>): DispatchLead {
+  return {
+    itemId: "L",
+    name: "Lead",
+    boardId: "B",
+    reps: [],
+    issLabel: "Not Issued",
+    apptWallMinutes: 14 * 60,
+    coords: null,
+    products: [],
+    isReset: false,
+    isJobWalk: false,
+    isCanSave: false,
+    isRehash: false,
+    excludedReps: [],
+    jobWalkReps: [],
+    requestedLanguage: null,
+    olderHomeowner: false,
+    ...over,
+  };
+}
+function mkRep(over: Partial<DispatchRep>): DispatchRep {
+  return {
+    name: "Rep Name",
+    office: "SD",
+    working: true,
+    off: false,
+    openLeadCount: 0,
+    lastCoords: null,
+    ...over,
+  };
+}
+
+// ── drive time ──
+{
+  expectEq("drive: same point = 0 min", driveMinutes(SD_A, SD_A), 0);
+  expectEq(
+    "drive: missing coords → default padding",
+    driveMinutes(null, SD_A),
+    DISPATCH_CONFIG.defaultDriveMinutes,
+  );
+  expect("drive: distinct points > 0 min", driveMinutes(SD_A, SD_FAR) > 0);
+  expect("haversine: SD_A→SD_FAR is several miles", haversineMiles(SD_A, SD_FAR) > 5);
+  expect("drive: near < far", driveMinutes(SD_A, SD_NEAR) < driveMinutes(SD_A, SD_FAR));
+}
+
+// ── free rep ──
+{
+  expect("free: working, zero open leads", isFreeRep(mkRep({ openLeadCount: 0 })));
+  expect("not free: holds an open lead", !isFreeRep(mkRep({ openLeadCount: 1 })));
+  expect("not free: marked Off", !isFreeRep(mkRep({ off: true })));
+  expect("not free: not working", !isFreeRep(mkRep({ working: false })));
+}
+
+// ── strength table ──
+{
+  expectEq(
+    "strength: Yakup + roof",
+    strengthBonus("Yakup Sancakli", mkLead({ products: ["roof"] })),
+    3,
+  );
+  expectEq(
+    "strength: Yakup + roof + older homeowner",
+    strengthBonus("Yakup Sancakli", mkLead({ products: ["roof"], olderHomeowner: true })),
+    5,
+  );
+  expectEq("strength: Jaxon + reset", strengthBonus("Jaxon Heilman", mkLead({ isReset: true })), 3);
+  expectEq(
+    "strength: Nick + stucco/paint",
+    strengthBonus("Nick Doe", mkLead({ products: ["stucco/paint"] })),
+    3,
+  );
+  expectEq(
+    "strength: Josiah evening penalty",
+    strengthBonus("Josiah Doe", mkLead({ apptWallMinutes: 18 * 60 })),
+    -4,
+  );
+  expectEq("strength: Edward + reset", strengthBonus("Edward Doe", mkLead({ isReset: true })), 3);
+  expectEq(
+    "strength: unknown rep = 0",
+    strengthBonus("Nobody Here", mkLead({ products: ["roof"] })),
+    0,
+  );
+}
+
+// ── scoring ──
+{
+  const rep = mkRep({ lastCoords: SD_A });
+  const near = scoreCandidate(rep, mkLead({ itemId: "near", coords: SD_NEAR }), 10 * 60);
+  const far = scoreCandidate(rep, mkLead({ itemId: "far", coords: SD_FAR }), 10 * 60);
+  expect("score: nearer lead scores higher", near.score > far.score);
+  expect("score: nearer has fewer drive minutes", near.driveMinutes < far.driveMinutes);
+}
+
+// ── hard rules ──
+{
+  const rep = mkRep({ name: "Jaxon Heilman" });
+  const lang = hardRuleCheck(rep, mkLead({ requestedLanguage: "Spanish" }));
+  expectEq("hard: language → manager", lang.ok === false && lang.disposition, "manager");
+  const rehash = hardRuleCheck(rep, mkLead({ isRehash: true, excludedReps: ["Jaxon Heilman"] }));
+  expectEq("hard: rehash to prior rep → skip", rehash.ok === false && rehash.disposition, "skip");
+  const okRep = hardRuleCheck(rep, mkLead({ isRehash: true, excludedReps: ["Someone Else"] }));
+  expect("hard: rehash to a fresh rep → ok", okRep.ok === true);
+  const saver = hardRuleCheck(mkRep({ name: "Yakup Sancakli" }), mkLead({ isCanSave: true }));
+  expect("hard: can-save to a designated saver → ok", saver.ok === true);
+  const nonSaver = hardRuleCheck(rep, mkLead({ isCanSave: true }));
+  expectEq(
+    "hard: can-save to non-saver → skip",
+    nonSaver.ok === false && nonSaver.disposition,
+    "skip",
+  );
+  const jwOrig = hardRuleCheck(rep, mkLead({ isJobWalk: true, jobWalkReps: ["Jaxon Heilman"] }));
+  expect("hard: job walk to its original rep → ok", jwOrig.ok === true);
+  const jwOther = hardRuleCheck(rep, mkLead({ isJobWalk: true, jobWalkReps: ["Someone Else"] }));
+  expectEq(
+    "hard: job walk to another rep → skip",
+    jwOther.ok === false && jwOther.disposition,
+    "skip",
+  );
+  const jwOrphan = hardRuleCheck(rep, mkLead({ isJobWalk: true, jobWalkReps: [] }));
+  expectEq(
+    "hard: job walk w/ unknown original → manager",
+    jwOrphan.ok === false && jwOrphan.disposition,
+    "manager",
+  );
+}
+
+// ── the planner ──
+{
+  const rep = mkRep({ name: "Jaxon Heilman", lastCoords: SD_A });
+  // basic issue (Tier B, time ok)
+  const basic = planIssue({
+    rep,
+    dayLeads: [mkLead({ itemId: "b1", apptWallMinutes: 14 * 60 })],
+    nowWallMinutes: 10 * 60,
+  });
+  expectEq(
+    "plan: free rep gets the open lead",
+    basic.action === "issue" && basic.lead.itemId,
+    "b1",
+  );
+
+  // not free
+  expectEq(
+    "plan: busy rep gets nothing",
+    planIssue({ rep: mkRep({ openLeadCount: 1 }), dayLeads: [mkLead({})], nowWallMinutes: 600 })
+      .action,
+    "none",
+  );
+
+  // time rule: too soon (now 10:00 + 20 drive + 45 = 11:05; lead at 10:30)
+  expectEq(
+    "plan: lead too soon is skipped",
+    planIssue({
+      rep,
+      dayLeads: [mkLead({ itemId: "soon", apptWallMinutes: 630 })],
+      nowWallMinutes: 600,
+    }).action,
+    "none",
+  );
+
+  // Tier A (own reset) beats a nearer Tier B lead
+  const tier = planIssue({
+    rep,
+    dayLeads: [
+      mkLead({
+        itemId: "A",
+        reps: ["Jaxon Heilman"],
+        isReset: true,
+        coords: SD_FAR,
+        apptWallMinutes: 14 * 60,
+      }),
+      mkLead({ itemId: "B", coords: SD_NEAR, apptWallMinutes: 14 * 60 }),
+    ],
+    nowWallMinutes: 600,
+  });
+  expectEq("plan: own reset/job walk goes first", tier.action === "issue" && tier.lead.itemId, "A");
+
+  // nearest Tier B wins
+  const nearest = planIssue({
+    rep,
+    dayLeads: [
+      mkLead({ itemId: "near", coords: SD_NEAR, apptWallMinutes: 14 * 60 }),
+      mkLead({ itemId: "far", coords: SD_FAR, apptWallMinutes: 14 * 60 }),
+    ],
+    nowWallMinutes: 600,
+  });
+  expectEq(
+    "plan: nearest open lead wins",
+    nearest.action === "issue" && nearest.lead.itemId,
+    "near",
+  );
+
+  // strength breaks a drive tie (both coordless → equal drive)
+  const tieBreak = planIssue({
+    rep: mkRep({ name: "Yakup Sancakli" }),
+    dayLeads: [
+      mkLead({ itemId: "plain", apptWallMinutes: 14 * 60 }),
+      mkLead({ itemId: "roof", products: ["roof"], apptWallMinutes: 14 * 60 }),
+    ],
+    nowWallMinutes: 600,
+  });
+  expectEq(
+    "plan: strength breaks a drive-time tie",
+    tieBreak.action === "issue" && tieBreak.lead.itemId,
+    "roof",
+  );
+
+  // own-flow Iss statuses never auto-issue
+  expectEq(
+    "plan: Office Appt is never issued",
+    planIssue({
+      rep,
+      dayLeads: [mkLead({ issLabel: "Office Appt", apptWallMinutes: 14 * 60 })],
+      nowWallMinutes: 600,
+    }).action,
+    "none",
+  );
+
+  // language lead → manager
+  const mgr = planIssue({
+    rep,
+    dayLeads: [mkLead({ itemId: "es", requestedLanguage: "Spanish", apptWallMinutes: 14 * 60 })],
+    nowWallMinutes: 600,
+  });
+  expectEq("plan: language lead → manager", mgr.action === "manager" && mgr.lead.itemId, "es");
+
+  // can-save only to a saver
+  expectEq(
+    "plan: can-save to non-saver → none",
+    planIssue({
+      rep,
+      dayLeads: [mkLead({ isCanSave: true, apptWallMinutes: 14 * 60 })],
+      nowWallMinutes: 600,
+    }).action,
+    "none",
+  );
+  expectEq(
+    "plan: can-save to a saver → issue",
+    planIssue({
+      rep: mkRep({ name: "Jonathan Paz" }),
+      dayLeads: [mkLead({ itemId: "cs", isCanSave: true, apptWallMinutes: 14 * 60 })],
+      nowWallMinutes: 600,
+    }).action,
+    "issue",
+  );
+}
+
+// ── manager texts ──
+{
+  const text = buildIssuedText({
+    repName: "jaxon heilman",
+    lead: mkLead({ name: "Valley View", products: ["roof"], apptWallMinutes: 13 * 60 }),
+    outOfLeadName: "Ingebretson",
+    outOfResultLabel: "PM",
+    dryRun: false,
+  });
+  expect(
+    "text: Issued line names the rep + lead + out-of",
+    /^Issued: Jaxon → 1pm Valley View \(roof\) – out of Ingebretson \(PM\)\.$/.test(text),
+  );
+  const dry = buildIssuedText({
+    repName: "jaxon",
+    lead: mkLead({ name: "Valley View", apptWallMinutes: 13 * 60 }),
+    outOfLeadName: null,
+    outOfResultLabel: null,
+    dryRun: true,
+  });
+  expect("text: dry-run prefix", dry.startsWith("[DRY RUN] would issue: Jaxon →"));
+  expectEq(
+    "text: free-reps line",
+    buildFreeRepsLine(["jaxon", "nick"]),
+    "Free reps (no lead to give): Jaxon, Nick.",
+  );
+  expectEq("text: empty free-reps line", buildFreeRepsLine([]), "");
+}
+
+// ── watchdog ──
+{
+  const uncovered: WatchdogLead = {
+    itemId: "u1",
+    name: "Smith",
+    apptWallMinutes: 640,
+    reps: [],
+    issLabel: "Not Issued",
+  };
+  const covered: WatchdogLead = {
+    itemId: "c1",
+    name: "Jones",
+    apptWallMinutes: 640,
+    reps: ["Al"],
+    issLabel: "Iss",
+  };
+  const base = {
+    nowWallMinutes: 600,
+    leads: [uncovered, covered],
+    lateReporters: ["Bob"],
+    workingReps: [mkRep({ name: "Al" })],
+    alreadyAlerted: new Set<string>(),
+  };
+  const r1 = planWatchdog({ ...base, freeReps: [] });
+  expectEq("watchdog: alerts the uncovered lead when nobody is free", r1.alerts.length, 1);
+  expectEq("watchdog: the alerted lead is the uncovered one", r1.alerts[0]?.lead.itemId, "u1");
+  expectEq("watchdog: passes the late reporters through", r1.lateReporters, ["Bob"]);
+  const r2 = planWatchdog({ ...base, freeReps: [mkRep({ name: "Al" })] });
+  expectEq("watchdog: a free rep means no alert", r2.alerts.length, 0);
+  const r3 = planWatchdog({ ...base, freeReps: [], alreadyAlerted: new Set(["u1"]) });
+  expectEq("watchdog: never alerts the same lead twice", r3.alerts.length, 0);
+  const far: WatchdogLead = {
+    itemId: "f1",
+    name: "Far",
+    apptWallMinutes: 800,
+    reps: [],
+    issLabel: "Not Issued",
+  };
+  const r4 = planWatchdog({ ...base, leads: [far], freeReps: [] });
+  expectEq("watchdog: a lead beyond the window is not alerted", r4.alerts.length, 0);
+}
+
+// ── late reporters ──
+{
+  const late = findLateReporters({
+    nowWallMinutes: 600,
+    leads: [
+      { reps: ["Bob"], issLabel: "Iss", apptWallMinutes: 540, disposition: false }, // overdue
+      { reps: ["Al"], issLabel: "Iss", apptWallMinutes: 540, disposition: true }, // reported
+      { reps: ["Cy"], issLabel: "Iss", apptWallMinutes: 660, disposition: false }, // future
+      { reps: ["Dan"], issLabel: "Not Issued", apptWallMinutes: 540, disposition: false }, // not issued
+    ],
+  });
+  expectEq("late: only the overdue, unreported, issued lead counts", late, ["Bob"]);
+}
+
+// ── window + clock + markers + language ──
+{
+  expect("window: 7am in", inWatchdogWindow(7));
+  expect("window: 6am out", !inWatchdogWindow(6));
+  expect("window: 8pm in", inWatchdogWindow(20));
+  expect("window: 9pm out", !inWatchdogWindow(21));
+
+  expectEq("clock: 1pm", wallClock12(13 * 60), "1pm");
+  expectEq("clock: 1:30pm", wallClock12(13 * 60 + 30), "1:30pm");
+  expectEq("clock: 9am", wallClock12(9 * 60), "9am");
+  expectEq("clock: midnight", wallClock12(0), "12am");
+  expectEq("nowWall: 10:08 PT", dispatchNowWall(pdt("2026-10-04", 10, 8)), 608);
+
+  expectEq("firstName: Yakup", firstName("Yakup Sancakli"), "yakup");
+  expectEq("lang: prefers spanish", detectRequestedLanguage("HO prefers Spanish only"), "Spanish");
+  expectEq("lang: habla espanol", detectRequestedLanguage("cliente habla espanol"), "Spanish");
+  expectEq("lang: none", detectRequestedLanguage("regular roof lead"), null);
+  expect("marker: rehash", isRehashMarker("REHASH from last week"));
+  expect("marker: can/save", isCanSaveMarker("Can/Save — call back"));
+  expect("marker: job walk", isJobWalkMarker("job walk for the sold roof"));
+  expect("marker: older homeowner", isOlderHomeownerMarker("elderly homeowner, be patient"));
+  expect("marker: no false rehash", !isRehashMarker("fresh canvass lead"));
 }
 
 if (failures > 0) {

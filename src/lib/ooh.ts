@@ -81,6 +81,8 @@ export type MissingReport = {
 
 export type OohConfig = {
   mode: "off" | "dry_run" | "live";
+  /** Live-issuing switch (Step 7) — independent of `mode`. */
+  dispatchMode: "off" | "dry_run" | "live";
   formUrl: string | null;
   autocreate: boolean;
 };

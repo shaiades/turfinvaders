@@ -254,7 +254,10 @@ export function CloseKombatOohTab() {
       <ArcadePanel title="Out of House — write-back" faction="kombat">
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
-            <Chip cls={modeCopy.cls}>Mode: {modeCopy.label}</Chip>
+            <Chip cls={modeCopy.cls}>Write-back: {modeCopy.label}</Chip>
+            <Chip cls={(MODE_COPY[cfg.data?.dispatchMode ?? "off"] ?? MODE_COPY.off).cls}>
+              Dispatch: {(MODE_COPY[cfg.data?.dispatchMode ?? "off"] ?? MODE_COPY.off).label}
+            </Chip>
             <Chip
               cls={
                 cfg.data?.formUrl

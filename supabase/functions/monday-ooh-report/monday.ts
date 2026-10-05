@@ -5,6 +5,15 @@
 // separate on purpose: this one adds the write mutations the OOH flow needs,
 // and the edge runtime cannot share modules across functions safely.
 import { BLOCK_COL, type ColMap, type DayItem, laWallMinutesFromUtc, normName } from "./engine.ts";
+import {
+  type DispatchLead,
+  type LatLng,
+  detectRequestedLanguage,
+  isCanSaveMarker,
+  isJobWalkMarker,
+  isOlderHomeownerMarker,
+  isRehashMarker,
+} from "./dispatch.ts";
 
 const denoEnv = (globalThis as { Deno?: { env: { get(k: string): string | undefined } } }).Deno
   ?.env;
@@ -132,6 +141,9 @@ export type BlockItem = {
   details: string | null;
   apptWallMinutes: number | null;
   reps: string[];
+  /** House coordinates (Monday Location column) — the rep's "last address" for
+   *  live-dispatch drive-time. null when the card is unmapped. */
+  coords: LatLng | null;
   // Current disposition column labels (for the already-dispositioned guard).
   iss: string | null;
   pm: string | null;
@@ -147,6 +159,7 @@ const BLOCK_READ_COLS = [
   BLOCK_COL.details,
   BLOCK_COL.apptDateTime,
   BLOCK_COL.reps,
+  BLOCK_COL.location,
   BLOCK_COL.iss,
   BLOCK_COL.pm,
   BLOCK_COL.rs,
@@ -154,6 +167,22 @@ const BLOCK_READ_COLS = [
   BLOCK_COL.bo,
   BLOCK_COL.sale,
 ];
+
+/** Parse a Monday Location column's value JSON ({lat,lng,address}) → LatLng.
+ *  Monday stores lat/lng as strings; a (0,0) or unparseable value → null. */
+export function parseLocation(value: string | null | undefined): LatLng | null {
+  if (!value) return null;
+  try {
+    const v = JSON.parse(value) as { lat?: string | number; lng?: string | number };
+    const lat = typeof v.lat === "string" ? Number(v.lat) : v.lat;
+    const lng = typeof v.lng === "string" ? Number(v.lng) : v.lng;
+    if (!Number.isFinite(lat as number) || !Number.isFinite(lng as number)) return null;
+    if (lat === 0 && lng === 0) return null;
+    return { lat: lat as number, lng: lng as number };
+  } catch {
+    return null;
+  }
+}
 
 function wallMinutesFromDate(value: string | null, text: string | null): number | null {
   // date9 value JSON: {date,time} in UTC (Monday stores date columns in UTC).
@@ -220,6 +249,7 @@ export async function fetchBlockItem(token: string, itemId: string): Promise<Blo
       cols[BLOCK_COL.apptDateTime]?.value ?? null,
       cols[BLOCK_COL.apptDateTime]?.text ?? null,
     ),
+    coords: parseLocation(cols[BLOCK_COL.location]?.value ?? null),
     reps: (cols[BLOCK_COL.reps]?.text ?? "")
       .split(",")
       .map((s) => s.trim())
@@ -391,4 +421,272 @@ export async function createItem(
   );
   const id = (data?.create_item as { id?: string })?.id;
   return id ? String(id) : null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LIVE DISPATCH reads/writes (Step 7). Attendance (who's working), today's block
+// with coordinates + markers, Monday user ids (to write people6), and the
+// people-column write that hands a rep their next lead. Board + column ids were
+// read live 2026-10-04/05 from boards 5291879937 / 18411800909 (attendance) and
+// 18432844990 (SD block).
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Rep Attendance boards (one per office). */
+export const ATTENDANCE_BOARD: Record<"SD" | "OC", string> = {
+  SD: "5291879937",
+  OC: "18411800909",
+};
+
+/** Weekday (0=Sun..6=Sat) → {am,pm} attendance status column ids (identical on
+ *  both office boards; read live 2026-10-05). Mirrors SHIFT_ATTENDANCE_COL in
+ *  src/lib/respawn.ts — the Deno edge fn can't import from src/. Labels are
+ *  "On"/"Off" and the index differs per column, so ALWAYS read by label text. */
+const ATTENDANCE_SHIFT_COL: Record<number, { am: string; pm: string }> = {
+  1: { am: "color0", pm: "dup__of_mon_am" }, // Monday
+  2: { am: "status", pm: "dup__of_tuesday" }, // Tuesday
+  3: { am: "dup__of_status", pm: "dup__of_wednesday" }, // Wednesday
+  4: { am: "color", pm: "dup__of_thursday" }, // Thursday
+  5: { am: "color2", pm: "dup__of_fri_am" }, // Friday
+  6: { am: "color22", pm: "dup__of_sat_am" }, // Saturday
+  0: { am: "color7", pm: "status_mkn3rnr9" }, // Sunday
+};
+
+export type Attendance = { amOn: boolean; pmOn: boolean; amOff: boolean; pmOff: boolean };
+
+/** Read an office's attendance board for `weekday` → Map(normName → shifts).
+ *  Rows are keyed by the employee's item name (the rep's display name). */
+export async function fetchAttendance(
+  token: string,
+  office: "SD" | "OC",
+  weekday: number,
+): Promise<Map<string, Attendance>> {
+  const cols = ATTENDANCE_SHIFT_COL[weekday] ?? ATTENDANCE_SHIFT_COL[1];
+  const boardId = ATTENDANCE_BOARD[office];
+  const { data } = await graphql(
+    token,
+    `
+      query ($b: ID!, $cols: [String!]) {
+        boards(ids: [$b]) {
+          items_page(limit: 200) {
+            items {
+              id
+              name
+              column_values(ids: $cols) {
+                id
+                text
+              }
+            }
+          }
+        }
+      }
+    `,
+    { b: boardId, cols: [cols.am, cols.pm] },
+  );
+  const items =
+    ((data?.boards as Array<{ items_page?: { items?: Array<Record<string, unknown>> } }>) ?? [])[0]
+      ?.items_page?.items ?? [];
+  const out = new Map<string, Attendance>();
+  for (const it of items) {
+    const cv = (it.column_values as Array<{ id: string; text: string | null }>) ?? [];
+    const amText = (cv.find((c) => c.id === cols.am)?.text ?? "").trim();
+    const pmText = (cv.find((c) => c.id === cols.pm)?.text ?? "").trim();
+    out.set(normName(String(it.name ?? "")), {
+      amOn: amText === "On",
+      pmOn: pmText === "On",
+      amOff: amText === "Off",
+      pmOff: pmText === "Off",
+    });
+  }
+  return out;
+}
+
+/** A day item enriched for the live-dispatch planner — a DispatchLead plus the
+ *  disposition labels (so the caller can count a rep's OPEN leads with the
+ *  engine's isOpenLead). `excludedReps`/`jobWalkReps` start empty; the edge fn
+ *  fills them from the Supabase history mirrors. */
+export type DispatchDayItem = DispatchLead & {
+  pm: string | null;
+  rs: string | null;
+  ol: string | null;
+  bo: string | null;
+  sale: string | null;
+};
+
+const DISPATCH_DAY_COLS = [
+  BLOCK_COL.reps,
+  BLOCK_COL.iss,
+  BLOCK_COL.apptDateTime,
+  BLOCK_COL.location,
+  BLOCK_COL.products,
+  BLOCK_COL.reloads,
+  BLOCK_COL.source,
+  BLOCK_COL.agent,
+  BLOCK_COL.comments,
+  BLOCK_COL.details,
+  BLOCK_COL.pm,
+  BLOCK_COL.rs,
+  BLOCK_COL.ol,
+  BLOCK_COL.bo,
+  BLOCK_COL.sale,
+];
+
+/** Fetch today's block day-group as DispatchDayItems (coords + markers + labels).
+ *  The marker flags (rehash/can-save/job walk/language/older homeowner) are
+ *  computed from the card's free text; history-based exclusions are added later. */
+export async function fetchDispatchDayItems(
+  token: string,
+  boardId: string,
+  groupId: string,
+): Promise<DispatchDayItem[]> {
+  const { data } = await graphql(
+    token,
+    `
+      query ($b: ID!, $g: [String], $cols: [String!]) {
+        boards(ids: [$b]) {
+          groups(ids: $g) {
+            items_page(limit: 200) {
+              items {
+                id
+                name
+                column_values(ids: $cols) {
+                  id
+                  text
+                  value
+                }
+              }
+            }
+          }
+        }
+      }
+    `,
+    { b: boardId, g: [groupId], cols: DISPATCH_DAY_COLS },
+  );
+  const boards =
+    (data?.boards as Array<{
+      groups?: Array<{ items_page?: { items?: Array<Record<string, unknown>> } }>;
+    }>) ?? [];
+  const items = boards[0]?.groups?.[0]?.items_page?.items ?? [];
+  const label = (c: ColMap, id: string) => c[id]?.text?.trim() || null;
+  return items.map((it) => {
+    const cols = colMapOf(
+      it.column_values as Array<{ id: string; text: string | null; value: string | null }>,
+    );
+    const products = (cols[BLOCK_COL.products]?.text ?? "")
+      .split(/[,;]/)
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+    // Free-text pooled for marker + language scanning.
+    const freeText = [
+      cols[BLOCK_COL.source]?.text,
+      cols[BLOCK_COL.agent]?.text,
+      cols[BLOCK_COL.comments]?.text,
+      cols[BLOCK_COL.details]?.text,
+      cols[BLOCK_COL.reloads]?.text,
+    ]
+      .filter(Boolean)
+      .join(" | ");
+    const rsLabel = label(cols, BLOCK_COL.rs);
+    const reloadsText = cols[BLOCK_COL.reloads]?.text ?? "";
+    const isReset =
+      /\brep\s*reset\b|\breset\b/i.test(reloadsText) ||
+      /\breset\b/i.test(cols[BLOCK_COL.source]?.text ?? "") ||
+      (rsLabel ?? "").toLowerCase() === "reset";
+    return {
+      itemId: String(it.id),
+      name: String(it.name ?? ""),
+      boardId,
+      reps: (cols[BLOCK_COL.reps]?.text ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+      issLabel: label(cols, BLOCK_COL.iss),
+      apptWallMinutes: wallMinutesFromDate(
+        cols[BLOCK_COL.apptDateTime]?.value ?? null,
+        cols[BLOCK_COL.apptDateTime]?.text ?? null,
+      ),
+      coords: parseLocation(cols[BLOCK_COL.location]?.value ?? null),
+      products,
+      isReset,
+      isJobWalk: isJobWalkMarker(freeText) || /\bjob\s*walk\b/i.test(reloadsText),
+      isCanSave: isCanSaveMarker(freeText),
+      isRehash: isRehashMarker(freeText),
+      excludedReps: [],
+      jobWalkReps: [],
+      requestedLanguage: detectRequestedLanguage(freeText),
+      olderHomeowner: isOlderHomeownerMarker(freeText),
+      pm: label(cols, BLOCK_COL.pm),
+      rs: rsLabel,
+      ol: label(cols, BLOCK_COL.ol),
+      bo: label(cols, BLOCK_COL.bo),
+      sale: label(cols, BLOCK_COL.sale),
+    };
+  });
+}
+
+/** All active Monday users (id + name) — to resolve a rep name → the user id a
+ *  people column write needs. Cached by the caller per invocation. */
+export async function fetchMondayUsers(
+  token: string,
+): Promise<Array<{ id: string; name: string }>> {
+  const { data } = await graphql(
+    token,
+    `
+      query {
+        users(kind: all, limit: 500) {
+          id
+          name
+        }
+      }
+    `,
+  );
+  const users = (data?.users as Array<{ id?: string; name?: string }>) ?? [];
+  return users
+    .filter((u) => u.id && u.name)
+    .map((u) => ({ id: String(u.id), name: String(u.name) }));
+}
+
+/** Resolve a rep display name to a Monday user id (exact, then first+last, then
+ *  startsWith). null when no confident single match — the caller then routes to
+ *  the managers rather than guessing who to assign. */
+export function resolveUserId(
+  users: Array<{ id: string; name: string }>,
+  repName: string,
+): string | null {
+  const want = normName(repName);
+  if (!want) return null;
+  const exact = users.filter((u) => normName(u.name) === want);
+  if (exact.length === 1) return exact[0].id;
+  if (exact.length > 1) return null; // ambiguous — a human decides
+  // first + last token match (handles a middle name on one side only).
+  const [wf, wl] = [want.split(" ")[0], want.split(" ").slice(-1)[0]];
+  const fl = users.filter((u) => {
+    const n = normName(u.name);
+    return n.split(" ")[0] === wf && n.split(" ").slice(-1)[0] === wl;
+  });
+  if (fl.length === 1) return fl[0].id;
+  return null;
+}
+
+/** Write a people column (e.g. people6 Reps) with the given Monday user ids. */
+export async function setPeopleColumn(
+  token: string,
+  boardId: string,
+  itemId: string,
+  columnId: string,
+  userIds: string[],
+  idempotencyKey?: string,
+): Promise<MondayResult> {
+  const personsAndTeams = userIds.map((id) => ({ id: Number(id), kind: "person" }));
+  return graphql(
+    token,
+    `
+      mutation ($b: ID!, $i: ID!, $vals: JSON!) {
+        change_multiple_column_values(board_id: $b, item_id: $i, column_values: $vals) {
+          id
+        }
+      }
+    `,
+    { b: boardId, i: itemId, vals: JSON.stringify({ [columnId]: { personsAndTeams } }) },
+    idempotencyKey,
+  );
 }

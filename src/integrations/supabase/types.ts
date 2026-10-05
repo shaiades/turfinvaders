@@ -1597,6 +1597,7 @@ export type Database = {
           active_monday_board_sd: string | null
           created_at: string
           id: boolean
+          live_dispatch_mode: string
           monday_api_token: string | null
           monday_template_board_id: string | null
           monday_webhooks: Json
@@ -1613,6 +1614,7 @@ export type Database = {
           active_monday_board_sd?: string | null
           created_at?: string
           id?: boolean
+          live_dispatch_mode?: string
           monday_api_token?: string | null
           monday_template_board_id?: string | null
           monday_webhooks?: Json
@@ -1629,6 +1631,7 @@ export type Database = {
           active_monday_board_sd?: string | null
           created_at?: string
           id?: boolean
+          live_dispatch_mode?: string
           monday_api_token?: string | null
           monday_template_board_id?: string | null
           monday_webhooks?: Json
