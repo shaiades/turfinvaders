@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { ArcadeCard, ArcadePanel, ArcadeSkeleton } from "@/components/arcade";
 import { RepAvatar } from "@/components/RepAvatar";
@@ -30,6 +30,9 @@ const fmtVol = (n: number) =>
   n >= 10_000 ? `$${Math.round(n / 1000)}K` : `$${Math.round(n).toLocaleString()}`;
 const firstName = (name: string) => name.split(" ")[0];
 const bonusCount = (vol: number) => Math.floor(Math.max(0, vol) / BOSS_HP);
+
+// useLayoutEffect warns during SSR; fall back to useEffect on the server.
+const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 export function CanvasserLeaderboard() {
   const { user } = useAuth();
@@ -86,6 +89,57 @@ export function CanvasserLeaderboard() {
   const podium = rows.slice(0, 3);
   const rest = rows.slice(3);
 
+  // ── FLIP slide-reorder: when a posted result reshuffles the high-score
+  // table, each row animates from where it was to where it lands, instead of
+  // snapping. We measure positions relative to the list (scroll-independent),
+  // invert to the old spot with no transition, then release to animate. Keyed
+  // by the rendered order so flash-only re-renders don't trigger it; skipped
+  // under reduced motion (the numbers still update, just no slide).
+  const listRef = useRef<HTMLOListElement>(null);
+  const prevTops = useRef(new Map<string, number>());
+  const orderSig = rest.map((r) => r.id).join(",");
+  // Switching tabs swaps the whole list — snap to the new order (no slide) by
+  // dropping the remembered positions before the layout effect measures.
+  const lastTab = useRef(tab);
+  if (lastTab.current !== tab) {
+    lastTab.current = tab;
+    prevTops.current = new Map();
+  }
+  useIsoLayoutEffect(() => {
+    const container = listRef.current;
+    if (!container) return;
+    const els = Array.from(container.querySelectorAll<HTMLElement>("[data-row-id]"));
+    // offsetTop (relative to the positioned <ol>) is layout-based: it ignores
+    // any active slide transform and page scroll, so a reshuffle that lands
+    // mid-animation still measures the true positions.
+    const newTops = new Map<string, number>();
+    for (const el of els) newTops.set(el.dataset.rowId!, el.offsetTop);
+    if (!reduced && prevTops.current.size > 0) {
+      for (const el of els) {
+        const id = el.dataset.rowId!;
+        const prev = prevTops.current.get(id);
+        const next = newTops.get(id)!;
+        if (prev == null) continue; // newly on the board — just appears
+        const delta = prev - next;
+        if (Math.abs(delta) < 1) continue;
+        el.style.transition = "none";
+        el.style.transform = `translateY(${delta}px)`;
+        el.style.zIndex = "1";
+        requestAnimationFrame(() => {
+          el.style.transition = "transform 480ms cubic-bezier(0.22,1,0.36,1)";
+          el.style.transform = "";
+          const clear = () => {
+            el.style.zIndex = "";
+            el.style.transition = "";
+            el.removeEventListener("transitionend", clear);
+          };
+          el.addEventListener("transitionend", clear);
+        });
+      }
+    }
+    prevTops.current = newTops;
+  }, [orderSig, reduced]);
+
   return (
     <div className="space-y-4">
       {/* Range tabs */}
@@ -137,7 +191,7 @@ export function CanvasserLeaderboard() {
                   {rows.length} on the board
                 </span>
               </header>
-              <ol className="divide-y divide-border/60 px-2">
+              <ol ref={listRef} className="relative divide-y divide-border/60 px-2">
                 {rest.map((r, i) => (
                   <ScoreRow
                     key={r.id}
@@ -269,7 +323,10 @@ function ScoreRow({
 }) {
   const bonuses = bonusCount(r.vol);
   return (
-    <li className={`py-2.5 ${self ? "-mx-1 rounded bg-neon/10 px-1" : ""}`}>
+    <li
+      data-row-id={r.id}
+      className={`relative py-2.5 ${self ? "-mx-1 rounded bg-neon/10 px-1" : "bg-surface"}`}
+    >
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2.5">
           <span className="flex w-8 shrink-0 items-center justify-end gap-0.5 font-display text-sm tabular-nums text-muted-foreground">
