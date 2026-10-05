@@ -12,6 +12,7 @@ import {
   type VanRow,
 } from "@/hooks/useCanvasserArcade";
 import { captureMorningRank } from "@/hooks/useWrapData";
+import { haptic } from "@/lib/arcade-fx";
 import { BOSS_HP } from "@/lib/canvasserPay";
 
 /**
@@ -68,11 +69,13 @@ export function CanvasserLeaderboard() {
     prevRank.current = rm;
     prevVol.current = vm;
     if (Object.keys(next).length > 0) {
+      // A light buzz when YOUR row moves or banks a sale (haptics pref gated).
+      if (selfId && next[selfId]) haptic(next[selfId] === "up" ? 20 : 15);
       setFlash((f) => ({ ...f, ...next }));
       const t = setTimeout(() => setFlash({}), 2600);
       return () => clearTimeout(t);
     }
-  }, [rows]);
+  }, [rows, selfId]);
 
   // Remember today's rank the first time they look, so the Daily Wrap can show
   // the morning → night climb. Only the live "Today" standing counts as morning.

@@ -10,6 +10,8 @@ import confetti from "canvas-confetti";
 import { X, ChevronRight, Share2, RotateCcw } from "lucide-react";
 import { RepAvatar } from "@/components/RepAvatar";
 import { NeonButton } from "@/components/arcade";
+import { ArcadeFxToggle } from "@/components/ArcadeFxToggle";
+import { arcadeCue } from "@/lib/arcade-fx";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { useWrapData, type WrapScope } from "@/hooks/useWrapData";
 import { BOSS_BOUNTY } from "@/lib/canvasserPay";
@@ -103,16 +105,48 @@ export function WrapShow({ scope, onClose }: { scope: WrapScope; onClose: () => 
     return () => clearTimeout(t);
   }, [i, kind, d.loading, noScore]);
 
-  // Celebratory bursts on the money / badge cards.
+  // Celebration per card: confetti is motion (skipped under reduced-motion),
+  // while sound + haptics ride their own prefs so they still fire when motion
+  // is off. The hits: sales → coins, boss → a chest (defeat) or a low hit,
+  // badges → a level-up fanfare, a rank climb → a quick blip.
   useEffect(() => {
-    if (reduced || d.loading) return;
-    const fire = (colors: string[]) =>
+    if (d.loading) return;
+    const fire = (colors: string[]) => {
+      if (reduced) return;
       confetti({ particleCount: 110, spread: 75, startVelocity: 42, origin: { y: 0.55 }, colors });
-    if (kind === "sales" && d.vol > 0) fire(["#ffcf33", "#3be089", "#22e6ff"]);
-    if (kind === "boss" && d.boss.bossesDefeated > 0) fire(["#ffcf33", "#ff3d9a"]);
-    if (kind === "badges" && d.badges.some((b) => b.unlocked))
-      fire(["#ff3d9a", "#22e6ff", "#ffcf33"]);
-  }, [kind, reduced, d.loading, d.vol, d.boss.bossesDefeated, d.badges]);
+    };
+    if (kind === "sales" && d.vol > 0) {
+      fire(["#ffcf33", "#3be089", "#22e6ff"]);
+      arcadeCue("coin", [20, 20]);
+    } else if (kind === "boss") {
+      if (d.boss.bossesDefeated > 0) {
+        fire(["#ffcf33", "#ff3d9a"]);
+        arcadeCue("chest", [40, 30, 90]);
+      } else if (d.todayVol > 0) {
+        arcadeCue("boss", 30);
+      }
+    } else if (kind === "badges") {
+      if (d.badges.some((b) => b.unlocked)) fire(["#ff3d9a", "#22e6ff", "#ffcf33"]);
+      arcadeCue("levelup", [20, 20, 20]);
+    } else if (
+      kind === "rank" &&
+      d.rank != null &&
+      d.morningRank != null &&
+      d.rank < d.morningRank
+    ) {
+      arcadeCue("rank", 25);
+    }
+  }, [
+    kind,
+    reduced,
+    d.loading,
+    d.vol,
+    d.todayVol,
+    d.boss.bossesDefeated,
+    d.badges,
+    d.rank,
+    d.morningRank,
+  ]);
 
   const next = () => setI((n) => Math.min(n + 1, KINDS.length - 1));
   const prev = () => setI((n) => Math.max(n - 1, 0));
@@ -144,8 +178,8 @@ export function WrapShow({ scope, onClose }: { scope: WrapScope; onClose: () => 
 
   return (
     <div className="fixed inset-0 z-[10025] flex flex-col bg-[linear-gradient(180deg,#0b0b12,#140a1e_60%,#0b0b12)] px-safe pt-safe pb-safe">
-      {/* progress dots + skip */}
-      <div className="flex items-center gap-1.5 px-4 pt-4">
+      {/* progress dots + sound/haptics + skip (above the tap zones) */}
+      <div className="relative z-20 flex items-center gap-1.5 px-4 pt-4">
         {KINDS.map((k, idx) => (
           <span
             key={k}
@@ -154,11 +188,12 @@ export function WrapShow({ scope, onClose }: { scope: WrapScope; onClose: () => 
             }`}
           />
         ))}
+        <ArcadeFxToggle className="ml-1.5" />
         <button
           type="button"
           onClick={close}
           aria-label="Close wrap"
-          className="ml-2 grid h-9 w-9 shrink-0 place-items-center rounded-full text-muted-foreground hover:text-foreground"
+          className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-muted-foreground hover:text-foreground"
         >
           <X className="h-5 w-5" />
         </button>
@@ -203,9 +238,9 @@ export function WrapShow({ scope, onClose }: { scope: WrapScope; onClose: () => 
         )}
       </div>
 
-      {/* bottom controls */}
+      {/* bottom controls (above the tap zones) */}
       {!d.loading && (
-        <div className="flex items-center justify-between gap-3 px-6 pb-4">
+        <div className="relative z-20 flex items-center justify-between gap-3 px-6 pb-4">
           <span className="font-display text-[10px] uppercase tracking-widest text-muted-foreground">
             {SCOPE_LABEL[scope]}
           </span>
@@ -484,7 +519,7 @@ function WrapCard({
             type="button"
             onClick={onShare}
             disabled={saving}
-            className="mt-5 flex min-h-11 items-center gap-2 rounded-lg bg-neon px-4 font-display text-[11px] uppercase tracking-widest text-neon-foreground disabled:opacity-60"
+            className="relative z-20 mt-5 flex min-h-11 items-center gap-2 rounded-lg bg-neon px-4 font-display text-[11px] uppercase tracking-widest text-neon-foreground disabled:opacity-60"
           >
             <Share2 className="h-4 w-4" /> {saving ? "Saving…" : "Save / Share"}
           </button>

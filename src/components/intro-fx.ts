@@ -5,6 +5,8 @@
  * each scene keeps its own timeline, characters, and particles.
  */
 
+import { isSoundOn } from "@/lib/fx-prefs";
+
 export const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 
 export const easeInOut = (p: number) => (p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2);
@@ -134,6 +136,11 @@ const armUnlock = () => {
 export function makeBeeper() {
   return (freq: number, durMs: number, delayMs = 0, type: OscillatorType = "square") => {
     try {
+      // Global sound switch (owner spec: sound OFF by default). Honored here so
+      // every beeper consumer — arcade cues, the EOD recap, Kombat FX — follows
+      // the one preference without each wiring it up. The per-scene 🔇 toggles
+      // in WelcomeAnimation / CloseKombatIntro use their own contexts, not this.
+      if (!isSoundOn()) return;
       sharedCtx ??= new AudioContext();
       const ctx = sharedCtx;
       if (ctx.state !== "running") {

@@ -6,6 +6,7 @@ import { ArcadeCard, ArcadePanel } from "@/components/arcade";
 import { GlossarySheet } from "@/components/GlossarySheet";
 import { AlertTriangle, Info, Play, Trophy } from "lucide-react";
 import { WrapShow } from "@/components/WrapShow";
+import { ArcadeFxToggle } from "@/components/ArcadeFxToggle";
 import type { WrapScope } from "@/hooks/useWrapData";
 import { addDaysISO, laTodayISO, reportDates } from "@/lib/dates";
 import { formatCurrency } from "@/lib/utils";
@@ -272,11 +273,15 @@ function DailyWrap() {
       {selfId && (
         <ArcadeCard className="flex flex-col items-center gap-3 p-4 text-center sm:flex-row sm:justify-between sm:text-left">
           <div className="min-w-0">
-            <p className="font-display text-sm uppercase tracking-widest text-neon">
-              ▶ Play your Wrap
-            </p>
+            <div className="flex items-center justify-center gap-1 sm:justify-start">
+              <p className="font-display text-sm uppercase tracking-widest text-neon">
+                ▶ Play your Wrap
+              </p>
+              <ArcadeFxToggle />
+            </div>
             <p className="mt-0.5 text-xs text-muted-foreground">
               Your day as a highlight reel — sits, sales, boss damage, rank and a share card.
+              Sound&apos;s off until you tap 🔊.
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
