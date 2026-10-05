@@ -2030,10 +2030,39 @@ function CloseKombatInner({
 
         {/* Leads/Dispo: the rep's leads (reps) + the office write-back cockpit
             (admins) in one tab. A user who is both (owner previewing a rep via
-            View As) sees their leads first, then the cockpit. */}
+            View As) sees their leads first, then the cockpit — the Reps/Office
+            headers show only then, so a single-section view stays uncluttered. */}
         <TabsContent value="leads" className="mt-4 space-y-4 md:space-y-6">
-          {isRep && <MyLeads displayName={displayName} />}
-          {isAdmin && <CloseKombatOohTab />}
+          {isRep && (
+            <div className="space-y-3">
+              {isAdmin && (
+                <div className="flex flex-wrap items-baseline gap-x-2 border-b border-border/40 pb-1.5">
+                  <span className="font-display text-base uppercase tracking-widest text-neon">
+                    Reps
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    what the field sees &amp; submits
+                  </span>
+                </div>
+              )}
+              <MyLeads displayName={displayName} />
+            </div>
+          )}
+          {isAdmin && (
+            <div className="space-y-3">
+              {isRep && (
+                <div className="flex flex-wrap items-baseline gap-x-2 border-b border-border/40 pb-1.5">
+                  <span className="font-display text-base uppercase tracking-widest text-kombat-gold">
+                    Office
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    review &amp; what didn't make it into Monday
+                  </span>
+                </div>
+              )}
+              <CloseKombatOohTab />
+            </div>
+          )}
         </TabsContent>
 
         <TabsContent value="learn" className="mt-4">
