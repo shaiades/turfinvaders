@@ -4,7 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { ArcadeCard, ArcadePanel } from "@/components/arcade";
 import { GlossarySheet } from "@/components/GlossarySheet";
-import { AlertTriangle, Info, Trophy } from "lucide-react";
+import { AlertTriangle, Info, Play, Trophy } from "lucide-react";
+import { WrapShow } from "@/components/WrapShow";
+import type { WrapScope } from "@/hooks/useWrapData";
 import { addDaysISO, laTodayISO, reportDates } from "@/lib/dates";
 import { formatCurrency } from "@/lib/utils";
 import { useClockPresence, useDailyWrapRows, type WrapRow } from "@/hooks/useDailyWrapRows";
@@ -51,7 +53,13 @@ function DoughnutCard({
           : "flex items-center gap-4 p-3 rounded-md border border-border bg-surface"
       }
     >
-      <span className={frozen ? "frozen-doughnut text-5xl leading-none" : "bouncing-doughnut text-4xl leading-none"}>
+      <span
+        className={
+          frozen
+            ? "frozen-doughnut text-5xl leading-none"
+            : "bouncing-doughnut text-4xl leading-none"
+        }
+      >
         🍩
       </span>
       <div className="min-w-0">
@@ -139,6 +147,8 @@ function AwardSection({ tier, rows }: { tier: (typeof AWARD_TIERS)[number]; rows
 function DailyWrap() {
   const { today, yday, wkStart, locked } = reportDates();
   const [glossaryOpen, setGlossaryOpen] = useState(false);
+  // The cinematic wrap plays over everything when a scope is chosen.
+  const [playScope, setPlayScope] = useState<WrapScope | null>(null);
 
   // YOUR DAY (audit P2-3): the wrap used to be entirely team-wide — the one
   // person guaranteed to read it never appeared. All self data rides caches
@@ -203,8 +213,12 @@ function DailyWrap() {
     const winners = rows
       .filter((r) => r.todayLeads >= 1)
       .sort((a, b) => b.todayLeads - a.todayLeads);
-    const club3 = rows.filter((r) => r.weekPoints >= 3 && r.weekPoints < 7).sort((a, b) => b.weekPoints - a.weekPoints);
-    const bosses7 = rows.filter((r) => r.weekPoints >= 7).sort((a, b) => b.weekPoints - a.weekPoints);
+    const club3 = rows
+      .filter((r) => r.weekPoints >= 3 && r.weekPoints < 7)
+      .sort((a, b) => b.weekPoints - a.weekPoints);
+    const bosses7 = rows
+      .filter((r) => r.weekPoints >= 7)
+      .sort((a, b) => b.weekPoints - a.weekPoints);
     return { suspension, doughnuts, winners, club3, bosses7 };
   }, [rows, clockReady, clockedOn, yday, yday2]);
 
@@ -216,6 +230,7 @@ function DailyWrap() {
 
   return (
     <div className="space-y-6">
+      {playScope && selfId && <WrapShow scope={playScope} onClose={() => setPlayScope(null)} />}
       {!locked && (
         <div
           className="rounded-md border-2 px-4 py-2 text-center font-display text-xs uppercase tracking-widest"
@@ -251,6 +266,39 @@ function DailyWrap() {
           day
         </p>
       </div>
+
+      {/* Cinematic wrap launcher — the Spotify-Wrapped-style recap, replayable
+          any time for Today / Week / Month. Auto-plays once after 9 PM PT. */}
+      {selfId && (
+        <ArcadeCard className="flex flex-col items-center gap-3 p-4 text-center sm:flex-row sm:justify-between sm:text-left">
+          <div className="min-w-0">
+            <p className="font-display text-sm uppercase tracking-widest text-neon">
+              ▶ Play your Wrap
+            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Your day as a highlight reel — sits, sales, boss damage, rank and a share card.
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {(
+              [
+                ["day", "Today"],
+                ["week", "Week"],
+                ["month", "Month"],
+              ] as const
+            ).map(([k, label]) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setPlayScope(k)}
+                className="inline-flex min-h-11 items-center gap-1 rounded-lg border border-neon/40 bg-neon/10 px-3 font-display text-[10px] uppercase tracking-widest text-neon transition hover:bg-neon/20"
+              >
+                <Play className="h-3 w-3" /> {label}
+              </button>
+            ))}
+          </div>
+        </ArcadeCard>
+      )}
 
       {/* YOUR DAY — celebration starts with the person reading (P2-3). */}
       {selfId && (
@@ -372,7 +420,10 @@ function YourDayCard({
       </div>
       <div className="grid grid-cols-4 sm:grid-cols-5 gap-2">
         {stats.map((s) => (
-          <div key={s.label} className="rounded-md border border-border/60 bg-black/30 px-2 py-2 text-center">
+          <div
+            key={s.label}
+            className="rounded-md border border-border/60 bg-black/30 px-2 py-2 text-center"
+          >
             <div className={`font-display text-xl leading-none tabular-nums ${s.cls}`}>
               {s.value}
             </div>

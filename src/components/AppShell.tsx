@@ -24,6 +24,7 @@ import { CanvasserTutorial, startCanvasserTutorial } from "@/components/tutorial
 import { WelcomeAnimation, isWelcomeAnimationForced } from "@/components/WelcomeAnimation";
 import { CloseKombatIntro, isCloseKombatIntroForced } from "@/components/CloseKombatIntro";
 import { EodRecapFx, isEodRecapForced } from "@/components/EodRecapFx";
+import { EodWrapGate, isEodWrapForced } from "@/components/EodWrapGate";
 import {
   PurposeReminderCard,
   isPurposeReminderForced,
@@ -149,6 +150,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   // End-of-day recap cutscene: same hold for the tour. Play order on a
   // morning open that owes both: intro → EOD recap → page tour.
   const [eodActive, setEodActive] = useState(false);
+  // Personal Daily Wrap auto-play (9 PM PT, canvassers/captains): held behind
+  // the intro AND the team EOD recap so the two cutscenes never stack.
+  const [wrapActive, setWrapActive] = useState(false);
   // Respawn reminder (Fri 6 PM → Sun 12 PM): held behind intro + plan +
   // purpose; active while UNSETTLED so the page tour waits for it too.
   const [respawnPopupActive, setRespawnPopupActive] = useState(false);
@@ -705,6 +709,23 @@ export function AppShell({ children }: { children: ReactNode }) {
           <EodRecapFx userId={user.id} heldBack={introActive} onActiveChange={setEodActive} />
         )}
 
+      {/* Personal Daily Wrap cinematic — canvassers & captains, once per LA day
+          on the first open at/after 9 PM PT. Sequenced AFTER the morning intro
+          and the team EOD recap via heldBack; gated on the REAL role so a
+          View-As preview can't burn the stamp. `?eod_wrap=1` previews from any
+          account without stamping; the Wrap tab's Replay re-runs it any time. */}
+      {user &&
+        (isEodWrapForced() ||
+          (realRole !== null &&
+            (privilegeRole(realRole) === "canvasser" ||
+              privilegeRole(realRole) === "captain"))) && (
+          <EodWrapGate
+            userId={user.id}
+            heldBack={introActive || eodActive}
+            onActiveChange={setWrapActive}
+          />
+        )}
+
       {/* Weekly Action Plan popup — reps only, once per PLAN week (Sunday
           shows the upcoming week). Sequenced after the door-kick intro via
           heldBack; gated on the REAL role so a View-As preview can't burn
@@ -766,6 +787,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             (tourRole === "canvasser" || tourRole === "captain" || tourRole === "sales_rep") &&
             !introActive &&
             !eodActive &&
+            !wrapActive &&
             !planPopupActive &&
             !purposeReminderActive &&
             !respawnPopupActive && (
