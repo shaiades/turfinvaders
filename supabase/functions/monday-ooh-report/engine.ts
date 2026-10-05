@@ -509,6 +509,31 @@ export function buildDetailsLine(
   return `${parts.join(". ")} (${laClock(submitMs)})`;
 }
 
+/** True when this submission is a SALE (any Sold result — on-block, self-gen,
+ *  upsell or reload). Drives the leadership SALE text. */
+export function isSaleResult(form: OohForm): boolean {
+  return form.result === RESULT.SOLD;
+}
+
+/**
+ * The "SALE" alert texted to leadership (Tyler / Shai / Jorge) the moment a rep
+ * sells: a loud banner, the rep(s), what they sold, and how much. Pure so the
+ * verify script can assert it. Never invents an amount — a blank Sale Price just
+ * omits the money line (owner rule: blank = unknown, don't backfill).
+ */
+export function buildSaleAlert(form: OohForm, customerName: string | null): string {
+  const reps = [form.repName, form.partner].filter(Boolean).join(" & ") || "A rep";
+  const what = (form.quantities || form.quotedText || "").trim();
+  const amount = form.salePrice != null ? `$${form.salePrice.toLocaleString("en-US")}` : null;
+  const kind = resultPrefix(form); // "Sold" | "Upsell" | "Reload"
+  const lines = ["🟩🟩🟩  SALE  🟩🟩🟩"];
+  if (amount) lines.push(`💰 ${amount}`);
+  lines.push(`Rep: ${reps}`);
+  lines.push(`${kind}${what ? `: ${what}` : ""}`);
+  if (customerName && customerName.trim()) lines.push(`Customer: ${customerName.trim()}`);
+  return lines.join("\n");
+}
+
 const WD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 function fmtReset(r: { date: string; time: string | null }): string {
