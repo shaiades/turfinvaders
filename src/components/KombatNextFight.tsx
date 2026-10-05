@@ -63,13 +63,13 @@ export function KombatNextFight({
         </span>
       }
     >
-      <div className="grid grid-cols-[1fr_auto_1fr] items-stretch gap-2 sm:gap-3">
+      <div className="mx-auto grid max-w-xl grid-cols-[1fr_auto_1fr] items-center gap-2 sm:gap-3">
         <FighterTile fighter={me} side="you" />
         <div className="flex flex-col items-center justify-center">
           <span
-            className="font-display text-2xl text-kombat-red sm:text-3xl"
+            className="font-display text-2xl text-kombat-red sm:text-4xl"
             style={{
-              textShadow: "0 0 14px color-mix(in oklab, var(--kombat-red) 70%, transparent)",
+              textShadow: "0 0 18px color-mix(in oklab, var(--kombat-red) 75%, transparent)",
             }}
           >
             VS
@@ -131,24 +131,48 @@ function FighterTile({
   const accent = isYou ? "var(--kombat-gold)" : "var(--kombat-red)";
   return (
     <div
-      className="pop-panel relative flex min-w-0 flex-col items-center rounded-lg bg-kombat-black/60 p-2"
+      className="pop-panel relative flex min-w-0 flex-col items-center rounded-lg bg-kombat-black/60 p-1.5 sm:p-2"
       style={{ borderColor: accent }}
     >
-      <RepAvatar
-        name={fighter.name}
-        cartoon={fighter.cartoon}
-        variant="full"
-        rounded="lg"
-        className="h-28 w-full sm:h-36"
-        textClassName="text-2xl"
-      />
+      {/* Character-select frame: whole fighter on a themed stage, head-first so
+          the face is never the part that gets cropped. */}
       <div
-        className="mt-2 w-full truncate text-center font-display text-[10px] uppercase tracking-widest"
+        className="relative aspect-[3/4] w-full overflow-hidden rounded-md"
+        style={{
+          background: `radial-gradient(120% 90% at 50% 0%, color-mix(in oklab, ${accent} 26%, transparent), transparent 70%), linear-gradient(180deg, color-mix(in oklab, ${accent} 10%, var(--kombat-black)), var(--kombat-black))`,
+        }}
+      >
+        <RepAvatar
+          name={fighter.name}
+          cartoon={fighter.cartoon}
+          variant="full"
+          rounded="none"
+          className="absolute inset-0 h-full w-full"
+          textClassName="text-3xl"
+        />
+        {/* Floor glow grounds the fighter in the frame. */}
+        <div
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-1/3"
+          style={{
+            background: `linear-gradient(180deg, transparent, color-mix(in oklab, ${accent} 22%, transparent))`,
+          }}
+        />
+        {/* Inner edge vignette for depth. */}
+        <div
+          className="pointer-events-none absolute inset-0 rounded-md"
+          style={{ boxShadow: `inset 0 0 22px color-mix(in oklab, ${accent} 30%, transparent)` }}
+        />
+      </div>
+      <div
+        className="mt-2 w-full truncate text-center font-display text-[10px] uppercase tracking-widest sm:text-xs"
         style={{ color: accent }}
       >
         {isYou ? "You" : firstName(fighter.name)}
       </div>
-      <div className="font-mono text-sm font-bold tabular-nums" style={{ color: accent }}>
+      <div
+        className="font-mono text-sm font-bold tabular-nums sm:text-base"
+        style={{ color: accent }}
+      >
         {fmtPts(fighter.total)}
       </div>
     </div>
