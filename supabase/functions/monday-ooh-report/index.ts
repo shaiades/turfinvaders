@@ -26,8 +26,10 @@ import {
   FORM_BOARD_ID,
   buildBaseQueueRow,
   buildDetailsLine,
+  buildSaleAlert,
   hasExistingDisposition,
   isAllowedOohBoard,
+  isSaleResult,
   laClock,
   matchTarget,
   oohUpdateKey,
@@ -205,6 +207,19 @@ serve(async (req) => {
       return ok({ queued: plan.needsReview });
     }
 
+    // A self-gen / off-block SALE still texts leadership immediately, even
+    // though its card is queued for the office (a rep who sold on their own
+    // shouldn't wait on card-creation for the SALE to land). Only in live mode;
+    // never in dry_run. Best-effort.
+    const saleAlertSent = { done: false };
+    const alertSaleOnce = async (customer: string | null) => {
+      if (saleAlertSent.done) return;
+      if (mode === "live" && isSaleResult(form)) {
+        saleAlertSent.done = true;
+        await sendDispatcherIMessage(buildSaleAlert(form, customer)).catch(() => undefined);
+      }
+    };
+
     // Only the matched-lead path writes automatically. Create (self-gen /
     // upsell / reload) is queued unless auto-create is explicitly enabled.
     if (target.kind !== "write") {
@@ -212,6 +227,7 @@ serve(async (req) => {
       if (target.kind === "create" && !autocreate) {
         await finish("queued");
         await queue("needs_review", `auto-create off — ${target.reason}`, baseRow);
+        await alertSaleOnce(formItem.name || form.address); // self-gen SALE → text now
         return ok({ queued: "create (auto-create off)" });
       }
       if (target.kind === "queue") {
@@ -330,6 +346,10 @@ serve(async (req) => {
       `OOH report from ${form.repName ?? "rep"} at ${laClock(formItem.createdAtMs)} — ${formLink}${sourceCodeNote}`,
       oohUpdateKey(formItemId),
     ).catch(() => undefined);
+
+    // SALE → text leadership (Tyler / Shai / Jorge) with a loud banner: the
+    // rep(s), what they sold, how much. Best-effort; live mode only.
+    await alertSaleOnce(block.name);
 
     // ── Rule 6: at-the-door → message the office; release nothing ───────────
     let released: string | null = null;

@@ -17,11 +17,13 @@ import {
   applyDisposition,
   buildBaseQueueRow,
   buildDetailsLine,
+  buildSaleAlert,
   hasExistingDisposition,
   isAllowedOohBoard,
   isBlankStatus,
   isDuplicate,
   isOpenLead,
+  isSaleResult,
   laClock,
   laWallMinutesFromUtc,
   lateReportCheck,
@@ -1111,6 +1113,60 @@ expectEq(
     ),
     null,
   );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 11) SALE alert to leadership (Tyler / Shai / Jorge)
+// ════════════════════════════════════════════════════════════════════════════
+expectEq(
+  "isSaleResult: Sold → true",
+  isSaleResult(parseOohForm("s", form({ [FORM_COL.result]: status(RESULT.SOLD) }))),
+  true,
+);
+expectEq(
+  "isSaleResult: Pitch miss → false",
+  isSaleResult(parseOohForm("s", form({ [FORM_COL.result]: status(RESULT.PITCH_MISS) }))),
+  false,
+);
+{
+  const f = parseOohForm(
+    "sale1",
+    form({
+      [FORM_COL.repName]: status(4, "Jaxon Heilman"),
+      [FORM_COL.partner]: status(10, "Nick Schoeben"),
+      [FORM_COL.result]: status(RESULT.SOLD),
+      [FORM_COL.onBlock]: status(ON_BLOCK.YES),
+      [FORM_COL.quantities]: text("Roof 28 sq + gutters"),
+      [FORM_COL.salePrice]: num(34900),
+    }),
+  );
+  const msg = buildSaleAlert(f, "John Smith");
+  expect("sale alert has a SALE banner", msg.includes("SALE"));
+  expect("sale alert shows the amount", msg.includes("$34,900"));
+  expect("sale alert lists both reps", msg.includes("Jaxon Heilman & Nick Schoeben"));
+  expect("sale alert says what sold", msg.includes("Sold: Roof 28 sq + gutters"));
+  expect("sale alert names the customer", msg.includes("Customer: John Smith"));
+  console.log(`   e.g. →\n${msg.replace(/^/gm, "      ")}`);
+}
+{
+  // Upsell keeps its label; blank Sale Price omits the money line (never invent).
+  const f = parseOohForm(
+    "sale2",
+    form({
+      [FORM_COL.repName]: status(4, "Solo Rep"),
+      [FORM_COL.result]: status(RESULT.SOLD),
+      [FORM_COL.onBlock]: status(ON_BLOCK.UPSELL),
+      [FORM_COL.quoted]: { text: "Windows", value: null },
+    }),
+  );
+  const msg = buildSaleAlert(f, null);
+  expect("upsell alert uses the Upsell label", msg.includes("Upsell: Windows"));
+  expect("no sale price → no money line", !msg.includes("$"));
+  expect(
+    "single rep renders without an ampersand",
+    msg.includes("Rep: Solo Rep") && !msg.includes(" & "),
+  );
+  expect("no customer → no Customer line", !msg.includes("Customer:"));
 }
 
 if (failures > 0) {

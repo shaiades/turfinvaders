@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { ArcadePanel } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
-import { OohReportButton } from "@/components/OohReportButton";
+import { OohReportButton, OohSelfGenButton } from "@/components/OohReportButton";
 import { MapPin, Users, Loader2, CheckCircle2 } from "lucide-react";
 import { laTodayISO } from "@/lib/dates";
 import { buildRepMatcher } from "@/lib/rep-identity";
@@ -144,30 +144,37 @@ export function MyLeads({ displayName }: { displayName: string | null }) {
         </span>
       }
     >
-      {q.isLoading ? (
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" /> Loading your leads…
-        </p>
-      ) : mine.length === 0 ? (
-        <div className="space-y-1 py-4 text-center">
-          <CheckCircle2 className="mx-auto size-6 text-victory" />
-          <p className="text-sm text-foreground">No leads assigned to you today.</p>
-          <p className="text-xs text-muted-foreground">
-            Your next lead is released the night before — you’ll get a text when it’s yours.
+      <div className="space-y-3">
+        {/* Always available — report a sale you made on your own (self-gen /
+            off-block), even on a day with no issued leads. */}
+        <OohSelfGenButton repName={matcher.matched ?? displayName} className="w-full" />
+
+        {q.isLoading ? (
+          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" /> Loading your leads…
           </p>
-        </div>
-      ) : (
-        <div className="grid gap-3 md:grid-cols-2">
-          {mine.map((c) => (
-            <LeadCard
-              key={c.monday_item_id}
-              card={c}
-              repName={matcher.matched ?? displayName ?? ""}
-              partner={(c.reps ?? []).filter((r) => !matcher.isMe(r)).join(", ") || null}
-            />
-          ))}
-        </div>
-      )}
+        ) : mine.length === 0 ? (
+          <div className="space-y-1 py-4 text-center">
+            <CheckCircle2 className="mx-auto size-6 text-victory" />
+            <p className="text-sm text-foreground">No leads assigned to you today.</p>
+            <p className="text-xs text-muted-foreground">
+              Your next lead is released the night before — you’ll get a text when it’s yours. Sold
+              one on your own? Use the button above.
+            </p>
+          </div>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2">
+            {mine.map((c) => (
+              <LeadCard
+                key={c.monday_item_id}
+                card={c}
+                repName={matcher.matched ?? displayName ?? ""}
+                partner={(c.reps ?? []).filter((r) => !matcher.isMe(r)).join(", ") || null}
+              />
+            ))}
+          </div>
+        )}
+      </div>
     </ArcadePanel>
   );
 }
