@@ -24,24 +24,23 @@ export function KombatHeroBanner({
         boxShadow: "0 0 32px -10px color-mix(in oklab, var(--kombat-red) 70%, transparent)",
       }}
     >
-      {/* Key-art backdrop, zoomed into the central clash so the LIGHTNING is the
-          hero and the two fighters read as crackling accents on each edge
-          (owner 2026-10-05: "more lightning than fighters"). */}
+      {/* Key-art backdrop — the FULL clash scene (both fighters + the arena),
+          shown whole so the art reads (owner 2026-10-05: the original image is
+          the amazing part; just lose the VS badge and center the title). */}
       <img
         src="/close-kombat-hero.jpg"
         alt=""
         aria-hidden
-        className="absolute inset-0 z-0 h-full w-full scale-[1.7] object-cover object-center"
+        className="absolute inset-0 z-0 h-full w-full object-cover object-center"
       />
-      {/* Legibility scrim: a dark plate behind the wordmark + a soft edge
-          vignette to tame the far sides — the lightning still blooms around the
-          title. */}
+      {/* Center-weighted legibility scrim: darkens behind the wordmark over the
+          bright clash, fading out toward the flanking fighters so they show. */}
       <span
         aria-hidden
         className="absolute inset-0 z-0"
         style={{
           background:
-            "radial-gradient(ellipse 46% 80% at 50% 50%, rgba(10,8,12,.86) 0%, rgba(10,8,12,.5) 55%, rgba(10,8,12,0) 78%), linear-gradient(90deg, rgba(10,8,12,.72) 0%, rgba(10,8,12,0) 26%, rgba(10,8,12,0) 74%, rgba(10,8,12,.72) 100%), linear-gradient(180deg, rgba(10,8,12,.25), rgba(10,8,12,.55))",
+            "radial-gradient(ellipse 58% 135% at 50% 46%, rgba(10,8,12,.9) 0%, rgba(10,8,12,.5) 52%, rgba(10,8,12,.12) 80%), linear-gradient(180deg, rgba(10,8,12,.28), rgba(10,8,12,.6))",
         }}
       />
       <span aria-hidden className="pop-halftone z-0 opacity-20" />
