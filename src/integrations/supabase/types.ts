@@ -263,6 +263,33 @@ export type Database = {
         }
         Relationships: []
       }
+      kombat_rep_aliases: {
+        Row: {
+          board_name: string
+          created_at: string
+          created_by: string | null
+          note: string | null
+          profile_id: string
+          updated_at: string
+        }
+        Insert: {
+          board_name: string
+          created_at?: string
+          created_by?: string | null
+          note?: string | null
+          profile_id: string
+          updated_at?: string
+        }
+        Update: {
+          board_name?: string
+          created_at?: string
+          created_by?: string | null
+          note?: string | null
+          profile_id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       customer_homes_legacy: {
         Row: {
           address: string | null

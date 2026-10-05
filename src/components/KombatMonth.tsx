@@ -64,6 +64,7 @@ import { KombatCartoonAdmin } from "@/components/KombatCartoonAdmin";
 import { CanvasserCartoonAdmin } from "@/components/CanvasserCartoonAdmin";
 import { KombatKoFlash } from "@/components/KombatKoFlash";
 import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
+import { useRepAliases } from "@/hooks/useRepAliases";
 
 const MONDAY_HOST = "https://tidal-remodeling.monday.com";
 
@@ -218,13 +219,20 @@ export function KombatMonthTab({
 
   useRealtimeInvalidate({
     channel: "kombat-month-live",
-    tables: ["contest_ledger", "contest_proofs", "contest_bounties", "contest_rules"],
+    tables: [
+      "contest_ledger",
+      "contest_proofs",
+      "contest_bounties",
+      "contest_rules",
+      "kombat_rep_aliases",
+    ],
     invalidateKeys: [
       ["contest_ledger"],
       ["kombat_my_proofs"],
       ["contest_bounties"],
       ["contest_rules"],
       ["kombat_pending_proofs"],
+      ["kombat_rep_aliases"],
     ],
   });
 
@@ -259,7 +267,13 @@ export function KombatMonthTab({
   const ledger = useMemo(() => ledgerQuery.data ?? [], [ledgerQuery.data]);
   const totals = useMemo(() => totalsFromLedger(ledger), [ledger]);
   const repNames = useMemo(() => totals.map((t) => t.rep_name), [totals]);
-  const matcher = useMemo(() => buildRepMatcher(displayName, repNames), [displayName, repNames]);
+  // Handle aliases bind a stylized display_name ("CurtofWest") to its board
+  // name so the rep keeps their handle and still sees their own standing.
+  const aliases = useRepAliases().data;
+  const matcher = useMemo(
+    () => buildRepMatcher(displayName, repNames, aliases),
+    [displayName, repNames, aliases],
+  );
   const myTotals = matcher.matched ? totals.find((t) => t.rep_name === matcher.matched) : undefined;
   const myTotal = myTotals?.total ?? 0;
   const tier = tierFor(myTotal, rules);
