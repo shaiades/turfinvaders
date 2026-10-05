@@ -18,6 +18,7 @@ import { CanvasserHUD } from "@/components/CanvasserHUD";
 import { CrewBeacon } from "@/components/CrewBeacon";
 import { LeadConfirmedCelebration } from "@/components/LeadConfirmedCelebration";
 import { AppMenu } from "@/components/AppMenu";
+import { FighterPhotoPrompt } from "@/components/FighterPhotoPrompt";
 import { CanvasserTutorial, startCanvasserTutorial } from "@/components/tutorial/CanvasserTutorial";
 import { WelcomeAnimation, isWelcomeAnimationForced } from "@/components/WelcomeAnimation";
 import { CloseKombatIntro, isCloseKombatIntroForced } from "@/components/CloseKombatIntro";
@@ -298,7 +299,12 @@ export function AppShell({ children }: { children: ReactNode }) {
       // Badge = Dojo submissions + Kombat Month proofs waiting for review —
       // the in-app companion to the notify-dojo push, so work waiting is
       // visible even with push alerts off on this device.
-      { to: "/confirmation-desk", label: "Desk", icon: PhoneCall, badge: pendingDojo + pendingProofs },
+      {
+        to: "/confirmation-desk",
+        label: "Desk",
+        icon: PhoneCall,
+        badge: pendingDojo + pendingProofs,
+      },
       ...(role && CLOSE_KOMBAT_ROLES.includes(role)
         ? [{ to: "/close-kombat", label: "Close Kombat", icon: Swords } as NavItem]
         : []),
@@ -690,7 +696,11 @@ export function AppShell({ children }: { children: ReactNode }) {
           the owner's week stamp (`?plan_pop=1` previews without stamping,
           same contract as the other overlays). */}
       {user && (isWeeklyPlanPopupForced() || privilegeRole(realRole) === "sales_rep") && (
-        <WeeklyPlanPopup userId={user.id} heldBack={introActive} onActiveChange={setPlanPopupActive} />
+        <WeeklyPlanPopup
+          userId={user.id}
+          heldBack={introActive}
+          onActiveChange={setPlanPopupActive}
+        />
       )}
 
       {/* Daily "remember your why" — reps only, once per LA day, and ONLY
@@ -707,6 +717,12 @@ export function AppShell({ children }: { children: ReactNode }) {
           onActiveChange={setPurposeReminderActive}
         />
       )}
+
+      {/* "Submit a photo for your fighter" login nudge — canvassers, captains,
+          and managers who have no avatar yet, once per login session. Self-gates
+          on the REAL role + whether they already have a fighter; held until the
+          first-sign-in intro has finished so the two don't stack. */}
+      {user && !introActive && <FighterPhotoPrompt />}
 
       {/* Per-page discovery tips: each screen's mini-tour auto-pops the first
           time this account opens it; the header "?" replays the current
