@@ -48,6 +48,11 @@ import {
   oohIsOpenLead,
   planNextLeadToIssue,
 } from "../src/lib/ooh";
+import {
+  sendImessageToRecipients,
+  type InkboxConfig,
+  type InkboxFetch,
+} from "../supabase/functions/monday-ooh-report/inkbox";
 
 let failures = 0;
 function expectEq(label: string, got: unknown, want: unknown) {
@@ -1167,6 +1172,110 @@ expectEq(
     msg.includes("Rep: Solo Rep") && !msg.includes(" & "),
   );
   expect("no customer → no Customer line", !msg.includes("Customer:"));
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 12) INKBOX send — real API contract, mocked fetch (one 1:1 request per number)
+// ════════════════════════════════════════════════════════════════════════════
+const AGENT_ID = "2d0dbf34-9276-4f6a-b413-2ef1c5a71cfa";
+const inkboxCfg = (recipients: string[], apiKey: string | null = "test-key"): InkboxConfig => ({
+  apiKey,
+  recipients,
+  baseUrl: "https://inkbox.ai/api/v1",
+  agentIdentityId: AGENT_ID,
+});
+{
+  const calls: Array<{ url: string; headers: Record<string, string>; body: string }> = [];
+  const mockFetch: InkboxFetch = async (url, init) => {
+    calls.push({ url, headers: init.headers, body: init.body });
+    return { ok: true, status: 200, text: async () => "" };
+  };
+  const res = await sendImessageToRecipients(
+    inkboxCfg(["+15551112222", "+15553334444", "+15555556666"]),
+    "🟩 SALE",
+    mockFetch,
+  );
+  expectEq("inkbox: one request per recipient (1:1)", calls.length, 3);
+  expectEq(
+    "inkbox: result counts all delivered",
+    { sent: res.sent, delivered: res.delivered, attempted: res.attempted },
+    { sent: true, delivered: 3, attempted: 3 },
+  );
+  expectEq(
+    "inkbox: URL hits /imessage/messages with agent_identity_id",
+    calls[0].url,
+    `https://inkbox.ai/api/v1/imessage/messages?agent_identity_id=${AGENT_ID}`,
+  );
+  expect(
+    "inkbox: X-API-Key header (NOT Bearer)",
+    calls[0].headers["X-API-Key"] === "test-key" &&
+      !("Authorization" in calls[0].headers) &&
+      calls[0].headers["Content-Type"] === "application/json",
+  );
+  expectEq("inkbox: body is {to,text} for the first recipient", JSON.parse(calls[0].body), {
+    to: "+15551112222",
+    text: "🟩 SALE",
+  });
+  expectEq(
+    "inkbox: each recipient gets their own request",
+    calls.map((c) => JSON.parse(c.body).to),
+    ["+15551112222", "+15553334444", "+15555556666"],
+  );
+}
+{
+  // one recipient fails → captured in errors, the others still delivered, never throws
+  const mockFetch: InkboxFetch = async (_url, init) => {
+    const to = JSON.parse(init.body).to as string;
+    return to === "+bad"
+      ? { ok: false, status: 500, text: async () => "boom" }
+      : { ok: true, status: 200, text: async () => "" };
+  };
+  const res = await sendImessageToRecipients(inkboxCfg(["+good", "+bad"]), "hi", mockFetch);
+  expectEq(
+    "inkbox: partial failure still delivers the good recipient",
+    { delivered: res.delivered, attempted: res.attempted, sent: res.sent },
+    { delivered: 1, attempted: 2, sent: true },
+  );
+  expect(
+    "inkbox: the failed recipient + status is captured",
+    (res.errors ?? []).some((e) => e.includes("+bad") && e.includes("500")),
+  );
+}
+{
+  // a thrown fetch (network) is caught per-recipient, never propagates
+  const mockFetch: InkboxFetch = async () => {
+    throw new Error("network down");
+  };
+  const res = await sendImessageToRecipients(inkboxCfg(["+1"]), "hi", mockFetch);
+  expectEq(
+    "inkbox: thrown fetch is caught (sent=false, not configured skip absent)",
+    { sent: res.sent, delivered: res.delivered, skipped: res.skipped ?? null },
+    { sent: false, delivered: 0, skipped: null },
+  );
+  expect(
+    "inkbox: network error captured",
+    (res.errors ?? []).some((e) => e.includes("network down")),
+  );
+}
+{
+  // not configured → skipped, zero requests
+  const calls: string[] = [];
+  const mockFetch: InkboxFetch = async () => {
+    calls.push("x");
+    return { ok: true, status: 200, text: async () => "" };
+  };
+  const noKey = await sendImessageToRecipients(inkboxCfg(["+1"], null), "hi", mockFetch);
+  expectEq(
+    "inkbox: no API key → skipped, no request",
+    { skipped: noKey.skipped, calls: calls.length },
+    { skipped: "INKBOX_API_KEY not set", calls: 0 },
+  );
+  const noRecip = await sendImessageToRecipients(inkboxCfg([]), "hi", mockFetch);
+  expectEq(
+    "inkbox: no recipients → skipped",
+    noRecip.skipped,
+    "INKBOX_DISPATCH_RECIPIENTS not set",
+  );
 }
 
 if (failures > 0) {
