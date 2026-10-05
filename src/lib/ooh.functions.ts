@@ -27,6 +27,7 @@ async function assertAdmin(supabase: AdminClient, userId: string): Promise<void>
 async function settings(): Promise<{
   token: string;
   mode: OohConfig["mode"];
+  dispatchMode: OohConfig["dispatchMode"];
   formUrl: string | null;
   autocreate: boolean;
   activeSd: string | null;
@@ -37,13 +38,17 @@ async function settings(): Promise<{
   const { data } = await supabaseAdmin
     .from("system_settings")
     .select(
-      "monday_api_token, ooh_writeback_mode, ooh_form_url, ooh_autocreate, active_monday_board_sd, active_monday_board_oc, ooh_go_live_at",
+      "monday_api_token, ooh_writeback_mode, live_dispatch_mode, ooh_form_url, ooh_autocreate, active_monday_board_sd, active_monday_board_oc, ooh_go_live_at",
     )
     .maybeSingle();
   const mode = ((data?.ooh_writeback_mode as string | null) ?? "off") as OohConfig["mode"];
+  const dispatchMode = ((data?.live_dispatch_mode as string | null) ??
+    "off") as OohConfig["dispatchMode"];
+  const oneOf = (m: string): OohConfig["mode"] => (m === "dry_run" || m === "live" ? m : "off");
   return {
     token: ((data?.monday_api_token as string | null) ?? "").trim(),
-    mode: mode === "dry_run" || mode === "live" ? mode : "off",
+    mode: oneOf(mode),
+    dispatchMode: oneOf(dispatchMode),
     formUrl: (data?.ooh_form_url as string | null) ?? null,
     autocreate: (data?.ooh_autocreate as boolean | null) ?? false,
     activeSd: (data?.active_monday_board_sd as string | null) ?? null,
@@ -57,7 +62,12 @@ export const getOohConfig = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async (): Promise<OohConfig> => {
     const s = await settings();
-    return { mode: s.mode, formUrl: s.formUrl, autocreate: s.autocreate };
+    return {
+      mode: s.mode,
+      dispatchMode: s.dispatchMode,
+      formUrl: s.formUrl,
+      autocreate: s.autocreate,
+    };
   });
 
 const pushInput = z.object({

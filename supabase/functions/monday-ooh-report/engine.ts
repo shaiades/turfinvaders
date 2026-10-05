@@ -17,6 +17,16 @@
 
 // ── Boards ───────────────────────────────────────────────────────────────────
 export const FORM_BOARD_ID = "18433859050"; // "Out of House Reports"
+
+/** The OOH form board's "Dispatcher" status column — the outcome Claude/edge-fn
+ *  stamps on each submission so the office can see it at a glance. Labels read
+ *  live 2026-10-05: New (default) / Processed / Needs review / Error. */
+export const OOH_DISPATCHER_COL = "color_mm7vex4s";
+export const DISPATCHER_LABEL = {
+  processed: "Processed",
+  needsReview: "Needs review",
+  error: "Error",
+} as const;
 /** Destinations the block's own automations own — NEVER written here. For docs. */
 export const DESTINATION_BOARDS = {
   salesProcessing: "4155553389",
@@ -62,9 +72,13 @@ export const BLOCK_COL = {
   name: "name",
   reps: "people6", // max 2 (pairs)
   source: "text", // "Source" — drives Rule 4
+  agent: "text5", // "Agent" — free-text, marker scanning (rehash/job walk)
+  comments: "long_text", // "Comments" — can/save + language markers
+  location: "location", // "Location" — house coordinates (live-dispatch drive time)
   office: "color_mm2yd84r", // 0 Orange County | 1 San Diego
   apptDateTime: "date9", // "Date/Time" — Rule 3 arrival fallback
   details: "long_text3",
+  products: "dropdown", // "Products" — quoted/booked products (strength table)
   salePrice: "numbers",
   resetDate: "date", // date + time
   reloads: "dropdown2",

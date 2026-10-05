@@ -11,33 +11,53 @@
 // itself; never touches destination boards.
 // ═══════════════════════════════════════════════════════════════════════════
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { makeClient, type Supa } from "./supa.ts";
 import {
+  type BlockItem,
+  fetchAttendance,
   fetchBlockItem,
-  fetchDayGroupItems,
+  fetchDispatchDayItems,
   fetchFormItem,
+  fetchMondayUsers,
   postUpdate,
+  resolveUserId,
   setColumns,
+  setPeopleColumn,
   setStatus,
 } from "./monday.ts";
 import { sendDispatcherIMessage, type InkboxResult } from "./inkbox.ts";
 import {
   BLOCK_COL,
+  DISPATCHER_LABEL,
   FORM_BOARD_ID,
+  OOH_DISPATCHER_COL,
   buildBaseQueueRow,
   buildDetailsLine,
   buildSaleAlert,
   hasExistingDisposition,
   isAllowedOohBoard,
+  isOpenLead,
   isSaleResult,
+  LABEL,
   laClock,
+  laWeekday,
   matchTarget,
+  normName,
   oohUpdateKey,
   parseOohForm,
   planDisposition,
-  planRelease,
   sourceCodeToWrite,
 } from "./engine.ts";
+import {
+  type DispatchRep,
+  buildFreeRepsLine,
+  buildIssuedText,
+  firstName,
+  nowWallMinutes,
+  planIssue,
+} from "./dispatch.ts";
+import { runWatchdog } from "./watchdog.ts";
+import { enrichHistory, logDispatchDecision } from "./history.ts";
 
 const denoEnv = (globalThis as { Deno?: { env: { get(k: string): string | undefined } } }).Deno
   ?.env;
@@ -56,6 +76,30 @@ const ok = (body: unknown) =>
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  // ── Uncovered-lead watchdog (scheduled, every 5 min 7 AM–9 PM PT) ───────────
+  // Rides the same function at ?task=watchdog so it can reuse the dispatch
+  // engine without duplicating it across edge functions. Authenticated by the
+  // shared notify secret (the pg_cron job posts it); the full flow lives in
+  // watchdog.ts and is a no-op unless live_dispatch_mode != 'off'.
+  const url = new URL(req.url);
+  if (url.searchParams.get("task") === "watchdog") {
+    const notifySecret = denoEnv?.get("NOTIFY_SECRET");
+    const provided = req.headers.get("x-notify-secret") ?? url.searchParams.get("secret");
+    if (notifySecret && provided !== notifySecret) {
+      return new Response("unauthorized", { status: 401, headers: corsHeaders });
+    }
+    const SUPABASE_URL = denoEnv?.get("SUPABASE_URL") ?? "";
+    const SERVICE_ROLE = denoEnv?.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const supabase = makeClient(SUPABASE_URL, SERVICE_ROLE);
+    try {
+      const result = await runWatchdog(supabase);
+      return ok(result);
+    } catch (e) {
+      console.error("[ooh watchdog] error", e instanceof Error ? e.message : String(e));
+      return ok({ error: e instanceof Error ? e.message : String(e) });
+    }
+  }
 
   const raw = await req.text();
   if (!raw) return ok({ ignored: "empty body" });
@@ -110,7 +154,7 @@ serve(async (req) => {
 
   const SUPABASE_URL = denoEnv?.get("SUPABASE_URL") ?? "";
   const SERVICE_ROLE = denoEnv?.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-  const supabase = createClient(SUPABASE_URL, SERVICE_ROLE);
+  const supabase = makeClient(SUPABASE_URL, SERVICE_ROLE);
 
   // ── idempotency CLAIM: once-only even under concurrent redelivery ──────────
   // Insert a 'processing' claim; a conflict means another delivery owns it (or
@@ -126,6 +170,9 @@ serve(async (req) => {
   }
 
   let mondayTouched = false;
+  // Set once settings are read, so the Dispatcher-column stamp (below) and the
+  // live-dispatch flow can reach Monday. null until then → stamping is a no-op.
+  let oohToken: string | null = null;
   const releaseClaimForRetry = async () => {
     if (!mondayTouched)
       await supabase.from("ooh_processed_reports").delete().eq("form_item_id", formItemId);
@@ -136,10 +183,34 @@ serve(async (req) => {
       .update({ outcome, ...extra })
       .eq("form_item_id", formItemId);
   };
+  // Stamp the OOH board's "Dispatcher" status column with the human-facing
+  // outcome (Processed / Needs review / Error) so the office sees it at a glance
+  // (owner brief, Part 1 "Afterwards"). Best-effort; never blocks the write.
+  const stampDispatcher = async (label: string) => {
+    if (!oohToken) return;
+    await setStatus(
+      oohToken,
+      FORM_BOARD_ID,
+      formItemId,
+      OOH_DISPATCHER_COL,
+      label,
+      `ooh-disp-${formItemId}-${label}`,
+    ).catch(() => undefined);
+  };
   const queue = async (status: string, reason: string, row: Record<string, unknown>) => {
     await supabase
       .from("ooh_report_queue")
       .upsert({ form_item_id: formItemId, status, reason, ...row }, { onConflict: "form_item_id" });
+    // Mirror the outcome onto the Dispatcher column: a clean dry-run preview is
+    // "Processed" (would auto-handle), anything a human must touch is "Needs
+    // review", a failure is "Error".
+    await stampDispatcher(
+      status === "error"
+        ? DISPATCHER_LABEL.error
+        : status === "dry_run"
+          ? DISPATCHER_LABEL.processed
+          : DISPATCHER_LABEL.needsReview,
+    );
     // Notify the office for anything that needs a human (best-effort).
     if (status === "needs_review" || status === "error") {
       await sendDispatcherIMessage(
@@ -157,11 +228,14 @@ serve(async (req) => {
     const { data: settings } = await supabase
       .from("system_settings")
       .select(
-        "monday_api_token, active_monday_board_sd, active_monday_board_oc, ooh_writeback_mode, ooh_writeback_board_allowlist, ooh_autocreate",
+        "monday_api_token, active_monday_board_sd, active_monday_board_oc, ooh_writeback_mode, ooh_writeback_board_allowlist, ooh_autocreate, live_dispatch_mode",
       )
       .maybeSingle();
     const token = ((settings?.monday_api_token as string | null) ?? "").trim();
+    oohToken = token || null;
     const mode = (settings?.ooh_writeback_mode as string | null) ?? "off";
+    const dispatchMode = ((settings?.live_dispatch_mode as string | null) ?? "off") as
+      "off" | "dry_run" | "live";
     const activeSd = (settings?.active_monday_board_sd as string | null) ?? null;
     const activeOc = (settings?.active_monday_board_oc as string | null) ?? null;
     const allowlist = ((settings?.ooh_writeback_board_allowlist as string | null) ?? "")
@@ -307,22 +381,48 @@ serve(async (req) => {
       [BLOCK_COL.details]: { text: combinedDetails },
     };
 
+    const office: "SD" | "OC" | null = isCurrentBlock
+      ? block.boardId === activeSd
+        ? "SD"
+        : "OC"
+      : null;
     const rowWithTarget = {
       ...baseRow,
       details_line: detailsLineForBlock,
       target_item_id: leadId,
       board_id: block.boardId,
-      office: isCurrentBlock ? (block.boardId === activeSd ? "SD" : "OC") : null,
+      office,
     };
 
+    // Reps this report frees (the submitter + their partner, if any).
+    const freedReps = [form.repName, form.partner].filter((r): r is string => !!r && !!r.trim());
+    const resultLabel = (plan.status?.label ?? null) as string | null;
+
     if (!liveAllowed) {
-      // dry-run / not allow-listed: store the plan, write nothing.
+      // dry-run / not allow-listed: store the plan, write nothing to the block.
       await finish("dry_run", { target_item_id: leadId, board_id: block.boardId });
       await queue(
         isCurrentBlock || mode === "dry_run" ? "dry_run" : "needs_review",
         mode === "dry_run" ? "dry-run preview" : "block not allow-listed for live writes",
         rowWithTarget,
       );
+      // Live-issuing can still be REHEARSED here (no block was written, so it can
+      // only ever simulate): compute + log the decision and text "[DRY RUN]…".
+      if (dispatchMode !== "off" && office && !plan.atTheDoor) {
+        await runDispatch({
+          token,
+          supabase,
+          mode: "dry_run",
+          office,
+          block,
+          reportedLeadId: leadId,
+          reportedLeadName: block.name,
+          reportedResultLabel: resultLabel,
+          repNames: freedReps,
+          nowMs: formItem.createdAtMs,
+          formItemId,
+        }).catch((e) => console.error("[ooh dispatch dry]", e instanceof Error ? e.message : e));
+      }
       return ok({ dryRun: true, target: leadId, board: block.boardId });
     }
 
@@ -379,33 +479,35 @@ serve(async (req) => {
       );
     }
 
-    // ── Rule 6: at-the-door → message the office; release nothing ───────────
+    // The write-back succeeded → Dispatcher column shows Processed.
+    await stampDispatcher(DISPATCHER_LABEL.processed);
+
+    // ── Rule 6: at-the-door → message the office; issue nothing ─────────────
     let released: string | null = null;
     if (plan.atTheDoor) {
       await sendDispatcherIMessage(
         `No show at the door: ${block.name}, ${laClock(formItem.createdAtMs)}, ${form.repName ?? "rep"}. Office please call the lead.`,
       ).catch(() => undefined);
-    } else {
-      // ── Rule 7: release the rep's next lead (one lead at a time) ──────────
-      const dayItems = await fetchDayGroupItems(token, block.boardId, block.groupId);
-      const rel = planRelease({
-        atTheDoor: false,
-        rep: form.repName,
-        dayItems,
-        reportedLeadTimeMs: block.apptWallMinutes,
+    } else if (dispatchMode !== "off" && office) {
+      // ── Live issuing (Step 7): hand the freed rep(s) their next lead. In
+      // live mode this writes people6 + Iss on Monday; in dry_run it only
+      // computes, logs and texts "[DRY RUN]…". Never fails the write-back.
+      released = await runDispatch({
+        token,
+        supabase,
+        mode: dispatchMode === "live" ? "live" : "dry_run",
+        office,
+        block,
         reportedLeadId: leadId,
+        reportedLeadName: block.name,
+        reportedResultLabel: resultLabel,
+        repNames: freedReps,
+        nowMs: formItem.createdAtMs,
+        formItemId,
+      }).catch((e) => {
+        console.error("[ooh dispatch]", e instanceof Error ? e.message : e);
+        return null;
       });
-      if (rel.action === "issue") {
-        const r = await setStatus(
-          token,
-          block.boardId,
-          rel.itemId,
-          BLOCK_COL.iss,
-          "Iss",
-          `ooh-issue-${rel.itemId}`,
-        );
-        if (!r.error) released = rel.itemId;
-      }
     }
 
     await finish("written", { target_item_id: leadId, board_id: block.boardId });
@@ -429,3 +531,176 @@ serve(async (req) => {
     return ok({ error: msg, mondayTouched });
   }
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LIVE ISSUING — hand each freed rep their next lead (Step 7). Pure decision in
+// dispatch.ts; this does the Monday reads/writes + the manager texts + the
+// decision log. In 'live' it writes people6 then Iss (firing Monday's own "New
+// Opportunity!" text); in 'dry_run' it only computes, logs and texts "[DRY
+// RUN]…". Returns the issued lead id (live only), else null. Never throws past
+// the caller's catch — a dispatch failure must never undo the write-back.
+// ═══════════════════════════════════════════════════════════════════════════
+async function runDispatch(p: {
+  token: string;
+  supabase: Supa;
+  mode: "dry_run" | "live";
+  office: "SD" | "OC";
+  block: BlockItem;
+  reportedLeadId: string;
+  reportedLeadName: string | null;
+  reportedResultLabel: string | null;
+  repNames: string[];
+  nowMs: number;
+  formItemId: string;
+}): Promise<string | null> {
+  if (p.repNames.length === 0) return null;
+  const weekday = laWeekday(p.nowMs);
+  const nowWall = nowWallMinutes(p.nowMs);
+
+  const [attendance, dayItems, users] = await Promise.all([
+    fetchAttendance(p.token, p.office, weekday).catch(() => new Map()),
+    fetchDispatchDayItems(p.token, p.block.boardId, p.block.groupId).catch(() => []),
+    fetchMondayUsers(p.token).catch(() => [] as Array<{ id: string; name: string }>),
+  ]);
+  await enrichHistory(p.supabase, dayItems).catch(() => undefined);
+
+  const chosen = new Set<string>(); // never issue the same lead to both partners
+  let issued: string | null = null;
+  const freeNone: string[] = [];
+
+  for (const repName of p.repNames) {
+    const att = attendance.get(firstName(repName));
+    const working = !!att && (att.amOn || att.pmOn);
+    const off = !!att && att.amOff && att.pmOff && !att.amOn && !att.pmOn;
+    const openLeadCount = dayItems.filter(
+      (l) =>
+        l.itemId !== p.reportedLeadId &&
+        l.reps.map(normName).includes(normName(repName)) &&
+        isOpenLead({ iss: l.issLabel, pm: l.pm, rs: l.rs, ol: l.ol, bo: l.bo, sale: l.sale }),
+    ).length;
+    const rep: DispatchRep = {
+      name: repName,
+      office: p.office,
+      working,
+      off,
+      openLeadCount,
+      lastCoords: p.block.coords,
+    };
+    const pool = dayItems.filter((l) => l.itemId !== p.reportedLeadId && !chosen.has(l.itemId));
+    const plan = planIssue({ rep, dayLeads: pool, nowWallMinutes: nowWall });
+
+    if (plan.action === "issue") {
+      chosen.add(plan.lead.itemId);
+      let didIssue = false;
+      let failReason: string | null = null;
+      if (p.mode === "live") {
+        const uid = resolveUserId(users, repName);
+        if (!uid) {
+          failReason = `couldn't match ${repName} to a Monday user`;
+        } else {
+          // Manager-override safe: we only ever write to a lead that was Not
+          // Issued (Tier A carries the rep; Tier B is unassigned) — never one a
+          // person already touched.
+          const r1 = await setPeopleColumn(
+            p.token,
+            plan.lead.boardId,
+            plan.lead.itemId,
+            BLOCK_COL.reps,
+            [uid],
+            `ooh-people-${plan.lead.itemId}`,
+          );
+          if (r1.error) failReason = `people6: ${r1.error}`;
+          else {
+            const r2 = await setStatus(
+              p.token,
+              plan.lead.boardId,
+              plan.lead.itemId,
+              BLOCK_COL.iss,
+              LABEL.iss,
+              `ooh-iss-${plan.lead.itemId}`,
+            );
+            if (r2.error) failReason = `Iss: ${r2.error}`;
+            else {
+              didIssue = true;
+              issued = plan.lead.itemId;
+            }
+          }
+        }
+      }
+      if (failReason) {
+        await sendDispatcherIMessage(
+          `Dispatch could not issue ${plan.lead.name} to ${repName}: ${failReason}. Please assign by hand.`,
+        ).catch(() => undefined);
+      } else {
+        await sendDispatcherIMessage(
+          buildIssuedText({
+            repName,
+            lead: plan.lead,
+            outOfLeadName: p.reportedLeadName,
+            outOfResultLabel: p.reportedResultLabel,
+            dryRun: p.mode !== "live",
+          }),
+        ).catch(() => undefined);
+      }
+      await logDispatchDecision(p.supabase, {
+        mode: p.mode,
+        trigger: "report",
+        formItemId: p.formItemId,
+        repName,
+        office: p.office,
+        boardId: plan.lead.boardId,
+        leadItemId: plan.lead.itemId,
+        leadName: plan.lead.name,
+        action: failReason ? "manager" : "issue",
+        score: plan.score,
+        driveMinutes: plan.driveMinutes,
+        strength: plan.strength,
+        reason: failReason ?? plan.reason,
+        issued: didIssue,
+      });
+    } else if (plan.action === "manager") {
+      await sendDispatcherIMessage(
+        `Dispatch — managers please assign: ${plan.lead.name} (${plan.reason}).`,
+      ).catch(() => undefined);
+      await logDispatchDecision(p.supabase, {
+        mode: p.mode,
+        trigger: "report",
+        formItemId: p.formItemId,
+        repName,
+        office: p.office,
+        boardId: plan.lead.boardId,
+        leadItemId: plan.lead.itemId,
+        leadName: plan.lead.name,
+        action: "manager",
+        score: null,
+        driveMinutes: null,
+        strength: null,
+        reason: plan.reason,
+        issued: false,
+      });
+    } else {
+      if (working && !off) freeNone.push(repName);
+      await logDispatchDecision(p.supabase, {
+        mode: p.mode,
+        trigger: "report",
+        formItemId: p.formItemId,
+        repName,
+        office: p.office,
+        boardId: p.block.boardId,
+        leadItemId: null,
+        leadName: null,
+        action: "none",
+        score: null,
+        driveMinutes: null,
+        strength: null,
+        reason: plan.reason,
+        issued: false,
+      });
+    }
+  }
+
+  if (freeNone.length) {
+    await sendDispatcherIMessage(buildFreeRepsLine(freeNone)).catch(() => undefined);
+  }
+  return issued;
+}
