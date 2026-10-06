@@ -57,7 +57,10 @@ export function resolveVanWarsConfig(row: unknown): VanWarsConfig {
 
 /** One knocker's contribution to their van's war score. */
 export type VanWarRowInput = {
-  teamName: string | null;
+  /** Team identity — the grouping key. */
+  teamId: string | null;
+  /** Crew display name: the captain's name, falling back to the team name. */
+  label: string;
   teamColor: string | null;
   pts: number;
   sal: number;
@@ -106,9 +109,9 @@ export function buildVanWarStandings(
   };
   const map = new Map<string, Acc>();
   for (const r of rows) {
-    const key = r.teamName ?? "Unassigned";
+    const key = r.teamId ?? r.label;
     const v: Acc = map.get(key) ?? {
-      name: key,
+      name: r.label,
       color: r.teamColor ?? "#8a8f99",
       warTotal: 0,
       knockers: 0,

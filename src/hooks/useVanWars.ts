@@ -70,13 +70,43 @@ export function useVanWars(): VanWarsData {
     },
   });
 
+  // Vans race under their CAPTAIN's name (owner, 2026-10-05), falling back to
+  // the team name for crews without one (e.g. the Confirmation desk). Two light
+  // reads of standard typed tables → teamId → captain first name.
+  const captainsQ = useQuery({
+    queryKey: ["vanwars", "captains"],
+    staleTime: 5 * 60_000,
+    queryFn: async () => {
+      const { data: roleRows, error: rErr } = await supabase
+        .from("user_roles")
+        .select("user_id")
+        .eq("role", "captain");
+      if (rErr || !roleRows?.length) return {} as Record<string, string>;
+      const ids = roleRows.map((r) => r.user_id);
+      const { data: profs, error: pErr } = await supabase
+        .from("profiles")
+        .select("display_name, team_id")
+        .in("id", ids);
+      if (pErr) return {} as Record<string, string>;
+      const byTeam: Record<string, string> = {};
+      for (const p of profs ?? []) {
+        if (p.team_id && p.display_name && !byTeam[p.team_id]) {
+          byTeam[p.team_id] = String(p.display_name).split(" ")[0];
+        }
+      }
+      return byTeam;
+    },
+  });
+
   const config = useMemo(() => resolveVanWarsConfig(cfgQ.data), [cfgQ.data]);
+  const captainByTeam = useMemo(() => captainsQ.data ?? {}, [captainsQ.data]);
 
   const standings = useMemo(
     () =>
       buildVanWarStandings(
         ladder.rows.map((r) => ({
-          teamName: r.teamName,
+          teamId: r.teamId,
+          label: (r.teamId && captainByTeam[r.teamId]) || r.teamName || "Unassigned",
           teamColor: r.teamColor,
           pts: r.pts,
           sal: r.sal,
@@ -86,7 +116,7 @@ export function useVanWars(): VanWarsData {
         })),
         config,
       ),
-    [ladder.rows, config],
+    [ladder.rows, config, captainByTeam],
   );
 
   return {

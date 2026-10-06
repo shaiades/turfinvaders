@@ -96,7 +96,7 @@ export function VanWarsRace() {
       }
       if (prevLeader.current && lead && lead !== prevLeader.current) {
         setSmoked(prevLeader.current);
-        fireSpray(`${lead} TOOK THE BLOCK`, standings[0].color, "New leader on the strip");
+        fireSpray(`${lead}'S CREW TOOK THE BLOCK`, standings[0].color, "New leader on the strip");
       }
     }
 

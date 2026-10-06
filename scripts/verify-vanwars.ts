@@ -64,10 +64,37 @@ expectEq(
 // ── standings: per-head lets a small crew win ───────────────────────────────
 const rows: VanWarRowInput[] = [
   // Big crew: 2 knockers, warTotal 6, per-head 3.
-  { teamName: "Vipers", teamColor: "#a", pts: 4, sal: 1, vol: 100, sitSits: 2, sitLeads: 4 },
-  { teamName: "Vipers", teamColor: "#a", pts: 2, sal: 0, vol: 0, sitSits: 1, sitLeads: 2 },
+  {
+    teamId: "v",
+    label: "Vipers",
+    teamColor: "#a",
+    pts: 4,
+    sal: 1,
+    vol: 100,
+    sitSits: 2,
+    sitLeads: 4,
+  },
+  {
+    teamId: "v",
+    label: "Vipers",
+    teamColor: "#a",
+    pts: 2,
+    sal: 0,
+    vol: 0,
+    sitSits: 1,
+    sitLeads: 2,
+  },
   // Small crew: 1 knocker, warTotal 5, per-head 5.
-  { teamName: "Night Owls", teamColor: "#b", pts: 5, sal: 2, vol: 200, sitSits: 3, sitLeads: 4 },
+  {
+    teamId: "n",
+    label: "Night Owls",
+    teamColor: "#b",
+    pts: 5,
+    sal: 2,
+    vol: 200,
+    sitSits: 3,
+    sitLeads: 4,
+  },
 ];
 const perHead = buildVanWarStandings(rows, { mode: "per_head", sitWeight: 1, saleWeight: 2 });
 expectEq("per-head: small crew #1", perHead[0].name, "Night Owls");
@@ -81,8 +108,26 @@ expectEq("total: big crew war 6", total[0].war, 6);
 
 // ── ties break on sit rate ──────────────────────────────────────────────────
 const tie: VanWarRowInput[] = [
-  { teamName: "Low Sit", teamColor: "#c", pts: 4, sal: 0, vol: 0, sitSits: 1, sitLeads: 4 }, // 25%
-  { teamName: "High Sit", teamColor: "#d", pts: 4, sal: 0, vol: 0, sitSits: 3, sitLeads: 4 }, // 75%
+  {
+    teamId: "lo",
+    label: "Low Sit",
+    teamColor: "#c",
+    pts: 4,
+    sal: 0,
+    vol: 0,
+    sitSits: 1,
+    sitLeads: 4,
+  }, // 25%
+  {
+    teamId: "hi",
+    label: "High Sit",
+    teamColor: "#d",
+    pts: 4,
+    sal: 0,
+    vol: 0,
+    sitSits: 3,
+    sitLeads: 4,
+  }, // 75%
 ];
 const broke = buildVanWarStandings(tie, DEFAULT_VANWARS_CONFIG);
 expectEq("tie: equal war, higher sit rate wins", broke[0].name, "High Sit");
