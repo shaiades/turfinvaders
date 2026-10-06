@@ -81,20 +81,31 @@ function fromRow(row: DailyLogRow | undefined, key: LogKey): number {
   return row?.[key] ?? 0;
 }
 
-export function DailyLogPanel({ canEditMondayUrl }: { canEditMondayUrl: boolean }) {
+export function DailyLogPanel({
+  canEditMondayUrl,
+  overrideUserId,
+  readOnly = false,
+}: {
+  canEditMondayUrl: boolean;
+  /** View As canvasser pick: read the PICKED canvasser's rows instead of the
+   *  signed-in user's. Always paired with readOnly — a preview never saves. */
+  overrideUserId?: string;
+  readOnly?: boolean;
+}) {
   const { user, teamId } = useAuth();
+  const logUserId = overrideUserId ?? user?.id;
 
   // daily_logs rows are per (canvasser, day, office); the manual log always
   // targets the canvasser's home-office row, but reads span every office so
   // the totals here can't silently disagree with the Stats tab.
-  const profile = useCanvasserProfile(user?.id);
+  const profile = useCanvasserProfile(logUserId);
   const myOffice = profile.data?.office_location ?? DEFAULT_OFFICE;
   // Don't accept edits until the real home office is known — a keystroke
   // made while myOffice is still the DEFAULT_OFFICE placeholder would be
   // dirty-pinned against the wrong row and later upserted over the real one.
-  const officeReady = !profile.isLoading;
-  const todayLogs = useTodayLogs(user?.id);
-  const sixtyQ = useSixtyDayLogs(user?.id);
+  const officeReady = !profile.isLoading && !readOnly;
+  const todayLogs = useTodayLogs(logUserId);
+  const sixtyQ = useSixtyDayLogs(logUserId);
   const homeRow = findOfficeRow(todayLogs.data, myOffice);
 
   const [form, setForm] = useState<LogState>(EMPTY);
@@ -185,12 +196,14 @@ export function DailyLogPanel({ canEditMondayUrl }: { canEditMondayUrl: boolean 
       <ArcadePanel
         title="Desk Log"
         action={
-          <Button
-            onClick={submitSave}
-            disabled={save.isPending || dirty.size === 0 || !officeReady}
-          >
-            <Save className="w-3.5 h-3.5 mr-1.5" /> {save.isPending ? "Saving…" : "Save"}
-          </Button>
+          readOnly ? undefined : (
+            <Button
+              onClick={submitSave}
+              disabled={save.isPending || dirty.size === 0 || !officeReady}
+            >
+              <Save className="w-3.5 h-3.5 mr-1.5" /> {save.isPending ? "Saving…" : "Save"}
+            </Button>
+          )
         }
       >
         {otherParts.length > 0 && (
@@ -245,24 +258,31 @@ export function DailyLogPanel({ canEditMondayUrl }: { canEditMondayUrl: boolean 
         </div>
       </ArcadePanel>
 
-      <NewLeadCard userId={user?.id} teamId={teamId} />
+      {/* Lead submission stays the signed-in user's own — in a View As
+          preview both forms hide so a lead can never land as the picked
+          canvasser. */}
+      {!readOnly && (
+        <>
+          <NewLeadCard userId={user?.id} teamId={teamId} />
 
-      {/* The Monday.com form is a second, differently-shaped lead form; the
-          internal card above is the primary path, so the embed stays behind a
-          collapsed disclosure (which also defers the iframe load). */}
-      <div>
-        <button
-          type="button"
-          aria-expanded={showBackupForm}
-          onClick={() => setShowBackupForm((s) => !s)}
-          className="min-h-11 flex items-center gap-1.5 font-display text-[10px] uppercase tracking-widest text-muted-foreground hover:text-foreground"
-        >
-          Lead form (backup) {showBackupForm ? "▾" : "▸"}
-        </button>
-        {showBackupForm && <MondayEmbed canEdit={canEditMondayUrl} />}
-      </div>
+          {/* The Monday.com form is a second, differently-shaped lead form; the
+              internal card above is the primary path, so the embed stays behind a
+              collapsed disclosure (which also defers the iframe load). */}
+          <div>
+            <button
+              type="button"
+              aria-expanded={showBackupForm}
+              onClick={() => setShowBackupForm((s) => !s)}
+              className="min-h-11 flex items-center gap-1.5 font-display text-[10px] uppercase tracking-widest text-muted-foreground hover:text-foreground"
+            >
+              Lead form (backup) {showBackupForm ? "▾" : "▸"}
+            </button>
+            {showBackupForm && <MondayEmbed canEdit={canEditMondayUrl} />}
+          </div>
+        </>
+      )}
 
-      <MyRecentLeads userId={user?.id} />
+      <MyRecentLeads userId={logUserId} />
     </div>
   );
 }

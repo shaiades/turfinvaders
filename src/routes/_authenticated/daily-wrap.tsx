@@ -156,13 +156,16 @@ function DailyWrap() {
   // YOUR DAY (audit P2-3): the wrap used to be entirely team-wide — the one
   // person guaranteed to read it never appeared. All self data rides caches
   // other pages already warm.
-  const { user, realRole } = useAuth();
+  const { user, realRole, previewCanvasserId } = useAuth();
   // §7 praise-public/coach-private: the zero lists (Doughnut Zone + Suspension)
   // render on captain/manager views only when the flag is on. Praise (winners)
   // stays public for everyone.
   const coachPrivate = useArcadeFlags().coachPrivate;
   const coachView = !coachPrivate || isManagerRole(realRole) || realRole === "captain";
-  const selfId = user?.id;
+  // View As canvasser pick: YOUR DAY, the winners highlight, and the
+  // cinematic wrap (useWrapData honors the same pick) all follow the picked
+  // player — reads only.
+  const selfId = previewCanvasserId ?? user?.id;
   const myLogs = useTodayLogs(selfId);
   const my = sumLogCounters(myLogs.data);
 

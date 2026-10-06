@@ -81,7 +81,7 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
 });
 
 function Dashboard() {
-  const { role, loading, teamId, displayName, user } = useAuth();
+  const { role, loading, teamId, displayName, user, previewCanvasserId } = useAuth();
   // CanvasserMission is route-agnostic — this route owns its ?tab search
   // (captains mount the same component on /mission with that route's ?tab).
   const { tab: rawTab } = Route.useSearch();
@@ -91,6 +91,23 @@ function Dashboard() {
     queryKey: ["company_settings"],
     queryFn: async () => {
       const { data } = await supabase.from("company_settings").select("*").maybeSingle();
+      return data;
+    },
+  });
+
+  // View As canvasser pick: Mission is id-keyed, so the preview swaps the
+  // whole data subject — including the van badge, which rides the PICKED
+  // canvasser's team, not the owner's.
+  const previewProfile = useQuery({
+    enabled: !!previewCanvasserId,
+    queryKey: ["view-as-canvasser-profile", previewCanvasserId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("team_id")
+        .eq("id", previewCanvasserId!)
+        .maybeSingle();
+      if (error) throw error;
       return data;
     },
   });
@@ -108,8 +125,9 @@ function Dashboard() {
   return user?.id ? (
     <CanvasserMission
       displayName={displayName}
-      teamId={teamId}
-      userId={user.id}
+      teamId={previewCanvasserId ? (previewProfile.data?.team_id ?? null) : teamId}
+      userId={previewCanvasserId ?? user.id}
+      previewing={!!previewCanvasserId}
       rawTab={rawTab}
       setTab={(t) => navigate({ search: { tab: t }, replace: true })}
     />

@@ -90,8 +90,12 @@ export type WrapData = {
 const MORNING_RANK_KEY = (uid: string) => `ti_morning_rank_v1:${uid}:${laTodayISO()}`;
 
 export function useWrapData(scope: WrapScope): WrapData {
-  const { user } = useAuth();
-  const uid = user?.id ?? "";
+  const { user, previewCanvasserId } = useAuth();
+  // View As canvasser pick: the wrap/fighter numbers become the picked
+  // player's. Reads only — this hook writes nothing (the morning-rank
+  // localStorage capture is keyed per uid, so previews can't clobber the
+  // owner's own).
+  const uid = previewCanvasserId ?? user?.id ?? "";
   const range: RangeKey = scope;
   const ladder = useArcadeLadder(range);
   const week = useArcadeLadder("week"); // for weekSales + Van MVP (week-scoped badges)
@@ -125,7 +129,10 @@ export function useWrapData(scope: WrapScope): WrapData {
   // useWrapData/Fighter card. FAIL OPEN: if the RPC isn't deployed yet the level
   // falls back to this scope's XP so the card never blanks. Cosmetic only.
   const lifetimeQ = useQuery({
-    enabled: !!uid,
+    // arcade_lifetime_xp is SELF-scoped server-side (auth.uid()) — in a
+    // View As preview it would return the OWNER's lifetime, so skip it and
+    // let the level fall back to the previewed scope's XP instead.
+    enabled: !!uid && !previewCanvasserId,
     queryKey: ["arcade_lifetime_xp", uid],
     staleTime: 5 * 60_000,
     retry: false,

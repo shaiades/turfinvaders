@@ -38,8 +38,10 @@ const bonusCount = (vol: number) => Math.floor(Math.max(0, vol) / BOSS_HP);
 const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 export function CanvasserLeaderboard() {
-  const { user } = useAuth();
-  const selfId = user?.id;
+  const { user, previewCanvasserId } = useAuth();
+  // View As canvasser pick: the highlighted "you" row, BossMeter and rank
+  // haptics follow the picked player — reads + local effects only.
+  const selfId = previewCanvasserId ?? user?.id;
   const cartoons = useRepCartoons().data;
   const reduced = usePrefersReducedMotion();
   const [tab, setTab] = useState<Tab>("day");

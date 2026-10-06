@@ -54,12 +54,18 @@ export function CanvasserMission({
   userId,
   displayName,
   teamId,
+  previewing = false,
   rawTab,
   setTab,
 }: {
   userId: string;
   displayName: string | null;
   teamId: string | null;
+  /** View As canvasser pick: `userId` is the PICKED canvasser's — reads show
+   *  their data, and every write surface (clock, requests, desk log, goals,
+   *  lead submit, fighter upload) hides or locks so nothing can ever be
+   *  written as them. */
+  previewing?: boolean;
   /** The host route's raw ?tab value (any type — coerced below). */
   rawTab: unknown;
   /** Writes the host route's ?tab (e.g. dashboard/mission navigate, replace). */
@@ -117,20 +123,34 @@ export function CanvasserMission({
       {/* The old PLAYER name block is gone (audit 2026-09-11): the page a
           grinder opens to check money spent its best space telling them
           their own name. Van identity rides the Paycheck card instead. */}
-      <div data-tour="mission-clock">
-        <TimeClock userId={userId} />
-      </div>
-      {/* Weekly sign-off on LAST week's hours (CA defense for manager /
-          captain-entered punches). Renders nothing until the attestation
-          table ships, when the week was empty, or once signed. */}
-      <WeekAttestationCard userId={userId} />
-      {/* Self-serve day-off requests (captain approves). Ships dark until
-          the day_off_requests table lands. */}
-      <DayOffRequestCard userId={userId} />
+      {previewing ? (
+        /* Previewing a picked canvasser: their clock, attestation, and
+           day-off controls are THEIR private write surfaces — a preview must
+           never punch, sign, or request as them, so the cards go away. */
+        <div className="rounded-lg border border-[var(--neon-magenta)]/40 bg-[color-mix(in_oklab,var(--neon-magenta)_8%,var(--surface))] px-4 py-3 text-xs text-muted-foreground">
+          <span className="font-display uppercase tracking-widest text-[var(--neon-magenta)]">
+            Previewing {displayName ?? "a canvasser"}
+          </span>{" "}
+          — their numbers, read-only. Clock, requests, and edits are hidden.
+        </div>
+      ) : (
+        <>
+          <div data-tour="mission-clock">
+            <TimeClock userId={userId} />
+          </div>
+          {/* Weekly sign-off on LAST week's hours (CA defense for manager /
+              captain-entered punches). Renders nothing until the attestation
+              table ships, when the week was empty, or once signed. */}
+          <WeekAttestationCard userId={userId} />
+          {/* Self-serve day-off requests (captain approves). Ships dark until
+              the day_off_requests table lands. */}
+          <DayOffRequestCard userId={userId} />
+        </>
+      )}
       {/* ONE Fighter card (identity + rank + level + badges) at the top, then
           the ONE Paycheck card — the two cards the consolidation merged the
           old TakeHome / SCCE-rank / MyFighter / PaycheckHud panels into. */}
-      <FighterCard userId={userId} displayName={displayName} />
+      <FighterCard userId={userId} displayName={displayName} readOnly={previewing} />
       <div data-tour="mission-pay">
         <PaycheckCard
           userId={userId}
@@ -140,10 +160,14 @@ export function CanvasserMission({
           onEditGoal={() => setTab("plan")}
         />
       </div>
-      <PushAlertsCard
-        title="Alerts"
-        description="Turf drops and schedule changes, straight to your phone."
-      />
+      {/* Device-level alerts are the OWNER's own in a preview — hide them so
+          the card can't read as the previewed player's setting. */}
+      {!previewing && (
+        <PushAlertsCard
+          title="Alerts"
+          description="Turf drops and schedule changes, straight to your phone."
+        />
+      )}
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as CanvasserTab)}>
         <div
@@ -161,11 +185,11 @@ export function CanvasserMission({
         </div>
 
         <TabsContent value="plan" className="mt-6">
-          <PlanPanel userId={userId} />
+          <PlanPanel userId={userId} readOnly={previewing} />
         </TabsContent>
 
         <TabsContent value="log" className="mt-6">
-          <TodayPanel userId={userId} stats={stats} />
+          <TodayPanel userId={userId} stats={stats} previewing={previewing} />
         </TabsContent>
 
         <TabsContent value="stats" className="mt-6 space-y-5">
@@ -182,7 +206,15 @@ export function CanvasserMission({
  *  and the cinematic Wrap now (consolidation 2026-10-05), not here. Lives HERE,
  *  not inside DailyLogPanel, so the leadership /log route keeps the bare desk
  *  panel without pulling funnel queries for non-canvassing roles. */
-function TodayPanel({ userId, stats }: { userId: string; stats: CanvasserStatsData }) {
+function TodayPanel({
+  userId,
+  stats,
+  previewing = false,
+}: {
+  userId: string;
+  stats: CanvasserStatsData;
+  previewing?: boolean;
+}) {
   const { role } = useAuth();
   const today = stats.today;
   return (
@@ -231,7 +263,11 @@ function TodayPanel({ userId, stats }: { userId: string; stats: CanvasserStatsDa
             : " Missed pins on a dead-phone day? Tell your captain."}
         </p>
       </div>
-      <DailyLogPanel canEditMondayUrl={false} />
+      <DailyLogPanel
+        canEditMondayUrl={false}
+        overrideUserId={previewing ? userId : undefined}
+        readOnly={previewing}
+      />
     </div>
   );
 }

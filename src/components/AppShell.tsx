@@ -6,8 +6,11 @@ import {
   useAuth,
   setDevRoleOverride,
   setDevNameOverride,
+  setDevCanvasserOverride,
   DEV_NAME_STORAGE_KEY,
+  DEV_CANVASSER_STORAGE_KEY,
   type AppRole,
+  type CanvasserPick,
 } from "@/hooks/useAuth";
 import { useSwipeNav } from "@/hooks/useSwipeNav";
 import { useTheme } from "@/hooks/useTheme";
@@ -215,6 +218,53 @@ export function AppShell({ children }: { children: ReactNode }) {
     setDevNameOverride(v);
     setNameOverride(v?.trim() || null);
   };
+  // View As canvasser picker (owner request 2026-10-06): inside a Canvasser
+  // preview, choose WHICH canvasser — the Close Kombat rep picker's twin.
+  // Canvasser surfaces key on the profile ID, so the pick stores id + name;
+  // useAuth turns it into displayName + previewCanvasserId (reads only —
+  // write surfaces hide or lock while previewing someone else).
+  const [canvasserPick, setCanvasserPick] = useState<CanvasserPick | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = window.localStorage.getItem(DEV_CANVASSER_STORAGE_KEY);
+      return raw ? (JSON.parse(raw) as CanvasserPick) : null;
+    } catch {
+      return null;
+    }
+  });
+  const applyCanvasserPick = (v: CanvasserPick | null) => {
+    setDevCanvasserOverride(v);
+    setCanvasserPick(v);
+  };
+  const showCanvasserPicker = !!user && canUseViewAs(realRole) && role === "canvasser";
+  const canvassersQuery = useQuery({
+    queryKey: ["view-as-canvassers"],
+    enabled: showCanvasserPicker,
+    staleTime: 5 * 60 * 1000,
+    queryFn: async (): Promise<CanvasserPick[]> => {
+      // Confirmers live the canvasser app (privilegeRole collapses them), so
+      // they're previewable too.
+      const { data: roleRows, error: rolesErr } = await supabase
+        .from("user_roles")
+        .select("user_id")
+        .in("role", ["canvasser", "confirmer"]);
+      if (rolesErr) throw rolesErr;
+      const ids = [...new Set((roleRows ?? []).map((r) => r.user_id))];
+      if (ids.length === 0) return [];
+      const { data: profs, error: profErr } = await supabase
+        .from("profiles")
+        .select("id, display_name")
+        .in("id", ids);
+      if (profErr) throw profErr;
+      return (profs ?? [])
+        .flatMap((p) => {
+          const n = (p.display_name ?? "").trim();
+          return n ? [{ id: p.id, name: n }] : [];
+        })
+        .sort((a, b) => a.name.localeCompare(b.name));
+    },
+  });
+
   const showRepPicker = !!user && canUseViewAs(realRole) && role === "sales_rep";
   const repNamesQuery = useQuery({
     queryKey: ["view-as-rep-names"],
@@ -447,6 +497,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   const v = e.target.value as AppRole;
                   setDevRoleOverride(v === realRole ? null : v);
                   if (v !== "sales_rep") applyNameOverride(null);
+                  if (v !== "canvasser") applyCanvasserPick(null);
                 }}
                 className="bg-surface border border-border rounded px-2 py-1.5 min-h-11 md:min-h-9 text-base md:text-xs font-medium focus:outline-none focus:ring-1 focus:ring-[var(--neon-magenta)]"
               >
@@ -456,6 +507,32 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <option value="sales_rep">Sales Rep</option>
                 <option value="office_staff">Manager</option>
               </select>
+              {showCanvasserPicker && (
+                <select
+                  value={canvasserPick?.id ?? ""}
+                  onChange={(e) => {
+                    const picked = (canvassersQuery.data ?? []).find(
+                      (c) => c.id === e.target.value,
+                    );
+                    applyCanvasserPick(picked ?? null);
+                  }}
+                  aria-label="Preview as a specific canvasser"
+                  className="bg-surface border border-border rounded px-2 py-1.5 min-h-11 md:min-h-9 text-base md:text-xs font-medium focus:outline-none focus:ring-1 focus:ring-[var(--neon-magenta)]"
+                >
+                  <option value="">Yourself</option>
+                  {/* Keep a stale/still-loading pick visible so the select
+                      never silently snaps back to "Yourself". */}
+                  {canvasserPick &&
+                    !(canvassersQuery.data ?? []).some((c) => c.id === canvasserPick.id) && (
+                      <option value={canvasserPick.id}>{canvasserPick.name}</option>
+                    )}
+                  {(canvassersQuery.data ?? []).map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              )}
               {showRepPicker && (
                 <select
                   value={nameOverride ?? ""}
@@ -481,6 +558,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   onClick={() => {
                     setDevRoleOverride(null);
                     applyNameOverride(null);
+                    applyCanvasserPick(null);
                   }}
                   className="ml-auto min-h-11 md:min-h-9 px-3 rounded border border-[var(--neon-magenta)]/40 text-[10px] uppercase tracking-widest text-[var(--neon-magenta)]"
                 >

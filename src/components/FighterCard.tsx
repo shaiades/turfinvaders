@@ -47,9 +47,15 @@ const PAY_LOCK_BANNERS: Record<
 export function FighterCard({
   userId,
   displayName,
+  readOnly = false,
 }: {
   userId: string;
   displayName: string | null;
+  /** View As canvasser pick: show the PICKED fighter without the selfie
+   *  uploader, and with badge persistence + unlock animations suppressed —
+   *  a preview must never write badge rows or burn someone's once-ever
+   *  unlock moment. */
+  readOnly?: boolean;
 }) {
   const profile = useCanvasserProfile(userId);
   const wrap = useWrapData("month"); // lifetime level + the live-earned badge set
@@ -63,7 +69,9 @@ export function FighterCard({
     () => new Set<BadgeId>(wrap.badges.filter((b) => b.unlocked).map((b) => b.def.id)),
     [wrap.badges],
   );
-  const badges = useCanvasserBadges(userId, liveEarned, !wrap.loading);
+  // liveReady=false in a preview keeps the reconcile effect from upserting
+  // badge rows as the picked player; the earned set still renders saved ∪ live.
+  const badges = useCanvasserBadges(userId, liveEarned, !wrap.loading && !readOnly);
 
   const name = displayName ?? "You";
   const mine = cartoonFor(cartoons, displayName);
@@ -86,36 +94,50 @@ export function FighterCard({
       <ArcadePanel title="Your Fighter" faction="kombat">
         {/* Identity: avatar (tap to upload) · name · SCCE rank + arcade level side by side */}
         <div className="flex items-center gap-4">
-          <button
-            type="button"
-            onClick={() => fileRef.current?.click()}
-            disabled={busy}
-            aria-label={hasFighter ? "Change my fighter photo" : "Upload my fighter photo"}
-            className="relative shrink-0 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-neon disabled:opacity-60"
-          >
+          {readOnly ? (
             <RepAvatar
               name={name}
               cartoon={mine}
               variant="full"
               rounded="lg"
               ring
-              className="h-20 w-20"
+              className="h-20 w-20 shrink-0"
               textClassName="text-xl"
             />
-            <span className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full border border-border bg-surface">
-              <Camera className="h-3.5 w-3.5 text-muted-foreground" />
-            </span>
-          </button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => {
-              void onPick(e.target.files?.[0]);
-              e.target.value = "";
-            }}
-          />
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={busy}
+                aria-label={hasFighter ? "Change my fighter photo" : "Upload my fighter photo"}
+                className="relative shrink-0 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-neon disabled:opacity-60"
+              >
+                <RepAvatar
+                  name={name}
+                  cartoon={mine}
+                  variant="full"
+                  rounded="lg"
+                  ring
+                  className="h-20 w-20"
+                  textClassName="text-xl"
+                />
+                <span className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full border border-border bg-surface">
+                  <Camera className="h-3.5 w-3.5 text-muted-foreground" />
+                </span>
+              </button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  void onPick(e.target.files?.[0]);
+                  e.target.value = "";
+                }}
+              />
+            </>
+          )}
 
           <div className="min-w-0 flex-1">
             <div className="truncate font-display text-sm uppercase tracking-widest text-foreground">
@@ -206,17 +228,21 @@ export function FighterCard({
           </div>
         </div>
 
-        <p className="mt-3 text-[11px] text-muted-foreground">
-          {busy
-            ? "Drawing your fighter… this takes a few seconds."
-            : hasFighter
-              ? "Tap your avatar to upload a new photo and redraw your fighter."
-              : "Tap your avatar to upload a selfie — we'll draw you as a fighter and show it next to your name everywhere."}
-        </p>
+        {!readOnly && (
+          <p className="mt-3 text-[11px] text-muted-foreground">
+            {busy
+              ? "Drawing your fighter… this takes a few seconds."
+              : hasFighter
+                ? "Tap your avatar to upload a new photo and redraw your fighter."
+                : "Tap your avatar to upload a selfie — we'll draw you as a fighter and show it next to your name everywhere."}
+          </p>
+        )}
       </ArcadePanel>
 
-      {/* First-time unlock animation — plays once, then markSeen persists it. */}
-      {badges.unseen.length > 0 && (
+      {/* First-time unlock animation — plays once, then markSeen persists it.
+          Never in a preview: the moment (and its seen flag) belongs to the
+          player, not to whoever is looking over their shoulder. */}
+      {!readOnly && badges.unseen.length > 0 && (
         <BadgeUnlock badges={badges.unseen} onDone={(ids) => badges.markSeen(ids)} />
       )}
     </>

@@ -97,8 +97,10 @@ export type ArcadeLadder = {
  * on daily_logs / leads so a posted result bumps the board live.
  */
 export function useArcadeLadder(range: RangeKey): ArcadeLadder {
-  const { user } = useAuth();
-  const selfId = user?.id;
+  const { user, previewCanvasserId } = useAuth();
+  // View As canvasser pick: "you" on the ladder is the picked player — a
+  // read-only highlight, the ladder itself writes nothing.
+  const selfId = previewCanvasserId ?? user?.id;
   const { start, end } = rangeFor(range);
 
   const prodQ = useQuery({
