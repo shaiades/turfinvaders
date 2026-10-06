@@ -80,6 +80,7 @@ export function CanvasserCartoonAdmin() {
     let done = 0;
     let failed = 0;
     try {
+      let prevRemaining = Infinity;
       for (let i = 0; i < 100; i++) {
         const r = await rerollCanvasserCartoonsFn({ data: { limit: 4 } });
         done += r.ok;
@@ -87,11 +88,16 @@ export function CanvasserCartoonAdmin() {
         setBulk({ running: true, done, failed });
         refresh();
         if (r.remaining <= 0) break;
+        // Stop if a batch made zero forward progress — the leading rows are
+        // unprocessable (e.g. a photo Gemini keeps rejecting), so looping would
+        // just reburn budget on the same failures.
+        if (r.ok === 0 && r.remaining >= prevRemaining) break;
+        prevRemaining = r.remaining;
       }
       toast.success(
         done === 0 && failed === 0
-          ? "Everyone's background already matches their van"
-          : `Re-rolled ${done} fighter${done === 1 ? "" : "s"} to van colors${failed ? ` · ${failed} failed` : ""}`,
+          ? "Everyone's fighter is already up to date"
+          : `Drew ${done} fighter${done === 1 ? "" : "s"}${failed ? ` · ${failed} failed` : ""}`,
       );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Re-roll all failed");
@@ -132,11 +138,15 @@ export function CanvasserCartoonAdmin() {
         </span>
       }
       action={
-        !list.isError && (counts.approved ?? 0) > 0 ? (
+        // Show whenever at least one player has a selfie on file — the job both
+        // backfills photos that never got a cartoon (or failed) AND refreshes
+        // live art whose van color went stale. Hidden only when nobody has a
+        // photo yet (nothing to draw).
+        !list.isError && rows.length - (counts.none ?? 0) > 0 ? (
           <NeonButton tone="kombat-gold" disabled={pending} onClick={() => void runRerollAll()}>
             {bulk.running
-              ? `Re-rolling… ${bulk.done}${bulk.failed ? ` · ${bulk.failed} failed` : ""}`
-              : "Re-roll all to van colors"}
+              ? `Working… ${bulk.done}${bulk.failed ? ` · ${bulk.failed} failed` : ""}`
+              : "Generate / refresh fighters"}
           </NeonButton>
         ) : undefined
       }
@@ -256,9 +266,11 @@ function CanvasserAdminCard({
           <SmallBtn tone="gold" disabled={busy} onClick={() => fileRef.current?.click()}>
             {busy ? "Working…" : hasArt ? "New photo" : "Upload photo"}
           </SmallBtn>
-          {hasArt && (
+          {/* Re-roll live art, OR retry a selfie whose generation failed/stalled
+              (regenerates from the stored selfie — no re-upload needed). */}
+          {(hasArt || row.cartoon_status === "failed" || row.cartoon_status === "generating") && (
             <SmallBtn tone="green" disabled={busy} onClick={onReroll}>
-              Re-roll
+              {hasArt ? "Re-roll" : "Retry"}
             </SmallBtn>
           )}
         </div>
