@@ -1,6 +1,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { fetchItemBatched, mondayQuery } from './monday.ts'
+import { isRehashOrRoomCard, normalizeLoose } from './confirmer-credit.ts'
 import {
   buildBlockCardRow,
   copyBaseName,
@@ -442,11 +443,55 @@ serve(async (req) => {
       const groupTitle = String(item.group?.title ?? '')
       const isInbound = groupId === 'topics' || groupTitle.trim().toLowerCase() === 'inbound'
       if (!isInbound) {
-        await supabaseAdmin.from('webhook_logs').insert({
-          step: 'Ignored_Leads_Board_Non_Inbound',
-          data: { pulseId: String(pulseId), itemName: item.name, group: groupTitle || groupId },
-        })
-        return new Response('Non-Inbound leads-board card ignored', { status: 200, headers: corsHeaders })
+        // §4 (owner 2026-10-05): a confirmer named in the Agent column earns a
+        // Rehash-source / room-lead-status card wherever it's born — so let it
+        // fall through to the normal crediting path instead of being ignored.
+        // OFF by default (system_settings.confirmer_recycle_credit); with the
+        // flag off this branch is byte-identical to the historical ignore.
+        // Every OTHER recycled group (Futures / Never Confirmed / Reschedules /
+        // QR / Internet) still stops here, and a blank Agent still falls to the
+        // Rehash / Cynthia King channel below.
+        let confirmerRecycle = false
+        if ((settingsRow as any)?.confirmer_recycle_credit === true) {
+          const agentName = (cols.find((c) => c.id === 'text5' || c.column?.id === 'text5')?.text || '').trim()
+          const sourceText = cols.find((c) => c.id === 'text' || c.column?.id === 'text')?.text || ''
+          const leadStatusText =
+            cols.find((c) => c.id === LEAD_STATUS_COL_ID || c.column?.id === LEAD_STATUS_COL_ID)?.text || ''
+          if (agentName && isRehashOrRoomCard(sourceText, leadStatusText)) {
+            // Only credit when the Agent IS a real confirmer (canvasser-tier),
+            // so the fall-through can never mint a Bouncer placeholder for a
+            // stray name — it resolves to that confirmer's existing profile.
+            const { data: confRoles } = await supabaseAdmin
+              .from('user_roles')
+              .select('user_id')
+              .eq('role', 'confirmer')
+            const confIds = (confRoles ?? []).map((r: { user_id: string }) => r.user_id)
+            if (confIds.length) {
+              const { data: confProfs } = await supabaseAdmin
+                .from('profiles')
+                .select('display_name')
+                .in('id', confIds)
+              const want = normalizeLoose(agentName)
+              confirmerRecycle = (confProfs ?? []).some(
+                (p: { display_name: string | null }) => normalizeLoose(p.display_name) === want,
+              )
+            }
+          }
+        }
+        if (confirmerRecycle) {
+          await supabaseAdmin.from('webhook_logs').insert({
+            step: 'Confirmer_Recycle_Credited',
+            data: { pulseId: String(pulseId), itemName: item.name, group: groupTitle || groupId },
+          })
+          // fall through — the normal create-crediting path credits the
+          // confirmer named in Agent, exactly as it would a canvasser.
+        } else {
+          await supabaseAdmin.from('webhook_logs').insert({
+            step: 'Ignored_Leads_Board_Non_Inbound',
+            data: { pulseId: String(pulseId), itemName: item.name, group: groupTitle || groupId },
+          })
+          return new Response('Non-Inbound leads-board card ignored', { status: 200, headers: corsHeaders })
+        }
       }
     }
 
