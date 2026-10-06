@@ -13,7 +13,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
-import { useVanWars, type VanWarWin } from "@/hooks/useVanWars";
+import { useVanWars, useCrownVanWars, isCrownWindow, type VanWarWin } from "@/hooks/useVanWars";
+import { toast } from "sonner";
 import { ArcadeCard, ArcadeSkeleton } from "@/components/arcade";
 import { playArcadeSound, haptic } from "@/lib/arcade-fx";
 import { laTodayISO } from "@/lib/dates";
@@ -78,6 +79,7 @@ export function VanWarsRace() {
   const { user, realRole } = useAuth();
   const reduced = usePrefersReducedMotion();
   const { standings, leader, config, wins, loading } = useVanWars();
+  const { crown, crowning } = useCrownVanWars();
 
   // ── Live events: per-crew surge (war up = nitro, $ up = sparks) + a change
   // of leader (the TOOK-THE-BLOCK banner + the WASTED stamp on the loser).
@@ -516,6 +518,29 @@ export function VanWarsRace() {
       )}
 
       {/* ── Trophy case (Wall of Fame) ────────────────────────────────── */}
+      {/* §3 tail — a captain crowns the week's champion into the Wall. Only in
+          the Sat-6PM→Sun window; records the objective leader, idempotent. */}
+      {isCaptain && isCrownWindow() && standings.length >= 2 && (
+        <button
+          type="button"
+          disabled={crowning}
+          onClick={async () => {
+            await crown(standings);
+            playArcadeSound("horn");
+            haptic([40, 60, 40]);
+            toast.success(`👑 ${standings[0].name}'s crew crowned this week`);
+          }}
+          className="min-h-11 w-full rounded-xl border-2 px-4 py-3 font-display text-sm uppercase italic tracking-widest transition disabled:opacity-50 md:min-h-0"
+          style={{
+            color: "#2a1e02",
+            borderColor: WANTED,
+            background: `linear-gradient(100deg, #ffe08a, ${WANTED})`,
+            boxShadow: `0 0 26px -6px ${WANTED}`,
+          }}
+        >
+          {crowning ? "Crowning…" : "👑 Crown this week's champion"}
+        </button>
+      )}
       <TrophyCase wins={wins} />
     </div>
   );
