@@ -243,22 +243,25 @@ export async function saveCanvasserPhotoAndGenerate(
 }
 
 /**
- * Re-roll the fighters whose baked-in background no longer matches their van's
- * current color (owner 2026-10-03: "re-roll everyone so they get their van
- * colors"). Only touches rows that actually need it — a fighter whose stored
- * cartoon_meta.van_color already equals its current team color is left alone, so
- * this is idempotent and never wastes Gemini budget. Bounded per call (slow: two
- * image gens each); the admin button loops it until `remaining` hits 0.
+ * Draw every fighter that has a selfie but isn't live-and-current yet, in bounded
+ * batches. "Needs work" is EITHER (a) a photo with no live cartoon — never
+ * generated, failed, or mid-generation (owner 2026-10-05: "generate cartoons for
+ * the ones with photos already") — OR (b) a live cartoon whose baked-in
+ * background no longer matches the player's current van color (owner 2026-10-03:
+ * "re-roll everyone so they get their van colors"). A fighter that's already
+ * approved AND colored for its current van is left alone, so this is idempotent
+ * and never wastes Gemini budget. Bounded per call (slow: two image gens each);
+ * the admin button loops it until `remaining` hits 0.
  */
 export async function rerollOutdatedCanvasserCartoons(opts?: {
   limit?: number;
 }): Promise<{ attempted: number; ok: number; failed: number; remaining: number }> {
   const limit = Math.max(1, Math.min(opts?.limit ?? 4, 10));
 
-  // Every fighter that has a source selfie to redraw from.
+  // Every fighter that has a source selfie to draw from.
   const { data: rows, error } = await supabaseAdmin
     .from("canvasser_photos")
-    .select("profile_id, cartoon_meta")
+    .select("profile_id, cartoon_meta, cartoon_portrait_url, cartoon_status")
     .not("photo_path", "is", null);
   if (error) throw new Error(error.message);
   const all = rows ?? [];
@@ -280,12 +283,14 @@ export async function rerollOutdatedCanvasserCartoons(opts?: {
     return teamId ? (colorByTeam.get(teamId) ?? null) : null;
   };
 
-  // Outdated = the color baked into the art differs from the van's color now
-  // (covers never-colored fighters and van moves alike).
+  // Needs work = no live cartoon yet (never generated / failed / mid-generation),
+  // OR the color baked into the art differs from the van's color now (covers
+  // never-colored fighters and van moves alike).
   const outdated = all.filter((r) => {
+    const noLiveArt = !r.cartoon_portrait_url || r.cartoon_status !== "approved";
     const baked = ((r.cartoon_meta as { van_color?: string | null } | null)?.van_color ?? null) as
       string | null;
-    return currentColor(r.profile_id) !== baked;
+    return noLiveArt || currentColor(r.profile_id) !== baked;
   });
 
   const batch = outdated.slice(0, limit);
