@@ -46,22 +46,48 @@ export function useRealtimeInvalidate({
   useEffect(() => {
     if (!enabled) return;
     const specs = JSON.parse(tablesKey) as Array<{ table: string; event: RealtimeEvent }>;
-    const ch = supabase.channel(channel);
     let timer: ReturnType<typeof setTimeout> | null = null;
     const flush = () => {
       timer = null;
       for (const key of keysRef.current) qc.invalidateQueries({ queryKey: key });
     };
-    for (const spec of specs) {
-      ch.on("postgres_changes", { event: spec.event, schema: "public", table: spec.table }, () => {
-        if (timer !== null) clearTimeout(timer);
-        timer = setTimeout(flush, INVALIDATE_DEBOUNCE_MS);
-      });
+    // Live invalidation is a best-effort enhancement on top of the initial
+    // fetch — never a load-bearing step. A realtime setup failure (e.g. a
+    // duplicate channel name handing back an already-subscribed channel, whose
+    // `.on("postgres_changes")` throws "cannot add ... after subscribe()")
+    // must NOT escape this effect: an uncaught throw here propagates to the
+    // nearest router error boundary and blanks the whole screen to "Connection
+    // Lost" (the arcade incident, 2026-10-06). Degrade to no live updates — the
+    // data is already on screen and react-query's focus refetch still refreshes
+    // it — rather than taking the app down.
+    let ch: ReturnType<typeof supabase.channel> | null = null;
+    try {
+      ch = supabase.channel(channel);
+      for (const spec of specs) {
+        ch.on(
+          "postgres_changes",
+          { event: spec.event, schema: "public", table: spec.table },
+          () => {
+            if (timer !== null) clearTimeout(timer);
+            timer = setTimeout(flush, INVALIDATE_DEBOUNCE_MS);
+          },
+        );
+      }
+      ch.subscribe();
+    } catch (err) {
+      console.warn(`useRealtimeInvalidate: live updates disabled for "${channel}"`, err);
+      if (ch) {
+        try {
+          supabase.removeChannel(ch);
+        } catch {
+          /* ignore */
+        }
+        ch = null;
+      }
     }
-    ch.subscribe();
     return () => {
       if (timer !== null) clearTimeout(timer);
-      supabase.removeChannel(ch);
+      if (ch) supabase.removeChannel(ch);
     };
   }, [qc, channel, enabled, tablesKey]);
 }

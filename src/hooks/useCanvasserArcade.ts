@@ -5,7 +5,7 @@
 // invents a number; it only ranks, nets and shapes trusted totals so the UI
 // stays dumb. Every dollar matches a paycheck.
 
-import { useMemo } from "react";
+import { useId, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { getDispatchProduction } from "@/lib/dispatch.functions";
@@ -129,8 +129,19 @@ export function useArcadeLadder(range: RangeKey): ArcadeLadder {
     },
   });
 
+  // useArcadeLadder is mounted by several co-rendered consumers at once — the
+  // Mission Fighter/Paycheck/Stats cards, the Leaderboard, Van Wars, and the
+  // Wrap (useWrapData mounts it TWICE). useRealtimeInvalidate's contract is
+  // that co-mounted subscribers must NOT share a channel name: supabase-js
+  // hands the second mount the already-subscribed "arcade-ladder" channel, and
+  // `.on("postgres_changes")` on an already-subscribed channel throws. From
+  // inside the effect that tore the whole arcade down to the root "Connection
+  // Lost" boundary for every canvasser (incident 2026-10-06). A per-instance id
+  // keeps each mount on its own channel — the few extra sockets are cheap and
+  // the invalidations are debounced.
+  const rtId = useId();
   useRealtimeInvalidate({
-    channel: "arcade-ladder",
+    channel: `arcade-ladder-${rtId}`,
     tables: ["daily_logs", "leads"],
     invalidateKeys: [["arcade_ladder", "prod"]],
     enabled: !!selfId,
