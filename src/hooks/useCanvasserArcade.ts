@@ -5,7 +5,7 @@
 // invents a number; it only ranks, nets and shapes trusted totals so the UI
 // stays dumb. Every dollar matches a paycheck.
 
-import { useId, useMemo } from "react";
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { getDispatchProduction } from "@/lib/dispatch.functions";
@@ -18,7 +18,6 @@ import {
   remainingWorkdaysInMonth,
 } from "@/lib/dates";
 import { useAuth } from "@/hooks/useAuth";
-import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { isLeadSourceName } from "@/lib/lead-sources";
 import { useMyEarnings } from "@/hooks/useMyEarnings";
 import {
@@ -104,6 +103,15 @@ export function useArcadeLadder(range: RangeKey): ArcadeLadder {
 
   const prodQ = useQuery({
     queryKey: ["arcade_ladder", "prod", start, end],
+    // 60s polling instead of realtime (incident 2026-10-06): the arcade pages
+    // co-mount this hook ~6x, and that many postgres_changes subscriptions per
+    // client — churned further by every reload — ran Supabase realtime's
+    // per-subscription auth checks hot enough to starve the project VM's
+    // sidecars (Kong/GoTrue/PostgREST all went down while postgres itself
+    // stayed healthy; whole company locked out). A leaderboard is fine one
+    // minute stale. If live-push ever comes back here it must be ONE shared,
+    // ref-counted channel app-wide, never per-mount.
+    refetchInterval: 60_000,
     queryFn: async () =>
       getDispatchProduction({
         data: {
@@ -127,24 +135,6 @@ export function useArcadeLadder(range: RangeKey): ArcadeLadder {
       if (teamsR.error) throw teamsR.error;
       return { profiles: profilesR.data ?? [], teams: teamsR.data ?? [] };
     },
-  });
-
-  // useArcadeLadder is mounted by several co-rendered consumers at once — the
-  // Mission Fighter/Paycheck/Stats cards, the Leaderboard, Van Wars, and the
-  // Wrap (useWrapData mounts it TWICE). useRealtimeInvalidate's contract is
-  // that co-mounted subscribers must NOT share a channel name: supabase-js
-  // hands the second mount the already-subscribed "arcade-ladder" channel, and
-  // `.on("postgres_changes")` on an already-subscribed channel throws. From
-  // inside the effect that tore the whole arcade down to the root "Connection
-  // Lost" boundary for every canvasser (incident 2026-10-06). A per-instance id
-  // keeps each mount on its own channel — the few extra sockets are cheap and
-  // the invalidations are debounced.
-  const rtId = useId();
-  useRealtimeInvalidate({
-    channel: `arcade-ladder-${rtId}`,
-    tables: ["daily_logs", "leads"],
-    invalidateKeys: [["arcade_ladder", "prod"]],
-    enabled: !!selfId,
   });
 
   const { rows, vans } = useMemo(() => {
