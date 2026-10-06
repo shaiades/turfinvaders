@@ -1961,13 +1961,16 @@ function CloseKombatInner({
             accentClass="text-kombat-gold"
           />
 
-          {/* Sale alerts (R-11): reps could never even SUBSCRIBE to push — the
-          alerts card only lived on pages the cage blocks. The KA-CHING push
-          fires from the block_cards trigger the moment their sale lands. */}
+          {/* Sale + lead alerts (R-11): reps could never even SUBSCRIBE to
+          push — the alerts card only lived on pages the cage blocks. One
+          device subscription feeds every notify-* function, so this single
+          toggle covers both KA-CHINGs: the block_cards sale trigger the moment
+          a sale lands, and the lead-issued trigger the moment a fresh lead is
+          handed to them. */}
           {isRep && (
             <PushAlertsCard
-              title="Sale alerts"
-              description="Get a KA-CHING on this phone the moment one of your sales hits the board."
+              title="Sale & lead alerts"
+              description="Get a KA-CHING on this phone the moment a lead is issued to you — and again when one of your sales hits the board."
             />
           )}
         </TabsContent>
