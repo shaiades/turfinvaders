@@ -7,6 +7,7 @@
 
 export const SOUND_KEY = "ti_sound_on_v1";
 export const HAPTICS_KEY = "ti_haptics_on_v1";
+export const MUSIC_MUTED_KEY = "ti_music_muted_v1";
 export const FX_PREF_EVENT = "ti-fx-pref";
 
 /** Sound defaults OFF — nothing plays until the viewer opts in. */
@@ -26,6 +27,26 @@ export function isHapticsOn(): boolean {
   } catch {
     return true;
   }
+}
+
+/** Background music defaults ON (owner ask 2026-10-06) — the stored flag is
+ * the MUTE, so an absent key means "play". Separate from the arcade-FX sound
+ * toggle above, which stays off by default per the earlier owner spec. */
+export function isMusicMuted(): boolean {
+  try {
+    return localStorage.getItem(MUSIC_MUTED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function setMusicMuted(muted: boolean): void {
+  try {
+    localStorage.setItem(MUSIC_MUTED_KEY, muted ? "1" : "0");
+  } catch {
+    /* private mode — the pref just won't persist */
+  }
+  emit();
 }
 
 function emit(): void {

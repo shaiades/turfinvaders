@@ -19,6 +19,7 @@ import { CanvasserHUD } from "@/components/CanvasserHUD";
 import { CrewBeacon } from "@/components/CrewBeacon";
 import { LeadConfirmedCelebration } from "@/components/LeadConfirmedCelebration";
 import { AppMenu } from "@/components/AppMenu";
+import { BackgroundMusic, MusicToggle } from "@/components/BackgroundMusic";
 import { ProfilePhotoGate } from "@/components/profile-photo/ProfilePhotoGate";
 import { PhotoNeededBanner } from "@/components/profile-photo/PhotoNeededBanner";
 import { CanvasserTutorial, startCanvasserTutorial } from "@/components/tutorial/CanvasserTutorial";
@@ -559,7 +560,10 @@ export function AppShell({ children }: { children: ReactNode }) {
           </Link>
           {user ? (
             <div className="flex items-center">
-              <div className="w-11" />
+              {/* Music mute/unmute fills the old centering spacer; the
+                  component renders the 44px spacer itself until the track
+                  file exists, so the wordmark never shifts. */}
+              <MusicToggle spacer />
               <button
                 onClick={signOut}
                 className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
@@ -641,6 +645,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   </div>
                   <div className="text-sm font-medium">{displayName}</div>
                 </div>
+                <MusicToggle />
                 <button
                   onClick={toggleTheme}
                   className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
@@ -672,6 +677,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       {/* App-wide crew-live publisher — self-gated (field tiers, real role,
           GPS already granted). Renders nothing. */}
       <CrewBeacon />
+      {/* Background music engine — loops Radio Los Santos for the whole
+          session, signed-in only. Renders nothing; the header MusicToggle
+          buttons mute/unmute it. Self-hides until the MP3 exists at
+          public/audio/radio-los-santos.mp3. */}
+      {user && <BackgroundMusic />}
       {/* Lead-confirmed celebration — realtime INSERT on lead_events, gated to
           canvasser+captain. Renders nothing; fires confetti + toast + beep on
           the payoff moment (desk or Monday confirms). Demo: ?lead_confirm_demo=1 */}

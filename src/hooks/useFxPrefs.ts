@@ -3,7 +3,7 @@
 // component can flip it; a window event fans the change out). SSR-safe.
 
 import { useSyncExternalStore } from "react";
-import { FX_PREF_EVENT, isHapticsOn, isSoundOn } from "@/lib/fx-prefs";
+import { FX_PREF_EVENT, isHapticsOn, isMusicMuted, isSoundOn } from "@/lib/fx-prefs";
 
 function subscribe(cb: () => void): () => void {
   window.addEventListener(FX_PREF_EVENT, cb);
@@ -14,8 +14,9 @@ function subscribe(cb: () => void): () => void {
   };
 }
 
-export function useFxPrefs(): { sound: boolean; haptics: boolean } {
+export function useFxPrefs(): { sound: boolean; haptics: boolean; musicMuted: boolean } {
   const sound = useSyncExternalStore(subscribe, isSoundOn, () => false);
   const haptics = useSyncExternalStore(subscribe, isHapticsOn, () => true);
-  return { sound, haptics };
+  const musicMuted = useSyncExternalStore(subscribe, isMusicMuted, () => false);
+  return { sound, haptics, musicMuted };
 }
