@@ -76,6 +76,7 @@ import { usePendingOohCount } from "@/hooks/usePendingOohCount";
 import { KombatMonthTab } from "@/components/KombatMonth";
 import { KombatHeroBanner } from "@/components/KombatHeroBanner";
 import { ArcadeFxToggle } from "@/components/ArcadeFxToggle";
+import { makeBeeper } from "@/components/intro-fx";
 import { RepAvatar } from "@/components/RepAvatar";
 import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
 import { useRepAliases } from "@/hooks/useRepAliases";
@@ -938,6 +939,67 @@ function CloseKombatInner({
     return () => clearTimeout(t);
   }, [heroFlash]);
 
+  // Real rep looking at their OWN numbers — the gate for any "that's MINE"
+  // celebration. During an owner's Sales Rep preview isRep is the effective
+  // role and displayName IS the previewed rep's name, so without this the
+  // owner's browser would cheer someone else's lead/sale; privilegeRole over
+  // the REAL role (and a real rep can never carry a name override) kills that.
+  const selfView =
+    isRep && privilegeRole(realRole) === "sales_rep" && displayName === realDisplayName;
+
+  // KA-CHING on a lead ISSUED to me (owner, 2026-10-06) — the in-app twin of
+  // the notify-lead-issued push: the moment a fresh lead lands on my plate
+  // while I have the board open, ring the cash register. Counts the "Reps"
+  // column (countReps = the raw assignment, not an outcome) so it fires BEFORE
+  // any sale, and mirrors the sale KA-CHING's settle guards exactly — a cold
+  // load's 0→N hydration and a range/office flip's placeholder rows must never
+  // read as a new lead landing. Realtime on block_cards (close-kombat-live)
+  // refetches the instant the webhook mirrors the assignment.
+  const myLeadsToday = useMemo(() => {
+    if (!selfView || !range.isLive) return 0;
+    let n = 0;
+    for (const c of officeCards) {
+      if (c.card_date !== todayISO) continue;
+      if (countReps(c).some((r) => matcher.isMe(r))) n++;
+    }
+    return n;
+  }, [selfView, range.isLive, officeCards, todayISO, matcher]);
+  const leadKaChingRef = useRef<{ key: string; leads: number } | null>(null);
+  const kachingBeepRef = useRef<ReturnType<typeof makeBeeper> | null>(null);
+  useEffect(() => {
+    if (!selfView || !range.isLive) return;
+    if (!cardsQuery.isSuccess || cardsQuery.isPlaceholderData) return;
+    const key = `${range.start}:${range.end}:${office}`;
+    const prev = leadKaChingRef.current;
+    leadKaChingRef.current = { key, leads: myLeadsToday };
+    if (!prev || prev.key !== key || myLeadsToday <= prev.leads) return;
+    // A fresh lead just got issued to me — ring the register. makeBeeper
+    // self-gates on the global sound pref (OFF by default; the ArcadeFxToggle
+    // on this page turns it on) and arms an unlock if the AudioContext is
+    // still suspended, so a wrong note here can never break the board.
+    try {
+      kachingBeepRef.current ??= makeBeeper();
+      const b = kachingBeepRef.current;
+      // Cash-register "cha-ching": a quick lower ring, a brighter ring, then a
+      // drawer-bell shimmer tail — the PiggyBank money chime, dressed up.
+      b(1047, 60, 0, "triangle");
+      b(1318, 70, 60, "sine");
+      b(1760, 300, 140, "sine");
+    } catch {
+      /* audio is garnish — never let it break the board */
+    }
+    rewardToast("KA-CHING! New lead just landed on your plate — go close it. 🥊");
+  }, [
+    selfView,
+    range.isLive,
+    range.start,
+    range.end,
+    office,
+    myLeadsToday,
+    cardsQuery.isSuccess,
+    cardsQuery.isPlaceholderData,
+  ]);
+
   // Belt Drop — "a sale landed while you were away", once per app open.
   // VIEW-AS LANDMINE: isRep is the EFFECTIVE role, and during an owner's
   // Sales Rep preview displayName IS the picked rep's name — so the matcher
@@ -948,8 +1010,7 @@ function CloseKombatInner({
   // fold this into the KA-CHING effect above: that one is per-settle
   // in-memory keyed to the visible range; this is per-app-open persisted and
   // keyed to the LA month — they're already mutually exclusive per settle.
-  const victoryEligible =
-    isRep && privilegeRole(realRole) === "sales_rep" && displayName === realDisplayName;
+  const victoryEligible = selfView;
   const { fx: victoryFx, dismiss: dismissVictory } = useSaleVictory({
     userId: user?.id ?? null,
     eligible: victoryEligible,
