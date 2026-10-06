@@ -4,7 +4,14 @@
 // read-only live-dispatch client (../monday-live-dispatch/monday.ts) is kept
 // separate on purpose: this one adds the write mutations the OOH flow needs,
 // and the edge runtime cannot share modules across functions safely.
-import { BLOCK_COL, type ColMap, type DayItem, laWallMinutesFromUtc, normName } from "./engine.ts";
+import {
+  BLOCK_COL,
+  SOURCE_CODE_COL,
+  type ColMap,
+  type DayItem,
+  laWallMinutesFromUtc,
+  normName,
+} from "./engine.ts";
 import {
   type DispatchLead,
   type LatLng,
@@ -140,6 +147,12 @@ export type BlockItem = {
   source: string | null;
   sourceCode: number | null;
   details: string | null;
+  /** Comments + Agent free text (can-save / job-walk / language markers). */
+  comments: string | null;
+  agent: string | null;
+  /** The card's own Products labels (lowercased) — the lead's MAIN product(s),
+   *  used to tell an add-on (→ Reloads) from the product the lead was for. */
+  products: string[];
   apptWallMinutes: number | null;
   reps: string[];
   /** House coordinates (Monday Location column) — the rep's "last address" for
@@ -156,8 +169,12 @@ export type BlockItem = {
 
 const BLOCK_READ_COLS = [
   BLOCK_COL.source,
-  BLOCK_COL.sourceCode,
+  SOURCE_CODE_COL.SD, // the one per-office id — read both, use whichever exists
+  SOURCE_CODE_COL.OC,
   BLOCK_COL.details,
+  BLOCK_COL.comments,
+  BLOCK_COL.agent,
+  BLOCK_COL.products,
   BLOCK_COL.apptDateTime,
   BLOCK_COL.reps,
   BLOCK_COL.location,
@@ -235,7 +252,9 @@ export async function fetchBlockItem(token: string, itemId: string): Promise<Blo
   const cols = colMapOf(
     it.column_values as Array<{ id: string; text: string | null; value: string | null }>,
   );
-  const sc = cols[BLOCK_COL.sourceCode]?.text ?? "";
+  // Source Code: the column id differs per office (SD numeric_mm35kwnj, OC
+  // numeric_mm35nm4y) — read whichever one this board actually has.
+  const sc = cols[SOURCE_CODE_COL.SD]?.text?.trim() || cols[SOURCE_CODE_COL.OC]?.text?.trim() || "";
   const label = (id: string) => cols[id]?.text?.trim() || null;
   return {
     id: String(it.id),
@@ -246,6 +265,12 @@ export async function fetchBlockItem(token: string, itemId: string): Promise<Blo
     source: cols[BLOCK_COL.source]?.text?.trim() || null,
     sourceCode: sc && Number.isFinite(Number(sc)) ? Number(sc) : null,
     details: cols[BLOCK_COL.details]?.text ?? null,
+    comments: cols[BLOCK_COL.comments]?.text ?? null,
+    agent: cols[BLOCK_COL.agent]?.text ?? null,
+    products: (cols[BLOCK_COL.products]?.text ?? "")
+      .split(/[,;]/)
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
     apptWallMinutes: wallMinutesFromDate(
       cols[BLOCK_COL.apptDateTime]?.value ?? null,
       cols[BLOCK_COL.apptDateTime]?.text ?? null,
@@ -625,6 +650,28 @@ export async function fetchDispatchDayItems(
       sale: label(cols, BLOCK_COL.sale),
     };
   });
+}
+
+/** Which board an item currently sits on (the Sold follow-up polls this until
+ *  the block automation has moved the item to Sales Processing). */
+export async function fetchItemBoardId(token: string, itemId: string): Promise<string | null> {
+  const { data } = await graphql(
+    token,
+    `
+      query ($ids: [ID!]) {
+        items(ids: $ids) {
+          id
+          board {
+            id
+          }
+        }
+      }
+    `,
+    { ids: [itemId] },
+  );
+  const it = ((data?.items as Array<Record<string, unknown>>) ?? [])[0];
+  const id = (it?.board as { id?: string })?.id;
+  return id ? String(id) : null;
 }
 
 /** All active Monday users (id + name) — to resolve a rep name → the user id a

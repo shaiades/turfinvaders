@@ -59,6 +59,32 @@ export const DISPATCH_CONFIG = {
   /** Watchdog runs only during these LA hours (7 AM–9 PM PT). `endHour` is
    *  exclusive-ish: a run at 20:59 is in; 21:00 is out. */
   watchdogWindow: { startHour: 7, endHour: 21 },
+  /** Missing-report watchdog: alert once when an issued lead is this many hours
+   *  past its start with no report. */
+  missingReportHours: 3,
+  /**
+   * Back-to-back exception (owner 10/6): an UNCOVERED lead whose start is near
+   * or already passed may go to the rep just coming out of an earlier
+   * appointment NEARBY — the Issued text then carries "running ~X min late,
+   * office please call customer". Only when no normal candidate exists.
+   */
+  backToBack: {
+    /** "Nearby": at most this many estimated drive minutes away. */
+    maxDriveMinutes: 20,
+    /** Don't resurrect a lead whose start passed more than this long ago. */
+    maxLateMinutes: 60,
+  },
+  /**
+   * The pairing table (owner 10/6). First names, lowercase. `neverAlone` reps
+   * are never issued a lead solo — freed with a partner they ride together
+   * (ONE lead, both on people6); freed alone they go to the managers. `best`
+   * pairs are kept together when both free; `avoid` pairs are never co-issued.
+   */
+  pairing: {
+    neverAlone: ["daniel"] as ReadonlyArray<string>,
+    best: [] as ReadonlyArray<readonly [string, string]>,
+    avoid: [] as ReadonlyArray<readonly [string, string]>,
+  },
 } as const;
 
 /**
@@ -326,12 +352,18 @@ export type IssuePlan =
       strength: number;
       score: number;
       reason: string;
+      /** Back-to-back only: minutes the rep will be late to this lead. The
+       *  Issued text then asks the office to call the customer. */
+      lateMinutes?: number;
     }
   | { action: "manager"; lead: DispatchLead; reason: string }
   | { action: "none"; reason: string };
 
 export type PlanIssueInput = {
   rep: DispatchRep;
+  /** A partner being issued TOGETHER with the rep (pairing table): the lead
+   *  must pass the hard rules for BOTH, and both land on people6. */
+  coRep?: DispatchRep | null;
   /** Every item on today's block for the rep's office (Not Issued + others). */
   dayLeads: DispatchLead[];
   /** "Now" in LA wall-minutes (hour*60+minute). */
@@ -354,6 +386,7 @@ export type PlanIssueInput = {
 export function planIssue(input: PlanIssueInput): IssuePlan {
   const cfg = input.cfg ?? DISPATCH_CONFIG;
   const { rep, dayLeads, nowWallMinutes } = input;
+  const coRep = input.coRep ?? null;
 
   if (!isFreeRep(rep)) {
     return {
@@ -365,13 +398,18 @@ export function planIssue(input: PlanIssueInput): IssuePlan {
           : "rep not working now",
     };
   }
+  if (coRep && !isFreeRep(coRep)) {
+    return { action: "none", reason: `partner ${coRep.name} isn't free` };
+  }
 
-  const rn = normName(rep.name);
+  const repNorms = [rep, ...(coRep ? [coRep] : [])].map((r) => normName(r.name));
   const earliestStart = (lead: DispatchLead) =>
     nowWallMinutes + driveMinutes(rep.lastCoords, lead.coords, cfg) + cfg.minLeadLeadMinutes;
 
-  // Tier A: the rep's own Not-Issued reset / job walk.
-  const tierA = dayLeads.filter((l) => isIssuableStatus(l) && l.reps.map(normName).includes(rn));
+  // Tier A: the rep's (or riding partner's) own Not-Issued reset / job walk.
+  const tierA = dayLeads.filter(
+    (l) => isIssuableStatus(l) && l.reps.some((r) => repNorms.includes(normName(r))),
+  );
   // Tier B: unassigned Not-Issued leads.
   const tierB = dayLeads.filter((l) => isIssuableStatus(l) && l.reps.length === 0);
 
@@ -380,18 +418,44 @@ export function planIssue(input: PlanIssueInput): IssuePlan {
   // mutable closure variable — TS can't narrow a `let` assigned inside a nested
   // function, which would make it read as `never`.)
   const managerLeads: Array<{ lead: DispatchLead; reason: string }> = [];
+  // Back-to-back pool: uncovered leads whose start is near/past, kept aside in
+  // case nothing passes the normal time rule (owner 10/6 exception).
+  const lateCands: ScoredCandidate[] = [];
 
-  const eligible = (pool: DispatchLead[]): ScoredCandidate[] => {
+  /** Hard rules for the rep AND (when riding together) the partner. */
+  const jointHardRule = (lead: DispatchLead) => {
+    const a = hardRuleCheck(rep, lead, cfg);
+    if (!a.ok) return a;
+    return coRep ? hardRuleCheck(coRep, lead, cfg) : a;
+  };
+  const jointScore = (lead: DispatchLead): ScoredCandidate => {
+    const base = scoreCandidate(rep, lead, nowWallMinutes, cfg);
+    if (!coRep) return base;
+    const other = scoreCandidate(coRep, lead, nowWallMinutes, cfg);
+    // The pair rides together (same start point) — take the stronger fit.
+    return other.strength > base.strength ? { ...other, driveMinutes: base.driveMinutes } : base;
+  };
+
+  const eligible = (pool: DispatchLead[], collectLate: boolean): ScoredCandidate[] => {
     const out: ScoredCandidate[] = [];
     for (const lead of pool) {
-      const hr = hardRuleCheck(rep, lead, cfg);
+      const hr = jointHardRule(lead);
       if (!hr.ok) {
         if (hr.disposition === "manager") managerLeads.push({ lead, reason: hr.reason });
         continue;
       }
       // Time rule: the lead must start late enough for the rep to get there.
-      if (lead.apptWallMinutes != null && lead.apptWallMinutes < earliestStart(lead)) continue;
-      out.push(scoreCandidate(rep, lead, nowWallMinutes, cfg));
+      if (lead.apptWallMinutes != null && lead.apptWallMinutes < earliestStart(lead)) {
+        // Back-to-back: an uncovered near/past lead NEARBY may still go to the
+        // rep coming out of this appointment — held back unless nothing normal
+        // qualifies.
+        if (collectLate && lead.apptWallMinutes >= nowWallMinutes - cfg.backToBack.maxLateMinutes) {
+          const sc = jointScore(lead);
+          if (sc.driveMinutes <= cfg.backToBack.maxDriveMinutes) lateCands.push(sc);
+        }
+        continue;
+      }
+      out.push(jointScore(lead));
     }
     return out;
   };
@@ -407,7 +471,7 @@ export function planIssue(input: PlanIssueInput): IssuePlan {
     return contenders[0];
   };
 
-  const chosen = pick(eligible(tierA)) ?? pick(eligible(tierB));
+  const chosen = pick(eligible(tierA, false)) ?? pick(eligible(tierB, true));
   if (chosen) {
     const tier = tierA.includes(chosen.lead) ? "own reset/job walk" : "nearest open lead";
     return {
@@ -417,6 +481,23 @@ export function planIssue(input: PlanIssueInput): IssuePlan {
       strength: chosen.strength,
       score: chosen.score,
       reason: `${tier}: ${chosen.driveMinutes}m drive, strength ${chosen.strength}`,
+    };
+  }
+  // Back-to-back fallback: nearest near/past uncovered lead, flagged late.
+  const late = pick(lateCands);
+  if (late) {
+    const lateMinutes = Math.max(
+      0,
+      nowWallMinutes + late.driveMinutes - (late.lead.apptWallMinutes ?? nowWallMinutes),
+    );
+    return {
+      action: "issue",
+      lead: late.lead,
+      driveMinutes: late.driveMinutes,
+      strength: late.strength,
+      score: late.score,
+      lateMinutes,
+      reason: `back-to-back: uncovered lead ${late.driveMinutes}m away, ~${lateMinutes}m late`,
     };
   }
   const mgr = managerLeads[0];
@@ -447,10 +528,14 @@ function shortLead(name: string): string {
  */
 export function buildIssuedText(input: {
   repName: string;
+  /** Set when a pair rides together (pairing table) — both named in the text. */
+  partnerName?: string | null;
   lead: DispatchLead;
   outOfLeadName: string | null;
   outOfResultLabel: string | null;
   dryRun: boolean;
+  /** Back-to-back: the office must call the customer about the delay. */
+  lateMinutes?: number;
 }): string {
   const when = wallClock12(input.lead.apptWallMinutes);
   const products = input.lead.products.length ? ` (${input.lead.products.join(", ")})` : "";
@@ -458,7 +543,14 @@ export function buildIssuedText(input: {
     ? ` – out of ${shortLead(input.outOfLeadName)}${input.outOfResultLabel ? ` (${input.outOfResultLabel})` : ""}`
     : "";
   const head = input.dryRun ? "[DRY RUN] would issue" : "Issued";
-  return `${head}: ${firstNameDisplay(input.repName)} → ${when} ${shortLead(input.lead.name)}${products}${outOf}.`;
+  const who = input.partnerName
+    ? `${firstNameDisplay(input.repName)} & ${firstNameDisplay(input.partnerName)}`
+    : firstNameDisplay(input.repName);
+  const late =
+    input.lateMinutes && input.lateMinutes > 0
+      ? ` Running ~${input.lateMinutes} min late, office please call customer.`
+      : "";
+  return `${head}: ${who} → ${when} ${shortLead(input.lead.name)}${products}${outOf}.${late}`;
 }
 
 /** Display-cased first name for a text ("Jaxon", not "jaxon"). */
@@ -587,6 +679,110 @@ function suggestBestRep(
       (strengthBonus(a.name, dl, cfg) + ocFirstBonus(a, cfg)),
   );
   return ranked[0]?.name ?? null;
+}
+
+// ── Pairing (owner 10/6: "Daniel never alone; best/avoid pairs") ─────────────
+export type PairingDecision = {
+  /** Groups to issue: [a,b] = ONE lead to both (ride together); [a] = solo. */
+  groups: DispatchRep[][];
+  /** neverAlone reps freed with no partner — the managers pair them by hand. */
+  holdAlone: DispatchRep[];
+};
+
+function inPairList(a: string, b: string, list: ReadonlyArray<readonly [string, string]>): boolean {
+  const [fa, fb] = [firstName(a), firstName(b)];
+  return list.some(([x, y]) => (x === fa && y === fb) || (x === fb && y === fa));
+}
+
+/**
+ * How the freed rep(s) of one report are issued (pure). Two partners freed
+ * together ride together — ONE next lead, both on people6 — when they're a
+ * `best` pair or either is `neverAlone`; an `avoid` pair always splits. A
+ * `neverAlone` rep freed solo (or split off an avoid pair) is never issued —
+ * the managers get a text instead.
+ */
+export function decidePairing(reps: DispatchRep[], cfg = DISPATCH_CONFIG): PairingDecision {
+  const never = (r: DispatchRep) => cfg.pairing.neverAlone.includes(firstName(r.name));
+  if (reps.length <= 1) {
+    const r = reps[0];
+    if (!r) return { groups: [], holdAlone: [] };
+    return never(r) ? { groups: [], holdAlone: [r] } : { groups: [[r]], holdAlone: [] };
+  }
+  const [a, b] = reps;
+  if (inPairList(a.name, b.name, cfg.pairing.avoid)) {
+    // An avoid pair splits; a neverAlone member of it still can't go solo.
+    return {
+      groups: [a, b].filter((r) => !never(r)).map((r) => [r]),
+      holdAlone: [a, b].filter(never),
+    };
+  }
+  if (never(a) || never(b) || inPairList(a.name, b.name, cfg.pairing.best)) {
+    return { groups: [[a, b]], holdAlone: [] };
+  }
+  return { groups: [[a], [b]], holdAlone: [] };
+}
+
+/** The manager text for a neverAlone rep left without a partner. */
+export function buildNeverAloneText(repName: string): string {
+  return `${firstNameDisplay(repName)} is free but never rides alone — please pair him with someone before the next lead.`;
+}
+
+// ── Attendance overrides (managers set these in Turf Invaders; they BEAT the
+// attendance board, which is sometimes wrong — owner 10/6) ───────────────────
+export type AttendanceState = { working: boolean; off: boolean };
+
+/** Apply a manager override ('on' | 'off' | null) to a board-derived state. */
+export function attendanceWithOverride(
+  board: AttendanceState,
+  override: "on" | "off" | null | undefined,
+): AttendanceState {
+  if (override === "on") return { working: true, off: false };
+  if (override === "off") return { working: false, off: true };
+  return board;
+}
+
+// ── Missing-report watchdog (owner 10/6: 3+ hours past start, text once) ─────
+export type MissingReportLead = {
+  itemId: string;
+  name: string;
+  reps: string[];
+  issLabel: string | null;
+  apptWallMinutes: number | null;
+  /** A disposition column is set — the report landed. */
+  disposition: boolean;
+};
+
+/**
+ * Issued leads 3+ hours past their start with no report. The caller texts the
+ * managers ONCE listing those reps (ledgered per lead so it never repeats).
+ */
+export function planMissingReports(input: {
+  nowWallMinutes: number;
+  leads: MissingReportLead[];
+  alreadyAlerted: Set<string>;
+  cfg?: typeof DISPATCH_CONFIG;
+}): MissingReportLead[] {
+  const cfg = input.cfg ?? DISPATCH_CONFIG;
+  const cutoff = cfg.missingReportHours * 60;
+  return input.leads.filter(
+    (l) =>
+      (l.issLabel ?? "").trim().toLowerCase() === LABEL.iss.toLowerCase() &&
+      !l.disposition &&
+      l.apptWallMinutes != null &&
+      input.nowWallMinutes - l.apptWallMinutes >= cutoff &&
+      !input.alreadyAlerted.has(l.itemId),
+  );
+}
+
+/** The one missing-report manager text. */
+export function buildMissingReportText(
+  leads: Array<{ name: string; reps: string[]; apptWallMinutes: number | null }>,
+): string {
+  const lines = leads.map(
+    (l) =>
+      `${l.reps.map(firstNameDisplay).join(" & ") || "?"} – ${l.name} (${wallClock12(l.apptWallMinutes)})`,
+  );
+  return `⏰ No report 3+ hrs after start: ${lines.join("; ")}. Please chase the report.`;
 }
 
 // ── now-in-wall-minutes helper (shared with the edge fn) ──────────────────────

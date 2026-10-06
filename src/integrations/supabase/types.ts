@@ -14,6 +14,36 @@ export type Database = {
   }
   public: {
     Tables: {
+      attendance_overrides: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          for_date: string
+          id: string
+          office: string
+          rep_name: string
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          for_date: string
+          id?: string
+          office: string
+          rep_name: string
+          status: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          for_date?: string
+          id?: string
+          office?: string
+          rep_name?: string
+          status?: string
+        }
+        Relationships: []
+      }
       block_cards: {
         Row: {
           address: string | null

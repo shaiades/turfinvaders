@@ -55,6 +55,89 @@ export function useMissingReports(enabled = true) {
   });
 }
 
+/** Today's LA calendar date (the dispatcher's day key). */
+export function laToday(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+}
+
+export type AttendanceOverrideRow = {
+  id: string;
+  office: string;
+  rep_name: string;
+  for_date: string;
+  status: string;
+};
+
+/**
+ * Manager attendance overrides for TODAY (owner 10/6): the Monday attendance
+ * board is sometimes wrong, so an override set here beats it in live dispatch.
+ * Admin-gated by RLS (owner / office_staff).
+ */
+export function useAttendanceOverrides(enabled = true) {
+  return useQuery({
+    queryKey: ["ooh", "att_overrides", laToday()],
+    enabled,
+    refetchInterval: 60_000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("attendance_overrides")
+        .select("id, office, rep_name, for_date, status")
+        .eq("for_date", laToday())
+        .order("office")
+        .order("rep_name");
+      if (error) return null; // table not deployed yet → feature ships dark
+      return (data ?? []) as AttendanceOverrideRow[];
+    },
+  });
+}
+
+export function useAttendanceOverrideMutations() {
+  const qc = useQueryClient();
+  const refresh = () => qc.invalidateQueries({ queryKey: ["ooh", "att_overrides"] });
+
+  const upsert = useMutation({
+    mutationFn: async (vars: { office: "SD" | "OC"; repName: string; status: "on" | "off" }) => {
+      const { data: auth } = await supabase.auth.getSession();
+      const uid = auth.session?.user.id ?? null;
+      // One override per rep/office/day (unique on the rep's FIRST name): drop
+      // any existing row for the same first name, then insert the new state.
+      const first = vars.repName.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+      const { data: existing, error: readErr } = await supabase
+        .from("attendance_overrides")
+        .select("id, rep_name")
+        .eq("for_date", laToday())
+        .eq("office", vars.office);
+      if (readErr) throw readErr;
+      const dupIds = (existing ?? [])
+        .filter((r) => (r.rep_name ?? "").trim().split(/\s+/)[0]?.toLowerCase() === first)
+        .map((r) => r.id);
+      if (dupIds.length > 0) {
+        const { error } = await supabase.from("attendance_overrides").delete().in("id", dupIds);
+        if (error) throw error;
+      }
+      const { error } = await supabase.from("attendance_overrides").insert({
+        office: vars.office,
+        rep_name: vars.repName.trim(),
+        for_date: laToday(),
+        status: vars.status,
+        created_by: uid,
+      });
+      if (error) throw error;
+    },
+    onSuccess: refresh,
+  });
+
+  const remove = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("attendance_overrides").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: refresh,
+  });
+
+  return { upsert, remove };
+}
+
 export function useOohMutations() {
   const qc = useQueryClient();
   const refresh = () => qc.invalidateQueries({ queryKey: ["ooh"] });

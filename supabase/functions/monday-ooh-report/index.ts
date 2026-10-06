@@ -14,12 +14,12 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { makeClient, type Supa } from "./supa.ts";
 import {
   type BlockItem,
+  createItem,
   fetchAttendance,
   fetchBlockItem,
   fetchDispatchDayItems,
   fetchFormItem,
   fetchMondayUsers,
-  postUpdate,
   resolveUserId,
   setColumns,
   setPeopleColumn,
@@ -28,35 +28,53 @@ import {
 import { sendDispatcherIMessage, type InkboxResult } from "./inkbox.ts";
 import {
   BLOCK_COL,
+  BLOCK_DAY_GROUP,
   DISPATCHER_LABEL,
   FORM_BOARD_ID,
   OOH_DISPATCHER_COL,
+  SOURCE_CODE_COL,
+  addOnReloadLabels,
   buildBaseQueueRow,
+  buildCanSaveDetails,
   buildDetailsLine,
+  buildOffBlockCreate,
+  buildOffBlockText,
   buildSaleAlert,
+  buildSalesProcMissingText,
   hasExistingDisposition,
   isAllowedOohBoard,
+  isCanSaveOfficeAppt,
   isOpenLead,
   isSaleResult,
   LABEL,
   laClock,
   laWeekday,
+  matchByLastNameAndRep,
   matchTarget,
   normName,
-  oohUpdateKey,
   parseOohForm,
+  parsePaymentDetails,
   planDisposition,
+  sameCustomer,
+  secondReportOutcome,
+  soldFollowupMissing,
   sourceCodeToWrite,
 } from "./engine.ts";
 import {
   type DispatchRep,
+  attendanceWithOverride,
   buildFreeRepsLine,
   buildIssuedText,
+  buildNeverAloneText,
+  decidePairing,
   firstName,
+  isFreeRep,
   nowWallMinutes,
   planIssue,
+  sameRep,
 } from "./dispatch.ts";
-import { runWatchdog } from "./watchdog.ts";
+import { fetchAttendanceOverrides, runWatchdog } from "./watchdog.ts";
+import { enqueueSalesProcFollowup } from "./salesproc.ts";
 import { enrichHistory, logDispatchDecision } from "./history.ts";
 
 const denoEnv = (globalThis as { Deno?: { env: { get(k: string): string | undefined } } }).Deno
@@ -270,12 +288,13 @@ serve(async (req) => {
     // that have no block). The write path rebuilds it once the block is known,
     // so a blank arrival can fall back to the appointment time (Rule 3 / #6).
     const detailsLine = buildDetailsLine(form, formItem.createdAtMs);
-    const formLink = `https://tidal-remodeling.monday.com/boards/${FORM_BOARD_ID}/pulses/${formItemId}`;
     baseRow = buildBaseQueueRow(form, detailsLine, plan);
 
     // A plan the engine refuses to auto-apply (e.g. a reset result with no
-    // reset date) goes to the office — press nothing (#4).
-    if (plan.needsReview) {
+    // reset date) goes to the office — press nothing (#4). For a report that
+    // targets a block item we defer the check until the block is read: a
+    // can-save presses no button at all, so a missing reset date can't block it.
+    if (plan.needsReview && target.kind !== "write") {
       await finish("queued");
       await queue("needs_review", plan.needsReview, baseRow);
       return ok({ queued: plan.needsReview });
@@ -302,11 +321,52 @@ serve(async (req) => {
         ? `SALE written but leadership text failed: ${r.errors.join("; ").slice(0, 280)}`
         : null;
 
-    // Only the matched-lead path writes automatically. Create (self-gen /
-    // upsell / reload) is queued unless auto-create is explicitly enabled.
-    if (target.kind !== "write") {
+    // The block item this report lands on. Filled by the Lead ID, the
+    // last-name+rep fallback, or the off-block add below.
+    let leadId: string | null =
+      target.kind === "write" ? ((target as { leadId?: string }).leadId ?? form.leadId) : null;
+    // Set when this report ADDED (or adopted) an off-block item — drives the
+    // "Off-block …: added to today's block" manager text after the write.
+    let offBlock: { office: "SD" | "OC"; customer: string } | null = null;
+    const weekday = laWeekday(formItem.createdAtMs);
+    const dayGroupId = BLOCK_DAY_GROUP[weekday];
+
+    // ── On-block report with NO Lead ID: customer last name + rep, today's
+    // group (owner rule). Anything but one confident hit → Needs review. ─────
+    if (target.kind === "queue") {
+      // One confident hit ACROSS both offices, or nothing — never a guess.
+      const pooled: Array<{ itemId: string; name: string; reps: string[] }> = [];
+      for (const b of [activeSd, activeOc]) {
+        if (!b) continue;
+        const items = await fetchDispatchDayItems(token, b, dayGroupId).catch(() => []);
+        for (const it of items) pooled.push({ itemId: it.itemId, name: it.name, reps: it.reps });
+      }
+      const m = matchByLastNameAndRep({
+        customerName: formItem.name || null,
+        repName: form.repName,
+        partner: form.partner,
+        items: pooled,
+      });
+      if (m.kind === "match") {
+        leadId = m.itemId;
+      } else {
+        await finish("queued");
+        await queue(
+          "needs_review",
+          m.kind === "ambiguous"
+            ? `several leads match this name + rep today (${m.count})`
+            : target.reason,
+          baseRow,
+        );
+        return ok({ queued: target.reason });
+      }
+    }
+
+    // ── Off-block report (upsell / reload / self-gen): ADD it to today's block
+    // in the rep's office, unless the same customer is already there. ────────
+    if (target.kind === "create") {
       const autocreate = (settings?.ooh_autocreate as boolean | null) ?? false;
-      if (target.kind === "create" && !autocreate) {
+      if (!autocreate) {
         await finish("queued");
         const saleRes = await alertSaleOnce(formItem.name || form.address); // self-gen SALE → text now
         const ste = saleTextError(saleRes);
@@ -316,15 +376,80 @@ serve(async (req) => {
         });
         return ok({ queued: "create (auto-create off)" });
       }
-      if (target.kind === "queue") {
-        await finish("queued");
-        await queue("needs_review", target.reason, baseRow);
-        return ok({ queued: target.reason });
+      const customer = (formItem.name || form.address || "").trim();
+      if (mode !== "live") {
+        // dry_run: show what WOULD be added; create nothing.
+        await finish("dry_run");
+        await queue("dry_run", "would add off-block item to today's block", baseRow);
+        return ok({ dryRun: true, wouldCreate: customer });
       }
+      // The rep's office comes from the attendance boards (first-name rosters).
+      const [sdAtt, ocAtt] = await Promise.all([
+        fetchAttendance(token, "SD", weekday).catch(() => new Map()),
+        fetchAttendance(token, "OC", weekday).catch(() => new Map()),
+      ]);
+      const fn = firstName(form.repName ?? "");
+      const inSd = !!fn && sdAtt.has(fn);
+      const inOc = !!fn && ocAtt.has(fn);
+      const office: "SD" | "OC" | null = inSd && !inOc ? "SD" : inOc && !inSd ? "OC" : null;
+      const boardId = office === "SD" ? activeSd : office === "OC" ? activeOc : null;
+      if (!customer || !office || !boardId) {
+        await finish("queued");
+        const saleRes = await alertSaleOnce(customer || form.address);
+        const ste = saleTextError(saleRes);
+        await queue(
+          "needs_review",
+          !customer
+            ? "off-block report with no customer name"
+            : "couldn't resolve the rep's office for the off-block add",
+          { ...baseRow, ...(ste ? { error: ste } : {}) },
+        );
+        return ok({ queued: "off-block (unresolved)" });
+      }
+      const dayItems = await fetchDispatchDayItems(token, boardId, dayGroupId).catch(() => []);
+      const existing = dayItems.find((it) => sameCustomer(it.name, customer));
+      if (existing) {
+        leadId = existing.itemId;
+      } else {
+        const users = await fetchMondayUsers(token).catch(
+          () => [] as Array<{ id: string; name: string }>,
+        );
+        const uids = [form.repName, form.partner]
+          .map((n) => (n ? resolveUserId(users, n) : null))
+          .filter((x): x is string => !!x);
+        const create = buildOffBlockCreate({
+          form,
+          customerName: customer,
+          submitMs: formItem.createdAtMs,
+          office,
+          repUserIds: uids,
+        });
+        if (!create) {
+          await finish("queued");
+          await queue("needs_review", "off-block report with no on-block channel", baseRow);
+          return ok({ queued: "off-block (no channel)" });
+        }
+        mondayTouched = true;
+        const newId = await createItem(
+          token,
+          boardId,
+          dayGroupId,
+          create.name,
+          create.columnValues,
+          `ooh-create-${formItemId}`,
+        );
+        if (!newId) throw new Error("off-block create_item failed");
+        leadId = newId;
+      }
+      offBlock = { office, customer };
     }
 
     // ── matched lead: resolve + gate ────────────────────────────────────────
-    const leadId = (target as { leadId?: string }).leadId ?? form.leadId!;
+    if (!leadId) {
+      await finish("queued");
+      await queue("needs_review", "no target lead resolved", baseRow);
+      return ok({ queued: "no target" });
+    }
     const block = await fetchBlockItem(token, leadId);
     if (!block || block.state !== "active") {
       await finish("queued");
@@ -335,10 +460,29 @@ serve(async (req) => {
       return ok({ queued: "lead not found" });
     }
 
-    // Already-dispositioned guard (#3): if the office pressed a disposition by
-    // hand, write NOTHING — so a lead can never be routed twice. (The
-    // at-the-door "No show text" marker doesn't count; the lead is still open.)
+    // Already-dispositioned guard (#3): if a disposition is already set, write
+    // NOTHING — a lead can never be routed twice. When WE wrote that first
+    // disposition, this is the PARTNER's copy of the same report (owner rule:
+    // process the first, mark the second Processed as a duplicate); a human
+    // disposition still goes to the office for review. (The at-the-door
+    // "No show text" marker doesn't count; the lead is still open.)
     if (hasExistingDisposition(block)) {
+      const { data: prior } = await supabase
+        .from("ooh_processed_reports")
+        .select("form_item_id")
+        .eq("target_item_id", leadId)
+        .eq("outcome", "written")
+        .neq("form_item_id", formItemId)
+        .limit(1);
+      const outcome = secondReportOutcome({
+        alreadyDispositioned: true,
+        writtenByUs: (prior ?? []).length > 0,
+      });
+      if (outcome === "duplicate") {
+        await finish("duplicate", { target_item_id: leadId, board_id: block.boardId });
+        await stampDispatcher(DISPATCHER_LABEL.processed);
+        return ok({ duplicate: true, target: leadId });
+      }
       await finish("queued", { target_item_id: leadId, board_id: block.boardId });
       await queue("needs_review", "already dispositioned by office", {
         ...baseRow,
@@ -350,6 +494,36 @@ serve(async (req) => {
 
     const isCurrentBlock = block.boardId === activeSd || block.boardId === activeOc;
     const liveAllowed = mode === "live" && allowedBoards.has(block.boardId);
+    const office: "SD" | "OC" | null = isCurrentBlock
+      ? block.boardId === activeSd
+        ? "SD"
+        : "OC"
+      : null;
+
+    // ── Can-save (owner rule): the matched item is an Office Appt carrying the
+    // can/save marker → append the result to Details and press NO button (the
+    // outcome lives in Details + the WCC flow). The rep is then free. ─────────
+    const blockFreeText = [block.source, block.agent, block.comments, block.details]
+      .filter(Boolean)
+      .join(" | ");
+    const canSave = isCanSaveOfficeAppt({ issLabel: block.iss, freeText: blockFreeText });
+    if (canSave) {
+      plan.status = null;
+      plan.fillSourceCodeIfBlank = false;
+      plan.fieldWrites = {};
+    }
+
+    // Deferred needs-review (see above): with a block in hand, only a plan that
+    // still presses a button can be unroutable.
+    if (plan.needsReview && !canSave) {
+      await finish("queued");
+      await queue("needs_review", plan.needsReview, {
+        ...baseRow,
+        target_item_id: leadId,
+        board_id: block.boardId,
+      });
+      return ok({ queued: plan.needsReview });
+    }
 
     // Details (Rule 3 / #6): rebuild now that the block is known, so a blank
     // arrival time falls back to the appointment time (date9, PT).
@@ -357,9 +531,12 @@ serve(async (req) => {
       block.apptWallMinutes != null
         ? { hour: Math.floor(block.apptWallMinutes / 60), minute: block.apptWallMinutes % 60 }
         : null;
-    const detailsLineForBlock = buildDetailsLine(form, formItem.createdAtMs, apptFallback);
+    const detailsLineForBlock = canSave
+      ? buildCanSaveDetails(form, formItem.createdAtMs)
+      : buildDetailsLine(form, formItem.createdAtMs, apptFallback);
 
-    // Source Code fill (Rule 4), computed against the block's live values.
+    // Source Code fill (Rule 4), computed against the block's live values. The
+    // column id differs per office (SD numeric_mm35kwnj / OC numeric_mm35nm4y).
     const fieldWrites: Record<string, unknown> = { ...plan.fieldWrites };
     let sourceCodeNote = "";
     if (plan.fillSourceCodeIfBlank) {
@@ -368,10 +545,32 @@ serve(async (req) => {
         block.sourceCode,
         block.source,
       );
-      if (code != null) fieldWrites[BLOCK_COL.sourceCode] = String(code);
+      if (code != null) fieldWrites[SOURCE_CODE_COL[office ?? "SD"]] = String(code);
       if (unknownSource)
         sourceCodeNote = ` (source "${block.source ?? ""}" unrecognized — set code=1)`;
     }
+
+    // ── Every Sold (owner 10/6): Advantage+ and the add-on Reloads go on the
+    // block BEFORE the Sold press. Values come from the rep's own words — a
+    // membership never guessed, add-ons = quoted beyond the card's product(s)
+    // plus promised future reloads. ──────────────────────────────────────────
+    const payText = [form.notes, form.quantities, form.whatHappened].filter(Boolean).join("\n");
+    const pay = parsePaymentDetails(payText);
+    const addOns =
+      isSaleResult(form) && !canSave
+        ? addOnReloadLabels({
+            quoted: form.quotedText,
+            blockProducts: block.products,
+            notes: form.notes,
+          })
+        : [];
+    if (isSaleResult(form) && !canSave) {
+      if (pay.advantage) fieldWrites[BLOCK_COL.advantage] = { label: pay.advantage };
+      if (addOns.length > 0 && fieldWrites[BLOCK_COL.reloads] == null) {
+        fieldWrites[BLOCK_COL.reloads] = { labels: addOns };
+      }
+    }
+
     // Details: APPEND, never overwrite (Rule 3).
     const combinedDetails = block.details?.trim()
       ? `${block.details.trim()}\n${detailsLineForBlock}`
@@ -380,12 +579,6 @@ serve(async (req) => {
       ...fieldWrites,
       [BLOCK_COL.details]: { text: combinedDetails },
     };
-
-    const office: "SD" | "OC" | null = isCurrentBlock
-      ? block.boardId === activeSd
-        ? "SD"
-        : "OC"
-      : null;
     const rowWithTarget = {
       ...baseRow,
       details_line: detailsLineForBlock,
@@ -450,14 +643,23 @@ serve(async (req) => {
       if (r2.error) throw new Error(`setStatus: ${r2.error}`);
     }
 
-    // Activity-log note on the block item. Keyed by the FORM item id so a
-    // SECOND report on the same lead still posts its note (#7).
-    await postUpdate(
-      token,
-      leadId,
-      `Dispo report from ${form.repName ?? "rep"} at ${laClock(formItem.createdAtMs)} — ${formLink}${sourceCodeNote}`,
-      oohUpdateKey(formItemId),
-    ).catch(() => undefined);
+    // NO Monday updates/comments on the block or Dispo items (owner 10/6 —
+    // they notify reps and managers). The Details column carries the record;
+    // an unrecognized Source lands in the admin cockpit instead (the write
+    // itself succeeded — the office just double-checks the code).
+    if (sourceCodeNote) {
+      await supabase.from("ooh_report_queue").upsert(
+        {
+          form_item_id: formItemId,
+          status: "needs_review",
+          reason: `written, but ${sourceCodeNote.trim()}`,
+          ...baseRow,
+          target_item_id: leadId,
+          board_id: block.boardId,
+        },
+        { onConflict: "form_item_id" },
+      );
+    }
 
     // SALE → text leadership (Tyler / Shai / Jorge) with a loud banner: the
     // rep(s), what they sold, how much. Best-effort; live mode only. A send
@@ -481,6 +683,36 @@ serve(async (req) => {
 
     // The write-back succeeded → Dispatcher column shows Processed.
     await stampDispatcher(DISPATCHER_LABEL.processed);
+
+    // Off-block add → tell the managers what landed where (owner rule).
+    if (offBlock) {
+      await sendDispatcherIMessage(buildOffBlockText(form, offBlock.customer)).catch(
+        () => undefined,
+      );
+    }
+
+    // ── Sold follow-up (owner 10/6): the item moves to Sales Processing with
+    // the same id; queue the Deposit/Finance/Advantage+/Reloads fill (the
+    // watchdog drains it once the move lands) and ask the managers ONCE for
+    // whatever the report lacked. Plain Sold only — Upsell/Reload route as
+    // subitems of the original sale. ─────────────────────────────────────────
+    if (plan.status?.label === LABEL.sold) {
+      await enqueueSalesProcFollowup(supabase, {
+        form_item_id: formItemId,
+        lead_item_id: leadId,
+        customer: block.name || offBlock?.customer || null,
+        deposit_amount: pay.depositAmount,
+        finance_labels: pay.financeLabels.length > 0 ? pay.financeLabels : null,
+        advantage: pay.advantage,
+        reload_labels: addOns.length > 0 ? addOns : null,
+      });
+      const missing = soldFollowupMissing(form, pay);
+      if (missing.length > 0) {
+        await sendDispatcherIMessage(
+          buildSalesProcMissingText(block.name || offBlock?.customer || null, missing),
+        ).catch(() => undefined);
+      }
+    }
 
     // ── Rule 6: at-the-door → message the office; issue nothing ─────────────
     let released: string | null = null;
@@ -557,88 +789,142 @@ async function runDispatch(p: {
   const weekday = laWeekday(p.nowMs);
   const nowWall = nowWallMinutes(p.nowMs);
 
-  const [attendance, dayItems, users] = await Promise.all([
+  const [attendance, overrides, dayItems, users] = await Promise.all([
     fetchAttendance(p.token, p.office, weekday).catch(() => new Map()),
+    fetchAttendanceOverrides(p.supabase, p.office, p.nowMs),
     fetchDispatchDayItems(p.token, p.block.boardId, p.block.groupId).catch(() => []),
     fetchMondayUsers(p.token).catch(() => [] as Array<{ id: string; name: string }>),
   ]);
   await enrichHistory(p.supabase, dayItems).catch(() => undefined);
 
-  const chosen = new Set<string>(); // never issue the same lead to both partners
-  let issued: string | null = null;
-  const freeNone: string[] = [];
-
-  for (const repName of p.repNames) {
+  // The freed reps as planner inputs. A manager attendance override (set in
+  // Turf Invaders) BEATS the attendance board — it's sometimes wrong (owner).
+  const freedReps: DispatchRep[] = p.repNames.map((repName) => {
     const att = attendance.get(firstName(repName));
-    const working = !!att && (att.amOn || att.pmOn);
-    const off = !!att && att.amOff && att.pmOff && !att.amOn && !att.pmOn;
+    const boardState = {
+      working: !!att && (att.amOn || att.pmOn),
+      off: !!att && att.amOff && att.pmOff && !att.amOn && !att.pmOn,
+    };
+    const state = attendanceWithOverride(boardState, overrides.get(firstName(repName)) ?? null);
     const openLeadCount = dayItems.filter(
       (l) =>
         l.itemId !== p.reportedLeadId &&
         l.reps.map(normName).includes(normName(repName)) &&
         isOpenLead({ iss: l.issLabel, pm: l.pm, rs: l.rs, ol: l.ol, bo: l.bo, sale: l.sale }),
     ).length;
-    const rep: DispatchRep = {
+    return {
       name: repName,
       office: p.office,
-      working,
-      off,
+      working: state.working,
+      off: state.off,
       openLeadCount,
       lastCoords: p.block.coords,
     };
+  });
+
+  // Pairing table (owner 10/6): who rides together, who must not go alone.
+  const pairing = decidePairing(freedReps.filter((r) => isFreeRep(r)));
+  for (const held of pairing.holdAlone) {
+    await sendDispatcherIMessage(buildNeverAloneText(held.name)).catch(() => undefined);
+    await logDispatchDecision(p.supabase, {
+      mode: p.mode,
+      trigger: "report",
+      formItemId: p.formItemId,
+      repName: held.name,
+      office: p.office,
+      boardId: p.block.boardId,
+      leadItemId: null,
+      leadName: null,
+      action: "manager",
+      score: null,
+      driveMinutes: null,
+      strength: null,
+      reason: "never rides alone — managers pair by hand",
+      issued: false,
+    });
+  }
+  // Reps that aren't free still get a logged "none" decision below.
+  const groups: DispatchRep[][] = [
+    ...pairing.groups,
+    ...freedReps.filter((r) => !isFreeRep(r)).map((r) => [r]),
+  ];
+
+  const chosen = new Set<string>(); // never issue the same lead twice
+  let issued: string | null = null;
+  const freeNone: string[] = [];
+
+  for (const group of groups) {
+    const [rep, coRep] = group;
+    const groupLabel = group.map((g) => g.name).join(" & ");
     const pool = dayItems.filter((l) => l.itemId !== p.reportedLeadId && !chosen.has(l.itemId));
-    const plan = planIssue({ rep, dayLeads: pool, nowWallMinutes: nowWall });
+    const plan = planIssue({ rep, coRep: coRep ?? null, dayLeads: pool, nowWallMinutes: nowWall });
 
     if (plan.action === "issue") {
       chosen.add(plan.lead.itemId);
       let didIssue = false;
       let failReason: string | null = null;
+      let silentSkip = false;
       if (p.mode === "live") {
-        const uid = resolveUserId(users, repName);
-        if (!uid) {
-          failReason = `couldn't match ${repName} to a Monday user`;
+        const uids = group.map((g) => resolveUserId(users, g.name)).filter((x): x is string => !!x);
+        if (uids.length !== group.length) {
+          failReason = `couldn't match ${groupLabel} to a Monday user`;
         } else {
-          // Manager-override safe: we only ever write to a lead that was Not
-          // Issued (Tier A carries the rep; Tier B is unassigned) — never one a
-          // person already touched.
-          const r1 = await setPeopleColumn(
-            p.token,
-            plan.lead.boardId,
-            plan.lead.itemId,
-            BLOCK_COL.reps,
-            [uid],
-            `ooh-people-${plan.lead.itemId}`,
-          );
-          if (r1.error) failReason = `people6: ${r1.error}`;
-          else {
-            const r2 = await setStatus(
+          // Manager overrides always win (owner 10/6): re-read the lead right
+          // before writing — if a person changed Reps or the status since we
+          // planned, leave it exactly as they set it.
+          const fresh = await fetchBlockItem(p.token, plan.lead.itemId).catch(() => null);
+          const freshOk =
+            !!fresh &&
+            (fresh.iss ?? "").trim() === LABEL.notIssued &&
+            (fresh.reps.length === 0 ||
+              fresh.reps.every((r) => group.some((g) => sameRep(g.name, r))));
+          if (!freshOk) {
+            failReason = "lead changed since planning (manager override) — left untouched";
+            silentSkip = true;
+          } else {
+            const r1 = await setPeopleColumn(
               p.token,
               plan.lead.boardId,
               plan.lead.itemId,
-              BLOCK_COL.iss,
-              LABEL.iss,
-              `ooh-iss-${plan.lead.itemId}`,
+              BLOCK_COL.reps,
+              uids,
+              `ooh-people-${plan.lead.itemId}`,
             );
-            if (r2.error) failReason = `Iss: ${r2.error}`;
+            if (r1.error) failReason = `people6: ${r1.error}`;
             else {
-              didIssue = true;
-              issued = plan.lead.itemId;
+              const r2 = await setStatus(
+                p.token,
+                plan.lead.boardId,
+                plan.lead.itemId,
+                BLOCK_COL.iss,
+                LABEL.iss,
+                `ooh-iss-${plan.lead.itemId}`,
+              );
+              if (r2.error) failReason = `Iss: ${r2.error}`;
+              else {
+                didIssue = true;
+                issued = plan.lead.itemId;
+              }
             }
           }
         }
       }
       if (failReason) {
-        await sendDispatcherIMessage(
-          `Dispatch could not issue ${plan.lead.name} to ${repName}: ${failReason}. Please assign by hand.`,
-        ).catch(() => undefined);
+        if (!silentSkip) {
+          await sendDispatcherIMessage(
+            `Dispatch could not issue ${plan.lead.name} to ${groupLabel}: ${failReason}. Please assign by hand.`,
+          ).catch(() => undefined);
+        }
       } else {
         await sendDispatcherIMessage(
           buildIssuedText({
-            repName,
+            repName: rep.name,
+            partnerName: coRep?.name ?? null,
             lead: plan.lead,
             outOfLeadName: p.reportedLeadName,
             outOfResultLabel: p.reportedResultLabel,
             dryRun: p.mode !== "live",
+            lateMinutes: plan.lateMinutes,
           }),
         ).catch(() => undefined);
       }
@@ -646,7 +932,7 @@ async function runDispatch(p: {
         mode: p.mode,
         trigger: "report",
         formItemId: p.formItemId,
-        repName,
+        repName: groupLabel,
         office: p.office,
         boardId: plan.lead.boardId,
         leadItemId: plan.lead.itemId,
@@ -666,7 +952,7 @@ async function runDispatch(p: {
         mode: p.mode,
         trigger: "report",
         formItemId: p.formItemId,
-        repName,
+        repName: groupLabel,
         office: p.office,
         boardId: plan.lead.boardId,
         leadItemId: plan.lead.itemId,
@@ -679,12 +965,12 @@ async function runDispatch(p: {
         issued: false,
       });
     } else {
-      if (working && !off) freeNone.push(repName);
+      for (const g of group) if (isFreeRep(g)) freeNone.push(g.name);
       await logDispatchDecision(p.supabase, {
         mode: p.mode,
         trigger: "report",
         formItemId: p.formItemId,
-        repName,
+        repName: groupLabel,
         office: p.office,
         boardId: p.block.boardId,
         leadItemId: null,

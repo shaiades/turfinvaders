@@ -1,10 +1,27 @@
 import { useMemo, useState } from "react";
 import { ArcadePanel } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { AlertTriangle, CheckCircle2, Clock, Loader2, Send, X } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  Loader2,
+  Send,
+  UserCheck,
+  UserX,
+  X,
+} from "lucide-react";
 import { oohOnBlockLabel, oohResultLabel, type OohQueueRow } from "@/lib/ooh";
-import { useMissingReports, useOohConfig, useOohMutations, useOohQueue } from "@/hooks/useOohQueue";
+import {
+  useAttendanceOverrideMutations,
+  useAttendanceOverrides,
+  useMissingReports,
+  useOohConfig,
+  useOohMutations,
+  useOohQueue,
+} from "@/hooks/useOohQueue";
 
 /**
  * OOH admin tab — the office's cockpit for the Out of House write-back.
@@ -144,6 +161,128 @@ function PushNextLeadButton({
   );
 }
 
+/**
+ * Attendance overrides (owner 10/6): the Monday attendance board is sometimes
+ * wrong, so a manager can flip a rep On/Off for TODAY here — live dispatch
+ * reads these first and the override always beats the board.
+ */
+function AttendanceOverridesPanel() {
+  const overrides = useAttendanceOverrides();
+  const { upsert, remove } = useAttendanceOverrideMutations();
+  const [office, setOffice] = useState<"SD" | "OC">("SD");
+  const [name, setName] = useState("");
+
+  const add = (status: "on" | "off") => {
+    const repName = name.trim();
+    if (!repName) {
+      toast.info("Type the rep's name first.");
+      return;
+    }
+    upsert
+      .mutateAsync({ office, repName, status })
+      .then(() => {
+        toast.success(`${repName} marked ${status.toUpperCase()} today (${office}).`);
+        setName("");
+      })
+      .catch((e) => toast.error(String(e instanceof Error ? e.message : e)));
+  };
+
+  return (
+    <ArcadePanel
+      title="Attendance overrides"
+      faction="kombat"
+      info={
+        <span className="text-[10px] text-muted-foreground">today · beats the Monday board</span>
+      }
+    >
+      <div className="space-y-3">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center">
+          <div className="flex gap-2">
+            {(["SD", "OC"] as const).map((o) => (
+              <Button
+                key={o}
+                variant={office === o ? "default" : "outline"}
+                className="flex-1 md:flex-none"
+                onClick={() => setOffice(o)}
+              >
+                {o}
+              </Button>
+            ))}
+          </div>
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Rep name"
+            className="text-base md:text-xs"
+          />
+          <div className="flex gap-2">
+            <Button className="flex-1" disabled={upsert.isPending} onClick={() => add("on")}>
+              <UserCheck className="size-4" /> On
+            </Button>
+            <Button
+              variant="outline"
+              className="flex-1"
+              disabled={upsert.isPending}
+              onClick={() => add("off")}
+            >
+              <UserX className="size-4" /> Off
+            </Button>
+          </div>
+        </div>
+        {overrides.data === null ? (
+          <p className="text-sm text-muted-foreground">
+            Overrides not available yet (migration pending).
+          </p>
+        ) : (overrides.data ?? []).length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            No overrides today — dispatch trusts the attendance board.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {(overrides.data ?? []).map((o) => (
+              <div
+                key={o.id}
+                className="flex items-center justify-between gap-2 rounded-lg border border-border/40 bg-surface/50 p-2.5"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm text-foreground">{o.rep_name}</p>
+                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground">
+                    {o.office}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Chip
+                    cls={
+                      o.status === "on"
+                        ? "text-victory border-victory/50"
+                        : "text-destructive border-destructive/50"
+                    }
+                  >
+                    {o.status === "on" ? "On" : "Off"}
+                  </Chip>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    disabled={remove.isPending}
+                    onClick={() =>
+                      remove
+                        .mutateAsync(o.id)
+                        .then(() => toast.success("Override removed"))
+                        .catch((e) => toast.error(String(e instanceof Error ? e.message : e)))
+                    }
+                  >
+                    <X className="size-4" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </ArcadePanel>
+  );
+}
+
 function QueueCard({ row }: { row: OohQueueRow }) {
   const { resolve } = useOohMutations();
   const canPush = !!row.board_id && !!row.rep_name;
@@ -280,6 +419,8 @@ export function CloseKombatOohTab() {
           <p className="text-xs text-muted-foreground">{modeCopy.hint}</p>
         </div>
       </ArcadePanel>
+
+      <AttendanceOverridesPanel />
 
       <ArcadePanel
         title="Needs review"

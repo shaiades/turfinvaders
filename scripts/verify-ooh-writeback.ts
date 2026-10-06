@@ -8,31 +8,50 @@
  *  one-lead-at-a-time release, pairs, "late report = no lead", "At the door",
  *  and idempotency. October 2026 is PDT (UTC−7): a PT wall time T is T+7:00Z. */
 import {
+  ADVANTAGE_LABEL,
   AUTO_ISSUE_WITHOUT_REPORT,
   BLOCK_COL,
   FORM_COL,
+  ISS_CREATE_INDEX,
   LABEL,
   ON_BLOCK,
   RESULT,
+  SALESPROC_BOARD_ID,
+  SALESPROC_COL,
+  SOURCE_CODE_COL,
+  addOnReloadLabels,
   applyDisposition,
   buildBaseQueueRow,
+  buildCanSaveDetails,
   buildDetailsLine,
+  buildOffBlockCreate,
+  buildOffBlockText,
   buildSaleAlert,
+  buildSalesProcMissingText,
   hasExistingDisposition,
   isAllowedOohBoard,
   isBlankStatus,
+  isCanSaveOfficeAppt,
   isDuplicate,
   isOpenLead,
   isSaleResult,
   laClock,
   laWallMinutesFromUtc,
+  lastNameOf,
   lateReportCheck,
+  matchByLastNameAndRep,
   matchTarget,
+  offBlockSourceText,
   oohUpdateKey,
   parseOohForm,
+  parsePaymentDetails,
   planDisposition,
   planRelease,
+  productsDropdownLabels,
   reloadDropdownLabels,
+  sameCustomer,
+  secondReportOutcome,
+  soldFollowupMissing,
   sourceCodeToWrite,
   timeInHouseMins,
   type AppliedOp,
@@ -58,8 +77,12 @@ import {
   type DispatchLead,
   type DispatchRep,
   type WatchdogLead,
+  attendanceWithOverride,
   buildFreeRepsLine,
   buildIssuedText,
+  buildMissingReportText,
+  buildNeverAloneText,
+  decidePairing,
   detectRequestedLanguage,
   driveMinutes,
   findLateReporters,
@@ -74,6 +97,7 @@ import {
   isRehashMarker,
   nowWallMinutes as dispatchNowWall,
   planIssue,
+  planMissingReports,
   planWatchdog,
   sameRep,
   scoreCandidate,
@@ -1463,12 +1487,24 @@ function mkRep(over: Partial<DispatchRep>): DispatchRep {
     "none",
   );
 
-  // time rule: too soon (now 10:00 + 20 drive + 45 = 11:05; lead at 10:30)
+  // time rule: too soon for the normal 45-min rule (now 10:00 + 20 drive + 45
+  // = 11:05; lead at 10:30). Since the 10/6 brief this NEARBY uncovered lead
+  // is rescued by the back-to-back rule instead of going uncovered; the same
+  // lead carried by ANOTHER rep is still plainly skipped.
+  const soon = planIssue({
+    rep,
+    dayLeads: [mkLead({ itemId: "soon", apptWallMinutes: 630 })],
+    nowWallMinutes: 600,
+  });
+  expect(
+    "plan: too-soon uncovered lead falls to back-to-back",
+    soon.action === "issue" && soon.reason.startsWith("back-to-back"),
+  );
   expectEq(
-    "plan: lead too soon is skipped",
+    "plan: too-soon lead held by another rep is skipped",
     planIssue({
       rep,
-      dayLeads: [mkLead({ itemId: "soon", apptWallMinutes: 630 })],
+      dayLeads: [mkLead({ itemId: "soon2", reps: ["Someone Else"], apptWallMinutes: 630 })],
       nowWallMinutes: 600,
     }).action,
     "none",
@@ -1678,6 +1714,525 @@ function mkRep(over: Partial<DispatchRep>): DispatchRep {
   expect("marker: job walk", isJobWalkMarker("job walk for the sold roof"));
   expect("marker: older homeowner", isOlderHomeownerMarker("elderly homeowner, be patient"));
   expect("marker: no false rehash", !isRehashMarker("fresh canvass lead"));
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// STEP 7 FOLLOW-UP RULES (owner brief 2026-10-06)
+// ════════════════════════════════════════════════════════════════════════════
+
+// ── per-office Source Code column (the one id that differs SD vs OC) ─────────
+{
+  expectEq("source code col: SD", SOURCE_CODE_COL.SD, "numeric_mm35kwnj");
+  expectEq("source code col: OC", SOURCE_CODE_COL.OC, "numeric_mm35nm4y");
+  expect("source code col: ids differ", SOURCE_CODE_COL.SD !== SOURCE_CODE_COL.OC);
+}
+
+// ── matching fallback: customer last name + rep on today's group ────────────
+{
+  const items = [
+    { itemId: "1", name: "Smith, John", reps: ["Jaxon Heilman"] },
+    { itemId: "2", name: "Garcia Maria", reps: ["Nick Schoeben"] },
+  ];
+  expectEq(
+    "match: last name + rep → the one item",
+    matchByLastNameAndRep({
+      customerName: "John Smith",
+      repName: "Jaxon Heilman",
+      partner: null,
+      items,
+    }),
+    { kind: "match", itemId: "1" },
+  );
+  expectEq(
+    "match: partner on the card also matches",
+    matchByLastNameAndRep({
+      customerName: "John Smith",
+      repName: "Somebody Else",
+      partner: "Jaxon Heilman",
+      items,
+    }),
+    { kind: "match", itemId: "1" },
+  );
+  expectEq(
+    "match: right name, wrong rep → none",
+    matchByLastNameAndRep({
+      customerName: "John Smith",
+      repName: "Nick Schoeben",
+      partner: null,
+      items,
+    }),
+    { kind: "none" },
+  );
+  expectEq(
+    "match: two hits → ambiguous (Needs review)",
+    matchByLastNameAndRep({
+      customerName: "John Smith",
+      repName: "Jaxon Heilman",
+      partner: null,
+      items: [...items, { itemId: "3", name: "Bob Smith", reps: ["Jaxon Heilman"] }],
+    }),
+    { kind: "ambiguous", count: 2 },
+  );
+  expectEq("lastNameOf: strips (copy)", lastNameOf("Smith, John (copy 2)"), "john");
+  expect("sameCustomer: containment both ways", sameCustomer("John Smith", "john smith (copy)"));
+  expect("sameCustomer: different people", !sameCustomer("John Smith", "Maria Garcia"));
+}
+
+// ── payment details from the rep's words (Sold follow-up) ────────────────────
+{
+  const p1 = parsePaymentDetails("29sq 250 debit , balance 20k service / 10249 on synchrony");
+  expectEq("pay: '250 debit' → $250 deposit", p1.depositAmount, 250);
+  expectEq("pay: deposit method debit", p1.depositMethod, "debit");
+  expectEq("pay: balance methods after 'balance'", p1.financeLabels, [
+    "Synchrony",
+    "Service Finance",
+  ]);
+  expectEq("pay: no membership stated → null", p1.advantage, null);
+
+  const p2 = parsePaymentDetails("Advantage+ member. 500 check, balance on homerun");
+  expectEq("pay: Advantage+", p2.advantage, ADVANTAGE_LABEL.member);
+  expectEq("pay: $500 check deposit", p2.depositAmount, 500);
+  expectEq("pay: Homerun balance", p2.financeLabels, ["Homerun"]);
+
+  expectEq(
+    "pay: non member wins over 'member'",
+    parsePaymentDetails("went non member").advantage,
+    ADVANTAGE_LABEL.nonMember,
+  );
+  expectEq("pay: '20k down' → 20000", parsePaymentDetails("20k down, renew").depositAmount, 20000);
+  const empty = parsePaymentDetails("32sq wants other bids");
+  expectEq("pay: nothing stated → all null (never invent)", empty, {
+    depositAmount: null,
+    depositMethod: null,
+    financeLabels: [],
+    advantage: null,
+  });
+
+  const soldForm = parseOohForm(
+    "f1",
+    form({
+      [FORM_COL.repName]: status(4, "Jaxon Heilman"),
+      [FORM_COL.result]: status(RESULT.SOLD),
+      [FORM_COL.dropCall]: status(0, "Tyler"),
+    }),
+  );
+  expectEq(
+    "missing: full report → nothing missing",
+    soldFollowupMissing(soldForm, {
+      depositAmount: 250,
+      depositMethod: "debit",
+      financeLabels: ["Synchrony"],
+      advantage: ADVANTAGE_LABEL.member,
+    }),
+    [],
+  );
+  const bare = parseOohForm(
+    "f2",
+    form({
+      [FORM_COL.result]: status(RESULT.SOLD),
+      [FORM_COL.dropCall]: status(4, "No drop call"),
+    }),
+  );
+  expectEq("missing: bare report lists all five", soldFollowupMissing(bare, empty), [
+    "deposit amount",
+    "deposit method",
+    "balance method",
+    "drop call",
+    "Advantage+",
+  ]);
+  expect(
+    "missing text names the customer + items",
+    buildSalesProcMissingText("Smith", ["deposit amount", "Advantage+"]).includes(
+      "Smith: missing deposit amount, Advantage+",
+    ),
+  );
+  expectEq("salesproc: board id", SALESPROC_BOARD_ID, "4155553389");
+  expectEq("salesproc: column ids", SALESPROC_COL, {
+    deposit: "numbers5",
+    finance: "dropdown6",
+    advantage: "color_mkwkmx6g",
+    reloads: "dup__of_product9",
+  });
+}
+
+// ── every Sold: add-on Reloads beyond the main product + future reloads ─────
+{
+  expectEq(
+    "reloads: gutters sold with a roof lead",
+    addOnReloadLabels({ quoted: "Roof, Gutters", blockProducts: ["roof"], notes: null }),
+    ["Gutters"],
+  );
+  expectEq(
+    "reloads: 'will reload turf' in the notes",
+    addOnReloadLabels({
+      quoted: "Roof",
+      blockProducts: ["roof"],
+      notes: "will reload turf next month",
+    }),
+    ["Turf"],
+  );
+  expectEq(
+    "reloads: product named without 'reload' doesn't count",
+    addOnReloadLabels({ quoted: "Roof", blockProducts: ["roof"], notes: "talked about turf" }),
+    [],
+  );
+  expectEq(
+    "reloads: quoted = the lead's own product → none",
+    addOnReloadLabels({ quoted: "Roof", blockProducts: ["roof"], notes: null }),
+    [],
+  );
+}
+
+// ── off-block add (upsell / reload / self-gen) ───────────────────────────────
+{
+  expectEq(
+    "off-block: products map",
+    productsDropdownLabels(
+      "Roof, Paint / stucco / CoolWall, Solar R&R, Trim / eaves / fascia, Other",
+    ),
+    ["Roof", "Stucco/Paint", "Solar R/R", "Eaves/Fascia"],
+  );
+  expectEq("off-block: flat roof beats roof", productsDropdownLabels("Flat roof"), ["Flat Roof"]);
+
+  expectEq("off-block: source text upsell", offBlockSourceText(ON_BLOCK.UPSELL), "Upsell");
+  expectEq("off-block: source text self-gen", offBlockSourceText(ON_BLOCK.SELF_GEN), "Self Gen");
+  expectEq("off-block: on-block Yes → no channel", offBlockSourceText(ON_BLOCK.YES), null);
+
+  const selfGen = parseOohForm(
+    "f3",
+    form({
+      [FORM_COL.repName]: status(4, "Jaxon Heilman"),
+      [FORM_COL.result]: status(RESULT.SOLD),
+      [FORM_COL.onBlock]: status(ON_BLOCK.SELF_GEN),
+      [FORM_COL.phone]: text("6191234567"),
+      [FORM_COL.quoted]: text("Roof"),
+      [FORM_COL.address]: text("123 Main St"),
+      [FORM_COL.salePrice]: num(12000),
+    }),
+  );
+  const create = buildOffBlockCreate({
+    form: selfGen,
+    customerName: "John Smith",
+    submitMs: SUBMIT,
+    office: "SD",
+    repUserIds: ["111", "222"],
+  });
+  expect("off-block create: built", create !== null);
+  if (create) {
+    expectEq("off-block create: name = customer", create.name, "John Smith");
+    expectEq(
+      "off-block create: self-gen status pre-set to Iss (103) — no lead text",
+      create.columnValues[BLOCK_COL.iss],
+      { index: ISS_CREATE_INDEX.iss },
+    );
+    expectEq(
+      "off-block create: Source = Self Gen",
+      create.columnValues[BLOCK_COL.source],
+      "Self Gen",
+    );
+    expectEq(
+      "off-block create: date9 = submit time in UTC",
+      create.columnValues[BLOCK_COL.apptDateTime],
+      { date: "2026-10-04", time: "17:08:00" },
+    );
+    expectEq(
+      "off-block create: Source Code 1 (SD col)",
+      create.columnValues[SOURCE_CODE_COL.SD],
+      "1",
+    );
+    expectEq("off-block create: phone", create.columnValues[BLOCK_COL.phone], {
+      phone: "6191234567",
+      countryShortName: "US",
+    });
+    expectEq("off-block create: both reps on people6", create.columnValues[BLOCK_COL.reps], {
+      personsAndTeams: [
+        { id: 111, kind: "person" },
+        { id: 222, kind: "person" },
+      ],
+    });
+    expectEq("off-block create: quoted products", create.columnValues[BLOCK_COL.products], {
+      labels: ["Roof"],
+    });
+    expectEq(
+      "off-block create: address kept in Comments",
+      create.columnValues[BLOCK_COL.comments],
+      {
+        text: "123 Main St",
+      },
+    );
+  }
+  const upsell = buildOffBlockCreate({
+    form: { ...selfGen, onBlock: ON_BLOCK.UPSELL },
+    customerName: "John Smith",
+    submitMs: SUBMIT,
+    office: "OC",
+    repUserIds: [],
+  });
+  expectEq(
+    "off-block create: upsell status pre-set to Reload (1)",
+    upsell?.columnValues[BLOCK_COL.iss],
+    { index: ISS_CREATE_INDEX.reload },
+  );
+  expect(
+    "off-block create: OC uses the OC Source Code col",
+    upsell?.columnValues[SOURCE_CODE_COL.OC] === "1" &&
+      upsell?.columnValues[SOURCE_CODE_COL.SD] === undefined,
+  );
+  expectEq(
+    "off-block text",
+    buildOffBlockText({ ...selfGen, onBlock: ON_BLOCK.UPSELL }, "Smith"),
+    "Off-block Upsell: Jaxon Heilman – Smith – $12,000 (Upsell). Added to today's block.",
+  );
+}
+
+// ── can-saves: Details only, press NO button ─────────────────────────────────
+{
+  expect(
+    "can-save: Office Appt + marker",
+    isCanSaveOfficeAppt({ issLabel: "Office Appt", freeText: "Can/Save — WCC cancelled" }),
+  );
+  expect(
+    "can-save: Iss status is not a can-save",
+    !isCanSaveOfficeAppt({ issLabel: "Iss", freeText: "Can/Save" }),
+  );
+  expect(
+    "can-save: Office Appt without the marker is a job walk/appt",
+    !isCanSaveOfficeAppt({ issLabel: "Office Appt", freeText: "job walk" }),
+  );
+  const pmForm = parseOohForm(
+    "f4",
+    form({
+      [FORM_COL.result]: status(RESULT.PITCH_MISS),
+      [FORM_COL.notes]: text("upset about price, no save"),
+    }),
+  );
+  expectEq(
+    "can-save details: no save + notes + out time",
+    buildCanSaveDetails(pmForm, SUBMIT),
+    "Can-save – no save. upset about price, no save (10:08)",
+  );
+  const savedForm = parseOohForm(
+    "f5",
+    form({ [FORM_COL.result]: status(RESULT.SOLD), [FORM_COL.salePrice]: num(9000) }),
+  );
+  expectEq(
+    "can-save details: a save shows SAVED + the price",
+    buildCanSaveDetails(savedForm, SUBMIT),
+    "Can-save – SAVED. Sale $9,000 (10:08)",
+  );
+}
+
+// ── pairing table (Daniel never alone; best/avoid pairs) ─────────────────────
+{
+  const jaxon = mkRep({ name: "Jaxon Heilman" });
+  const daniel = mkRep({ name: "Daniel Figueiredo" });
+  const yakup = mkRep({ name: "Yakup Sancakli" });
+
+  expectEq("pair: one plain rep goes solo", decidePairing([jaxon]).groups, [[jaxon]]);
+  const dAlone = decidePairing([daniel]);
+  expectEq("pair: Daniel alone is held for the managers", dAlone.holdAlone, [daniel]);
+  expectEq("pair: Daniel alone gets no group", dAlone.groups, []);
+  expectEq(
+    "pair: Daniel freed with a partner rides WITH them (one lead)",
+    decidePairing([daniel, jaxon]).groups,
+    [[daniel, jaxon]],
+  );
+  expectEq("pair: two plain reps split", decidePairing([jaxon, yakup]).groups, [[jaxon], [yakup]]);
+
+  const bestCfg = {
+    ...DISPATCH_CONFIG,
+    pairing: { neverAlone: [], best: [["jaxon", "yakup"]], avoid: [] },
+  } as typeof DISPATCH_CONFIG;
+  expectEq("pair: a best pair stays together", decidePairing([jaxon, yakup], bestCfg).groups, [
+    [jaxon, yakup],
+  ]);
+  const avoidCfg = {
+    ...DISPATCH_CONFIG,
+    pairing: { neverAlone: ["daniel"], best: [], avoid: [["daniel", "jaxon"]] },
+  } as typeof DISPATCH_CONFIG;
+  const avoided = decidePairing([daniel, jaxon], avoidCfg);
+  expectEq("pair: an avoid pair splits", avoided.groups, [[jaxon]]);
+  expectEq("pair: the neverAlone half of an avoid pair is held", avoided.holdAlone, [daniel]);
+  expect(
+    "pair: never-alone text names the rep",
+    buildNeverAloneText("Daniel Figueiredo").startsWith("Daniel is free but never rides alone"),
+  );
+}
+
+// ── joint issuing (a pair shares ONE lead; hard rules bind BOTH) ─────────────
+{
+  const jaxon = mkRep({ name: "Jaxon Heilman", lastCoords: SD_A });
+  const yakup = mkRep({ name: "Yakup Sancakli", lastCoords: SD_A });
+  const now = 10 * 60;
+  // A can-save: Yakup is a designated saver, Jaxon is not → the PAIR can't take it.
+  const canSave = mkLead({ itemId: "cs", isCanSave: true, apptWallMinutes: now + 120 });
+  const p1 = planIssue({ rep: yakup, coRep: jaxon, dayLeads: [canSave], nowWallMinutes: now });
+  expectEq("joint: can-save blocked when the partner isn't a saver", p1.action, "none");
+  // The partner's own Not-Issued reset is Tier A for the pair.
+  const partnersReset = mkLead({
+    itemId: "rs",
+    reps: ["Jaxon Heilman"],
+    isReset: true,
+    apptWallMinutes: now + 120,
+  });
+  const p2 = planIssue({
+    rep: yakup,
+    coRep: jaxon,
+    dayLeads: [partnersReset],
+    nowWallMinutes: now,
+  });
+  expect(
+    "joint: partner's reset is Tier A for the pair",
+    p2.action === "issue" && p2.lead.itemId === "rs",
+  );
+  // Strength of the pair = the stronger rep's fit (Yakup on a roof).
+  const roof = mkLead({ itemId: "rf", products: ["roof"], apptWallMinutes: now + 120 });
+  const p3 = planIssue({ rep: jaxon, coRep: yakup, dayLeads: [roof], nowWallMinutes: now });
+  expect("joint: pair strength = the stronger fit", p3.action === "issue" && p3.strength === 3);
+}
+
+// ── back-to-back exception (near/past uncovered lead, nearby) ────────────────
+{
+  const rep = mkRep({ name: "Jaxon Heilman", lastCoords: SD_A });
+  const now = 13 * 60;
+  // Started 10 minutes ago, same neighborhood (drive 0) → issue, ~10 min late.
+  const passed = mkLead({ itemId: "late1", coords: SD_A, apptWallMinutes: now - 10 });
+  const p1 = planIssue({ rep, dayLeads: [passed], nowWallMinutes: now });
+  expect(
+    "b2b: near/past uncovered lead goes to the freed rep",
+    p1.action === "issue" && p1.lead.itemId === "late1",
+  );
+  expectEq("b2b: lateness is measured", p1.action === "issue" ? p1.lateMinutes : null, 10);
+  // Too far away → not back-to-back.
+  const farLate = mkLead({ itemId: "late2", coords: SD_FAR, apptWallMinutes: now - 10 });
+  expectEq(
+    "b2b: a lead too far away is not resurrected",
+    planIssue({ rep, dayLeads: [farLate], nowWallMinutes: now }).action,
+    "none",
+  );
+  // Started too long ago → gone.
+  const ancient = mkLead({ itemId: "late3", coords: SD_A, apptWallMinutes: now - 70 });
+  expectEq(
+    "b2b: a lead started >60 min ago is not resurrected",
+    planIssue({ rep, dayLeads: [ancient], nowWallMinutes: now }).action,
+    "none",
+  );
+  // A normal future candidate still wins over a back-to-back one.
+  const future = mkLead({ itemId: "fut", coords: SD_A, apptWallMinutes: now + 120 });
+  const p2 = planIssue({ rep, dayLeads: [passed, future], nowWallMinutes: now });
+  expect(
+    "b2b: a normal candidate beats the late one",
+    p2.action === "issue" && p2.lead.itemId === "fut",
+  );
+  // The Issued text carries the late warning.
+  const txt = buildIssuedText({
+    repName: "Jaxon Heilman",
+    partnerName: "Daniel Figueiredo",
+    lead: mkLead({ name: "Valley", apptWallMinutes: 13 * 60, products: ["roof"] }),
+    outOfLeadName: "Ingebretson",
+    outOfResultLabel: "PM",
+    dryRun: false,
+    lateMinutes: 12,
+  });
+  expectEq(
+    "text: pair + late note",
+    txt,
+    "Issued: Jaxon & Daniel → 1pm Valley (roof) – out of Ingebretson (PM). Running ~12 min late, office please call customer.",
+  );
+}
+
+// ── attendance overrides beat the board ──────────────────────────────────────
+{
+  expectEq(
+    "override: 'on' turns a board-Off rep on",
+    attendanceWithOverride({ working: false, off: true }, "on"),
+    { working: true, off: false },
+  );
+  expectEq(
+    "override: 'off' benches a board-On rep",
+    attendanceWithOverride({ working: true, off: false }, "off"),
+    { working: false, off: true },
+  );
+  expectEq(
+    "override: none → the board stands",
+    attendanceWithOverride({ working: true, off: false }, null),
+    { working: true, off: false },
+  );
+}
+
+// ── missing-report watchdog (3+ hours past start, once) ──────────────────────
+{
+  const now = 16 * 60; // 4 pm
+  const leads = [
+    // 1 pm start, no report → 3h late → alert.
+    {
+      itemId: "m1",
+      name: "Smith",
+      reps: ["Jaxon Heilman"],
+      issLabel: "Iss",
+      apptWallMinutes: 13 * 60,
+      disposition: false,
+    },
+    // 2 pm start → only 2h → not yet.
+    {
+      itemId: "m2",
+      name: "Jones",
+      reps: ["Nick S"],
+      issLabel: "Iss",
+      apptWallMinutes: 14 * 60,
+      disposition: false,
+    },
+    // 1 pm but reported → fine.
+    {
+      itemId: "m3",
+      name: "Lee",
+      reps: ["Yakup"],
+      issLabel: "Iss",
+      apptWallMinutes: 13 * 60,
+      disposition: true,
+    },
+    // Not issued → the uncovered watchdog's problem, not this one's.
+    {
+      itemId: "m4",
+      name: "Kim",
+      reps: [],
+      issLabel: "Not Issued",
+      apptWallMinutes: 12 * 60,
+      disposition: false,
+    },
+  ];
+  const hits = planMissingReports({ nowWallMinutes: now, leads, alreadyAlerted: new Set() });
+  expectEq(
+    "missing-report: only the 3h+ unreported issued lead",
+    hits.map((h) => h.itemId),
+    ["m1"],
+  );
+  const again = planMissingReports({ nowWallMinutes: now, leads, alreadyAlerted: new Set(["m1"]) });
+  expectEq("missing-report: never alerts the same lead twice", again.length, 0);
+  expectEq(
+    "missing-report: the one manager text",
+    buildMissingReportText(hits),
+    "⏰ No report 3+ hrs after start: Jaxon – Smith (1pm). Please chase the report.",
+  );
+}
+
+// ── paired reps: the second report on the same lead is a duplicate ──────────
+{
+  expectEq(
+    "second report: untouched lead proceeds",
+    secondReportOutcome({ alreadyDispositioned: false, writtenByUs: false }),
+    "proceed",
+  );
+  expectEq(
+    "second report: we already wrote it → duplicate (Processed, no writes)",
+    secondReportOutcome({ alreadyDispositioned: true, writtenByUs: true }),
+    "duplicate",
+  );
+  expectEq(
+    "second report: a human pressed it → Needs review",
+    secondReportOutcome({ alreadyDispositioned: true, writtenByUs: false }),
+    "needs_review",
+  );
 }
 
 if (failures > 0) {

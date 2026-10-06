@@ -67,10 +67,12 @@ export const FORM_COL = {
   calledTexted: "single_selectiv9qswz", // 0 Yes | 1 No
 } as const;
 
-// ── Block columns (boards 18432844990 / 18432845324, identical) ──────────────
+// ── Block columns (boards 18432844990 / 18432845324, identical except Source
+// Code — see SOURCE_CODE_COL) ─────────────────────────────────────────────────
 export const BLOCK_COL = {
   name: "name",
   reps: "people6", // max 2 (pairs)
+  phone: "phone_1",
   source: "text", // "Source" — drives Rule 4
   agent: "text5", // "Agent" — free-text, marker scanning (rehash/job walk)
   comments: "long_text", // "Comments" — can/save + language markers
@@ -81,8 +83,9 @@ export const BLOCK_COL = {
   products: "dropdown", // "Products" — quoted/booked products (strength table)
   salePrice: "numbers",
   resetDate: "date", // date + time
+  advantage: "color_mkwkazqn", // "Advantage+" — 0 Non Member | 1 Advantage+ (Rule: every Sold)
   reloads: "dropdown2",
-  sourceCode: "numeric_mm35kwnj",
+  sourceCode: "numeric_mm35kwnj", // SD id — OC differs; WRITE via SOURCE_CODE_COL
   // disposition status columns
   iss: "status", // Add Rep|Reload|CTC|Not Issued|Office Appt|Iss
   bo: "status4", // No Show|No show text|No Demo|None
@@ -91,6 +94,22 @@ export const BLOCK_COL = {
   pm: "status_1", // PM|PM w/ RS|None
   sale: "status9", // Sold|Upsell|Reload
 } as const;
+
+/**
+ * Source Code column id PER OFFICE — the ONE block column whose id differs
+ * between the SD and OC boards (read live 2026-10-06: SD `numeric_mm35kwnj`,
+ * OC `numeric_mm35nm4y`). Writing the SD id on the OC board lands in a dead
+ * column, so every Source Code write must go through this map.
+ */
+export const SOURCE_CODE_COL: Record<"SD" | "OC", string> = {
+  SD: "numeric_mm35kwnj",
+  OC: "numeric_mm35nm4y",
+};
+
+/** Block Advantage+ labels (color_mkwkazqn; identical on Sales Processing's
+ *  color_mkwkmx6g): index 1 = Advantage+, index 0 = Non Member. Pressed by
+ *  label text like every other status. */
+export const ADVANTAGE_LABEL = { member: "Advantage+", nonMember: "Non Member" } as const;
 
 /** Exact Monday status label text (press by LABEL, never numeric index). */
 export const LABEL = {
@@ -106,7 +125,13 @@ export const LABEL = {
   noDemo: "No Demo",
   iss: "Iss",
   notIssued: "Not Issued",
+  officeAppt: "Office Appt",
 } as const;
+
+/** Iss-column label INDEXES for creating an item with its status pre-set (read
+ *  live 2026-10-06). Setting the status in the create_item call itself means no
+ *  status-change automation fires — so an off-block add sends no lead text. */
+export const ISS_CREATE_INDEX = { reload: 1, iss: 103, officeAppt: 16 } as const;
 
 /** Block Iss-column labels that keep their OWN flow — never auto-released. */
 export const RELEASE_EXCLUDED_STATUSES = ["Office Appt", "CTC", "Reload", "Add Rep"] as const;
@@ -938,10 +963,337 @@ export function buildBaseQueueRow(
   };
 }
 
+// ═════════════════════════════════════════════════════════════════════════════
+// Step 7 follow-up rules (owner brief 2026-10-06). All pure; the edge fn wires
+// them to Monday/Supabase; the verify script asserts each one.
+// ═════════════════════════════════════════════════════════════════════════════
+
+// ── Matching fallback: customer LAST NAME + rep on today's group ─────────────
+const firstTok = (n: string | null | undefined): string => normName(n).split(" ")[0] ?? "";
+
+/** Last name token of a customer name (≥2 chars; null when there isn't one). */
+export function lastNameOf(name: string | null | undefined): string | null {
+  const toks = normName(name)
+    .replace(/(\s*\(copy(\s+\d+)?\))+\s*$/i, "")
+    .split(" ")
+    .filter(Boolean);
+  const last = toks[toks.length - 1] ?? "";
+  return last.length >= 2 ? last : null;
+}
+
+export type NameRepMatch =
+  { kind: "match"; itemId: string } | { kind: "none" } | { kind: "ambiguous"; count: number };
+
+/**
+ * On-block report with NO Lead ID: find today's block item by customer last
+ * name + rep (owner rule). A match needs the item name to contain the
+ * customer's last name AND the item's Reps to include the submitting rep (or
+ * their partner), matched by first name (attendance-roster style). Anything but
+ * exactly ONE hit is not confident → the caller queues Needs review and writes
+ * nothing.
+ */
+export function matchByLastNameAndRep(input: {
+  customerName: string | null;
+  repName: string | null;
+  partner: string | null;
+  items: Array<{ itemId: string; name: string; reps: string[] }>;
+}): NameRepMatch {
+  const last = lastNameOf(input.customerName);
+  const repFirsts = [firstTok(input.repName), firstTok(input.partner)].filter(Boolean);
+  if (!last || repFirsts.length === 0) return { kind: "none" };
+  const hits = input.items.filter(
+    (it) =>
+      normName(it.name).includes(last) && it.reps.some((r) => repFirsts.includes(firstTok(r))),
+  );
+  if (hits.length === 1) return { kind: "match", itemId: hits[0].itemId };
+  return hits.length === 0 ? { kind: "none" } : { kind: "ambiguous", count: hits.length };
+}
+
+/** Same-customer check for the off-block dedupe ("unless the same customer is
+ *  already there"). True when one normalized name contains the other. */
+export function sameCustomer(a: string | null | undefined, b: string | null | undefined): boolean {
+  const na = normName(a).replace(/(\s*\(copy(\s+\d+)?\))+\s*$/i, "");
+  const nb = normName(b).replace(/(\s*\(copy(\s+\d+)?\))+\s*$/i, "");
+  if (!na || !nb) return false;
+  return na.includes(nb) || nb.includes(na);
+}
+
+// ── Payment details parsed from the rep's free text (Sold follow-up) ─────────
+/** The Sales Processing board (4155553389) — the ONE destination board the Sold
+ *  follow-up may write to, because the SAME item moves there after Sold. */
+export const SALESPROC_BOARD_ID = "4155553389";
+export const SALESPROC_COL = {
+  deposit: "numbers5", // "Deposit Amt"
+  finance: "dropdown6", // "Finance" (balance method)
+  advantage: "color_mkwkmx6g", // "Advantage+" (Advantage+ / Non Member)
+  reloads: "dup__of_product9", // "Reloads"
+} as const;
+
+/** The exact Finance dropdown labels (read live 2026-10-06) + the free-text
+ *  cues reps write for each ("balance 20k service / 10249 on synchrony"). */
+const FINANCE_CUES: Array<{ label: string; re: RegExp }> = [
+  { label: "Renew", re: /\brenew\b/i },
+  { label: "Synchrony", re: /\bsynchrony\b/i },
+  { label: "Homerun", re: /\bhome\s*run\b/i },
+  { label: "Service Finance", re: /\bservice(\s*finance)?\b/i },
+  { label: "Momnt", re: /\bmomn?t\b/i },
+  { label: "Debit Card", re: /\bdebit\b/i },
+  { label: "Credit Card", re: /\bcredit\b/i },
+  { label: "Check", re: /\bcheck\b/i },
+  { label: "Cash", re: /\bcash\b/i },
+];
+
+export type PaymentDetails = {
+  /** Deposit amount in dollars (never invented — null when not stated). */
+  depositAmount: number | null;
+  /** How the deposit was taken ("debit", "check"…) — missing-check only. */
+  depositMethod: string | null;
+  /** Finance (balance-method) dropdown labels found in the text. */
+  financeLabels: string[];
+  /** Advantage+ membership, when the rep said so. */
+  advantage: (typeof ADVANTAGE_LABEL)[keyof typeof ADVANTAGE_LABEL] | null;
+};
+
+/** "250" → 250, "2,500" → 2500, "20k" → 20000. */
+function moneyToNumber(raw: string): number | null {
+  const m = raw
+    .replace(/[$,]/g, "")
+    .trim()
+    .match(/^(\d+(?:\.\d+)?)(k)?$/i);
+  if (!m) return null;
+  const n = Number(m[1]) * (m[2] ? 1000 : 1);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Parse deposit / balance-method / Advantage+ from the rep's free text (notes +
+ * quantities), the way the office reads Jorge's shorthand: "250 debit" =
+ * $250 deposit by debit; "deposit $500 check" likewise; "balance … synchrony"
+ * names the finance method. Never invents a number (owner rule) — anything not
+ * stated comes back null/empty and lands on the missing-items manager text.
+ */
+export function parsePaymentDetails(textIn: string | null | undefined): PaymentDetails {
+  const t = (textIn ?? "").trim();
+  const out: PaymentDetails = {
+    depositAmount: null,
+    depositMethod: null,
+    financeLabels: [],
+    advantage: null,
+  };
+  if (!t) return out;
+
+  // Advantage+ — "non member" first (it must not read as a membership).
+  if (/\bnon[-\s]?member\b/i.test(t)) out.advantage = ADVANTAGE_LABEL.nonMember;
+  else if (/\badvantage\s*\+?|\bmember(ship)?\b/i.test(t)) out.advantage = ADVANTAGE_LABEL.member;
+
+  // Deposit: "<amount> <method>" ("250 debit", "$2,500 check") or
+  // "deposit <amount>" / "<amount> deposit" / "<amount> down".
+  const amtMethod = t.match(
+    /\$?([\d][\d,]*(?:\.\d+)?k?)\s*(?:on\s+)?(debit|credit|check|cash|zelle|venmo)\b/i,
+  );
+  const depWord = t.match(
+    /(?:deposit|down)[:\s]*\$?([\d][\d,]*(?:\.\d+)?k?)|\$?([\d][\d,]*(?:\.\d+)?k?)\s*(?:deposit|down)\b/i,
+  );
+  if (amtMethod) {
+    out.depositAmount = moneyToNumber(amtMethod[1]);
+    out.depositMethod = amtMethod[2].toLowerCase();
+  } else if (depWord) {
+    out.depositAmount = moneyToNumber(depWord[1] ?? depWord[2] ?? "");
+  }
+
+  // Finance (balance method): every cue found AFTER the word "balance" when the
+  // rep used it, else any cue that isn't just the deposit-method token again.
+  const balanceIdx = t.toLowerCase().indexOf("balance");
+  const scope = balanceIdx >= 0 ? t.slice(balanceIdx) : t;
+  for (const { label, re } of FINANCE_CUES) {
+    if (!re.test(scope)) continue;
+    // Without a "balance" anchor, don't recount the deposit method as finance.
+    if (balanceIdx < 0 && out.depositMethod && label.toLowerCase().startsWith(out.depositMethod)) {
+      continue;
+    }
+    if (!out.financeLabels.includes(label)) out.financeLabels.push(label);
+  }
+  return out;
+}
+
+/** Items the Sold follow-up still needs from the office (one manager text). */
+export function soldFollowupMissing(form: OohForm, pay: PaymentDetails): string[] {
+  const missing: string[] = [];
+  if (pay.depositAmount == null) missing.push("deposit amount");
+  if (!pay.depositMethod) missing.push("deposit method");
+  if (pay.financeLabels.length === 0) missing.push("balance method");
+  if (!dropName(form.dropCall)) missing.push("drop call");
+  if (!pay.advantage) missing.push("Advantage+");
+  return missing;
+}
+
+/** The one missing-items text ("iMessage managers once"). */
+export function buildSalesProcMissingText(customer: string | null, missing: string[]): string {
+  const who = customer?.trim() || "the new sale";
+  return `Sales Processing – ${who}: missing ${missing.join(", ")}. Please add to the board or reply here.`;
+}
+
+// ── Every Sold: Reloads = add-ons beyond the main product + future reloads ───
+/**
+ * The Reloads (dropdown2) labels for a Sold: every QUOTED product beyond the
+ * lead's main product(s) (e.g. gutters sold with a roof lead), plus any future
+ * reload the rep promised in the notes ("will reload gutters"). Never "Room"
+ * (owner rule — "Room" isn't in RELOAD_DROPDOWN_LABELS, so it can't map).
+ */
+export function addOnReloadLabels(input: {
+  quoted: string | null | undefined;
+  /** The block card's own Products (normalized text) — the main product(s). */
+  blockProducts: string[];
+  notes: string | null | undefined;
+}): string[] {
+  const main = new Set(input.blockProducts.map((p) => norm(p)));
+  const addOns = reloadDropdownLabels(input.quoted).filter((l) => !main.has(norm(l)));
+  // Future reloads: a notes line containing "reload" names products directly.
+  const notes = (input.notes ?? "").trim();
+  if (/\breload\w*\b/i.test(notes)) {
+    const nn = norm(notes);
+    for (const l of RELOAD_DROPDOWN_LABELS) {
+      if (nn.includes(norm(l)) && !main.has(norm(l)) && !addOns.includes(l)) addOns.push(l);
+    }
+  }
+  return RELOAD_DROPDOWN_LABELS.filter((l) => addOns.includes(l));
+}
+
+// ── Off-block add (upsell / reload / self-gen) ────────────────────────────────
+/** Block Products (dropdown) labels, mapped from the form's "What did you
+ *  quote?" answers. Most specific first (Flat Roof before Roof, Solar R/R
+ *  before Solar); an unmapped answer is dropped — never invented. */
+const PRODUCTS_LABEL_MAP: Array<{ re: RegExp; label: string }> = [
+  { re: /flat\s*roof/i, label: "Flat Roof" },
+  { re: /solar\s*r\s*(&|\/)?\s*r/i, label: "Solar R/R" },
+  { re: /paint|stucco|coolwall/i, label: "Stucco/Paint" },
+  { re: /trim|eaves|fascia/i, label: "Eaves/Fascia" },
+  { re: /retaining/i, label: "Retaining Wall" },
+  { re: /patio/i, label: "Patio Cover" },
+  { re: /hvac/i, label: "HVAC" },
+  { re: /window/i, label: "Windows" },
+  { re: /gutter/i, label: "Gutters" },
+  { re: /insulation/i, label: "Insulation" },
+  { re: /paver/i, label: "Pavers" },
+  { re: /turf/i, label: "Turf" },
+  { re: /concrete/i, label: "Concrete" },
+  { re: /fence/i, label: "Fence" },
+  { re: /roof/i, label: "Roof" },
+  { re: /solar/i, label: "Solar" },
+];
+
+/** Map the quoted-products text onto the block Products dropdown labels. */
+export function productsDropdownLabels(quoted: string | null | undefined): string[] {
+  if (!quoted) return [];
+  const out: string[] = [];
+  for (const part of quoted.split(/[,;]/)) {
+    const p = part.trim();
+    if (!p || /^other$/i.test(p)) continue;
+    const hit = PRODUCTS_LABEL_MAP.find((m) => m.re.test(p));
+    if (hit && !out.includes(hit.label)) out.push(hit.label);
+  }
+  return out;
+}
+
+/** The form's on-block answer → the block Source text for an off-block add. */
+export function offBlockSourceText(onBlock: number | null): string | null {
+  if (onBlock === ON_BLOCK.UPSELL) return "Upsell";
+  if (onBlock === ON_BLOCK.RELOAD) return "Reload";
+  if (onBlock === ON_BLOCK.SELF_GEN) return "Self Gen";
+  return null;
+}
+
+/**
+ * Build the create_item payload for an off-block report (owner rule: ADD it to
+ * today's block in the rep's office). Status is set IN the create call — index
+ * 1 "Reload" for upsell/reload, 103 "Iss" for self-gen — so no lead text fires.
+ * Source Code = 1 (per-office column). The customer address goes into Comments
+ * (the Location column needs lat/lng Monday never geocodes for the API).
+ */
+export function buildOffBlockCreate(input: {
+  form: OohForm;
+  customerName: string;
+  submitMs: number;
+  office: "SD" | "OC";
+  repUserIds: string[];
+}): { name: string; columnValues: Record<string, MondayValue> } | null {
+  const source = offBlockSourceText(input.form.onBlock);
+  if (!source) return null;
+  const iso = new Date(input.submitMs).toISOString(); // Monday stores dates in UTC
+  const statusIndex =
+    input.form.onBlock === ON_BLOCK.SELF_GEN ? ISS_CREATE_INDEX.iss : ISS_CREATE_INDEX.reload;
+  const columnValues: Record<string, MondayValue> = {
+    [BLOCK_COL.iss]: { index: statusIndex },
+    [BLOCK_COL.source]: source,
+    [BLOCK_COL.apptDateTime]: { date: iso.slice(0, 10), time: iso.slice(11, 19) },
+    [SOURCE_CODE_COL[input.office]]: "1",
+  };
+  if (input.form.phone) {
+    columnValues[BLOCK_COL.phone] = { phone: input.form.phone, countryShortName: "US" };
+  }
+  if (input.repUserIds.length > 0) {
+    columnValues[BLOCK_COL.reps] = {
+      personsAndTeams: input.repUserIds.map((id) => ({ id: Number(id), kind: "person" })),
+    };
+  }
+  const products = productsDropdownLabels(input.form.quotedText);
+  if (products.length > 0) columnValues[BLOCK_COL.products] = { labels: products };
+  if (input.form.address) columnValues[BLOCK_COL.comments] = { text: input.form.address };
+  return { name: input.customerName, columnValues };
+}
+
+/** Manager text for an off-block add:
+ *  "Off-block Sold: Jaxon Heilman – Smith – $12,000 (Upsell). Added to today's block." */
+export function buildOffBlockText(form: OohForm, customer: string | null): string {
+  const rep = form.repName ?? "rep";
+  const who = customer?.trim() || form.address || "customer";
+  const price = form.salePrice != null ? ` – $${form.salePrice.toLocaleString("en-US")}` : "";
+  const type = offBlockSourceText(form.onBlock) ?? "off-block";
+  return `Off-block ${resultPrefix(form)}: ${rep} – ${who}${price} (${type}). Added to today's block.`;
+}
+
+// ── Can-saves: Details only, press NO button ─────────────────────────────────
+/** Is this block item an Office-Appt can-save? (status = Office Appt AND the
+ *  card's free text carries the can/save marker.) The outcome lives in Details
+ *  + the WCC flow — the write-back presses NO disposition button on these. */
+export function isCanSaveOfficeAppt(input: {
+  issLabel: string | null;
+  freeText: string | null;
+}): boolean {
+  if ((input.issLabel ?? "").trim().toLowerCase() !== LABEL.officeAppt.toLowerCase()) return false;
+  return /\bcan\s*\/?\s*save\b/i.test(input.freeText ?? "");
+}
+
+/** The can-save Details line: "Can-save – no save. <notes> (time)". */
+export function buildCanSaveDetails(form: OohForm, submitMs: number): string {
+  const saved = form.result === RESULT.SOLD;
+  const head = saved ? "Can-save – SAVED" : "Can-save – no save";
+  const bits: string[] = [head];
+  if (saved && form.salePrice != null) bits.push(`Sale $${form.salePrice.toLocaleString("en-US")}`);
+  if (form.objection) bits.push(`Obj: ${form.objection}`);
+  if (form.notes) bits.push(form.notes);
+  return `${bits.join(". ")} (${laClock(submitMs)})`;
+}
+
 // ── Rule: idempotency ────────────────────────────────────────────────────────
 /** A form item already processed must never be pressed again. (The durable
  *  guard is the ooh_processed_reports unique row; this mirrors it for tests.) */
 export function isDuplicate(processed: Iterable<string>, formItemId: string): boolean {
   for (const id of processed) if (id === formItemId) return true;
   return false;
+}
+
+/**
+ * What to do with a report whose block item ALREADY has a disposition (owner
+ * 10/6, "Paired reps"): when WE wrote that disposition, this is the partner's
+ * copy of the same appointment — mark it Processed as a duplicate, write
+ * nothing. When a HUMAN pressed it, the office reviews. Pure; index.ts feeds
+ * it the ooh_processed_reports lookup.
+ */
+export function secondReportOutcome(input: {
+  alreadyDispositioned: boolean;
+  writtenByUs: boolean;
+}): "proceed" | "duplicate" | "needs_review" {
+  if (!input.alreadyDispositioned) return "proceed";
+  return input.writtenByUs ? "duplicate" : "needs_review";
 }
