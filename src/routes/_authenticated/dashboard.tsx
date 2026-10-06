@@ -45,6 +45,7 @@ import { TimeClockReviewQueue } from "@/components/TimeClockReviewQueue";
 import { VanClockConsole } from "@/components/VanClockConsole";
 import { DayOffQueue } from "@/components/DayOffQueue";
 import { CaptainVanWarsCard } from "@/components/CaptainVanWarsCard";
+import { ShoutoutComposer } from "@/components/ShoutoutComposer";
 import { PushAlertsCard } from "@/components/PushAlertsCard";
 import { FormerBadge } from "@/components/FormerBadge";
 import { useTodayLeads } from "@/hooks/useTodayLeads";
@@ -311,6 +312,11 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
             </DialogContent>
           </Dialog>
         </div>
+      </div>
+
+      {/* §6 Shoutout — broadcast praise to every field phone. */}
+      <div className="flex justify-end">
+        <ShoutoutComposer />
       </div>
 
       <Tabs
