@@ -10,11 +10,9 @@ import { TeamWrapShow } from "@/components/TeamWrapShow";
 import { ArcadeFxToggle } from "@/components/ArcadeFxToggle";
 import type { WrapScope } from "@/hooks/useWrapData";
 import { addDaysISO, laTodayISO, reportDates } from "@/lib/dates";
-import { formatCurrency } from "@/lib/utils";
 import { useClockPresence, useDailyWrapRows, type WrapRow } from "@/hooks/useDailyWrapRows";
 import { useAuth } from "@/hooks/useAuth";
 import { sumLogCounters, useTodayLogs } from "@/hooks/useDailyLogs";
-import { usePiggyBank } from "@/hooks/usePiggyBank";
 
 /** Untyped table access (ObjectionDojo's pattern) until generated types
  *  catch up with gratitude_entries / objection_attempts reads here. */
@@ -160,7 +158,6 @@ function DailyWrap() {
   const selfId = user?.id;
   const myLogs = useTodayLogs(selfId);
   const my = sumLogCounters(myLogs.data);
-  const piggy = usePiggyBank(selfId);
 
   // Zero lists judge only FINISHED report days (owner, 2026-09-11: today
   // must not count toward suspension until the day is over). The two judged
@@ -348,7 +345,6 @@ function DailyWrap() {
           talked={my.people_talked_to}
           leads={rows.find((r) => r.id === selfId)?.todayLeads ?? my.leads_called_in}
           weekPoints={rows.find((r) => r.id === selfId)?.weekPoints ?? 0}
-          projected={piggy.dollars}
         />
       )}
 
@@ -427,19 +423,19 @@ function DailyWrap() {
 }
 
 /** The reader's own day, in the day's own currencies: doors, leads, week
- *  points, projected dollars. Every value rides caches other pages warm. */
+ *  points. Projected dollars live on the Active Run map pill and the cinematic
+ *  Wrap now (consolidation 2026-10-05), not on this static recap. Every value
+ *  rides caches other pages warm. */
 function YourDayCard({
   doors,
   talked,
   leads,
   weekPoints,
-  projected,
 }: {
   doors: number;
   talked: number;
   leads: number;
   weekPoints: number;
-  projected: number | null;
 }) {
   const stats: Array<{ label: string; value: string; cls: string }> = [
     { label: "Doors", value: doors.toLocaleString(), cls: "text-neon" },
@@ -447,19 +443,12 @@ function YourDayCard({
     { label: "Leads", value: leads.toLocaleString(), cls: "text-victory" },
     { label: "Wk Pts", value: weekPoints.toLocaleString(), cls: "text-victory" },
   ];
-  if (projected !== null) {
-    stats.push({
-      label: "Projected",
-      value: formatCurrency(Math.round(projected)),
-      cls: "text-victory",
-    });
-  }
   return (
     <ArcadeCard className="p-4">
       <div className="text-[10px] font-display uppercase tracking-widest text-neon mb-3">
         Your Day
       </div>
-      <div className="grid grid-cols-4 sm:grid-cols-5 gap-2">
+      <div className="grid grid-cols-4 gap-2">
         {stats.map((s) => (
           <div
             key={s.label}

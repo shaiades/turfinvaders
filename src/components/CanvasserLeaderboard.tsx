@@ -16,15 +16,17 @@ import { haptic } from "@/lib/arcade-fx";
 import { BOSS_HP } from "@/lib/canvasserPay";
 
 /**
- * The canvasser-facing arcade high-score hall (owner upgrade 2026-10): a top-3
- * PODIUM over a ranked high-score table, with Van Wars and a Bonus-Period boss
- * view. Numbers ride useArcadeLadder → getDispatchProduction, the same server
- * aggregates Fleet Dispatch shows, so the boards can never disagree. Privacy:
- * sales, sits, sit rate and bonus COUNT only — detailed take-home pay lives on
- * the viewer's own Paycheck HUD, never on a peer's row.
+ * The canvasser-facing arcade high-score hall: a top-3 PODIUM over a ranked
+ * high-score table, plus Van Wars. The Month tab carries the $100K Boss meter
+ * and a Points / "Bonus Race · $" toggle — the old separate Bonus tab, folded
+ * into Month (2026-10-05) so the $100K boss has exactly one home. Numbers ride
+ * useArcadeLadder → getDispatchProduction, the same server aggregates Fleet
+ * Dispatch shows, so the boards can never disagree. Privacy: sales, sits, sit
+ * rate and bonus COUNT only — detailed take-home pay lives on the viewer's own
+ * Paycheck card, never on a peer's row.
  */
 
-type Tab = "day" | "week" | "month" | "bonus";
+type Tab = "day" | "week" | "month";
 
 const fmtVol = (n: number) =>
   n >= 10_000 ? `$${Math.round(n / 1000)}K` : `$${Math.round(n).toLocaleString()}`;
@@ -40,14 +42,18 @@ export function CanvasserLeaderboard() {
   const cartoons = useRepCartoons().data;
   const reduced = usePrefersReducedMotion();
   const [tab, setTab] = useState<Tab>("day");
-  const range: RangeKey = tab === "bonus" ? "month" : tab;
+  // On the Month tab the ranking can flip between points and the $ "Bonus
+  // Race" (the old Bonus tab, folded in 2026-10-05). Harmless off Month.
+  const [monthMode, setMonthMode] = useState<"pts" | "bonus">("pts");
+  const moneyMode = tab === "month" && monthMode === "bonus";
+  const range: RangeKey = tab;
   const { rows: ptsRows, vans, self, loading } = useArcadeLadder(range);
 
-  // Bonus Period ranks by money (the $100K race), every other tab by points.
+  // The $ "Bonus Race" ranks by money (the $100K race); every other view by points.
   const rows = useMemo(() => {
-    if (tab !== "bonus") return ptsRows;
+    if (!moneyMode) return ptsRows;
     return [...ptsRows].sort((a, b) => b.vol - a.vol || b.pts - a.pts);
-  }, [ptsRows, tab]);
+  }, [ptsRows, moneyMode]);
 
   // ── Live rank movement: a ▲/▼ trail when a result reshuffles the board,
   // and a coin pop when a row's credited volume ticks up. Flash clears after
@@ -98,11 +104,13 @@ export function CanvasserLeaderboard() {
   const listRef = useRef<HTMLOListElement>(null);
   const prevTops = useRef(new Map<string, number>());
   const orderSig = rest.map((r) => r.id).join(",");
-  // Switching tabs swaps the whole list — snap to the new order (no slide) by
-  // dropping the remembered positions before the layout effect measures.
-  const lastTab = useRef(tab);
-  if (lastTab.current !== tab) {
-    lastTab.current = tab;
+  // Switching tabs OR the Month points/$ mode swaps the whole list — snap to
+  // the new order (no slide) by dropping the remembered positions before the
+  // layout effect measures.
+  const viewSig = `${tab}:${moneyMode}`;
+  const lastView = useRef(viewSig);
+  if (lastView.current !== viewSig) {
+    lastView.current = viewSig;
     prevTops.current = new Map();
   }
   useIsoLayoutEffect(() => {
@@ -149,7 +157,6 @@ export function CanvasserLeaderboard() {
             ["day", "Today"],
             ["week", "Week"],
             ["month", "Month"],
-            ["bonus", "Bonus"],
           ] as const
         ).map(([k, label]) => (
           <button
@@ -167,7 +174,33 @@ export function CanvasserLeaderboard() {
         ))}
       </div>
 
-      {tab === "bonus" && selfId && <BossMeter userId={selfId} />}
+      {/* Month view carries the $100K boss + the points/$ ranking toggle. */}
+      {tab === "month" && (
+        <>
+          {selfId && <BossMeter userId={selfId} />}
+          <div className="flex gap-1 rounded-lg border border-border bg-surface p-1">
+            {(
+              [
+                ["pts", "Points"],
+                ["bonus", "Bonus Race · $"],
+              ] as const
+            ).map(([k, label]) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setMonthMode(k)}
+                className={`min-h-11 flex-1 rounded-md px-3 py-1.5 font-display text-[10px] uppercase tracking-widest transition md:min-h-0 ${
+                  monthMode === k
+                    ? "bg-[color-mix(in_oklab,var(--kombat-gold)_18%,transparent)] text-[var(--kombat-gold)] shadow-[0_0_18px_-4px_var(--kombat-gold)]"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
 
       {loading ? (
         <ArcadeSkeleton className="h-64 w-full" />
@@ -178,14 +211,20 @@ export function CanvasserLeaderboard() {
       ) : (
         <>
           {/* Podium */}
-          <Podium rows={podium} selfId={selfId} cartoons={cartoons} tab={tab} reduced={reduced} />
+          <Podium
+            rows={podium}
+            selfId={selfId}
+            cartoons={cartoons}
+            money={moneyMode}
+            reduced={reduced}
+          />
 
           {/* High-score table */}
           <ArcadeCard asChild className="overflow-hidden p-0">
             <section>
               <header className="flex items-center justify-between border-b border-border px-4 py-3">
                 <h2 className="font-display text-xs uppercase tracking-widest text-neon">
-                  {tab === "bonus" ? "Bonus Race · $" : "High Scores · Pts"}
+                  {moneyMode ? "Bonus Race · $" : "High Scores · Pts"}
                 </h2>
                 <span className="font-display text-[10px] uppercase tracking-widest text-muted-foreground">
                   {rows.length} on the board
@@ -200,7 +239,7 @@ export function CanvasserLeaderboard() {
                     self={r.id === selfId}
                     cartoons={cartoons}
                     flash={flash[r.id]}
-                    tab={tab}
+                    money={moneyMode}
                     reduced={reduced}
                   />
                 ))}
@@ -211,7 +250,7 @@ export function CanvasserLeaderboard() {
           {/* Next to pass */}
           {self && self.ahead && (
             <p className="text-center font-display text-[11px] uppercase tracking-widest text-[var(--warning)]">
-              {tab === "bonus"
+              {moneyMode
                 ? `${fmtVol(Math.max(0, self.gapVol))} to pass ${firstName(self.ahead.name)} for #${self.rank - 1}`
                 : self.gapPts > 0
                   ? `${self.gapPts} pt${self.gapPts === 1 ? "" : "s"} to pass ${firstName(self.ahead.name)} for #${self.rank - 1}`
@@ -237,13 +276,14 @@ function Podium({
   rows,
   selfId,
   cartoons,
-  tab,
+  money,
   reduced,
 }: {
   rows: LadderRow[];
   selfId: string | undefined;
   cartoons: Map<string, { name: string; portrait: string | null; full: string | null }> | undefined;
-  tab: Tab;
+  /** Show credited $ instead of points (the Month "Bonus Race" view). */
+  money: boolean;
   reduced: boolean;
 }) {
   // Visual order: #2 left, #1 center (tallest), #3 right.
@@ -288,7 +328,7 @@ function Podium({
                 {firstName(r.name)}
               </span>
               <span className="font-display text-[11px] tabular-nums text-victory">
-                {tab === "bonus" ? fmtVol(r.vol) : `${r.pts} pts`}
+                {money ? fmtVol(r.vol) : `${r.pts} pts`}
               </span>
               <div
                 className={`mt-1.5 w-full rounded-t-md border-x border-t border-border bg-[color-mix(in_oklab,var(--neon)_8%,transparent)] ${pedestal[p]}`}
@@ -310,7 +350,7 @@ function ScoreRow({
   self,
   cartoons,
   flash,
-  tab,
+  money,
   reduced,
 }: {
   r: LadderRow;
@@ -318,7 +358,8 @@ function ScoreRow({
   self: boolean;
   cartoons: Map<string, { name: string; portrait: string | null; full: string | null }> | undefined;
   flash: "up" | "down" | "coin" | undefined;
-  tab: Tab;
+  /** Show credited $ instead of points (the Month "Bonus Race" view). */
+  money: boolean;
   reduced: boolean;
 }) {
   const bonuses = bonusCount(r.vol);
@@ -363,7 +404,7 @@ function ScoreRow({
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2.5 font-display text-[11px] uppercase tracking-wider tabular-nums">
-          {tab === "bonus" ? (
+          {money ? (
             <span className={r.vol > 0 ? "text-victory" : "text-muted-foreground/50"}>
               {fmtVol(r.vol)}
             </span>
