@@ -44,6 +44,7 @@ import { TimeClock } from "@/components/TimeClock";
 import { TimeClockReviewQueue } from "@/components/TimeClockReviewQueue";
 import { VanClockConsole } from "@/components/VanClockConsole";
 import { DayOffQueue } from "@/components/DayOffQueue";
+import { CaptainVanWarsCard } from "@/components/CaptainVanWarsCard";
 import { PushAlertsCard } from "@/components/PushAlertsCard";
 import { FormerBadge } from "@/components/FormerBadge";
 import { useTodayLeads } from "@/hooks/useTodayLeads";
@@ -555,6 +556,9 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
         </div>
         <LiveLeadCounter value={leads.byTeam[myTeam.id] ?? 0} size="md" accent="victory" />
       </ArcadeCard>
+
+      {/* §5 — this captain's crew standing in the weekly Van Wars race. */}
+      <CaptainVanWarsCard teamId={teamId} />
 
       {/* Day / Week / Month — governs the Command Center, team stats, and Other Vans */}
       <RangeTabs controls={rangeControls} />
