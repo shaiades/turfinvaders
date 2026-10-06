@@ -214,7 +214,7 @@ serve(async (req) => {
     // Notify the office for anything that needs a human (best-effort).
     if (status === "needs_review" || status === "error") {
       await sendDispatcherIMessage(
-        `OOH report needs review: ${String(row.rep_name ?? "?")}, result ${String(row.result ?? "?")}. Open Close Kombat → OOH.`,
+        `Dispo report needs review: ${String(row.rep_name ?? "?")}, result ${String(row.result ?? "?")}. Open Close Kombat → Dispo.`,
       ).catch(() => undefined);
     }
   };
@@ -455,7 +455,7 @@ serve(async (req) => {
     await postUpdate(
       token,
       leadId,
-      `OOH report from ${form.repName ?? "rep"} at ${laClock(formItem.createdAtMs)} — ${formLink}${sourceCodeNote}`,
+      `Dispo report from ${form.repName ?? "rep"} at ${laClock(formItem.createdAtMs)} — ${formLink}${sourceCodeNote}`,
       oohUpdateKey(formItemId),
     ).catch(() => undefined);
 

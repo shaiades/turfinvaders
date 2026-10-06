@@ -250,6 +250,91 @@
   animation: neon-mega-pulse 2.8s ease-in-out infinite;
 }
 
+/* $100K boss in the final $10K — a blood-red breathing glow + micro-shake.
+   JS also gates this on prefers-reduced-motion; the media query below is the
+   belt-and-suspenders stop so a stray class can never animate. */
+@keyframes boss-enrage {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in oklab, var(--kombat-red) 40%, transparent),
+      0 0 10px -2px color-mix(in oklab, var(--kombat-red) 50%, transparent);
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-0.5px);
+  }
+  50% {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in oklab, var(--kombat-red) 80%, transparent),
+      0 0 22px 0 color-mix(in oklab, var(--kombat-red) 70%, transparent);
+    transform: translateX(0.5px);
+  }
+  75% {
+    transform: translateX(-0.5px);
+  }
+}
+.boss-enrage {
+  animation: boss-enrage 1.1s ease-in-out infinite;
+}
+
+/* #1 podium avatar — slow gold breathing halo. */
+@keyframes podium-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 12px -2px color-mix(in oklab, var(--kombat-gold) 70%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 26px 2px color-mix(in oklab, var(--kombat-gold) 90%, transparent);
+  }
+}
+.podium-glow {
+  animation: podium-glow 2.6s ease-in-out infinite;
+}
+
+/* Coin pop when a row's credited volume ticks up live. */
+@keyframes coin-pop {
+  0% {
+    opacity: 0;
+    transform: translateY(4px) scale(0.8);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-2px) scale(1.1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-12px) scale(1);
+  }
+}
+.coin-pop {
+  animation: coin-pop 2.2s ease-out forwards;
+}
+
+/* Daily Wrap card entrance — rise + fade as each card becomes active. */
+@keyframes wrap-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.wrap-in {
+  animation: wrap-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .boss-enrage,
+  .podium-glow,
+  .coin-pop,
+  .wrap-in {
+    animation: none;
+  }
+}
+
 /* Tactile 3D arcade button — colored top face + darker bottom "lip" and press-down */
 @utility arcade-btn-3d {
   position: relative;

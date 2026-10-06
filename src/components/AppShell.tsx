@@ -19,11 +19,12 @@ import { CanvasserHUD } from "@/components/CanvasserHUD";
 import { CrewBeacon } from "@/components/CrewBeacon";
 import { LeadConfirmedCelebration } from "@/components/LeadConfirmedCelebration";
 import { AppMenu } from "@/components/AppMenu";
+import { FighterPhotoPrompt } from "@/components/FighterPhotoPrompt";
 import { CanvasserTutorial, startCanvasserTutorial } from "@/components/tutorial/CanvasserTutorial";
 import { WelcomeAnimation, isWelcomeAnimationForced } from "@/components/WelcomeAnimation";
 import { CloseKombatIntro, isCloseKombatIntroForced } from "@/components/CloseKombatIntro";
 import { EodRecapFx, isEodRecapForced } from "@/components/EodRecapFx";
-import { FighterPhotoPrompt } from "@/components/FighterPhotoPrompt";
+import { EodWrapGate, isEodWrapForced } from "@/components/EodWrapGate";
 import {
   PurposeReminderCard,
   isPurposeReminderForced,
@@ -149,6 +150,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   // End-of-day recap cutscene: same hold for the tour. Play order on a
   // morning open that owes both: intro → EOD recap → page tour.
   const [eodActive, setEodActive] = useState(false);
+  // Personal Daily Wrap auto-play (9 PM PT, canvassers/captains): held behind
+  // the intro AND the team EOD recap so the two cutscenes never stack.
+  const [wrapActive, setWrapActive] = useState(false);
   // Respawn reminder (Fri 6 PM → Sun 12 PM): held behind intro + plan +
   // purpose; active while UNSETTLED so the page tour waits for it too.
   const [respawnPopupActive, setRespawnPopupActive] = useState(false);
@@ -365,91 +369,96 @@ export function AppShell({ children }: { children: ReactNode }) {
   // inside explicit overflow-x-auto wrappers.
   return (
     <div className="min-h-dvh w-full max-w-full overflow-x-hidden flex flex-col bg-background px-safe">
-      {/* Owner-only tool (owner decision 2026-08-12): View As never renders
-          for captains, Admins, canvassers, or sales reps — and useAuth
-          ignores the stored override for them too. */}
-      {user && canUseViewAs(realRole) && !isOverridden && !viewAsOpen && (
-        <div className="border-b border-[var(--neon-magenta)]/20 bg-background">
-          <div className="max-w-7xl mx-auto px-3 sm:px-6">
-            <button
-              type="button"
-              onClick={() => setViewAsOpen(true)}
-              title="Preview the app as another role"
-              className="inline-flex min-h-8 items-center gap-1.5 text-[10px] font-display uppercase tracking-widest text-[var(--neon-magenta)]/60 hover:text-[var(--neon-magenta)] transition-colors"
-            >
-              <FlaskConical className="h-3 w-3" /> View As
-            </button>
+      {/* pt-safe: the sticky header owns the status-bar strip in the
+          installed (standalone) PWA; zero everywhere else. It also covers
+          the owner-only View As strip below, which lives as the header's
+          top row — previously it rendered ABOVE the header with no inset,
+          so on an iPhone it drew up under the status bar / Dynamic Island
+          and was untappable. Keeping it inside the one sticky, inset-padded
+          header makes the chip clear the notch and stay reachable. */}
+      <header className="border-b border-border bg-background/95 backdrop-blur sticky top-0 z-20 pt-safe">
+        {/* Owner-only tool (owner decision 2026-08-12): View As never renders
+            for captains, Admins, canvassers, or sales reps — and useAuth
+            ignores the stored override for them too. */}
+        {user && canUseViewAs(realRole) && !isOverridden && !viewAsOpen && (
+          <div className="border-b border-[var(--neon-magenta)]/20">
+            <div className="max-w-7xl mx-auto px-3 sm:px-6">
+              <button
+                type="button"
+                onClick={() => setViewAsOpen(true)}
+                title="Preview the app as another role"
+                className="inline-flex min-h-11 md:min-h-8 items-center gap-1.5 pr-2 text-[11px] md:text-[10px] font-display uppercase tracking-widest text-[var(--neon-magenta)]/70 hover:text-[var(--neon-magenta)] transition-colors"
+              >
+                <FlaskConical className="h-3.5 w-3.5" /> View As
+              </button>
+            </div>
           </div>
-        </div>
-      )}
-      {user && canUseViewAs(realRole) && (isOverridden || viewAsOpen) && (
-        <div className="border-b border-[var(--neon-magenta)]/30 bg-background text-xs">
-          <div className="max-w-7xl mx-auto px-3 sm:px-6 py-1 sm:py-2 flex items-center gap-2 overflow-x-auto scrollbar-hide whitespace-nowrap">
-            <FlaskConical className="w-3.5 h-3.5 text-[var(--neon-magenta)] shrink-0" />
-            <span className="font-display uppercase tracking-widest text-[10px] text-[var(--neon-magenta)] shrink-0">
-              View As
-            </span>
+        )}
+        {user && canUseViewAs(realRole) && (isOverridden || viewAsOpen) && (
+          <div className="border-b border-[var(--neon-magenta)]/30 text-xs">
+            <div className="max-w-7xl mx-auto px-3 sm:px-6 py-1 sm:py-2 flex items-center gap-2 overflow-x-auto scrollbar-hide whitespace-nowrap">
+              <FlaskConical className="w-3.5 h-3.5 text-[var(--neon-magenta)] shrink-0" />
+              <span className="font-display uppercase tracking-widest text-[10px] text-[var(--neon-magenta)] shrink-0">
+                View As
+              </span>
 
-            <select
-              value={role ?? ""}
-              onChange={(e) => {
-                const v = e.target.value as AppRole;
-                setDevRoleOverride(v === realRole ? null : v);
-                if (v !== "sales_rep") applyNameOverride(null);
-              }}
-              className="bg-surface border border-border rounded px-2 py-1.5 min-h-11 md:min-h-9 text-base md:text-xs font-medium focus:outline-none focus:ring-1 focus:ring-[var(--neon-magenta)]"
-            >
-              <option value="owner">Owner</option>
-              <option value="captain">Captain</option>
-              <option value="canvasser">Canvasser</option>
-              <option value="sales_rep">Sales Rep</option>
-              <option value="office_staff">Manager</option>
-            </select>
-            {showRepPicker && (
               <select
-                value={nameOverride ?? ""}
-                onChange={(e) => applyNameOverride(e.target.value || null)}
-                aria-label="Preview as a specific rep"
+                value={role ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value as AppRole;
+                  setDevRoleOverride(v === realRole ? null : v);
+                  if (v !== "sales_rep") applyNameOverride(null);
+                }}
                 className="bg-surface border border-border rounded px-2 py-1.5 min-h-11 md:min-h-9 text-base md:text-xs font-medium focus:outline-none focus:ring-1 focus:ring-[var(--neon-magenta)]"
               >
-                <option value="">Yourself</option>
-                {/* Keep a stale/still-loading selection visible so the select
-                    never silently snaps back to "Yourself". */}
-                {nameOverride && !(repNamesQuery.data ?? []).includes(nameOverride) && (
-                  <option value={nameOverride}>{nameOverride}</option>
-                )}
-                {(repNamesQuery.data ?? []).map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))}
+                <option value="owner">Owner</option>
+                <option value="captain">Captain</option>
+                <option value="canvasser">Canvasser</option>
+                <option value="sales_rep">Sales Rep</option>
+                <option value="office_staff">Manager</option>
               </select>
-            )}
-            {isOverridden && (
-              <button
-                onClick={() => {
-                  setDevRoleOverride(null);
-                  applyNameOverride(null);
-                }}
-                className="ml-auto min-h-11 md:min-h-9 px-2 rounded border border-[var(--neon-magenta)]/40 text-[10px] uppercase tracking-widest text-[var(--neon-magenta)]"
-              >
-                Reset to {realRole}
-              </button>
-            )}
-            {!isOverridden && (
-              <button
-                onClick={() => setViewAsOpen(false)}
-                className="ml-auto min-h-11 md:min-h-9 px-2 text-[10px] uppercase tracking-widest text-muted-foreground hover:text-foreground"
-              >
-                Hide
-              </button>
-            )}
+              {showRepPicker && (
+                <select
+                  value={nameOverride ?? ""}
+                  onChange={(e) => applyNameOverride(e.target.value || null)}
+                  aria-label="Preview as a specific rep"
+                  className="bg-surface border border-border rounded px-2 py-1.5 min-h-11 md:min-h-9 text-base md:text-xs font-medium focus:outline-none focus:ring-1 focus:ring-[var(--neon-magenta)]"
+                >
+                  <option value="">Yourself</option>
+                  {/* Keep a stale/still-loading selection visible so the select
+                      never silently snaps back to "Yourself". */}
+                  {nameOverride && !(repNamesQuery.data ?? []).includes(nameOverride) && (
+                    <option value={nameOverride}>{nameOverride}</option>
+                  )}
+                  {(repNamesQuery.data ?? []).map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {isOverridden && (
+                <button
+                  onClick={() => {
+                    setDevRoleOverride(null);
+                    applyNameOverride(null);
+                  }}
+                  className="ml-auto min-h-11 md:min-h-9 px-3 rounded border border-[var(--neon-magenta)]/40 text-[10px] uppercase tracking-widest text-[var(--neon-magenta)]"
+                >
+                  Reset to {realRole}
+                </button>
+              )}
+              {!isOverridden && (
+                <button
+                  onClick={() => setViewAsOpen(false)}
+                  className="ml-auto min-h-11 md:min-h-9 px-3 text-[10px] uppercase tracking-widest text-muted-foreground hover:text-foreground"
+                >
+                  Hide
+                </button>
+              )}
+            </div>
           </div>
-        </div>
-      )}
-      {/* pt-safe: in the installed (standalone) PWA the sticky header owns
-          the status-bar strip; zero everywhere else. */}
-      <header className="border-b border-border bg-background/95 backdrop-blur sticky top-0 z-20 pt-safe">
+        )}
         {/* Mobile header: centered logo only. Side slots are equal-width
             twins so the wordmark stays optically centered — signed-out is
             44px each, signed-in is 88px each (theme toggle joins the left
@@ -705,13 +714,30 @@ export function AppShell({ children }: { children: ReactNode }) {
           <EodRecapFx userId={user.id} heldBack={introActive} onActiveChange={setEodActive} />
         )}
 
+      {/* Personal Daily Wrap cinematic — canvassers & captains, once per LA day
+          on the first open at/after 9 PM PT. Sequenced AFTER the morning intro
+          and the team EOD recap via heldBack; gated on the REAL role so a
+          View-As preview can't burn the stamp. `?eod_wrap=1` previews from any
+          account without stamping; the Wrap tab's Replay re-runs it any time. */}
+      {user &&
+        (isEodWrapForced() ||
+          (realRole !== null &&
+            (privilegeRole(realRole) === "canvasser" ||
+              privilegeRole(realRole) === "captain"))) && (
+          <EodWrapGate
+            userId={user.id}
+            heldBack={introActive || eodActive}
+            onActiveChange={setWrapActive}
+          />
+        )}
+
       {/* Fighter photo request — fires once per login for the selfie-sourced
           crew (canvassers, captains, Managers) who have no fighter yet, on
           whatever page they land on. Self-gated on the REAL role + fighter
-          status; held behind the intro and EOD recap so it never stacks on the
-          first-open cutscenes. Skippable; returns next login until they add a
-          photo. */}
-      {user && <FighterPhotoPrompt heldBack={introActive || eodActive} />}
+          status; held behind the intro, EOD recap, AND the Daily Wrap cinematic
+          so it never stacks on the first-open cutscenes. Skippable; returns
+          next login until they add a photo. */}
+      {user && <FighterPhotoPrompt heldBack={introActive || eodActive || wrapActive} />}
 
       {/* Weekly Action Plan popup — reps only, once per PLAN week (Sunday
           shows the upcoming week). Sequenced after the door-kick intro via
@@ -768,6 +794,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             (tourRole === "canvasser" || tourRole === "captain" || tourRole === "sales_rep") &&
             !introActive &&
             !eodActive &&
+            !wrapActive &&
             !planPopupActive &&
             !purposeReminderActive &&
             !respawnPopupActive && (

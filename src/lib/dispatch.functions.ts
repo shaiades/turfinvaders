@@ -240,14 +240,25 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
     // office. Only the Confirmation van reads the slices, so a fallback miss
     // can never move numbers on a regular van.
     const officeByMid = new Map<string, string>();
+    // Closer-outcome funnel per lead (owner 2026-10-05 "show both"): a lead
+    // SAT if its block card shows PM / PM w/ RS, or a Sold/Upsell/Reload sale.
+    // Keyed by monday_item_id so a setter's confirmed leads can be scored by
+    // what the CLOSER did with them. has(mid) ⇔ the card is visible, so the
+    // sit-rate denominator stays over the same board-lead population (a lead
+    // whose card has rotated out of view scores neither side).
+    const sitByMid = new Map<string, boolean>();
+    const SOLD = new Set(["sold", "reload", "upsell", "sale"]);
     const mids = [...new Set(counted.map((c) => c.mid).filter((m): m is string => !!m))];
     if (mids.length > 0) {
       const cardsR = await supabaseAdmin
         .from("block_cards")
-        .select("monday_item_id, office_location")
+        .select("monday_item_id, office_location, pm, sale")
         .in("monday_item_id", mids);
       for (const c of cardsR.data ?? []) {
         if (c.office_location) officeByMid.set(String(c.monday_item_id), c.office_location);
+        const pm = (c.pm ?? "").toLowerCase();
+        const sale = (c.sale ?? "").toLowerCase();
+        sitByMid.set(String(c.monday_item_id), pm.includes("pm") || SOLD.has(sale));
       }
       const missing = mids.filter((m) => !officeByMid.has(m));
       if (missing.length > 0) {
@@ -267,8 +278,17 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
     const officeVolume: Record<string, Record<string, number>> = {};
     const officeCancels: Record<string, Record<string, number>> = {};
     const officeCancelledVol: Record<string, Record<string, number>> = {};
+    // Funnel sit-rate numerator/denominator per setter (board leads only).
+    const funnelSits: Record<string, number> = {};
+    const funnelLeads: Record<string, number> = {};
     for (const c of counted) {
       const office = (c.mid && officeByMid.get(c.mid)) || DEFAULT_OFFICE;
+      // Score the lead's funnel outcome regardless of cancellation — a later
+      // WCC cancel doesn't un-sit the appointment that already happened.
+      if (c.mid && sitByMid.has(c.mid)) {
+        funnelLeads[c.cid] = (funnelLeads[c.cid] ?? 0) + 1;
+        if (sitByMid.get(c.mid)) funnelSits[c.cid] = (funnelSits[c.cid] ?? 0) + 1;
+      }
       if (!c.cancelled) {
         const vo = (officeVolume[office] ??= {});
         vo[c.cid] = (vo[c.cid] ?? 0) + c.amt;
@@ -292,6 +312,8 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
       officeCancels,
       officeCancelledVol,
       snapshotTeam,
+      funnelSits,
+      funnelLeads,
     };
   });
 

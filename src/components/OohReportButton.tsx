@@ -43,7 +43,7 @@ export function OohReportButton({
   return (
     <Button asChild variant={variant} className={className}>
       <a href={url} target="_blank" rel="noopener noreferrer">
-        <ClipboardList className="size-4" /> Report result
+        <ClipboardList className="size-4" /> Open Dispo
       </a>
     </Button>
   );
@@ -71,7 +71,7 @@ export function OohSelfGenButton({
   return (
     <Button asChild variant={variant} className={className}>
       <a href={url} target="_blank" rel="noopener noreferrer">
-        <Store className="size-4" /> Report an off-block / self-gen sale
+        <Store className="size-4" /> Dispo — off-block / self-gen sale
       </a>
     </Button>
   );

@@ -29,6 +29,7 @@ import {
   type RepStats,
 } from "../src/lib/close-kombat";
 import { bestSoldMatch, matchReportRow } from "../src/lib/block-cards.server";
+import { buildRepMatcher } from "../src/lib/rep-identity";
 
 let n = 0;
 const card = (over: Partial<BlockCard>): BlockCard => ({
@@ -2004,6 +2005,49 @@ eq("flag: covered+dead → false", decideMissingFlag({ matched: false, covered: 
     "e2e: month total = book alone",
     merged.reduce((s, r) => s + r.revenue, 0),
     6000,
+  );
+}
+
+// ── Rep identity aliases (2026-10-05): a chosen handle binds to its board
+// name through the authoritative alias tier, while the conservative string
+// tiers and the no-alias path behave exactly as before.
+{
+  const board = ["Curtis Westergard", "Ronnell Watson", "Jonathan Smith"];
+  const aliases = new Map<string, string>([["curtofwest", "Curtis Westergard"]]);
+  eq(
+    "alias: handle binds to its board name",
+    buildRepMatcher("CurtofWest", board, aliases).matched,
+    "Curtis Westergard",
+  );
+  eq(
+    "alias: isMe keys off the canonical",
+    buildRepMatcher("CurtofWest", board, aliases).isMe("Curtis Westergard"),
+    true,
+  );
+  eq(
+    "alias: canonical absent from pool → no match",
+    buildRepMatcher("CurtofWest", ["Ronnell Watson"], aliases).matched,
+    null,
+  );
+  eq(
+    "alias: never falls through to fuzzy, never mis-binds a stranger",
+    buildRepMatcher("CurtofWest", ["Someone Else"], aliases).isMe("Someone Else"),
+    false,
+  );
+  eq(
+    "no alias arg: single-token handle stays unmatched",
+    buildRepMatcher("Ronnell", board).matched,
+    null,
+  );
+  eq(
+    "alias present but key absent: exact match still binds",
+    buildRepMatcher("Ronnell Watson", board, aliases).matched,
+    "Ronnell Watson",
+  );
+  eq(
+    "alias present but key absent: tier-3 still binds",
+    buildRepMatcher("Jon Smith", board, aliases).matched,
+    "Jonathan Smith",
   );
 }
 

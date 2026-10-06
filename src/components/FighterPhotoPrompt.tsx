@@ -2,11 +2,13 @@
 // "Next time they go to sign in, request a selfie — or any picture they want."
 // Mounted once in AppShell so it fires right after login on whatever page the
 // crew lands on. Shows ONCE per login session to the selfie-sourced crew
-// (canvassers, captains, office_staff "Managers" — see requiresFighterSelfie)
-// who have no fighter yet, using the same self-serve upload as MyFighterCard.
-// Skippable ("Maybe later") and it returns every login until they have one;
-// reps (Monday-sourced) and the owner never see it. Held behind the first-open
-// cutscenes via `heldBack` so it never stacks on the intro / EOD recap.
+// (canvassers, confirmers, captains, office_staff "Managers" — see
+// requiresFighterSelfie) who have no fighter yet, using the same self-serve
+// upload as MyFighterCard. Skippable ("Maybe later") and it returns every login
+// until they have one; reps (Monday-sourced) and the owner never see it. Gated
+// on the REAL role so View-As previews never trigger it or burn the session
+// flag, and held behind the first-open cutscenes via `heldBack` so it never
+// stacks on the intro / EOD recap.
 
 import { useEffect, useRef, useState } from "react";
 import {
