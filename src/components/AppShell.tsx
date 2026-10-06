@@ -25,6 +25,7 @@ import { WelcomeAnimation, isWelcomeAnimationForced } from "@/components/Welcome
 import { CloseKombatIntro, isCloseKombatIntroForced } from "@/components/CloseKombatIntro";
 import { EodRecapFx, isEodRecapForced } from "@/components/EodRecapFx";
 import { useArcadeFlags } from "@/hooks/useArcadeFlags";
+import { StreetFeed } from "@/components/StreetFeed";
 import { EodWrapGate, isEodWrapForced } from "@/components/EodWrapGate";
 import {
   PurposeReminderCard,
@@ -634,6 +635,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             for the player-coach busy running a van. */}
         {user && (role === "canvasser" || role === "captain") && <CanvasserHUD userId={user.id} />}
       </header>
+      {/* §7 Street Feed — the field's live big-moments ticker (field + leadership,
+          not sales reps who live in Close Kombat). */}
+      {user && realRole !== null && privilegeRole(realRole) !== "sales_rep" && <StreetFeed />}
       {/* App-wide crew-live publisher — self-gated (field tiers, real role,
           GPS already granted). Renders nothing. */}
       <CrewBeacon />
