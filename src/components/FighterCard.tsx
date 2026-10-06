@@ -5,19 +5,23 @@
 // MyFighterCard (selfie uploader), the SCCERankBanner (rank + perk + streaks)
 // and the "Your Fighter" XP strip (CanvasserProgress). The pay-lock warning
 // banner rides along because it's rank-status news the grinder needs up top.
-// Cosmetic + identity only; XP never touches pay. (Phase 2 will make the level
-// lifetime-XP and persist badges — today it mirrors the Daily Wrap's month.)
+// Cosmetic + identity only; XP never touches pay. The level is LIFETIME XP
+// (useWrapData, never month-resets) and badges are PERSISTED trophies
+// (useCanvasserBadges) that stay lit once earned and animate the first time.
 
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
 import { Camera } from "lucide-react";
 import { PAY_LOCK_MIN_ROLLING_AVG } from "@/lib/pay";
+import { BADGES, type BadgeId } from "@/lib/canvasserPay";
 import { ArcadePanel, ArcadeSkeleton } from "@/components/arcade";
+import { BadgeUnlock } from "@/components/BadgeUnlock";
 import { RepAvatar } from "@/components/RepAvatar";
 import { RankPill, RANK_PERKS } from "@/components/RankPill";
 import { useCanvasserProfile } from "@/hooks/useCanvasserProfile";
 import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
 import { useMyFighterUpload } from "@/hooks/useMyFighterUpload";
 import { useWrapData } from "@/hooks/useWrapData";
+import { useCanvasserBadges } from "@/hooks/useCanvasserBadges";
 
 /** Pay-lock states → banner copy (config-dict twin of PayrollLedger's
  *  PAY_LOCK_META; "active" renders nothing). Moved here from CanvasserMission
@@ -48,17 +52,25 @@ export function FighterCard({
   displayName: string | null;
 }) {
   const profile = useCanvasserProfile(userId);
-  const wrap = useWrapData("month"); // level / XP / badges (Phase 2: lifetime + persisted)
+  const wrap = useWrapData("month"); // lifetime level + the live-earned badge set
   const cartoons = useRepCartoons().data;
   const fileRef = useRef<HTMLInputElement>(null);
   const { onPick, busy } = useMyFighterUpload();
+
+  // Live-earned set this month → persisted trophies (stay lit once earned) +
+  // the one-time unlock animation for anything freshly earned.
+  const liveEarned = useMemo(
+    () => new Set<BadgeId>(wrap.badges.filter((b) => b.unlocked).map((b) => b.def.id)),
+    [wrap.badges],
+  );
+  const badges = useCanvasserBadges(userId, liveEarned, !wrap.loading);
 
   const name = displayName ?? "You";
   const mine = cartoonFor(cartoons, displayName);
   const hasFighter = !!mine?.portrait || !!mine?.full;
   const rank = profile.data?.current_rank ?? "Jr. Silver";
   const banner = PAY_LOCK_BANNERS[profile.data?.pay_lock_status ?? "active"];
-  const earnedBadges = wrap.badges.filter((b) => b.unlocked).length;
+  const badgesLoading = wrap.loading || badges.loading;
 
   return (
     <>
@@ -133,31 +145,34 @@ export function FighterCard({
           </div>
         </div>
 
-        {/* Badges row */}
+        {/* Badges row — persisted trophies: once earned, lit forever */}
         <div className="mt-4">
           <p className="mb-1.5 font-display text-[9px] uppercase tracking-widest text-muted-foreground">
-            Badges · {earnedBadges}/{wrap.badges.length}
+            Badges · {badges.earned.size}/{BADGES.length}
           </p>
-          {wrap.loading ? (
+          {badgesLoading ? (
             <ArcadeSkeleton className="h-8 w-full" />
           ) : (
             <div className="flex flex-wrap gap-1.5">
-              {wrap.badges.map((b) => (
-                <span
-                  key={b.def.id}
-                  title={`${b.def.label} — ${b.def.blurb}`}
-                  className={`flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] ${
-                    b.unlocked
-                      ? "border-[var(--kombat-gold)]/60 text-foreground"
-                      : "border-border text-muted-foreground/40"
-                  }`}
-                >
-                  <span aria-hidden className={b.unlocked ? "" : "opacity-40 grayscale"}>
-                    {b.def.icon}
+              {BADGES.map((def) => {
+                const unlocked = badges.earned.has(def.id);
+                return (
+                  <span
+                    key={def.id}
+                    title={`${def.label} — ${def.blurb}`}
+                    className={`flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] ${
+                      unlocked
+                        ? "border-[var(--kombat-gold)]/60 text-foreground"
+                        : "border-border text-muted-foreground/40"
+                    }`}
+                  >
+                    <span aria-hidden className={unlocked ? "" : "opacity-40 grayscale"}>
+                      {def.icon}
+                    </span>
+                    {def.label}
                   </span>
-                  {b.def.label}
-                </span>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -199,6 +214,11 @@ export function FighterCard({
               : "Tap your avatar to upload a selfie — we'll draw you as a fighter and show it next to your name everywhere."}
         </p>
       </ArcadePanel>
+
+      {/* First-time unlock animation — plays once, then markSeen persists it. */}
+      {badges.unseen.length > 0 && (
+        <BadgeUnlock badges={badges.unseen} onDone={(ids) => badges.markSeen(ids)} />
+      )}
     </>
   );
 }

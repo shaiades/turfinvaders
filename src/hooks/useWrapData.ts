@@ -8,6 +8,7 @@
 
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import { getDispatchProduction } from "@/lib/dispatch.functions";
 import { addDaysISO, laMidnightUtcISO, laTodayISO } from "@/lib/dates";
 import { useAuth } from "@/hooks/useAuth";
@@ -15,6 +16,7 @@ import {
   useArcadeLadder,
   useBossMeter,
   useWallet,
+  rangeFor,
   type RangeKey,
 } from "@/hooks/useCanvasserArcade";
 import { useSixtyDayLogs, useTodayLogs, sumLogCounters } from "@/hooks/useDailyLogs";
@@ -22,6 +24,7 @@ import { useCanvasserProfile } from "@/hooks/useCanvasserProfile";
 import { useRepCartoons, cartoonFor, type RepCartoon } from "@/hooks/useRepCartoons";
 import {
   evaluateBadges,
+  bestDaySits,
   levelForXp,
   xpFor,
   BADGES,
@@ -116,6 +119,33 @@ export function useWrapData(scope: WrapScope): WrapData {
       }),
   });
 
+  // Lifetime XP for the level — the arcade level counts ALL-TIME logged funnel,
+  // so it only ever climbs (no month reset). A scope-independent, self-scoped
+  // RPC (arcade_lifetime_xp); the shared query key dedupes across every mounted
+  // useWrapData/Fighter card. FAIL OPEN: if the RPC isn't deployed yet the level
+  // falls back to this scope's XP so the card never blanks. Cosmetic only.
+  const lifetimeQ = useQuery({
+    enabled: !!uid,
+    queryKey: ["arcade_lifetime_xp", uid],
+    staleTime: 5 * 60_000,
+    retry: false,
+    queryFn: async (): Promise<{ appts: number; sits: number; solds: number }> => {
+      const { data, error } = await (
+        supabase as unknown as {
+          rpc: (fn: string) => Promise<{ data: unknown; error: unknown }>;
+        }
+      ).rpc("arcade_lifetime_xp");
+      if (error) throw error;
+      const row = (Array.isArray(data) ? data[0] : data) as
+        { appts?: number; sits?: number; solds?: number } | null | undefined;
+      return {
+        appts: Number(row?.appts ?? 0),
+        sits: Number(row?.sits ?? 0),
+        solds: Number(row?.solds ?? 0),
+      };
+    },
+  });
+
   return useMemo<WrapData>(() => {
     const self = ladder.self;
     const row = self?.row;
@@ -134,9 +164,19 @@ export function useWrapData(scope: WrapScope): WrapData {
 
     const weekSales = week.self?.row.sal ?? 0;
     const streak = sitStreak(sixtyQ.data ?? []);
+
+    // Hat Trick checks the SELECTED range, not just today: the best single day
+    // within [start, end]. Prior days come from the 60-day logs; today uses the
+    // fresher useTodayLogs count (the 60-day snapshot can lag a just-saved log).
+    const { start, end } = rangeFor(range);
+    const daySits = (sixtyQ.data ?? [])
+      .filter((r) => r.log_date !== today)
+      .map((r) => ({ date: r.log_date, sits: r.demos_sits ?? 0 }));
+    daySits.push({ date: today, sits: todaySits });
+
     const badgeStats = {
       weekSales,
-      bestDaySits: todaySits, // today's sits (Hat Trick fires same-day)
+      bestDaySits: bestDaySits(daySits, start, end),
       sitRate: sitRate.rate ?? 0,
       sitRateLeads: sitRate.leads,
       bossesDefeated: boss.boss.bossesDefeated,
@@ -145,13 +185,20 @@ export function useWrapData(scope: WrapScope): WrapData {
     };
     const unlocked = evaluateBadges(badgeStats);
 
-    // XP flavor for this scope (cosmetic; never pay). A $100K boss is huge.
+    // XP flavor for THIS scope (cosmetic; never pay) — the "+N XP gained" beat.
+    // A $100K boss is huge.
     const xpEarned = xpFor({
       appts: leads,
       sits,
       solds: sales,
       bossesDefeated: scope === "month" ? boss.boss.bossesDefeated : 0,
     });
+
+    // The LEVEL is lifetime (all-time logged funnel), so it never resets at a
+    // month boundary. Falls back to this scope's XP until the lifetime RPC
+    // resolves (or if it isn't deployed) so the bar always has a value.
+    const lifetimeXp = lifetimeQ.data ? xpFor(lifetimeQ.data) : null;
+    const level = levelForXp(lifetimeXp ?? xpEarned);
 
     let morningRank: number | null = null;
     try {
@@ -182,7 +229,7 @@ export function useWrapData(scope: WrapScope): WrapData {
       loot: wallet.lines,
       earned: scope === "month" ? wallet.monthTotal : wallet.weekTotal,
       streak,
-      level: levelForXp(xpEarned),
+      level,
       xpEarned,
       badges: BADGES.map((def) => ({ def, unlocked: unlocked.has(def.id) })),
       vanMvp,
@@ -191,7 +238,9 @@ export function useWrapData(scope: WrapScope): WrapData {
     };
   }, [
     scope,
+    range,
     uid,
+    today,
     ladder.self,
     ladder.rows.length,
     ladder.loading,
@@ -208,6 +257,7 @@ export function useWrapData(scope: WrapScope): WrapData {
     todayQ.data,
     todayQ.isLoading,
     todayProdQ.data,
+    lifetimeQ.data,
     profile.data,
     cartoons,
   ]);
