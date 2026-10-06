@@ -118,7 +118,6 @@ function PodiumCard({
         <RepAvatar
           name={total.rep_name}
           cartoon={cartoon}
-          missing={!(cartoon?.portrait || cartoon?.full)}
           className={place === 0 ? "h-16 w-16" : "h-12 w-12"}
           textClassName={place === 0 ? "text-base" : "text-xs"}
           ring={place === 0}
@@ -193,7 +192,6 @@ function LadderRow({
       <RepAvatar
         name={total.rep_name}
         cartoon={cartoon}
-        missing={!(cartoon?.portrait || cartoon?.full)}
         className="h-9 w-9"
         textClassName="text-[0.7rem]"
         ring={rank === 1}
@@ -204,11 +202,6 @@ function LadderRow({
           {me && (
             <span className="shrink-0 text-[10px] text-kombat-gold font-display uppercase tracking-widest">
               you
-            </span>
-          )}
-          {!(cartoon?.portrait || cartoon?.full) && (
-            <span className="shrink-0 font-display text-[8px] uppercase tracking-widest text-muted-foreground/60">
-              Photo needed
             </span>
           )}
         </span>

@@ -16,7 +16,10 @@ import { z } from "zod";
  *    ("Users without a photo: N"), so Jose Miranda shows up until he adds one.
  */
 
-const GATED_ROLES = new Set(["canvasser", "confirmer", "captain", "sales_rep", "office_staff"]);
+// Canvassers only (owner 2026-10-06: "don't request photos from anyone other
+// than canvassers"); confirmers collapse to the canvasser experience. Mirrors
+// PROFILE_PHOTO_ROLES in role-policy.ts — keep the two in lockstep.
+const GATED_ROLES = new Set(["canvasser", "confirmer"]);
 
 /** Read the remind-later flag for the signed-in user (service role — the table
  *  is owner-only under RLS). Defaults to false (fully blocking) on any miss. */

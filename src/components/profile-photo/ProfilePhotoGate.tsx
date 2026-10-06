@@ -1,14 +1,16 @@
-// The blocking "Snap your fighter photo" step (owner directive 2026-10-06:
-// "the photo step has to be obvious for every user"). A full-screen arcade
-// overlay that drops right after login on ANY gated player (canvasser,
-// confirmer, captain, sales rep, Manager) who has no photo yet, covering the
-// whole app — nav included — until a photo is saved. No skip button by default.
+// The blocking "Snap your fighter photo" step (owner directive 2026-10-06,
+// narrowed the same day: photos are requested from CANVASSERS ONLY — confirmers
+// collapse in via privilegeRole; sales reps already have Monday-sourced photos
+// the owner wants kept, and captains/Managers/owner are never asked). A
+// full-screen arcade overlay that drops right after login on a gated canvasser
+// with no photo yet, covering the whole app — nav included — until a photo is
+// saved. No skip button by default.
 //
 // Why this replaces the old FighterPhotoPrompt: that was a small, dismissible
-// dialog shown once per session, held UNDER the first-open cutscenes, and it
-// never fired for sales reps at all — a canvasser like Jose Miranda could tap
-// it away (or the backdrop) once and never see it again, with only his initials
-// hinting anything was missing. This one blocks.
+// dialog shown once per session, held UNDER the first-open cutscenes — a
+// canvasser like Jose Miranda could tap it away (or the backdrop) once and
+// never see it again, with only his initials hinting anything was missing.
+// This one blocks.
 //
 //  §1 blocking screen · §2 game style (arcade bg, glowing frame, silhouette +
 //  pulsing "?") · §3 crop & confirm (PhotoCropper) · §6 never a dead screen
