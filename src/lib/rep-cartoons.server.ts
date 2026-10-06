@@ -51,30 +51,44 @@ type GeminiPart = {
   inline_data?: { mime_type?: string; data?: string };
 };
 
-/** One Gemini image generation: text prompt + the source face → PNG bytes. */
+/** One Gemini image generation: text prompt + the source face → PNG bytes.
+ *  Transient rate limits (429) and overloads (503) are retried a few times with
+ *  a short backoff, so a burst of generations (the admin "generate all" loop)
+ *  rides out a momentary cap instead of hard-failing the whole batch. */
 export async function callGemini(
   apiKey: string,
   prompt: string,
   source: { data: string; mimeType: string },
 ): Promise<{ bytes: Buffer; contentType: string }> {
-  const resp = await fetch(GEMINI_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-    body: JSON.stringify({
-      contents: [
-        {
-          role: "user",
-          parts: [
-            { text: prompt },
-            { inline_data: { mime_type: source.mimeType, data: source.data } },
-          ],
-        },
-      ],
-      generationConfig: { responseModalities: ["IMAGE"] },
-    }),
+  const reqBody = JSON.stringify({
+    contents: [
+      {
+        role: "user",
+        parts: [
+          { text: prompt },
+          { inline_data: { mime_type: source.mimeType, data: source.data } },
+        ],
+      },
+    ],
+    generationConfig: { responseModalities: ["IMAGE"] },
   });
-  const bodyText = await resp.text();
-  if (!resp.ok) throw new Error(`Gemini HTTP ${resp.status}: ${bodyText.slice(0, 300)}`);
+  let bodyText = "";
+  for (let attempt = 0; ; attempt++) {
+    const resp = await fetch(GEMINI_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+      body: reqBody,
+    });
+    bodyText = await resp.text();
+    if (resp.ok) break;
+    // Back off and retry only transient caps/overloads; everything else (bad
+    // key, safety block, etc.) fails fast.
+    if ((resp.status === 429 || resp.status === 503) && attempt < 3) {
+      await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+      continue;
+    }
+    throw new Error(`Gemini HTTP ${resp.status}: ${bodyText.slice(0, 300)}`);
+  }
   let json: { candidates?: Array<{ content?: { parts?: GeminiPart[] } }> };
   try {
     json = JSON.parse(bodyText);
