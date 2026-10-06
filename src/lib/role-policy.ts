@@ -104,6 +104,34 @@ export function requiresFighterSelfie(role: AppRole | string | null | undefined)
   return !!r && (FIGHTER_SELFIE_ROLES as readonly string[]).includes(r);
 }
 
+/** Blocking profile-photo gate (owner directive 2026-10-06: "the photo step has
+ *  to be obvious for every user"). EVERY player who appears on a board or
+ *  leaderboard must have a face: canvassers (confirmers collapse in), captains,
+ *  sales reps (Close Kombat — the old selfie prompt skipped them entirely, a
+ *  big reason reps stayed faceless), and office_staff "Managers". The OWNER is
+ *  exempt — he administers the gate (the admin list + the "Remind me later"
+ *  toggle) and must never lock himself out — and the bookkeeper is pure back-
+ *  office (never on a board), so neither is forced. Supersedes
+ *  requiresFighterSelfie, which this widens with sales_rep. */
+export const PROFILE_PHOTO_ROLES: readonly AppRole[] = [
+  "canvasser",
+  "confirmer",
+  "captain",
+  "sales_rep",
+  "office_staff",
+] as const;
+
+export function requiresProfilePhoto(role: AppRole | string | null | undefined): boolean {
+  // Confirmers collapse to canvasser everywhere experience is decided, but the
+  // list already names both tiers explicitly, so check the raw role too.
+  if (!role) return false;
+  const r = privilegeRole(role);
+  return (
+    (PROFILE_PHOTO_ROLES as readonly string[]).includes(role) ||
+    (!!r && (PROFILE_PHOTO_ROLES as readonly string[]).includes(r))
+  );
+}
+
 /** Highest-priority role held: owner > office_staff > captain > sales_rep >
  *  canvasser; null when none of the app roles are present. */
 export function primaryRole(roles: ReadonlyArray<AppRole | string>): AppRole | null {

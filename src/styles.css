@@ -1424,3 +1424,64 @@
     animation: none;
   }
 }
+
+/* ── Blocking profile-photo gate (owner 2026-10-06) ──────────────────────── */
+@keyframes photo-gate-q {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.85;
+    text-shadow: 0 0 10px color-mix(in oklab, var(--kombat-gold) 70%, transparent);
+  }
+  50% {
+    transform: scale(1.14);
+    opacity: 1;
+    text-shadow: 0 0 22px var(--kombat-gold);
+  }
+}
+.photo-gate-q {
+  animation: photo-gate-q 1.6s ease-in-out infinite;
+}
+
+@keyframes photo-gate-frame {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 0 color-mix(in oklab, var(--kombat-red) 45%, transparent),
+      inset 0 0 18px color-mix(in oklab, var(--kombat-red) 25%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 24px 4px color-mix(in oklab, var(--kombat-red) 55%, transparent),
+      inset 0 0 26px color-mix(in oklab, var(--kombat-gold) 25%, transparent);
+  }
+}
+.photo-gate-frame {
+  animation: photo-gate-frame 2.4s ease-in-out infinite;
+}
+
+@keyframes photo-gate-pop {
+  0% {
+    transform: scale(0.82);
+    opacity: 0;
+  }
+  55% {
+    transform: scale(1.04);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+.photo-gate-pop {
+  animation: photo-gate-pop 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .photo-gate-q,
+  .photo-gate-frame,
+  .photo-gate-pop {
+    animation: none;
+  }
+}

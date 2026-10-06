@@ -1633,6 +1633,7 @@ export type Database = {
           ooh_go_live_at: string | null
           ooh_writeback_board_allowlist: string | null
           ooh_writeback_mode: string
+          profile_photo_remind_later: boolean
           updated_at: string
         }
         Insert: {
@@ -1650,6 +1651,7 @@ export type Database = {
           ooh_go_live_at?: string | null
           ooh_writeback_board_allowlist?: string | null
           ooh_writeback_mode?: string
+          profile_photo_remind_later?: boolean
           updated_at?: string
         }
         Update: {
@@ -1667,6 +1669,7 @@ export type Database = {
           ooh_go_live_at?: string | null
           ooh_writeback_board_allowlist?: string | null
           ooh_writeback_mode?: string
+          profile_photo_remind_later?: boolean
           updated_at?: string
         }
         Relationships: []
