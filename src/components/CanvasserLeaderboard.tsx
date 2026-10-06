@@ -1,16 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
-import { ArcadeCard, ArcadePanel, ArcadeSkeleton } from "@/components/arcade";
+import { ArcadeCard, ArcadeSkeleton } from "@/components/arcade";
 import { RepAvatar } from "@/components/RepAvatar";
 import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
 import { BossMeter } from "@/components/BossMeter";
+import { VanWarsRace } from "@/components/VanWarsRace";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
-import {
-  useArcadeLadder,
-  type LadderRow,
-  type RangeKey,
-  type VanRow,
-} from "@/hooks/useCanvasserArcade";
+import { useArcadeLadder, type LadderRow, type RangeKey } from "@/hooks/useCanvasserArcade";
 import { captureMorningRank } from "@/hooks/useWrapData";
 import { haptic } from "@/lib/arcade-fx";
 import { BOSS_HP } from "@/lib/canvasserPay";
@@ -42,12 +38,14 @@ export function CanvasserLeaderboard() {
   const cartoons = useRepCartoons().data;
   const reduced = usePrefersReducedMotion();
   const [tab, setTab] = useState<Tab>("day");
+  // SOLO = this podium / high-score board; VAN WARS = the weekly street race.
+  const [mode, setMode] = useState<"solo" | "vanwars">("solo");
   // On the Month tab the ranking can flip between points and the $ "Bonus
   // Race" (the old Bonus tab, folded in 2026-10-05). Harmless off Month.
   const [monthMode, setMonthMode] = useState<"pts" | "bonus">("pts");
   const moneyMode = tab === "month" && monthMode === "bonus";
   const range: RangeKey = tab;
-  const { rows: ptsRows, vans, self, loading } = useArcadeLadder(range);
+  const { rows: ptsRows, self, loading } = useArcadeLadder(range);
 
   // The $ "Bonus Race" ranks by money (the $100K race); every other view by points.
   const rows = useMemo(() => {
@@ -150,48 +148,44 @@ export function CanvasserLeaderboard() {
 
   return (
     <div className="space-y-4">
-      {/* Range tabs */}
-      <div className="flex flex-wrap gap-1 rounded-lg border border-border bg-surface p-1">
-        {(
-          [
-            ["day", "Today"],
-            ["week", "Week"],
-            ["month", "Month"],
-          ] as const
-        ).map(([k, label]) => (
+      {/* SOLO | VAN WARS — the top-level switch */}
+      <div className="flex gap-1.5 rounded-xl border border-border bg-surface p-1.5">
+        {(["solo", "vanwars"] as const).map((m) => (
           <button
-            key={k}
+            key={m}
             type="button"
-            onClick={() => setTab(k)}
-            className={`min-h-11 flex-1 rounded-md px-3 py-1.5 font-display text-[10px] uppercase tracking-widest transition md:min-h-0 ${
-              tab === k
-                ? "bg-[color-mix(in_oklab,var(--neon)_15%,transparent)] text-neon shadow-[0_0_18px_-4px_var(--neon)]"
+            onClick={() => setMode(m)}
+            className={`min-h-11 flex-1 rounded-lg px-3 py-2 font-display text-[13px] italic uppercase tracking-[0.14em] transition md:min-h-0 ${
+              mode === m
+                ? "bg-[color-mix(in_oklab,var(--neon)_18%,transparent)] text-neon shadow-[0_0_22px_-6px_var(--neon)]"
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            {label}
+            {m === "solo" ? "Solo" : "Van Wars"}
           </button>
         ))}
       </div>
 
-      {/* Month view carries the $100K boss + the points/$ ranking toggle. */}
-      {tab === "month" && (
+      {mode === "vanwars" ? (
+        <VanWarsRace />
+      ) : (
         <>
-          {selfId && <BossMeter userId={selfId} />}
-          <div className="flex gap-1 rounded-lg border border-border bg-surface p-1">
+          {/* Range tabs */}
+          <div className="flex flex-wrap gap-1 rounded-lg border border-border bg-surface p-1">
             {(
               [
-                ["pts", "Points"],
-                ["bonus", "Bonus Race · $"],
+                ["day", "Today"],
+                ["week", "Week"],
+                ["month", "Month"],
               ] as const
             ).map(([k, label]) => (
               <button
                 key={k}
                 type="button"
-                onClick={() => setMonthMode(k)}
+                onClick={() => setTab(k)}
                 className={`min-h-11 flex-1 rounded-md px-3 py-1.5 font-display text-[10px] uppercase tracking-widest transition md:min-h-0 ${
-                  monthMode === k
-                    ? "bg-[color-mix(in_oklab,var(--kombat-gold)_18%,transparent)] text-[var(--kombat-gold)] shadow-[0_0_18px_-4px_var(--kombat-gold)]"
+                  tab === k
+                    ? "bg-[color-mix(in_oklab,var(--neon)_15%,transparent)] text-neon shadow-[0_0_18px_-4px_var(--neon)]"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
@@ -199,72 +193,97 @@ export function CanvasserLeaderboard() {
               </button>
             ))}
           </div>
-        </>
-      )}
 
-      {loading ? (
-        <ArcadeSkeleton className="h-64 w-full" />
-      ) : rows.length === 0 ? (
-        <ArcadeCard className="p-6 text-center text-sm text-muted-foreground">
-          No production in this range yet — first knock takes #1.
-        </ArcadeCard>
-      ) : (
-        <>
-          {/* Podium */}
-          <Podium
-            rows={podium}
-            selfId={selfId}
-            cartoons={cartoons}
-            money={moneyMode}
-            reduced={reduced}
-          />
-
-          {/* High-score table */}
-          <ArcadeCard asChild className="overflow-hidden p-0">
-            <section>
-              <header className="flex items-center justify-between border-b border-border px-4 py-3">
-                <h2 className="font-display text-xs uppercase tracking-widest text-neon">
-                  {moneyMode ? "Bonus Race · $" : "High Scores · Pts"}
-                </h2>
-                <span className="font-display text-[10px] uppercase tracking-widest text-muted-foreground">
-                  {rows.length} on the board
-                </span>
-              </header>
-              <ol ref={listRef} className="relative divide-y divide-border/60 px-2">
-                {rest.map((r, i) => (
-                  <ScoreRow
-                    key={r.id}
-                    r={r}
-                    rank={i + 4}
-                    self={r.id === selfId}
-                    cartoons={cartoons}
-                    flash={flash[r.id]}
-                    money={moneyMode}
-                    reduced={reduced}
-                  />
+          {/* Month view carries the $100K boss + the points/$ ranking toggle. */}
+          {tab === "month" && (
+            <>
+              {selfId && <BossMeter userId={selfId} />}
+              <div className="flex gap-1 rounded-lg border border-border bg-surface p-1">
+                {(
+                  [
+                    ["pts", "Points"],
+                    ["bonus", "Bonus Race · $"],
+                  ] as const
+                ).map(([k, label]) => (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => setMonthMode(k)}
+                    className={`min-h-11 flex-1 rounded-md px-3 py-1.5 font-display text-[10px] uppercase tracking-widest transition md:min-h-0 ${
+                      monthMode === k
+                        ? "bg-[color-mix(in_oklab,var(--kombat-gold)_18%,transparent)] text-[var(--kombat-gold)] shadow-[0_0_18px_-4px_var(--kombat-gold)]"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {label}
+                  </button>
                 ))}
-              </ol>
-            </section>
-          </ArcadeCard>
-
-          {/* Next to pass */}
-          {self && self.ahead && (
-            <p className="text-center font-display text-[11px] uppercase tracking-widest text-[var(--warning)]">
-              {moneyMode
-                ? `${fmtVol(Math.max(0, self.gapVol))} to pass ${firstName(self.ahead.name)} for #${self.rank - 1}`
-                : self.gapPts > 0
-                  ? `${self.gapPts} pt${self.gapPts === 1 ? "" : "s"} to pass ${firstName(self.ahead.name)} for #${self.rank - 1}`
-                  : `${fmtVol(Math.max(0, self.gapVol))} to pass ${firstName(self.ahead.name)} for #${self.rank - 1}`}
-            </p>
-          )}
-          {self && self.rank === 1 && (
-            <p className="text-center font-display text-[11px] uppercase tracking-widest text-[var(--kombat-gold)]">
-              👑 You hold #1 — defend it
-            </p>
+              </div>
+            </>
           )}
 
-          {/* Van Wars */}
-          {vans.length > 1 && <VanWars vans={vans} />}
+          {loading ? (
+            <ArcadeSkeleton className="h-64 w-full" />
+          ) : rows.length === 0 ? (
+            <ArcadeCard className="p-6 text-center text-sm text-muted-foreground">
+              No production in this range yet — first knock takes #1.
+            </ArcadeCard>
+          ) : (
+            <>
+              {/* Podium */}
+              <Podium
+                rows={podium}
+                selfId={selfId}
+                cartoons={cartoons}
+                money={moneyMode}
+                reduced={reduced}
+              />
+
+              {/* High-score table */}
+              <ArcadeCard asChild className="overflow-hidden p-0">
+                <section>
+                  <header className="flex items-center justify-between border-b border-border px-4 py-3">
+                    <h2 className="font-display text-xs uppercase tracking-widest text-neon">
+                      {moneyMode ? "Bonus Race · $" : "High Scores · Pts"}
+                    </h2>
+                    <span className="font-display text-[10px] uppercase tracking-widest text-muted-foreground">
+                      {rows.length} on the board
+                    </span>
+                  </header>
+                  <ol ref={listRef} className="relative divide-y divide-border/60 px-2">
+                    {rest.map((r, i) => (
+                      <ScoreRow
+                        key={r.id}
+                        r={r}
+                        rank={i + 4}
+                        self={r.id === selfId}
+                        cartoons={cartoons}
+                        flash={flash[r.id]}
+                        money={moneyMode}
+                        reduced={reduced}
+                      />
+                    ))}
+                  </ol>
+                </section>
+              </ArcadeCard>
+
+              {/* Next to pass */}
+              {self && self.ahead && (
+                <p className="text-center font-display text-[11px] uppercase tracking-widest text-[var(--warning)]">
+                  {moneyMode
+                    ? `${fmtVol(Math.max(0, self.gapVol))} to pass ${firstName(self.ahead.name)} for #${self.rank - 1}`
+                    : self.gapPts > 0
+                      ? `${self.gapPts} pt${self.gapPts === 1 ? "" : "s"} to pass ${firstName(self.ahead.name)} for #${self.rank - 1}`
+                      : `${fmtVol(Math.max(0, self.gapVol))} to pass ${firstName(self.ahead.name)} for #${self.rank - 1}`}
+                </p>
+              )}
+              {self && self.rank === 1 && (
+                <p className="text-center font-display text-[11px] uppercase tracking-widest text-[var(--kombat-gold)]">
+                  👑 You hold #1 — defend it
+                </p>
+              )}
+            </>
+          )}
         </>
       )}
     </div>
@@ -433,49 +452,5 @@ function ScoreRow({
         {r.cancels > 0 ? ` · ${r.cancels} cxl` : ""}
       </div>
     </li>
-  );
-}
-
-// ── Van Wars ─────────────────────────────────────────────────────────────
-function VanWars({ vans }: { vans: VanRow[] }) {
-  const topPts = Math.max(1, ...vans.map((v) => v.pts));
-  return (
-    <ArcadePanel title="Van Wars">
-      <ol className="space-y-3">
-        {vans.map((v, i) => (
-          <li key={v.name}>
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-2.5">
-                <span className="w-5 shrink-0 text-right font-display text-xs tabular-nums text-muted-foreground">
-                  {i + 1}
-                </span>
-                <span
-                  aria-hidden
-                  className="h-2.5 w-2.5 shrink-0 rounded-full"
-                  style={{ background: v.color, boxShadow: `0 0 8px ${v.color}` }}
-                />
-                <span className="truncate text-sm">{v.name}</span>
-              </div>
-              <div className="flex shrink-0 items-center gap-2.5 font-display text-[11px] uppercase tracking-wider tabular-nums">
-                <span className="text-victory">{v.pts} pts</span>
-                <span className="text-victory/90">{fmtVol(v.vol)}</span>
-                {v.sit.grade && <span className="text-neon">{v.sit.grade}</span>}
-              </div>
-            </div>
-            {/* Team health bar — points share of the leading van. */}
-            <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full border border-border bg-foreground/5">
-              <div
-                className="h-full rounded-full transition-[width] duration-700 ease-out"
-                style={{
-                  width: `${(v.pts / topPts) * 100}%`,
-                  background: `linear-gradient(90deg, color-mix(in oklab, ${v.color} 55%, transparent), ${v.color})`,
-                  boxShadow: `0 0 10px ${v.color}`,
-                }}
-              />
-            </div>
-          </li>
-        ))}
-      </ol>
-    </ArcadePanel>
   );
 }

@@ -1294,3 +1294,107 @@
   border-radius: 1rem;
   box-shadow: 0 0 44px -22px color-mix(in oklab, var(--purpose-tide) 55%, transparent);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   VAN WARS — the street race. Transient event flourishes (a van lurches with a
+   nitrous burst on a sit, sparks on a sale) + the full-screen "took the block"
+   spray on a lead change. The live component only mounts these when motion is
+   allowed; the media query is the belt-and-suspenders.
+   ═══════════════════════════════════════════════════════════════════════════ */
+@keyframes vw-nitro {
+  0% {
+    opacity: 0;
+    transform: translateX(8px) scaleX(0.5);
+  }
+  40% {
+    opacity: 1;
+    transform: translateX(-2px) scaleX(1.2);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-12px) scaleX(0.8);
+  }
+}
+.vw-nitro {
+  animation: vw-nitro 0.7s ease-out;
+}
+
+/* A forward lurch when the crew's war score ticks up. Base transform centers
+   the car on its left% position; the keyframe nudges and settles back. */
+@keyframes vw-lurch {
+  0% {
+    transform: translate(-50%, -60%);
+  }
+  35% {
+    transform: translate(calc(-50% + 11px), -63%);
+  }
+  100% {
+    transform: translate(-50%, -60%);
+  }
+}
+.vw-lurch {
+  animation: vw-lurch 0.6s cubic-bezier(0.3, 1.5, 0.5, 1);
+}
+
+@keyframes vw-spark {
+  0%,
+  100% {
+    filter: none;
+  }
+  50% {
+    filter: drop-shadow(0 0 10px #ffffff) drop-shadow(0 0 20px var(--kombat-gold));
+  }
+}
+.vw-spark {
+  animation: vw-spark 0.6s ease-out 2;
+}
+
+@keyframes vw-spray-in {
+  0% {
+    opacity: 0;
+    transform: scale(1.3) rotate(-4deg);
+  }
+  16% {
+    opacity: 1;
+    transform: scale(1) rotate(-2deg);
+  }
+  84% {
+    opacity: 1;
+    transform: scale(1) rotate(-2deg);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.06) rotate(-2deg);
+  }
+}
+.vw-spray-in {
+  animation: vw-spray-in 2.4s ease-out forwards;
+}
+
+@keyframes vw-streak {
+  0% {
+    opacity: 0.25;
+    transform: translateX(7px);
+  }
+  50% {
+    opacity: 0.9;
+    transform: translateX(0);
+  }
+  100% {
+    opacity: 0.25;
+    transform: translateX(7px);
+  }
+}
+.vw-streak {
+  animation: vw-streak 1.1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vw-nitro,
+  .vw-lurch,
+  .vw-spark,
+  .vw-spray-in,
+  .vw-streak {
+    animation: none;
+  }
+}
