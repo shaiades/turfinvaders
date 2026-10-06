@@ -71,6 +71,8 @@ export type VanWarRowInput = {
 };
 
 export type VanWarStanding = {
+  /** The crew's team id — lets the captain card find its own crew. */
+  teamId: string | null;
   name: string;
   color: string;
   /** The ranking score: per-head (default) or total war points. */
@@ -98,6 +100,7 @@ export function buildVanWarStandings(
   cfg: VanWarsConfig = DEFAULT_VANWARS_CONFIG,
 ): VanWarStanding[] {
   type Acc = {
+    teamId: string | null;
     name: string;
     color: string;
     warTotal: number;
@@ -111,6 +114,7 @@ export function buildVanWarStandings(
   for (const r of rows) {
     const key = r.teamId ?? r.label;
     const v: Acc = map.get(key) ?? {
+      teamId: r.teamId,
       name: r.label,
       color: r.teamColor ?? "#8a8f99",
       warTotal: 0,
@@ -130,6 +134,7 @@ export function buildVanWarStandings(
   }
   return [...map.values()]
     .map((v) => ({
+      teamId: v.teamId,
       name: v.name,
       color: v.color,
       war: cfg.mode === "per_head" ? (v.knockers > 0 ? v.warTotal / v.knockers : 0) : v.warTotal,
