@@ -46,6 +46,7 @@ import { VanClockConsole } from "@/components/VanClockConsole";
 import { DayOffQueue } from "@/components/DayOffQueue";
 import { CaptainVanWarsCard } from "@/components/CaptainVanWarsCard";
 import { ShoutoutComposer } from "@/components/ShoutoutComposer";
+import { BountyComposer } from "@/components/BountyComposer";
 import { ArenaMode } from "@/components/ArenaMode";
 import { PushAlertsCard } from "@/components/PushAlertsCard";
 import { FormerBadge } from "@/components/FormerBadge";
@@ -326,6 +327,7 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
           📺 Arena Mode
         </button>
         <ShoutoutComposer />
+        <BountyComposer />
       </div>
       {arenaOpen && <ArenaMode onExit={() => setArenaOpen(false)} />}
 
