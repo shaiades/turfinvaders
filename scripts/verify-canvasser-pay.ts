@@ -24,6 +24,7 @@ import {
   levelForXp,
   cumXpForLevel,
   evaluateBadges,
+  bestDaySits,
   sitRate,
   volumeBonusForMonthRevenue,
 } from "../src/lib/canvasserPay";
@@ -211,6 +212,32 @@ function base0() {
     vanMvp: false,
   };
 }
+
+// ── Hat Trick range (bestDaySits) ───────────────────────────────────────
+// The Hat Trick must check the SELECTED range, not just today: the best single
+// day inside the window, same-day office rows summed, out-of-range days ignored.
+const week = [
+  { date: "2026-10-05", sits: 1 }, // Monday
+  { date: "2026-10-05", sits: 2 }, // same day, second office → sums to 3
+  { date: "2026-10-07", sits: 2 }, // Wednesday
+  { date: "2026-10-10", sits: 5 }, // Saturday — but outside a Mon–Fri window below
+];
+expectEq("best day sums same-day office rows", bestDaySits(week, "2026-10-05", "2026-10-11"), 5);
+expectEq(
+  "Hat Trick fires on a prior day in range",
+  bestDaySits(week, "2026-10-05", "2026-10-07"),
+  3,
+);
+expectEq("out-of-range days excluded", bestDaySits(week, "2026-10-06", "2026-10-07"), 2);
+expectEq("empty range → 0", bestDaySits(week, "2026-11-01", "2026-11-30"), 0);
+expectEq("no rows → 0", bestDaySits([], "2026-10-01", "2026-10-31"), 0);
+expectEq(
+  "3+ on any single day in range lights Hat Trick",
+  evaluateBadges({ ...base0(), bestDaySits: bestDaySits(week, "2026-10-05", "2026-10-07") }).has(
+    "hat_trick",
+  ),
+  true,
+);
 
 // ── Sit rate grades ─────────────────────────────────────────────────────
 expectEq("no leads → null rate", sitRate(0, 0).rate, null);

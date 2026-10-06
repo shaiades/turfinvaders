@@ -325,6 +325,30 @@ export type BadgeStats = {
   vanMvp: boolean;
 };
 
+/**
+ * Most sits on any SINGLE day within [start, end] (inclusive, ISO YYYY-MM-DD) —
+ * the Hat Trick input. Pure: the data layer supplies per-day sit counts (one
+ * entry per office row is fine; same-day entries are summed). This is what lets
+ * Hat Trick honour the selected range instead of firing on today only — a Week
+ * or Month wrap lights it if the grinder stacked 3+ sits on any day in range.
+ * ISO date strings compare lexicographically = chronologically, so the window
+ * test needs no Date parsing.
+ */
+export function bestDaySits(
+  daySits: readonly { date: string; sits: number }[],
+  start: string,
+  end: string,
+): number {
+  const byDay = new Map<string, number>();
+  for (const r of daySits) {
+    if (r.date < start || r.date > end) continue;
+    byDay.set(r.date, (byDay.get(r.date) ?? 0) + Math.max(0, r.sits));
+  }
+  let best = 0;
+  for (const v of byDay.values()) if (v > best) best = v;
+  return best;
+}
+
 /** Which badges a stats snapshot has earned. Pure, order matches BADGES. */
 export function evaluateBadges(s: BadgeStats): Set<BadgeId> {
   const out = new Set<BadgeId>();
