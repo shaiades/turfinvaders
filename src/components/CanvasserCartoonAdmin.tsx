@@ -243,37 +243,86 @@ function CanvasserAdminCard({
         {[row.office, row.role].filter(Boolean).join(" · ") || "Field crew"}
       </div>
 
-      <div className="mt-2 flex items-center gap-3">
+      {/* Both team-facing avatars, same as the rep gallery (the raw selfie stays
+          private). Everyone gets a headshot AND a full body. */}
+      <div className="mt-2 grid grid-cols-2 gap-1.5">
+        <Thumb
+          label="Headshot"
+          src={row.cartoon_portrait_url}
+          alt={`${row.name} headshot`}
+          fallback={!hasArt}
+        />
+        <Thumb
+          label="Full body"
+          src={row.cartoon_full_url}
+          alt={`${row.name} full body`}
+          fallback={!hasArt}
+        />
+      </div>
+
+      {/* How the team sees them (approved art or initials). */}
+      <div className="mt-2 flex items-center gap-2 text-[10px] text-muted-foreground">
         <RepAvatar
           name={row.name}
           cartoon={row.cartoon_status === "approved" ? cartoon : undefined}
-          variant="full"
-          rounded="lg"
-          className="h-16 w-16"
-          textClassName="text-base"
+          className="h-7 w-7"
+          textClassName="text-[0.6rem]"
         />
-        <div className="flex flex-1 flex-wrap gap-1.5">
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => {
-              void onPick(e.target.files?.[0]);
-              e.target.value = "";
-            }}
-          />
-          <SmallBtn tone="gold" disabled={busy} onClick={() => fileRef.current?.click()}>
-            {busy ? "Working…" : hasArt ? "New photo" : "Upload photo"}
+        On the board
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            void onPick(e.target.files?.[0]);
+            e.target.value = "";
+          }}
+        />
+        <SmallBtn tone="gold" disabled={busy} onClick={() => fileRef.current?.click()}>
+          {busy ? "Working…" : hasArt ? "New photo" : "Upload photo"}
+        </SmallBtn>
+        {/* Re-roll live art, OR retry a selfie whose generation failed/stalled
+            (regenerates from the stored selfie — no re-upload needed). */}
+        {(hasArt || row.cartoon_status === "failed" || row.cartoon_status === "generating") && (
+          <SmallBtn tone="green" disabled={busy} onClick={onReroll}>
+            {hasArt ? "Re-roll" : "Retry"}
           </SmallBtn>
-          {/* Re-roll live art, OR retry a selfie whose generation failed/stalled
-              (regenerates from the stored selfie — no re-upload needed). */}
-          {(hasArt || row.cartoon_status === "failed" || row.cartoon_status === "generating") && (
-            <SmallBtn tone="green" disabled={busy} onClick={onReroll}>
-              {hasArt ? "Re-roll" : "Retry"}
-            </SmallBtn>
-          )}
-        </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** One cartoon preview tile — the whole image, contained (mirror of the rep
+ *  gallery's Thumb) so an admin sees exactly what was drawn. */
+function Thumb({
+  label,
+  src,
+  alt,
+  fallback,
+}: {
+  label: string;
+  src: string | null;
+  alt: string;
+  fallback?: boolean;
+}) {
+  return (
+    <div>
+      <div className="aspect-square overflow-hidden rounded border border-border bg-kombat-black/40">
+        {src ? (
+          <img src={src} alt={alt} loading="lazy" className="h-full w-full object-contain" />
+        ) : (
+          <div className="grid h-full w-full place-items-center text-[9px] text-muted-foreground">
+            {fallback ? "—" : ""}
+          </div>
+        )}
+      </div>
+      <div className="mt-0.5 text-center text-[9px] uppercase tracking-widest text-muted-foreground">
+        {label}
       </div>
     </div>
   );
