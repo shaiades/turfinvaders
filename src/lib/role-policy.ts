@@ -88,6 +88,22 @@ export function requiresGratitudeGate(role: AppRole | string | null | undefined)
   return (GRATITUDE_GATE_ROLES as readonly string[]).includes(role);
 }
 
+/** Fighter-selfie prompt (Close Kombat, owner 2026-10-05): the crew whose
+ *  avatar is SELFIE-sourced — canvassers (confirmers collapse to canvasser),
+ *  captains, and office_staff "Managers". They get asked once per login to add
+ *  a photo until they have a fighter. Sales reps are Monday-photo-sourced and
+ *  the owner is exempt, so neither is asked. */
+export const FIGHTER_SELFIE_ROLES: readonly AppRole[] = [
+  "canvasser",
+  "captain",
+  "office_staff",
+] as const;
+
+export function requiresFighterSelfie(role: AppRole | string | null | undefined): boolean {
+  const r = privilegeRole(role);
+  return !!r && (FIGHTER_SELFIE_ROLES as readonly string[]).includes(r);
+}
+
 /** Highest-priority role held: owner > office_staff > captain > sales_rep >
  *  canvasser; null when none of the app roles are present. */
 export function primaryRole(roles: ReadonlyArray<AppRole | string>): AppRole | null {

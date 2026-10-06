@@ -23,6 +23,7 @@ import { CanvasserTutorial, startCanvasserTutorial } from "@/components/tutorial
 import { WelcomeAnimation, isWelcomeAnimationForced } from "@/components/WelcomeAnimation";
 import { CloseKombatIntro, isCloseKombatIntroForced } from "@/components/CloseKombatIntro";
 import { EodRecapFx, isEodRecapForced } from "@/components/EodRecapFx";
+import { FighterPhotoPrompt } from "@/components/FighterPhotoPrompt";
 import {
   PurposeReminderCard,
   isPurposeReminderForced,
@@ -305,7 +306,12 @@ export function AppShell({ children }: { children: ReactNode }) {
       // Badge = Dojo submissions + Kombat Month proofs waiting for review —
       // the in-app companion to the notify-dojo push, so work waiting is
       // visible even with push alerts off on this device.
-      { to: "/confirmation-desk", label: "Desk", icon: PhoneCall, badge: pendingDojo + pendingProofs },
+      {
+        to: "/confirmation-desk",
+        label: "Desk",
+        icon: PhoneCall,
+        badge: pendingDojo + pendingProofs,
+      },
       // Badge = shift-off (Respawn) requests waiting on Tyler/Shai/Jorge.
       ...(role && CLOSE_KOMBAT_ROLES.includes(role)
         ? [
@@ -699,13 +705,25 @@ export function AppShell({ children }: { children: ReactNode }) {
           <EodRecapFx userId={user.id} heldBack={introActive} onActiveChange={setEodActive} />
         )}
 
+      {/* Fighter photo request — fires once per login for the selfie-sourced
+          crew (canvassers, captains, Managers) who have no fighter yet, on
+          whatever page they land on. Self-gated on the REAL role + fighter
+          status; held behind the intro and EOD recap so it never stacks on the
+          first-open cutscenes. Skippable; returns next login until they add a
+          photo. */}
+      {user && <FighterPhotoPrompt heldBack={introActive || eodActive} />}
+
       {/* Weekly Action Plan popup — reps only, once per PLAN week (Sunday
           shows the upcoming week). Sequenced after the door-kick intro via
           heldBack; gated on the REAL role so a View-As preview can't burn
           the owner's week stamp (`?plan_pop=1` previews without stamping,
           same contract as the other overlays). */}
       {user && (isWeeklyPlanPopupForced() || privilegeRole(realRole) === "sales_rep") && (
-        <WeeklyPlanPopup userId={user.id} heldBack={introActive} onActiveChange={setPlanPopupActive} />
+        <WeeklyPlanPopup
+          userId={user.id}
+          heldBack={introActive}
+          onActiveChange={setPlanPopupActive}
+        />
       )}
 
       {/* Daily "remember your why" — reps only, once per LA day, and ONLY

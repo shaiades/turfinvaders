@@ -21,7 +21,6 @@ import { DailyLogPanel } from "@/components/DailyLogPanel";
 import { CanvasserStats, GrindCounter } from "@/components/CanvasserStats";
 import { PiggyBankHUD } from "@/components/PiggyBankHUD";
 import { MyFighterCard } from "@/components/MyFighterCard";
-import { FighterPhotoPrompt } from "@/components/FighterPhotoPrompt";
 import { usePiggyBank } from "@/hooks/usePiggyBank";
 import type { CanvasserStatsData } from "@/hooks/useCanvasserStats";
 import { CalendarClock, DoorOpen, MessageSquare, PhoneCall } from "lucide-react";
@@ -117,9 +116,9 @@ export function CanvasserMission({
 
   return (
     <div className="space-y-6">
-      {/* Login nudge: asks a player with no fighter yet to submit a photo
-          (once per login session). Renders nothing once they have one. */}
-      <FighterPhotoPrompt />
+      {/* The login photo request now lives app-wide in AppShell (owner
+          2026-10-05) so it fires right after sign-in on any page — the
+          MyFighterCard below stays as the always-available control. */}
       {/* The old PLAYER name block is gone (audit 2026-09-11): the page a
           grinder opens to check money spent its best space telling them
           their own name. Van identity rides the TakeHome header instead. */}
