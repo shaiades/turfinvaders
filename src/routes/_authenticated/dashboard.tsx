@@ -46,6 +46,7 @@ import { VanClockConsole } from "@/components/VanClockConsole";
 import { DayOffQueue } from "@/components/DayOffQueue";
 import { CaptainVanWarsCard } from "@/components/CaptainVanWarsCard";
 import { ShoutoutComposer } from "@/components/ShoutoutComposer";
+import { ArenaMode } from "@/components/ArenaMode";
 import { PushAlertsCard } from "@/components/PushAlertsCard";
 import { FormerBadge } from "@/components/FormerBadge";
 import { useTodayLeads } from "@/hooks/useTodayLeads";
@@ -268,6 +269,7 @@ function VisibilityChip({ on }: { on: boolean }) {
 /* ============ OWNER ============ */
 function OwnerDashboard({ visibility }: { visibility: boolean }) {
   const [importOpen, setImportOpen] = useState(false);
+  const [arenaOpen, setArenaOpen] = useState(false);
   const { tab: rawTab } = Route.useSearch();
   const navigate = Route.useNavigate();
   // Canvasser deep links (?tab=plan|log|stats) land on Fleet Dispatch here.
@@ -314,10 +316,18 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
         </div>
       </div>
 
-      {/* §6 Shoutout — broadcast praise to every field phone. */}
-      <div className="flex justify-end">
+      {/* §6 Shoutout + Arena — broadcast praise + the office-TV view. */}
+      <div className="flex flex-wrap justify-end gap-2">
+        <button
+          type="button"
+          onClick={() => setArenaOpen(true)}
+          className="inline-flex min-h-11 items-center gap-2 rounded-md border border-border px-3 font-display text-xs uppercase tracking-widest text-neon transition hover:bg-surface md:min-h-0"
+        >
+          📺 Arena Mode
+        </button>
         <ShoutoutComposer />
       </div>
+      {arenaOpen && <ArenaMode onExit={() => setArenaOpen(false)} />}
 
       <Tabs
         value={tab}
