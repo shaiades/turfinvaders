@@ -28,7 +28,9 @@ import { useFxPrefs } from "@/hooks/useFxPrefs";
 const MUSIC_SRC = "/audio/radio-los-santos.mp3";
 const RESUME_KEY = "ti_music_pos_v1";
 // Background bed, not a boombox — arcade FX and cutscene audio sit on top.
-const MUSIC_VOLUME = 0.35;
+// Kept low (owner ask 2026-10-06: "lower it a bit") so it underscores the
+// app rather than competing with field conversation.
+const MUSIC_VOLUME = 0.25;
 
 const AVAIL_EVENT = "ti-music-avail";
 let musicAvailable = false;
