@@ -1,9 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { formatCurrency } from "@/lib/utils";
 import { addDaysISO, laWeekStartISO } from "@/lib/dates";
-import { HOURLY_MID, HOURLY_TOP, POINTS_TIER_MID, POINTS_TIER_TOP } from "@/lib/pay";
-import { ArcadePanel, NeonBar } from "@/components/arcade";
+import { ArcadePanel } from "@/components/arcade";
 import { type PinType } from "@/lib/pin-results";
 import {
   countPins,
@@ -15,20 +13,15 @@ import { LiveLeadCounter } from "@/components/LiveLeadCounter";
 import { QueryStateCard } from "@/components/QueryStateCard";
 import { Button } from "@/components/ui/button";
 import type { CanvasserStatsData } from "@/hooks/useCanvasserStats";
-import {
-  DollarSign,
-  Filter,
-  Gauge,
-  Pencil,
-  Target,
-} from "lucide-react";
+import { Filter, Gauge } from "lucide-react";
 
 /**
- * The Mission page's Stats tab — the read-only SCOREBOARD (owner merge
- * 2026-09-12: everything live-today moved to the Today tab): THIS WEEK
- * (pace + paycheck engine) → MONTH TO DATE (revenue, sales, goal progress). Goal EDITING lives on the Plan tab;
- * the goal bar here links there. Weekly pay itself isn't repeated — the
- * Take-Home widget in the page header owns that number.
+ * The Mission page's Stats tab — the pure ANALYTICS scoreboard (consolidation
+ * 2026-10-05): the week's Conversion Funnel, what happened At the Door, and
+ * Leads Per Day. Everything "game" or money moved to its one home — pay to the
+ * Paycheck card, the $100K boss to Leaders, XP/level/badges to the Fighter card
+ * — so this tab is just the numbers a grinder studies to improve, nothing
+ * duplicated. Goal EDITING lives on the Plan tab; the funnel panel links there.
  */
 export function CanvasserStats({
   stats,
@@ -39,12 +32,9 @@ export function CanvasserStats({
   userId: string;
   onEditGoal: () => void;
 }) {
-  const { week, month } = stats;
-  // Today lives on the Today tab now (owner merge, 2026-09-12) — this tab is
-  // the pure scoreboard: the week you're being paid on, then the month.
+  const { week } = stats;
   return (
     <div className="space-y-6">
-      <SectionLabel>This Week</SectionLabel>
       <ConversionFunnelPanel stats={stats} onOpenPlan={onEditGoal} />
       <DoorResultsPanel userId={userId} />
       <BigStat
@@ -54,54 +44,6 @@ export function CanvasserStats({
         icon={<Gauge className="w-4 h-4" />}
         accent="var(--neon)"
       />
-      <PaycheckEngineWidget
-        pending={stats.funnelRates.isLoading}
-        points={stats.weekPoints}
-        hours={stats.weekHours}
-        hourlyRate={stats.hourlyRate}
-        base={stats.weekBase}
-        commission={stats.weekCommission}
-        commissionPct={Math.round(stats.weekCommissionRate * 100)}
-        revenue={stats.weekRevenue}
-      />
-
-      <SectionLabel>Month to Date</SectionLabel>
-      <div className="grid sm:grid-cols-2 gap-4">
-        <BigStat
-          label="Monthly Revenue Generated"
-          value={formatCurrency(stats.monthRevenue)}
-          sub={
-            stats.valuePerDoor > 0
-              ? `Confirmed sales · MTD · every knock paid ${formatCurrency(stats.valuePerDoor)}`
-              : "Confirmed sales · MTD"
-          }
-          icon={<DollarSign className="w-4 h-4" />}
-          accent="var(--victory)"
-        />
-        <BigStat
-          label="Total Sales"
-          value={month.sales.toLocaleString()}
-          sub={`${month.confirmed_leads} confirmed leads · MTD`}
-          icon={<Target className="w-4 h-4" />}
-          accent="var(--accent)"
-        />
-      </div>
-      <GoalBar
-        earned={stats.earnings.monthEarned}
-        goal={stats.monthlyGoal}
-        pct={stats.goalProgress}
-        onEditGoal={onEditGoal}
-        profile={stats.profile}
-        earningsLoading={stats.earnings.isLoading}
-      />
-    </div>
-  );
-}
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="text-[10px] font-display uppercase tracking-[0.25em] text-muted-foreground border-b border-border/60 pb-1.5">
-      {children}
     </div>
   );
 }
@@ -192,108 +134,6 @@ function BigStat({
         <div className="mt-2 text-[11px] text-muted-foreground">{sub}</div>
       </div>
     </div>
-  );
-}
-
-function PaycheckEngineWidget({
-  pending,
-  points,
-  hours,
-  hourlyRate,
-  base,
-  commission,
-  commissionPct,
-  revenue,
-}: {
-  /** The 60d-logs query behind `points` — the clocked-hours and sales-revenue
-   *  legs expose neither pending nor error via stats (see useCanvasserStats),
-   *  so a failed fetch on those still shows as zeros. */
-  pending: boolean;
-  points: number;
-  hours: number;
-  hourlyRate: number;
-  base: number;
-  commission: number;
-  /** Rank-lock-aware rate from the stats hook — never recomputed here. */
-  commissionPct: number;
-  revenue: number;
-}) {
-  const atTop = hourlyRate >= HOURLY_TOP;
-  const nextTarget = points >= POINTS_TIER_MID ? POINTS_TIER_TOP : POINTS_TIER_MID;
-  const nextRate = points >= POINTS_TIER_MID ? HOURLY_TOP : HOURLY_MID;
-  // Monotonic progress toward the top tier so the bar never shrinks as points grow.
-  const pct = Math.min(1, points / POINTS_TIER_TOP);
-  const accent = atTop ? "var(--victory)" : "var(--neon)";
-  const action = (
-    <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-      Auto · Weekly
-    </span>
-  );
-  // Zero ≠ error: never flash the $18/hr floor and 0 pts while the week is
-  // still loading.
-  if (pending) {
-    return (
-      <ArcadePanel title="Paycheck Engine" action={action}>
-        <QueryStateCard pending what="this week's paycheck" />
-      </ArcadePanel>
-    );
-  }
-  return (
-    <ArcadePanel title="Paycheck Engine" action={action}>
-      <div className="grid sm:grid-cols-3 gap-4">
-        <div>
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-            Hourly Tier
-          </div>
-          <div
-            className="font-display text-3xl mt-1"
-            style={{
-              color: accent,
-              textShadow: `0 0 14px color-mix(in oklab, ${accent} 60%, transparent)`,
-            }}
-          >
-            ${hourlyRate}/hr
-          </div>
-          <div className="text-[10px] uppercase tracking-widest text-muted-foreground mt-1">
-            {atTop
-              ? `🔥 $${HOURLY_TOP} tier unlocked`
-              : `${Math.max(0, nextTarget - points)} pt(s) to $${nextRate}/hr`}
-          </div>
-        </div>
-        <div>
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-            Clocked Hours
-          </div>
-          <div className="font-display text-3xl text-neon mt-1">{hours.toFixed(1)}</div>
-          <div className="text-[10px] uppercase tracking-widest text-muted-foreground mt-1">
-            from time clock · punched lunches deducted
-          </div>
-        </div>
-        <div>
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-            Sits / Points
-          </div>
-          <div className="font-display text-3xl text-accent mt-1">{points}</div>
-          <div className="text-[10px] uppercase tracking-widest text-muted-foreground mt-1">
-            Sit = 1 · Sale = 2
-          </div>
-        </div>
-      </div>
-      <NeonBar pct={pct} accent={accent} />
-      <div className="mt-3 grid sm:grid-cols-3 gap-2 text-[11px] text-muted-foreground border-t border-border pt-3">
-        <div>
-          Base · <span className="text-foreground">{formatCurrency(base)}</span>
-        </div>
-        <div>
-          Commission ({commissionPct}% of {formatCurrency(revenue)}) ·{" "}
-          <span className="text-victory">{formatCurrency(commission)}</span>
-        </div>
-        <div className="sm:text-right">
-          Total ·{" "}
-          <span className="font-display text-victory">{formatCurrency(base + commission)}</span>
-        </div>
-      </div>
-    </ArcadePanel>
   );
 }
 
@@ -403,72 +243,6 @@ function DoorResultsPanel({ userId }: { userId: string }) {
         </div>
       ) : (
         <DoorResultsGrid pins={pins} />
-      )}
-    </ArcadePanel>
-  );
-}
-
-function GoalBar({
-  earned,
-  goal,
-  pct,
-  onEditGoal,
-  profile,
-  earningsLoading,
-}: {
-  earned: number;
-  goal: number;
-  pct: number;
-  onEditGoal: () => void;
-  /** The profiles query behind `goal` — a failed fetch must not pass the
-   *  $10k default off as the canvasser's real goal. */
-  profile: CanvasserStatsData["profile"];
-  /** The pay-engine RPCs behind `earned` (useMyEarnings exposes loading
-   *  only — a failed RPC still reads $0 earned). */
-  earningsLoading: boolean;
-}) {
-  const pending = profile.isPending || earningsLoading;
-  return (
-    <ArcadePanel
-      title="Monthly Goal"
-      action={
-        <Button variant="ghost" onClick={onEditGoal}>
-          <Pencil className="w-3.5 h-3.5 mr-1.5" /> Edit in Plan
-        </Button>
-      }
-    >
-      {pending || profile.isError ? (
-        <QueryStateCard
-          pending={pending}
-          what="your monthly goal"
-          onRetry={() => profile.refetch()}
-        />
-      ) : (
-        <>
-          <div className="flex items-end justify-between gap-4 flex-wrap">
-            <div>
-              <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-                Earned MTD · All Pay Combined
-              </div>
-              <div className="font-display text-4xl md:text-5xl text-mega-victory leading-none mt-1">
-                {formatCurrency(earned)}
-              </div>
-            </div>
-            <div className="text-right">
-              <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-                Goal
-              </div>
-              <div className="font-display text-2xl text-neon">{formatCurrency(goal)}</div>
-            </div>
-          </div>
-          <NeonBar pct={pct} accent="var(--victory)" tall />
-          <div className="mt-2 flex justify-between text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-            <span>{(pct * 100).toFixed(0)}% complete</span>
-            <span>
-              {pct >= 1 ? "🏆 Goal smashed" : `${formatCurrency(Math.max(0, goal - earned))} to go`}
-            </span>
-          </div>
-        </>
       )}
     </ArcadePanel>
   );

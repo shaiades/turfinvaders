@@ -8,7 +8,17 @@
 import { makeBeeper } from "@/components/intro-fx";
 import { isHapticsOn, isSoundOn } from "@/lib/fx-prefs";
 
-export type ArcadeSound = "coin" | "levelup" | "chest" | "badge" | "boss" | "rank";
+export type ArcadeSound =
+  | "coin"
+  | "levelup"
+  | "chest"
+  | "badge"
+  | "boss"
+  | "rank"
+  // Van Wars street-race cues.
+  | "spray" // aerosol hiss on a crew taking the block
+  | "engine" // nitrous rev when a crew surges
+  | "horn"; // air horn on the Saturday crowning
 
 // makeBeeper itself checks isSoundOn, but we also skip building phrases when off.
 let beeper: ReturnType<typeof makeBeeper> | null = null;
@@ -44,6 +54,24 @@ export function playArcadeSound(kind: ArcadeSound): void {
     case "rank": // quick climb blip
       b(659, 80, 0, "square");
       b(988, 110, 70, "square");
+      break;
+    case "spray": // aerosol hiss — a fast high falling cluster ("pssht")
+      b(4200, 26, 0, "square");
+      b(3600, 26, 22, "square");
+      b(3000, 34, 44, "square");
+      b(2500, 46, 72, "triangle");
+      break;
+    case "engine": // nitrous rev — low sawtooth sweeping up
+      b(80, 110, 0, "sawtooth");
+      b(120, 110, 80, "sawtooth");
+      b(170, 130, 160, "sawtooth");
+      b(230, 180, 270, "sawtooth");
+      break;
+    case "horn": // air horn — two low two-tone blasts
+      b(330, 360, 0, "square");
+      b(247, 360, 0, "square");
+      b(330, 440, 440, "square");
+      b(247, 440, 440, "square");
       break;
   }
 }
