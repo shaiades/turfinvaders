@@ -97,6 +97,8 @@ type RecapData = {
    *  and the day stays unstamped so the full recap replays once presence
    *  recovers. */
   donutsKnown: boolean;
+  /** §7: false suppresses Act 2 for this viewer by policy (coach-private). */
+  act2Allowed: boolean;
 };
 
 const DEMO_WINNERS: Winner[] = [
@@ -107,9 +109,10 @@ const DEMO_WINNERS: Winner[] = [
 const DEMO_DONUTS: Donut[] = [
   { name: "Frost Example", frozen: true },
   { name: "Drift Example", frozen: true },
-  ...["Echo", "Foxtrot", "Golf", "Hotel", "India", "Juliett", "Kilo", "Lima", "Mike"].map(
-    (n) => ({ name: `${n} Example`, frozen: false }),
-  ),
+  ...["Echo", "Foxtrot", "Golf", "Hotel", "India", "Juliett", "Kilo", "Lima", "Mike"].map((n) => ({
+    name: `${n} Example`,
+    frozen: false,
+  })),
 ];
 
 /* ── Timeline (computed per playback from the data snapshot — degenerate
@@ -133,9 +136,19 @@ function buildTimeline(winnerCount: number, donutCount: number, act2: boolean) {
     const NEVER = Number.MAX_SAFE_INTEGER;
     const T_FADE = T_ACT1_OUT + 250;
     return {
-      T_TITLE, popAt, T_TOP, T_SHINE, T_ACT1_OUT,
-      T_ACT2: NEVER, T_RAIN: NEVER, T_NAMES: NEVER, chipCount: 0, T_TAG: NEVER,
-      T_FADE, DURATION: T_FADE + 450, act2,
+      T_TITLE,
+      popAt,
+      T_TOP,
+      T_SHINE,
+      T_ACT1_OUT,
+      T_ACT2: NEVER,
+      T_RAIN: NEVER,
+      T_NAMES: NEVER,
+      chipCount: 0,
+      T_TAG: NEVER,
+      T_FADE,
+      DURATION: T_FADE + 450,
+      act2,
     };
   }
   const T_ACT2 = T_ACT1_OUT + 400;
@@ -145,7 +158,21 @@ function buildTimeline(winnerCount: number, donutCount: number, act2: boolean) {
   const T_TAG = donutCount > 0 ? T_NAMES + chipCount * CHIP_STEP + 350 : T_ACT2 + 600;
   const T_FADE = T_TAG + (donutCount > 0 ? 3400 : 3000);
   const DURATION = T_FADE + 450;
-  return { T_TITLE, popAt, T_TOP, T_SHINE, T_ACT1_OUT, T_ACT2, T_RAIN, T_NAMES, chipCount, T_TAG, T_FADE, DURATION, act2 };
+  return {
+    T_TITLE,
+    popAt,
+    T_TOP,
+    T_SHINE,
+    T_ACT1_OUT,
+    T_ACT2,
+    T_RAIN,
+    T_NAMES,
+    chipCount,
+    T_TAG,
+    T_FADE,
+    DURATION,
+    act2,
+  };
 }
 type Timeline = ReturnType<typeof buildTimeline>;
 
@@ -175,7 +202,9 @@ function buildSfx(tl: Timeline, winnerCount: number, donutCount: number): Beat[]
   }
   if (tl.act2) {
     // freezer womp descend into Act 2
-    [392, 330, 262, 196].forEach((f, i) => beats.push({ ms: tl.T_ACT2 + i * 110, f, d: 130, t: "square" }));
+    [392, 330, 262, 196].forEach((f, i) =>
+      beats.push({ ms: tl.T_ACT2 + i * 110, f, d: 130, t: "square" }),
+    );
     for (let i = 0; i < tl.chipCount; i++)
       beats.push({ ms: tl.T_NAMES + i * CHIP_STEP, f: 587, d: 40, t: "sine" });
     if (donutCount === 0) {
@@ -198,8 +227,26 @@ function makeRng(seed: number) {
 }
 
 const CONFETTI_COLORS = ["#ff2d92", "#00f0ff", "#39ff14", "#ffd93d", "#a855f7"];
-type Confetto = { x: number; y: number; vx: number; vy: number; rot: number; vr: number; c: string; w: number; h: number };
-type DonutDrop = { x: number; y: number; vy: number; size: number; spawned: boolean; bounces: number; squashAt: number };
+type Confetto = {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  rot: number;
+  vr: number;
+  c: string;
+  w: number;
+  h: number;
+};
+type DonutDrop = {
+  x: number;
+  y: number;
+  vy: number;
+  size: number;
+  spawned: boolean;
+  bounces: number;
+  squashAt: number;
+};
 
 const STARS = Array.from({ length: 24 }, (_, i) => ({
   x: (i * 61 + 17) % VW,
@@ -235,11 +282,17 @@ export function EodRecapFx({
   userId,
   heldBack,
   onActiveChange,
+  act2Allowed = true,
 }: {
   userId: string;
   /** True while the morning intro is checking/playing — the recap defers. */
   heldBack?: boolean;
   onActiveChange?: (active: boolean) => void;
+  /** §7 praise-public/coach-private: when false, Act 2 (THE DOUGHNUT ZONE) is
+   *  suppressed for this viewer — the recap plays TOP CANVASSERS only. The day
+   *  still STAMPS (it's complete for them), unlike the data-unavailable case,
+   *  because this is a policy choice, not missing data. */
+  act2Allowed?: boolean;
 }) {
   // Latched once per mount: a mid-play search-string change must never flip
   // `forced` — markSeen's identity feeds the playing effect's deps, and an
@@ -277,6 +330,7 @@ export function EodRecapFx({
           winners: DEMO_WINNERS,
           donuts: DEMO_DONUTS,
           donutsKnown: true,
+          act2Allowed: true,
         }
       : null,
   );
@@ -372,8 +426,7 @@ export function EodRecapFx({
           .filter((r) => r.todayLeads === 0 && r.active && !r.graced && clockedOn(r.id, day))
           .map((r) => ({
             name: r.name,
-            frozen:
-              prevBucket(r) === 0 && clockedOn(r.id, prevWorked) && r.tracked && r.recent,
+            frozen: prevBucket(r) === 0 && clockedOn(r.id, prevWorked) && r.tracked && r.recent,
           }))
           .sort((a, b) => Number(b.frozen) - Number(a.frozen) || a.name.localeCompare(b.name));
     if (winners.length === 0 && donuts.length === 0) {
@@ -384,9 +437,23 @@ export function EodRecapFx({
       finish();
       return;
     }
-    dataRef.current = { day, winners, donuts, donutsKnown: clockReady };
+    dataRef.current = { day, winners, donuts, donutsKnown: clockReady, act2Allowed };
     setReady(true);
-  }, [phase, forced, rowsQ.isSuccess, rowsQ.isError, rowsQ.data, clockSettled, clockReady, clockedOn, day, prevWorked, markSeen, finish]);
+  }, [
+    phase,
+    forced,
+    rowsQ.isSuccess,
+    rowsQ.isError,
+    rowsQ.data,
+    clockSettled,
+    clockReady,
+    clockedOn,
+    day,
+    prevWorked,
+    markSeen,
+    finish,
+    act2Allowed,
+  ]);
 
   // Foreground tick for the hop below: promoting to "playing" while the
   // document is hidden would stamp and burn the whole recap invisibly (rAF
@@ -468,7 +535,7 @@ export function EodRecapFx({
     const scale = canvas.width / VW;
 
     const { winners, donuts } = data;
-    const tl = buildTimeline(winners.length, donuts.length, data.donutsKnown);
+    const tl = buildTimeline(winners.length, donuts.length, data.donutsKnown && data.act2Allowed);
     const sfx = hold == null ? buildSfx(tl, winners.length, donuts.length) : [];
     const fired = new Set<number>();
     const beep = makeBeeper();
@@ -615,10 +682,30 @@ export function EodRecapFx({
         titleGrad.addColorStop(1, GOLD_DEEP);
         popText(ctx, "TOP CANVASSERS", VW / 2, 64, tl.T_TITLE, t, 40, titleGrad, "#ffb02a");
         if (dateLabel)
-          popText(ctx, `${dateLabel} · DAY RECAP`, VW / 2, 94, tl.T_TITLE + 140, t, 13, "#9fb2d8", "rgba(0,240,255,0.6)");
+          popText(
+            ctx,
+            `${dateLabel} · DAY RECAP`,
+            VW / 2,
+            94,
+            tl.T_TITLE + 140,
+            t,
+            13,
+            "#9fb2d8",
+            "rgba(0,240,255,0.6)",
+          );
 
         if (winners.length === 0) {
-          popText(ctx, "NO LEADS ON THE BOARD", VW / 2, 190, 800, t, 24, "#9fb2d8", "rgba(0,240,255,0.5)");
+          popText(
+            ctx,
+            "NO LEADS ON THE BOARD",
+            VW / 2,
+            190,
+            800,
+            t,
+            24,
+            "#9fb2d8",
+            "rgba(0,240,255,0.5)",
+          );
         }
 
         winners.forEach((w, i) => {
@@ -773,7 +860,17 @@ export function EodRecapFx({
             ctx.fillText(label, 0, 1);
             ctx.restore();
           }
-          popText(ctx, "0 LEADS · CLOCKED IN", VW / 2, 298, tl.T_TAG, t, 13, "#93a7bd", "rgba(74,168,255,0.5)");
+          popText(
+            ctx,
+            "0 LEADS · CLOCKED IN",
+            VW / 2,
+            298,
+            tl.T_TAG,
+            t,
+            13,
+            "#93a7bd",
+            "rgba(74,168,255,0.5)",
+          );
         } else {
           // everyone scored — punt the lone doughnut off screen
           popText(ctx, "ZERO DOUGHNUTS!", VW / 2, 160, tl.T_ACT2 + 350, t, 34, GOLD, "#ffb02a");
