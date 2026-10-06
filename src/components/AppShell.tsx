@@ -24,6 +24,7 @@ import { CanvasserTutorial, startCanvasserTutorial } from "@/components/tutorial
 import { WelcomeAnimation, isWelcomeAnimationForced } from "@/components/WelcomeAnimation";
 import { CloseKombatIntro, isCloseKombatIntroForced } from "@/components/CloseKombatIntro";
 import { EodRecapFx, isEodRecapForced } from "@/components/EodRecapFx";
+import { useArcadeFlags } from "@/hooks/useArcadeFlags";
 import { EodWrapGate, isEodWrapForced } from "@/components/EodWrapGate";
 import {
   PurposeReminderCard,
@@ -32,7 +33,13 @@ import {
 import { WeeklyPlanPopup, isWeeklyPlanPopupForced } from "@/components/WeeklyPlanPopup";
 import { RespawnPopup, isRespawnPopupForced } from "@/components/RespawnPopup";
 import { usePurposeConfig, readCachedPurposeEnabled } from "@/hooks/usePurposeConfig";
-import { CLOSE_KOMBAT_ROLES, ROLE_LABEL, canUseViewAs, privilegeRole } from "@/lib/roles";
+import {
+  CLOSE_KOMBAT_ROLES,
+  ROLE_LABEL,
+  canUseViewAs,
+  isManagerRole,
+  privilegeRole,
+} from "@/lib/roles";
 import {
   LogOut,
   LayoutDashboard,
@@ -113,6 +120,11 @@ const SALES_REP_ALLOWED = ["/close-kombat", "/my-purpose"];
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, role, realRole, displayName, accessRevoked } = useAuth();
+  // §7 praise-public/coach-private: the Doughnut Zone stays on captain/manager
+  // views; field roles only see it when the owner flips the flag off.
+  const arcadeFlags = useArcadeFlags();
+  const recapAct2Allowed =
+    !arcadeFlags.coachPrivate || isManagerRole(realRole) || realRole === "captain";
   const { theme, toggleTheme } = useTheme();
   // Dojo submissions awaiting review — 0 for everyone outside the Admin tier.
   const pendingDojo = usePendingDojoCount();
@@ -711,7 +723,12 @@ export function AppShell({ children }: { children: ReactNode }) {
           stamps. `heldBack` sequences it after the morning intro. */}
       {user &&
         (isEodRecapForced() || (realRole !== null && privilegeRole(realRole) !== "sales_rep")) && (
-          <EodRecapFx userId={user.id} heldBack={introActive} onActiveChange={setEodActive} />
+          <EodRecapFx
+            userId={user.id}
+            heldBack={introActive}
+            onActiveChange={setEodActive}
+            act2Allowed={recapAct2Allowed}
+          />
         )}
 
       {/* Personal Daily Wrap cinematic — canvassers & captains, once per LA day

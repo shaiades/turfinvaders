@@ -12,6 +12,8 @@ import type { WrapScope } from "@/hooks/useWrapData";
 import { addDaysISO, laTodayISO, reportDates } from "@/lib/dates";
 import { useClockPresence, useDailyWrapRows, type WrapRow } from "@/hooks/useDailyWrapRows";
 import { useAuth } from "@/hooks/useAuth";
+import { useArcadeFlags } from "@/hooks/useArcadeFlags";
+import { isManagerRole } from "@/lib/roles";
 import { sumLogCounters, useTodayLogs } from "@/hooks/useDailyLogs";
 
 /** Untyped table access (ObjectionDojo's pattern) until generated types
@@ -154,7 +156,12 @@ function DailyWrap() {
   // YOUR DAY (audit P2-3): the wrap used to be entirely team-wide — the one
   // person guaranteed to read it never appeared. All self data rides caches
   // other pages already warm.
-  const { user } = useAuth();
+  const { user, realRole } = useAuth();
+  // §7 praise-public/coach-private: the zero lists (Doughnut Zone + Suspension)
+  // render on captain/manager views only when the flag is on. Praise (winners)
+  // stays public for everyone.
+  const coachPrivate = useArcadeFlags().coachPrivate;
+  const coachView = !coachPrivate || isManagerRole(realRole) || realRole === "captain";
   const selfId = user?.id;
   const myLogs = useTodayLogs(selfId);
   const my = sumLogCounters(myLogs.data);
@@ -368,51 +375,65 @@ function DailyWrap() {
         </div>
       </ArcadePanel>
 
-      {/* Suspension Zone */}
-      <section
-        className="relative overflow-hidden rounded-lg border-2 p-5"
-        style={{
-          borderColor: "var(--destructive)",
-          background: "color-mix(in oklab, var(--destructive) 12%, transparent)",
-          boxShadow: "0 0 32px -8px var(--destructive)",
-        }}
-      >
-        <header className="flex items-center gap-2 mb-4">
-          <AlertTriangle className="w-5 h-5 text-[var(--destructive)]" />
-          <h2 className="font-display text-sm uppercase tracking-widest text-[var(--destructive)]">
-            🚨 Suspension Warning · 2+ Zeros
-          </h2>
-        </header>
-        {suspension.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No one is in the freezer today. 🔥</p>
-        ) : (
-          <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {suspension.map((r) => (
-              <DoughnutCard key={r.id} r={r} frozen lastLabel={lastLabel} prevLabel={prevLabel} />
-            ))}
-          </ul>
-        )}
-        {!locked && (
-          <p className="mt-3 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-            Finished days only — today can't earn a zero until the 6 PM lock.
-          </p>
-        )}
-      </section>
+      {/* Doughnut Zone + Suspension — coach-private (owner flag): captain /
+          manager views only; hidden from the public canvasser Wrap. */}
+      {coachView && (
+        <>
+          {/* Suspension Zone */}
+          <section
+            className="relative overflow-hidden rounded-lg border-2 p-5"
+            style={{
+              borderColor: "var(--destructive)",
+              background: "color-mix(in oklab, var(--destructive) 12%, transparent)",
+              boxShadow: "0 0 32px -8px var(--destructive)",
+            }}
+          >
+            <header className="flex items-center gap-2 mb-4">
+              <AlertTriangle className="w-5 h-5 text-[var(--destructive)]" />
+              <h2 className="font-display text-sm uppercase tracking-widest text-[var(--destructive)]">
+                🚨 Suspension Warning · 2+ Zeros
+              </h2>
+            </header>
+            {suspension.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No one is in the freezer today. 🔥</p>
+            ) : (
+              <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {suspension.map((r) => (
+                  <DoughnutCard
+                    key={r.id}
+                    r={r}
+                    frozen
+                    lastLabel={lastLabel}
+                    prevLabel={prevLabel}
+                  />
+                ))}
+              </ul>
+            )}
+            {!locked && (
+              <p className="mt-3 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                Finished days only — today can't earn a zero until the 6 PM lock.
+              </p>
+            )}
+          </section>
 
-      {/* Doughnut List */}
-      <ArcadePanel title={locked ? "Doughnuts Today · 1 Zero" : "Doughnuts · Yesterday · 1 Zero"}>
-        {doughnuts.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No fresh doughnuts. Everyone got on the board.
-          </p>
-        ) : (
-          <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {doughnuts.map((r) => (
-              <DoughnutCard key={r.id} r={r} lastLabel={lastLabel} prevLabel={prevLabel} />
-            ))}
-          </ul>
-        )}
-      </ArcadePanel>
+          {/* Doughnut List */}
+          <ArcadePanel
+            title={locked ? "Doughnuts Today · 1 Zero" : "Doughnuts · Yesterday · 1 Zero"}
+          >
+            {doughnuts.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No fresh doughnuts. Everyone got on the board.
+              </p>
+            ) : (
+              <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {doughnuts.map((r) => (
+                  <DoughnutCard key={r.id} r={r} lastLabel={lastLabel} prevLabel={prevLabel} />
+                ))}
+              </ul>
+            )}
+          </ArcadePanel>
+        </>
+      )}
 
       {/* The closer: the morning's gratitude, back at day's end. */}
       <GratitudeWall />
