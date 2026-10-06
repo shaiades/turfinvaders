@@ -731,6 +731,14 @@ export function AppShell({ children }: { children: ReactNode }) {
           />
         )}
 
+      {/* Fighter photo request — fires once per login for the selfie-sourced
+          crew (canvassers, captains, Managers) who have no fighter yet, on
+          whatever page they land on. Self-gated on the REAL role + fighter
+          status; held behind the intro, EOD recap, AND the Daily Wrap cinematic
+          so it never stacks on the first-open cutscenes. Skippable; returns
+          next login until they add a photo. */}
+      {user && <FighterPhotoPrompt heldBack={introActive || eodActive || wrapActive} />}
+
       {/* Weekly Action Plan popup — reps only, once per PLAN week (Sunday
           shows the upcoming week). Sequenced after the door-kick intro via
           heldBack; gated on the REAL role so a View-As preview can't burn
@@ -758,12 +766,6 @@ export function AppShell({ children }: { children: ReactNode }) {
           onActiveChange={setPurposeReminderActive}
         />
       )}
-
-      {/* "Submit a photo for your fighter" login nudge — canvassers, captains,
-          and managers who have no avatar yet, once per login session. Self-gates
-          on the REAL role + whether they already have a fighter; held until the
-          first-sign-in intro has finished so the two don't stack. */}
-      {user && !introActive && <FighterPhotoPrompt />}
 
       {/* Respawn reminder — reps only, Fri 6 PM → Sun 12 PM PT, once per coming
           week. Held behind the intro, weekly plan, and purpose reminder so the
