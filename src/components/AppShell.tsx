@@ -19,7 +19,8 @@ import { CanvasserHUD } from "@/components/CanvasserHUD";
 import { CrewBeacon } from "@/components/CrewBeacon";
 import { LeadConfirmedCelebration } from "@/components/LeadConfirmedCelebration";
 import { AppMenu } from "@/components/AppMenu";
-import { FighterPhotoPrompt } from "@/components/FighterPhotoPrompt";
+import { ProfilePhotoGate } from "@/components/profile-photo/ProfilePhotoGate";
+import { PhotoNeededBanner } from "@/components/profile-photo/PhotoNeededBanner";
 import { CanvasserTutorial, startCanvasserTutorial } from "@/components/tutorial/CanvasserTutorial";
 import { WelcomeAnimation, isWelcomeAnimationForced } from "@/components/WelcomeAnimation";
 import { CloseKombatIntro, isCloseKombatIntroForced } from "@/components/CloseKombatIntro";
@@ -32,7 +33,14 @@ import {
 import { WeeklyPlanPopup, isWeeklyPlanPopupForced } from "@/components/WeeklyPlanPopup";
 import { RespawnPopup, isRespawnPopupForced } from "@/components/RespawnPopup";
 import { usePurposeConfig, readCachedPurposeEnabled } from "@/hooks/usePurposeConfig";
-import { CLOSE_KOMBAT_ROLES, ROLE_LABEL, canUseViewAs, privilegeRole } from "@/lib/roles";
+import {
+  CLOSE_KOMBAT_ROLES,
+  ROLE_LABEL,
+  canUseViewAs,
+  privilegeRole,
+  requiresProfilePhoto,
+} from "@/lib/roles";
+import { useMyPhotoStatus } from "@/hooks/useMyPhotoStatus";
 import {
   LogOut,
   LayoutDashboard,
@@ -64,6 +72,16 @@ type NavItem = {
   /** Small count pill on the item (e.g. Dojo submissions waiting on Desk). */
   badge?: number;
 };
+
+/** Small red dot flagging an unfinished profile photo on the help/menu chrome. */
+function PhotoBadgeDot() {
+  return (
+    <span
+      aria-label="Add your photo"
+      className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-destructive ring-2 ring-background"
+    />
+  );
+}
 
 /** Count pill riding a nav icon. */
 function NavBadge({ count }: { count?: number }) {
@@ -112,7 +130,7 @@ const CANVASSER_ALLOWED = [
 const SALES_REP_ALLOWED = ["/close-kombat", "/my-purpose"];
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { user, role, realRole, displayName, accessRevoked } = useAuth();
+  const { user, role, realRole, displayName, realDisplayName, accessRevoked } = useAuth();
   const { theme, toggleTheme } = useTheme();
   // Dojo submissions awaiting review — 0 for everyone outside the Admin tier.
   const pendingDojo = usePendingDojoCount();
@@ -156,10 +174,22 @@ export function AppShell({ children }: { children: ReactNode }) {
   // Respawn reminder (Fri 6 PM → Sun 12 PM): held behind intro + plan +
   // purpose; active while UNSETTLED so the page tour waits for it too.
   const [respawnPopupActive, setRespawnPopupActive] = useState(false);
+  // Blocking profile-photo gate (owner 2026-10-06): the TOP-priority first-open
+  // moment. While it owns the screen (or is still deciding for a gated player),
+  // every cutscene below is held back so none burns its once-ever flag beneath
+  // it — the photo step comes first, then the intro, EOD recap, etc.
+  const [photoGateActive, setPhotoGateActive] = useState(false);
   // Compare against the COLLAPSED real role: a confirmer's `role` is always
   // "canvasser" (privilegeRole in useAuth) and must not read as a View As
   // override.
   const isOverridden = role !== privilegeRole(realRole) && realRole !== null;
+  // Red dot on the personal chrome (help/menu) when this player still owes a
+  // photo — a quiet second nudge that mainly shows once an admin has enabled
+  // "Remind me later" (otherwise the blocking gate is up instead). Gated on the
+  // REAL role so a View-As preview never paints it.
+  const photoStatus = useMyPhotoStatus(user?.id, realDisplayName);
+  const needsPhotoBadge =
+    !!user && requiresProfilePhoto(realRole) && !photoStatus.loading && !photoStatus.hasPhoto;
   // Chrome diet (owner, 2026-10-01): with no override active the full
   // View-As bar is dead weight above every page — collapse it to a slim
   // chip and expand on tap. An active override always shows the full bar.
@@ -480,18 +510,20 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <button
                   onClick={startCanvasserTutorial}
                   data-tour="help"
-                  className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
+                  className="relative min-w-11 min-h-11 inline-flex items-center justify-center rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
                   aria-label="Replay the app tutorial"
                 >
                   <CircleHelp className="w-5 h-5" />
+                  {needsPhotoBadge && <PhotoBadgeDot />}
                 </button>
               ) : hasMenu ? (
                 <button
                   onClick={() => setMenuOpen(true)}
-                  className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
+                  className="relative min-w-11 min-h-11 inline-flex items-center justify-center rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
                   aria-label="Open menu"
                 >
                   <Menu className="w-5 h-5" />
+                  {needsPhotoBadge && <PhotoBadgeDot />}
                 </button>
               ) : (
                 <div className="w-11" />
@@ -575,19 +607,21 @@ export function AppShell({ children }: { children: ReactNode }) {
                   <button
                     onClick={startCanvasserTutorial}
                     data-tour="help"
-                    className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
+                    className="relative min-w-11 min-h-11 inline-flex items-center justify-center rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
                     aria-label="Replay the app tutorial"
                   >
                     <CircleHelp className="w-5 h-5" />
+                    {needsPhotoBadge && <PhotoBadgeDot />}
                   </button>
                 )}
                 {hasMenu && (
                   <button
                     onClick={() => setMenuOpen(true)}
-                    className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
+                    className="relative min-w-11 min-h-11 inline-flex items-center justify-center rounded-md hover:bg-surface-elevated text-muted-foreground hover:text-foreground"
                     aria-label="Open menu"
                   >
                     <Menu className="w-5 h-5" />
+                    {needsPhotoBadge && <PhotoBadgeDot />}
                   </button>
                 )}
                 <div className="text-right">
@@ -636,6 +670,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           user && navItems.length > 1 ? "pb-28" : "pb-8"
         }`}
       >
+        {/* Second nudge: a home banner for anyone still missing a photo (only
+            reachable when an admin has enabled "Remind me later"). */}
+        {user && <PhotoNeededBanner />}
         {children}
       </main>
 
@@ -688,6 +725,10 @@ export function AppShell({ children }: { children: ReactNode }) {
           `?ck_anim=1` previews the kick from any account, `?welcome_anim=1`
           still previews the van from non-rep accounts. */}
       {user &&
+        // The blocking photo gate comes first: hold the once-ever intro until
+        // the gate has stepped aside, so it never plays (and burns its flag)
+        // underneath the full-screen photo step.
+        !photoGateActive &&
         // Wait for a role: a brand-new account used to burn its once-ever
         // intro in the role-less waiting room, then get hard-reloaded into
         // the real app with the flag already spent. Now the intro plays on
@@ -711,7 +752,11 @@ export function AppShell({ children }: { children: ReactNode }) {
           stamps. `heldBack` sequences it after the morning intro. */}
       {user &&
         (isEodRecapForced() || (realRole !== null && privilegeRole(realRole) !== "sales_rep")) && (
-          <EodRecapFx userId={user.id} heldBack={introActive} onActiveChange={setEodActive} />
+          <EodRecapFx
+            userId={user.id}
+            heldBack={introActive || photoGateActive}
+            onActiveChange={setEodActive}
+          />
         )}
 
       {/* Personal Daily Wrap cinematic — canvassers & captains, once per LA day
@@ -726,18 +771,19 @@ export function AppShell({ children }: { children: ReactNode }) {
               privilegeRole(realRole) === "captain"))) && (
           <EodWrapGate
             userId={user.id}
-            heldBack={introActive || eodActive}
+            heldBack={introActive || eodActive || photoGateActive}
             onActiveChange={setWrapActive}
           />
         )}
 
-      {/* Fighter photo request — fires once per login for the selfie-sourced
-          crew (canvassers, captains, Managers) who have no fighter yet, on
-          whatever page they land on. Self-gated on the REAL role + fighter
-          status; held behind the intro, EOD recap, AND the Daily Wrap cinematic
-          so it never stacks on the first-open cutscenes. Skippable; returns
-          next login until they add a photo. */}
-      {user && <FighterPhotoPrompt heldBack={introActive || eodActive || wrapActive} />}
+      {/* Blocking profile-photo gate (owner 2026-10-06) — the full-screen
+          "Snap your fighter photo" step. Self-gated on the REAL role + photo
+          status (canvassers, confirmers, captains, sales reps, Managers; owner
+          exempt). It owns the screen until a photo is saved — no skip by
+          default — and reports `onActiveChange` so the cutscenes above stay
+          held behind it. Replaces the old skippable FighterPhotoPrompt.
+          Previews: ?photo_gate=1 / =error / =unlocked. */}
+      {user && <ProfilePhotoGate onActiveChange={setPhotoGateActive} />}
 
       {/* Weekly Action Plan popup — reps only, once per PLAN week (Sunday
           shows the upcoming week). Sequenced after the door-kick intro via
@@ -747,7 +793,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       {user && (isWeeklyPlanPopupForced() || privilegeRole(realRole) === "sales_rep") && (
         <WeeklyPlanPopup
           userId={user.id}
-          heldBack={introActive}
+          heldBack={introActive || photoGateActive}
           onActiveChange={setPlanPopupActive}
         />
       )}
@@ -762,7 +808,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       {user && (isPurposeReminderForced() || privilegeRole(realRole) === "sales_rep") && (
         <PurposeReminderCard
           userId={user.id}
-          heldBack={introActive || planPopupActive}
+          heldBack={introActive || planPopupActive || photoGateActive}
           onActiveChange={setPurposeReminderActive}
         />
       )}
@@ -775,7 +821,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       {user && (isRespawnPopupForced() || privilegeRole(realRole) === "sales_rep") && (
         <RespawnPopup
           userId={user.id}
-          heldBack={introActive || planPopupActive || purposeReminderActive}
+          heldBack={introActive || planPopupActive || purposeReminderActive || photoGateActive}
           onActiveChange={setRespawnPopupActive}
         />
       )}
@@ -792,6 +838,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           const tourRole = privilegeRole(realRole);
           return (
             (tourRole === "canvasser" || tourRole === "captain" || tourRole === "sales_rep") &&
+            !photoGateActive &&
             !introActive &&
             !eodActive &&
             !wrapActive &&

@@ -20,6 +20,7 @@ import { MovePlayersSheet } from "@/components/MovePlayersSheet";
 import { AddPlayerDialog } from "@/components/AddPlayerDialog";
 import { PlayerSheet, type PlayerGroup } from "@/components/PlayerSheet";
 import { RepAvatar } from "@/components/RepAvatar";
+import { ProfilePhotoAdmin } from "@/components/profile-photo/ProfilePhotoAdmin";
 import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
 import { VansPanel } from "@/components/VansPanel";
 import { RenameCanvasserDialog, type NameGroupRef } from "@/components/RenameCanvasserDialog";
@@ -383,6 +384,10 @@ function UsersPage() {
           </p>
         </ArcadePanel>
       )}
+
+      {/* ---- Profile-photo gate: who still owes a photo + the escape-valve
+           toggle (owner 2026-10-06) ---- */}
+      <ProfilePhotoAdmin />
 
       {/* ---- The roster ---- */}
       <ArcadePanel title={`Players (${visible.length})`}>
