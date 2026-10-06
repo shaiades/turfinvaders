@@ -1389,12 +1389,38 @@
   animation: vw-streak 1.1s ease-in-out infinite;
 }
 
+/* The GTA "WASTED" stamp slamming onto the dethroned crew's card. The inline
+   skewX(8deg) un-skews it inside the parallelogram card, so every step keeps it. */
+@keyframes vw-wasted {
+  0% {
+    opacity: 0;
+    transform: skewX(8deg) scale(1.6);
+  }
+  22% {
+    opacity: 1;
+    transform: skewX(8deg) scale(1);
+  }
+  30% {
+    transform: skewX(8deg) translateX(-3px);
+  }
+  38% {
+    transform: skewX(8deg) translateX(3px);
+  }
+  46% {
+    transform: skewX(8deg) translateX(0);
+  }
+}
+.vw-wasted {
+  animation: vw-wasted 0.55s ease-out;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .vw-nitro,
   .vw-lurch,
   .vw-spark,
   .vw-spray-in,
-  .vw-streak {
+  .vw-streak,
+  .vw-wasted {
     animation: none;
   }
 }

@@ -1,24 +1,29 @@
-// Van Wars — the weekly street race (§3). Crews race down a lit drag strip:
-// a van's position is its war score (points per active knocker, so a small
-// crew can take the block), it lurches with a nitrous burst when the crew
-// surges and sparks on a sale, the leader wears the crown and the dethroned
-// crew gets SMOKED, and a full-width spray tag fires on a lead change with a
-// hiss + haptic. Reduced-motion drops the animated strip for the static
-// color-bar standings below it. Numbers ride useVanWars → the same week ladder
-// the Solo board uses, so the two can never disagree. Captains can fire one
-// preset callout a day at the leader. The Wall of Fame reads vanwars_wins
-// (dark until the owner applies the migration + the Saturday crowning lands).
+// Van Wars — the weekly street race (§3), Grand Theft Auto skin (owner, 2026-10-05):
+// Vice City neon, a Pricedown-style heavy title, GTA cash-green crew banks,
+// wanted-level heat stars, angled character-select crew cards, and the iconic
+// WASTED stamp on the crew that just lost #1. Crews still RACE down the strip —
+// a van's position is its war score (points per active knocker, config-
+// switchable; sit 1 / sale 2) — lurching with a nitrous burst when a crew
+// surges and sparking on a sale, with a full-width "TOOK THE BLOCK" lead-change
+// banner (hiss + haptic). Reduced motion drops the strip for the static cards.
+// Vans race under their CAPTAIN's name. Numbers ride useVanWars → the week
+// ladder the Solo board uses. The Wall / Trophy case reads vanwars_wins (dark
+// until the migration + Saturday crowning land). Captains fire one callout a day.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { useVanWars, type VanWarWin } from "@/hooks/useVanWars";
-import { type VanWarStanding } from "@/lib/vanwars";
-import { ArcadeCard, ArcadePanel, ArcadeSkeleton } from "@/components/arcade";
+import { ArcadeCard, ArcadeSkeleton } from "@/components/arcade";
 import { playArcadeSound, haptic } from "@/lib/arcade-fx";
 import { laTodayISO } from "@/lib/dates";
 
-const fmtVol = (n: number) =>
+const CASH = "#9bf00b";
+const WANTED = "#ffd23d";
+const WASTED = "#ff2b3d";
+const GTA = "'Arial Black', Impact, 'Franklin Gothic Heavy', sans-serif";
+
+const fmtCash = (n: number) =>
   n >= 10_000 ? `$${Math.round(n / 1000)}K` : `$${Math.round(n).toLocaleString()}`;
 
 const CALLOUTS = [
@@ -49,19 +54,39 @@ function VanSprite({ color, w = 84 }: { color: string; w?: number }) {
   );
 }
 
+/** Leader "heat" — more crews chasing = hotter. Flavor, 1–5 stars. */
+function WantedStars({ n }: { n: number }) {
+  const filled = Math.max(1, Math.min(5, n));
+  return (
+    <span aria-hidden style={{ letterSpacing: 2, fontSize: 15 }}>
+      {[0, 1, 2, 3, 4].map((i) => (
+        <span
+          key={i}
+          style={{
+            color: i < filled ? WANTED : "#3a2b4a",
+            textShadow: i < filled ? `0 0 8px ${WANTED}, 0 0 1px #000` : "none",
+          }}
+        >
+          ★
+        </span>
+      ))}
+    </span>
+  );
+}
+
 export function VanWarsRace() {
   const { user, realRole } = useAuth();
   const reduced = usePrefersReducedMotion();
   const { standings, leader, config, wins, loading } = useVanWars();
 
-  // ── Live event detection: diff successive standings for a per-crew surge
-  // (war up = nitro, $ up = sparks) and a change of leader (the spray).
+  // ── Live events: per-crew surge (war up = nitro, $ up = sparks) + a change
+  // of leader (the TOOK-THE-BLOCK banner + the WASTED stamp on the loser).
   const prevWar = useRef(new Map<string, number>());
   const prevVol = useRef(new Map<string, number>());
   const prevLeader = useRef<string | null>(null);
   const seeded = useRef(false);
   const [surge, setSurge] = useState<Record<string, "war" | "sale">>({});
-  const [smoked, setSmoked] = useState<string | null>(null);
+  const [wasted, setWasted] = useState<string | null>(null);
   const [spray, setSpray] = useState<{ title: string; color: string; sub: string } | null>(null);
   const sprayTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const surgeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -71,7 +96,10 @@ export function VanWarsRace() {
     playArcadeSound("spray");
     haptic([30, 40, 30]);
     clearTimeout(sprayTimer.current);
-    sprayTimer.current = setTimeout(() => setSpray(null), 2600);
+    sprayTimer.current = setTimeout(() => {
+      setSpray(null);
+      setWasted(null);
+    }, 2800);
   };
 
   useEffect(() => {
@@ -95,8 +123,8 @@ export function VanWarsRace() {
         surgeTimer.current = setTimeout(() => setSurge({}), 850);
       }
       if (prevLeader.current && lead && lead !== prevLeader.current) {
-        setSmoked(prevLeader.current);
-        fireSpray(`${lead}'S CREW TOOK THE BLOCK`, standings[0].color, "New leader on the strip");
+        setWasted(prevLeader.current);
+        fireSpray(`${lead}'S CREW TOOK THE BLOCK`, standings[0].color, "New #1 on the strip");
       }
     }
 
@@ -114,7 +142,7 @@ export function VanWarsRace() {
     [],
   );
 
-  // ── Captain callout: one preset a day, sprayed at the leader.
+  // ── Captain callout: one preset a day, at the leader.
   const isCaptain = realRole === "captain";
   const calloutKey = `ti_vw_callout:${user?.id ?? "anon"}:${laTodayISO()}`;
   const [calloutUsed, setCalloutUsed] = useState(false);
@@ -136,6 +164,12 @@ export function VanWarsRace() {
     }
   };
 
+  const leaderWar = standings.length ? Math.max(1e-6, standings[0].war) : 1;
+  const posPct = useMemo(
+    () => (w: number) => Math.min(88, Math.max(24, 30 + (w / leaderWar) * 56)),
+    [leaderWar],
+  );
+
   if (loading && standings.length === 0) {
     return <ArcadeSkeleton className="h-96 w-full" />;
   }
@@ -147,55 +181,79 @@ export function VanWarsRace() {
     );
   }
 
-  const leaderWar = Math.max(1e-6, standings[0].war);
-  const posPct = (w: number) => Math.min(88, Math.max(24, 30 + (w / leaderWar) * 56));
-
   return (
     <div className="space-y-4">
-      {/* ── The drag strip (motion only) ───────────────────────────────── */}
-      {!reduced && (
+      {/* ── GTA title ─────────────────────────────────────────────────── */}
+      <div className="text-center">
         <div
-          className="relative overflow-hidden rounded-2xl border border-border"
           style={{
-            background: "linear-gradient(180deg,#0a0f20 0%,#0a1326 30%,#070b16 62%,#05080f 100%)",
+            fontFamily: GTA,
+            fontStyle: "italic",
+            fontSize: 44,
+            lineHeight: 0.85,
+            color: "#fff",
+            letterSpacing: "0.01em",
+            WebkitTextStroke: "2.5px #0a0712",
+            textShadow: "4px 4px 0 rgba(255,46,154,.55), 7px 7px 0 rgba(0,0,0,.4)",
           }}
         >
-          {/* skyline + horizon glow */}
+          VAN WARS
+        </div>
+        <div
+          className="mt-1 font-display text-[9px] uppercase tracking-[0.26em] text-[color:var(--pink,#ff2e9a)]"
+          style={{ color: "#ff5cb4" }}
+        >
+          This week · crowned Saturday 6 PM
+        </div>
+      </div>
+
+      {/* ── Heat + top-crew bank HUD ──────────────────────────────────── */}
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="font-display text-[8px] uppercase tracking-[0.2em] text-muted-foreground">
+            Heat · {standings[0].name}
+          </div>
+          <WantedStars n={standings.length} />
+        </div>
+        <div className="text-right">
+          <div className="font-display text-[8px] uppercase tracking-[0.2em] text-muted-foreground">
+            Top crew bank
+          </div>
           <div
-            className="pointer-events-none absolute inset-x-0 top-0 h-28"
+            style={{
+              fontFamily: GTA,
+              fontSize: 22,
+              color: CASH,
+              textShadow: "0 2px 0 #1f3d00, 0 0 14px rgba(155,240,11,.35)",
+            }}
+          >
+            {fmtCash(standings[0].vol)}
+          </div>
+        </div>
+      </div>
+
+      {/* ── The race strip (motion only) ─────────────────────────────── */}
+      {!reduced && (
+        <div
+          className="relative overflow-hidden rounded-2xl border"
+          style={{
+            borderColor: "rgba(255,120,220,.22)",
+            background: "linear-gradient(180deg,#160a24 0%,#12091f 45%,#07040f 100%)",
+          }}
+        >
+          <div
+            className="pointer-events-none absolute inset-x-0 top-0 h-24"
             style={{
               background:
-                "radial-gradient(600px 120px at 30% 60%, color-mix(in oklab,var(--neon) 16%,transparent), transparent 70%),radial-gradient(500px 120px at 82% 50%, color-mix(in oklab,var(--kombat-red) 18%,transparent), transparent 70%)",
+                "radial-gradient(500px 120px at 78% 40%, rgba(255,46,154,.22), transparent 70%),radial-gradient(420px 120px at 18% 60%, rgba(25,227,255,.16), transparent 70%)",
             }}
           />
-          {/* title */}
-          <div className="relative z-10 px-3 pt-3 text-center">
-            <div
-              className="font-display text-3xl italic leading-none"
-              style={{
-                background:
-                  "linear-gradient(180deg,#ffffff 10%,#d6e8ff 40%,#8094b4 56%,#eaf4ff 74%,#aebfdc 100%)",
-                WebkitBackgroundClip: "text",
-                backgroundClip: "text",
-                color: "transparent",
-                filter: "drop-shadow(0 0 16px color-mix(in oklab,var(--neon) 55%,transparent))",
-              }}
-            >
-              VAN WARS
-            </div>
-            <div className="mt-0.5 font-display text-[9px] uppercase tracking-[0.3em] text-neon">
-              This week · crowned Saturday 6 PM
-            </div>
-          </div>
-
-          {/* lanes */}
-          <div className="relative z-10 mt-2 flex flex-col gap-0.5 px-1 pb-3">
+          <div className="relative z-10 flex flex-col gap-0.5 px-1 py-2">
             {standings.map((v, i) => {
               const isLeader = i === 0;
               const ev = surge[v.name];
               return (
                 <div key={v.name} className="relative h-12">
-                  {/* finish line */}
                   <span
                     aria-hidden
                     className="absolute inset-y-1 right-2 w-2.5"
@@ -219,15 +277,18 @@ export function VanWarsRace() {
                       >
                         <path
                           d="M1 13 L3 3 L8 8 L11 1 L14 8 L19 3 L21 13 Z"
-                          fill="var(--kombat-gold)"
+                          fill={WANTED}
                           stroke="#6b4e00"
                           strokeWidth="1"
                         />
                       </svg>
                     )}
                     <span
-                      className="font-display text-[12px] italic uppercase leading-none"
                       style={{
+                        fontFamily: GTA,
+                        fontStyle: "italic",
+                        fontSize: 12,
+                        lineHeight: 0.9,
                         color: v.color,
                         WebkitTextStroke: "1px rgba(2,6,14,.85)",
                         textShadow: `0 0 10px ${v.color}`,
@@ -236,13 +297,11 @@ export function VanWarsRace() {
                       {v.name}
                     </span>
                     <div className="relative">
-                      {/* speed streaks */}
                       <span
                         aria-hidden
                         className="vw-streak absolute right-[58%] top-[46%] h-0.5 w-16 rounded"
                         style={{ background: `linear-gradient(90deg,transparent,${v.color})` }}
                       />
-                      {/* nitro burst */}
                       {ev === "war" && (
                         <span
                           aria-hidden
@@ -261,25 +320,17 @@ export function VanWarsRace() {
                       <span className={ev === "sale" ? "vw-spark inline-block" : "inline-block"}>
                         <VanSprite color={v.color} w={isLeader ? 86 : 78} />
                       </span>
-                      {/* underglow */}
                       <span
                         aria-hidden
                         className="absolute -bottom-0.5 left-1/2 h-3 w-20 -translate-x-1/2 rounded-full"
                         style={{ background: v.color, filter: "blur(5px)", opacity: 0.8 }}
                       />
                     </div>
-                    {smoked === v.name && (
-                      <span className="mt-0.5 font-display text-[9px] uppercase tracking-widest text-muted-foreground">
-                        — SMOKED —
-                      </span>
-                    )}
                   </div>
                 </div>
               );
             })}
           </div>
-
-          {/* vignette */}
           <div
             className="pointer-events-none absolute inset-0"
             style={{
@@ -287,20 +338,23 @@ export function VanWarsRace() {
                 "radial-gradient(130% 90% at 50% 40%, transparent 55%, rgba(0,0,0,.6) 100%)",
             }}
           />
-
-          {/* lead-change / callout spray */}
           {spray && (
             <div
-              className="vw-spray-in absolute inset-x-3 bottom-3 z-20 rounded-xl border p-3"
+              className="vw-spray-in absolute inset-x-3 bottom-3 z-20 rounded-xl p-3"
               style={{
-                borderColor: `color-mix(in oklab, ${spray.color} 55%, transparent)`,
-                background: `linear-gradient(100deg, color-mix(in oklab, ${spray.color} 22%, transparent), rgba(8,14,26,.92) 62%)`,
+                borderLeft: `5px solid ${spray.color}`,
+                background: `linear-gradient(90deg, color-mix(in oklab, ${spray.color} 22%, transparent), rgba(8,4,16,.92) 62%)`,
                 boxShadow: `0 10px 30px -14px ${spray.color}`,
               }}
             >
               <div
-                className="font-display text-xl italic leading-none"
-                style={{ color: "#eafcff", textShadow: `0 0 20px ${spray.color}` }}
+                style={{
+                  fontFamily: GTA,
+                  fontStyle: "italic",
+                  fontSize: 20,
+                  color: "#fff",
+                  textShadow: `0 0 18px ${spray.color}`,
+                }}
               >
                 {spray.title}
               </div>
@@ -315,14 +369,113 @@ export function VanWarsRace() {
         </div>
       )}
 
-      {/* ── Standings HUD (also the reduced-motion view) ───────────────── */}
-      <StandingsHud
-        standings={standings}
-        perHead={config.mode === "per_head"}
-        leaderWar={leaderWar}
-      />
+      {/* ── Standings — GTA character-select cards ────────────────────── */}
+      <div className="space-y-2">
+        {standings.map((v, i) => {
+          const isLeader = i === 0;
+          return (
+            <div
+              key={v.name}
+              className="relative overflow-hidden border-2"
+              style={{
+                transform: "skewX(-8deg)",
+                borderColor: isLeader ? "rgba(255,210,61,.6)" : "rgba(255,255,255,.1)",
+                background: "linear-gradient(90deg,rgba(255,255,255,.04),transparent)",
+                boxShadow: isLeader ? `0 0 22px -8px ${WANTED}` : "none",
+              }}
+            >
+              <span
+                aria-hidden
+                className="absolute inset-y-0 left-0 w-[7px]"
+                style={{ background: v.color, boxShadow: `0 0 12px ${v.color}` }}
+              />
+              <div
+                className="flex items-center gap-3 px-4 py-2.5"
+                style={{ transform: "skewX(8deg)" }}
+              >
+                <span
+                  style={{
+                    fontFamily: GTA,
+                    fontSize: 24,
+                    width: 22,
+                    textAlign: "center",
+                    color: isLeader ? WANTED : "var(--muted-foreground)",
+                  }}
+                >
+                  {i + 1}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div
+                    className="truncate"
+                    style={{
+                      fontFamily: GTA,
+                      fontStyle: "italic",
+                      fontSize: 20,
+                      lineHeight: 0.9,
+                      color: v.color,
+                    }}
+                  >
+                    {v.name}
+                  </div>
+                  <div className="mt-0.5 font-display text-[9px] uppercase tracking-wide text-muted-foreground">
+                    {v.pts} pts · {v.knockers} {v.knockers === 1 ? "knocker" : "knockers"} ·{" "}
+                    <span style={{ color: CASH }}>{v.vol > 0 ? fmtCash(v.vol) : "desk"}</span>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div style={{ fontFamily: GTA, fontSize: 26, lineHeight: 1, color: v.color }}>
+                    {Math.round(v.war)}
+                  </div>
+                  <div className="font-display text-[7px] uppercase tracking-[0.2em] text-muted-foreground">
+                    War / head
+                  </div>
+                </div>
+                {v.sit.grade && (
+                  <span
+                    style={{
+                      fontFamily: GTA,
+                      fontSize: 18,
+                      width: 24,
+                      textAlign: "center",
+                      borderRadius: 4,
+                      color: "#0b0f18",
+                      background: v.color,
+                    }}
+                  >
+                    {v.sit.grade}
+                  </span>
+                )}
+              </div>
+              {wasted === v.name && (
+                <div
+                  className="vw-wasted absolute inset-0 flex items-center justify-center"
+                  style={{ background: "rgba(6,3,10,.62)", transform: "skewX(8deg)" }}
+                >
+                  <span
+                    style={{
+                      fontFamily: GTA,
+                      fontStyle: "italic",
+                      fontSize: 26,
+                      color: WASTED,
+                      letterSpacing: "0.04em",
+                      WebkitTextStroke: "2px #2a0007",
+                      textShadow: `0 0 18px ${WASTED}`,
+                    }}
+                  >
+                    WASTED
+                  </span>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        <p className="font-display text-[10px] leading-relaxed text-muted-foreground">
+          War score = points per active knocker, so a small crew can still jack #1. Ties break on
+          sit rate.
+        </p>
+      </div>
 
-      {/* ── Captain callout ────────────────────────────────────────────── */}
+      {/* ── Captain callout ───────────────────────────────────────────── */}
       {isCaptain && (
         <div className="space-y-2">
           <div className="font-display text-[9px] uppercase tracking-[0.2em] text-muted-foreground">
@@ -337,150 +490,80 @@ export function VanWarsRace() {
                 type="button"
                 disabled={calloutUsed}
                 onClick={() => fireCallout(c)}
-                className="min-h-11 flex-1 rounded-lg border px-3 py-2 font-display text-[11px] italic uppercase tracking-wider transition disabled:opacity-40 md:min-h-0"
+                className="min-h-11 flex-1 border-2 px-3 py-2 disabled:opacity-40 md:min-h-0"
                 style={{
-                  color: "var(--kombat-red)",
-                  borderColor: "color-mix(in oklab, var(--kombat-red) 45%, transparent)",
-                  background: "color-mix(in oklab, var(--kombat-red) 10%, transparent)",
+                  transform: "skewX(-8deg)",
+                  color: "#ffa6d6",
+                  borderColor: "rgba(255,46,154,.5)",
+                  background: "rgba(255,46,154,.12)",
                 }}
               >
-                {c}
+                <span
+                  style={{
+                    display: "inline-block",
+                    transform: "skewX(8deg)",
+                    fontFamily: GTA,
+                    fontStyle: "italic",
+                    fontSize: 13,
+                  }}
+                >
+                  {c}
+                </span>
               </button>
             ))}
           </div>
         </div>
       )}
 
-      {/* ── Wall of Fame ───────────────────────────────────────────────── */}
-      <WallOfFame wins={wins} />
+      {/* ── Trophy case (Wall of Fame) ────────────────────────────────── */}
+      <TrophyCase wins={wins} />
     </div>
   );
 }
 
-function StandingsHud({
-  standings,
-  perHead,
-  leaderWar,
-}: {
-  standings: VanWarStanding[];
-  perHead: boolean;
-  leaderWar: number;
-}) {
-  return (
-    <ArcadeCard asChild className="overflow-hidden p-0">
-      <section>
-        <header className="flex items-center justify-between border-b border-border px-4 py-3">
-          <h2 className="font-display text-xs uppercase italic tracking-widest text-neon">
-            Standings
-          </h2>
-          <span className="font-display text-[9px] uppercase tracking-widest text-muted-foreground">
-            War {perHead ? "/ head" : "total"} · sit 1 · sale 2
-          </span>
-        </header>
-        <ol>
-          {standings.map((v, i) => (
-            <li
-              key={v.name}
-              className="relative flex items-center gap-2.5 border-t border-border/50 px-4 py-2.5 first:border-t-0"
-            >
-              <span
-                className={`w-4 text-center font-display text-sm tabular-nums ${i === 0 ? "text-[var(--kombat-gold)]" : "text-muted-foreground"}`}
-              >
-                {i + 1}
-              </span>
-              <span
-                aria-hidden
-                className="h-2.5 w-2.5 rotate-45"
-                style={{ background: v.color, boxShadow: `0 0 8px ${v.color}` }}
-              />
-              <span
-                className="min-w-0 flex-1 truncate font-display text-sm uppercase italic tracking-wide"
-                style={{ color: i === 0 ? v.color : undefined }}
-              >
-                {v.name}
-              </span>
-              <span className="font-display text-base tabular-nums" style={{ color: v.color }}>
-                {Math.round(v.war)}
-              </span>
-              <span className="flex items-center gap-2 font-display text-[10px] tabular-nums text-muted-foreground">
-                <span>
-                  {v.pts}p · {v.vol > 0 ? fmtVol(v.vol) : "desk"}
-                </span>
-                {v.sit.grade && (
-                  <span
-                    className="rounded px-1 text-[var(--kombat-black)]"
-                    style={{ background: v.color }}
-                    title={`${v.sit.sits}/${v.sit.leads} leads sat`}
-                  >
-                    {v.sit.grade}
-                  </span>
-                )}
-              </span>
-              <span
-                aria-hidden
-                className="absolute inset-x-0 bottom-0 h-0.5 rounded"
-                style={{
-                  width: `${Math.min(100, (v.war / leaderWar) * 100)}%`,
-                  background: v.color,
-                  boxShadow: `0 0 8px ${v.color}`,
-                }}
-              />
-            </li>
-          ))}
-        </ol>
-        <p className="border-t border-border px-4 py-2.5 font-display text-[10px] leading-relaxed text-muted-foreground">
-          War score = points per active knocker, so a small crew can still take the block. Ties
-          break on sit rate.
-        </p>
-      </section>
-    </ArcadeCard>
-  );
-}
-
-function WallOfFame({ wins }: { wins: VanWarWin[] }) {
+function TrophyCase({ wins }: { wins: VanWarWin[] }) {
   return (
     <div
       className="relative overflow-hidden rounded-2xl p-4"
       style={{
-        border: "1px solid color-mix(in oklab, var(--kombat-gold) 25%, transparent)",
+        border: `2px solid rgba(255,210,61,.3)`,
         background:
-          "linear-gradient(180deg,rgba(0,0,0,.35),rgba(0,0,0,.6)),repeating-linear-gradient(92deg,#191c22 0 3px,#15181d 3px 6px),linear-gradient(180deg,#20242b,#111318)",
+          "linear-gradient(180deg,rgba(0,0,0,.45),rgba(0,0,0,.65)),repeating-linear-gradient(90deg,#1a1024 0 2px,#140d1d 2px 5px)",
       }}
     >
-      <div className="relative mb-3 font-display text-[10px] uppercase tracking-[0.26em] text-[#d7c29a]">
-        The Wall of Fame
+      <div
+        className="mb-3 font-display text-[10px] uppercase tracking-[0.24em]"
+        style={{ color: "#ffcf7a" }}
+      >
+        ★ Trophy case — most wanted
       </div>
       {wins.length === 0 ? (
-        <p className="relative text-xs text-muted-foreground">
-          No champions tagged yet — the first weekly winner gets sprayed here after Saturday's 6 PM
+        <p className="text-xs text-muted-foreground">
+          No crews tagged yet — the first weekly champ gets mounted here after Saturday's 6 PM
           crowning.
         </p>
       ) : (
-        <div className="relative flex flex-col gap-3">
+        <div className="flex flex-col gap-2.5">
           {wins.map((w, i) => {
             const king = w.kind === "king";
-            const color = w.color ?? "var(--kombat-gold)";
+            const color = w.color ?? WANTED;
             return (
-              <div
-                key={`${w.week_start}-${w.kind}-${i}`}
-                className="font-display text-xl italic uppercase leading-none"
-                style={{
-                  transform: "rotate(-2.5deg)",
-                  color: king ? "var(--kombat-gold)" : color,
-                  WebkitTextStroke: "1.1px rgba(0,0,0,.6)",
-                  textShadow: king
-                    ? "0 0 20px color-mix(in oklab,var(--kombat-gold) 80%,transparent)"
-                    : `0 0 14px ${color}`,
-                }}
-              >
-                {king ? `TURF KING · ${w.period ?? ""} · ${w.team_name}` : w.team_name}
+              <div key={`${w.week_start}-${w.kind}-${i}`} className="flex items-center gap-3">
+                <span className="w-16 font-display text-[9px] uppercase tracking-wide text-muted-foreground">
+                  {king ? "Turf King" : `Wk ${w.week_start.slice(5)}`}
+                </span>
                 <span
-                  className="mt-1 block font-display text-[9px] not-italic tracking-[0.14em] text-[#b7a079]"
-                  style={{ transform: "rotate(2.5deg)", WebkitTextStroke: "0" }}
+                  style={{
+                    fontFamily: GTA,
+                    fontStyle: "italic",
+                    fontSize: 18,
+                    color: king ? WANTED : color,
+                    textShadow: king ? `0 0 16px rgba(255,210,61,.6)` : `0 0 10px ${color}`,
+                  }}
                 >
-                  {king
-                    ? "Monthly belt — most weekly wins"
-                    : `Week of ${w.week_start}${w.war_score != null ? ` · war ${Math.round(w.war_score)}` : ""}`}
+                  {w.team_name}
+                  {king && w.period ? ` · ${w.period}` : ""}
+                  {!king && w.war_score != null ? ` · war ${Math.round(w.war_score)}` : ""}
                 </span>
               </div>
             );
