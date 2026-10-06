@@ -18,6 +18,7 @@ export function RepAvatar({
   textClassName = "text-xs",
   rounded = "full",
   ring = false,
+  missing = false,
 }: {
   name: string;
   cartoon?: RepCartoon;
@@ -39,6 +40,11 @@ export function RepAvatar({
   textClassName?: string;
   rounded?: "full" | "lg" | "none";
   ring?: boolean;
+  /** No photo on file: show a grey silhouette instead of the initials circle
+   *  (leaderboard "Photo needed" treatment, owner 2026-10-06). Only used where
+   *  a surface wants to flag the gap — everywhere else keeps the initials
+   *  fallback, so the app-wide look is unchanged. */
+  missing?: boolean;
 }) {
   const [broken, setBroken] = useState(false);
   const url =
@@ -58,8 +64,12 @@ export function RepAvatar({
         ring && "ring-2 ring-kombat-gold/60",
         className,
       )}
-      style={!showImg ? { background: assigneeColor(name) } : undefined}
-      aria-label={name}
+      style={
+        !showImg
+          ? { background: missing ? "var(--surface-elevated)" : assigneeColor(name) }
+          : undefined
+      }
+      aria-label={missing && !showImg ? `${name} — photo needed` : name}
     >
       {showImg ? (
         <img
@@ -73,6 +83,14 @@ export function RepAvatar({
           style={{ objectPosition }}
           onError={() => setBroken(true)}
         />
+      ) : missing ? (
+        // Grey silhouette — no photo on file.
+        <svg viewBox="0 0 24 24" className="h-[70%] w-[70%] text-muted-foreground/60" aria-hidden>
+          <path
+            fill="currentColor"
+            d="M12 12.75a4.25 4.25 0 1 0 0-8.5 4.25 4.25 0 0 0 0 8.5ZM4.5 20.25a7.5 7.5 0 0 1 15 0 .75.75 0 0 1-.75.75H5.25a.75.75 0 0 1-.75-.75Z"
+          />
+        </svg>
       ) : (
         <span className={cn("font-display font-bold leading-none text-black", textClassName)}>
           {initials(name)}

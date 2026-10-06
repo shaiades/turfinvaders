@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { ArcadeCard, ArcadeSkeleton } from "@/components/arcade";
 import { RepAvatar } from "@/components/RepAvatar";
-import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
+import { useRepCartoons, cartoonFor, type RepCartoon } from "@/hooks/useRepCartoons";
 import { BossMeter } from "@/components/BossMeter";
 import { VanWarsRace } from "@/components/VanWarsRace";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
@@ -10,6 +10,11 @@ import { useArcadeLadder, type LadderRow, type RangeKey } from "@/hooks/useCanva
 import { captureMorningRank } from "@/hooks/useWrapData";
 import { haptic } from "@/lib/arcade-fx";
 import { BOSS_HP } from "@/lib/canvasserPay";
+
+/** No fighter art on file → the leaderboard shows a grey "Photo needed"
+ *  silhouette (owner 2026-10-06). A still-generating cartoon reads the same for
+ *  the brief window before it lands — acceptable; the nudge is gentle. */
+const noCartoonArt = (c: RepCartoon | undefined): boolean => !(c?.portrait || c?.full);
 
 /**
  * The canvasser-facing arcade high-score hall: a top-3 PODIUM over a ranked
@@ -335,6 +340,7 @@ function Podium({
                 <RepAvatar
                   name={r.name}
                   cartoon={cartoonFor(cartoons, r.name)}
+                  missing={noCartoonArt(cartoonFor(cartoons, r.name))}
                   variant="full"
                   fit="contain"
                   className={p === 1 ? "h-16 w-16" : "h-12 w-12"}
@@ -404,12 +410,18 @@ function ScoreRow({
           <RepAvatar
             name={r.name}
             cartoon={cartoonFor(cartoons, r.name)}
+            missing={noCartoonArt(cartoonFor(cartoons, r.name))}
             className="h-8 w-8"
             textClassName="text-[10px]"
             ring={self}
           />
           <span className={`truncate text-sm ${self ? "font-medium text-neon" : ""}`}>
             {r.name}
+            {noCartoonArt(cartoonFor(cartoons, r.name)) && (
+              <span className="ml-1.5 align-middle font-display text-[8px] uppercase tracking-widest text-muted-foreground/60">
+                Photo needed
+              </span>
+            )}
             {self && (
               <span className="ml-1.5 font-display text-[9px] uppercase tracking-widest text-neon/80">
                 you

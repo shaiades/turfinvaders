@@ -88,20 +88,20 @@ export function requiresGratitudeGate(role: AppRole | string | null | undefined)
   return (GRATITUDE_GATE_ROLES as readonly string[]).includes(role);
 }
 
-/** Fighter-selfie prompt (Close Kombat, owner 2026-10-05): the crew whose
- *  avatar is SELFIE-sourced — canvassers (confirmers collapse to canvasser),
- *  captains, and office_staff "Managers". They get asked once per login to add
- *  a photo until they have a fighter. Sales reps are Monday-photo-sourced and
- *  the owner is exempt, so neither is asked. */
-export const FIGHTER_SELFIE_ROLES: readonly AppRole[] = [
-  "canvasser",
-  "captain",
-  "office_staff",
-] as const;
+/** Blocking profile-photo gate (owner directive 2026-10-06, narrowed the same
+ *  day: "don't request photos from anyone other than canvassers"). CANVASSERS
+ *  ONLY — confirmers collapse in via privilegeRole (exact canvasser
+ *  experience). Nobody else is ever asked for a photo: sales reps already have
+ *  theirs (Monday-sourced rep_photos the owner wants kept as-is — a selfie
+ *  must never replace one), captains and office_staff "Managers" are not
+ *  canvassers, the owner administers the gate, and the bookkeeper is pure
+ *  back-office. Replaces FIGHTER_SELFIE_ROLES (2026-10-05), which also asked
+ *  captains and Managers — don't re-widen this without an owner decision. */
+export const PROFILE_PHOTO_ROLES: readonly AppRole[] = ["canvasser"] as const;
 
-export function requiresFighterSelfie(role: AppRole | string | null | undefined): boolean {
+export function requiresProfilePhoto(role: AppRole | string | null | undefined): boolean {
   const r = privilegeRole(role);
-  return !!r && (FIGHTER_SELFIE_ROLES as readonly string[]).includes(r);
+  return !!r && (PROFILE_PHOTO_ROLES as readonly string[]).includes(r);
 }
 
 /** Highest-priority role held: owner > office_staff > captain > sales_rep >
