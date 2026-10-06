@@ -14,3 +14,6 @@ verify_jwt = false
 
 [functions.notify-lunch-warning]
 verify_jwt = false
+
+[functions.notify-lead-issued]
+verify_jwt = false
