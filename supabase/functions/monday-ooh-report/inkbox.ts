@@ -66,9 +66,14 @@ export async function sendImessageToRecipients(
   // "'headers' of 'RequestInit' is not a valid ByteString". Trim fixes the
   // newline case; anything still non-printable-ASCII is a corrupt secret and
   // gets a loud, actionable error instead of the cryptic constructor throw.
-  const apiKey = (cfg.apiKey ?? "").trim();
+  let apiKey = (cfg.apiKey ?? "").trim();
   if (!apiKey)
     return { sent: false, attempted: 0, delivered: 0, skipped: "INKBOX_API_KEY not set" };
+  // Inkbox keys read "ApiKey_<secret>" and the console shows the full string
+  // only once — a hand-selected copy easily drops the prefix (it did on
+  // 2026-10-07: 53 chars, 401 on every send). Re-attach it; a wrong guess
+  // still just 401s, so this can't make anything worse.
+  if (!apiKey.startsWith("ApiKey_")) apiKey = `ApiKey_${apiKey}`;
   if (!/^[\x20-\x7e]+$/.test(apiKey)) {
     return {
       sent: false,
@@ -112,6 +117,22 @@ export async function sendImessageToRecipients(
     delivered,
     ...(errors.length ? { errors } : {}),
   };
+}
+
+/** Shape-only diagnostics for the configured key (ops test endpoint): Inkbox
+ *  keys read "ApiKey_…", so a missing prefix or odd length means a bad copy.
+ *  Never exposes the key itself. */
+export function dispatcherKeyDiagnostics(): {
+  present: boolean;
+  length: number;
+  hasApiKeyPrefix: boolean;
+} {
+  const raw =
+    [denoEnv?.get("INKBOX_API_KEY"), denoEnv?.get("INBOX_API_KEY")].find(
+      (v) => v && v.trim() && v.trim() !== "PASTE_THE_REAL_KEY_HERE",
+    ) ?? "";
+  const key = raw.trim();
+  return { present: key.length > 0, length: key.length, hasApiKeyPrefix: key.startsWith("ApiKey_") };
 }
 
 /** Read Inkbox config from the environment and send to the dispatch recipients. */

@@ -2281,7 +2281,11 @@ function mkRep(over: Partial<DispatchRep>): DispatchRep {
     okFetch,
   );
   expect("inkbox: trailing newline on the key is trimmed + delivered", trimmed.sent);
-  expectEq("inkbox: the header carries the CLEAN key", sent[0], "test-key");
+  expectEq(
+    "inkbox: trimmed key is normalized to the ApiKey_ prefix the API expects",
+    sent[0],
+    "ApiKey_test-key",
+  );
   const bad = await sendImessageToRecipients(
     inkboxCfg(["+15551112222"], "key\u2014mojibake"),
     "hi",

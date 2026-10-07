@@ -25,7 +25,7 @@ import {
   setPeopleColumn,
   setStatus,
 } from "./monday.ts";
-import { sendDispatcherIMessage, type InkboxResult } from "./inkbox.ts";
+import { dispatcherKeyDiagnostics, sendDispatcherIMessage, type InkboxResult } from "./inkbox.ts";
 import {
   BLOCK_COL,
   BLOCK_DAY_GROUP,
@@ -137,7 +137,7 @@ serve(async (req) => {
       delivered: 0,
       errors: [e instanceof Error ? e.message : String(e)],
     }));
-    return ok(result);
+    return ok({ ...result, key: dispatcherKeyDiagnostics() });
   }
 
   const raw = await req.text();
