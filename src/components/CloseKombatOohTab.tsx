@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { oohOnBlockLabel, oohResultLabel, type OohQueueRow } from "@/lib/ooh";
 import { useMissingReports, useOohConfig, useOohMutations, useOohQueue } from "@/hooks/useOohQueue";
+import { useAuth } from "@/hooks/useAuth";
 
 /**
  * OOH admin tab — the office's cockpit for the Out of House write-back.
@@ -52,6 +53,47 @@ function Chip({ children, cls = "" }: { children: React.ReactNode; cls?: string 
     >
       {children}
     </span>
+  );
+}
+
+/** Live-dispatch chip: a static badge for everyone, a tap-to-cycle toggle for
+ *  the owner (off → dry run → live → off). The owner-only gate is enforced on
+ *  the server too (setDispatchMode); this just hides the control. 44px tap
+ *  target below md, compact above (AGENTS.md). */
+const DISPATCH_CYCLE: Record<string, "off" | "dry_run" | "live"> = {
+  off: "dry_run",
+  dry_run: "live",
+  live: "off",
+};
+/** What each dispatch state does (distinct from the write-back MODE_COPY hints). */
+const DISPATCH_HINT: Record<string, string> = {
+  off: "Not issuing — a freed rep gets no next lead.",
+  dry_run: "Rehearsing: logs each next-lead decision, issues nothing on Monday.",
+  live: "Live: hands each freed rep their next lead on Monday.",
+};
+
+function DispatchChip({ mode, isOwner }: { mode: string; isOwner: boolean }) {
+  const { dispatchMode } = useOohMutations();
+  const copy = MODE_COPY[mode] ?? MODE_COPY.off;
+  if (!isOwner) return <Chip cls={copy.cls}>Dispatch: {copy.label}</Chip>;
+  const next = DISPATCH_CYCLE[mode] ?? "dry_run";
+  const cycle = () =>
+    dispatchMode
+      .mutateAsync({ mode: next })
+      .then((r) => toast.success(`Dispatch → ${(MODE_COPY[r.mode] ?? MODE_COPY.off).label}`))
+      .catch((e) => toast.error(String(e instanceof Error ? e.message : e)));
+  return (
+    <button
+      type="button"
+      onClick={cycle}
+      disabled={dispatchMode.isPending}
+      aria-label={`Dispatch mode is ${copy.label}. Tap to set ${(MODE_COPY[next] ?? MODE_COPY.off).label} (cycles off → dry run → live).`}
+      title="Tap to cycle: off → dry run → live"
+      className={`inline-flex min-h-11 items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-display uppercase tracking-widest transition-colors hover:bg-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 md:min-h-0 ${copy.cls}`}
+    >
+      {dispatchMode.isPending && <Loader2 className="size-3 animate-spin" />}
+      Dispatch: {copy.label}
+    </button>
   );
 }
 
@@ -170,7 +212,7 @@ function QueueCard({ row }: { row: OohQueueRow }) {
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="truncate text-sm font-medium text-foreground">
-            {row.rep_name ?? "Unknown rep"}
+            {row.rep_name ?? leadName ?? "Unknown rep"}
           </p>
           <p className="text-xs text-muted-foreground">
             {oohResultLabel(row.result)} · {oohOnBlockLabel(row.on_block)}
@@ -283,6 +325,10 @@ export function CloseKombatOohTab() {
   const cfg = useOohConfig();
   const queue = useOohQueue();
   const missing = useMissingReports();
+  // Owner-only: the live-dispatch chip becomes a tap-to-cycle toggle. realRole
+  // (not the View-As role) so an owner previewing a rep keeps the control.
+  const { realRole } = useAuth();
+  const isOwner = realRole === "owner";
 
   const rows = useMemo(() => queue.data ?? [], [queue.data]);
   const review = useMemo(
@@ -299,9 +345,7 @@ export function CloseKombatOohTab() {
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
             <Chip cls={modeCopy.cls}>Write-back: {modeCopy.label}</Chip>
-            <Chip cls={(MODE_COPY[cfg.data?.dispatchMode ?? "off"] ?? MODE_COPY.off).cls}>
-              Dispatch: {(MODE_COPY[cfg.data?.dispatchMode ?? "off"] ?? MODE_COPY.off).label}
-            </Chip>
+            <DispatchChip mode={cfg.data?.dispatchMode ?? "off"} isOwner={isOwner} />
             <Chip
               cls={
                 cfg.data?.formUrl
@@ -322,6 +366,10 @@ export function CloseKombatOohTab() {
             </Chip>
           </div>
           <p className="text-xs text-muted-foreground">{modeCopy.hint}</p>
+          <p className="text-xs text-muted-foreground">
+            {DISPATCH_HINT[cfg.data?.dispatchMode ?? "off"] ?? DISPATCH_HINT.off}
+            {isOwner ? " Tap the Dispatch chip to change it." : ""}
+          </p>
         </div>
       </ArcadePanel>
 

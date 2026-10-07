@@ -9,6 +9,18 @@
 // SD/OC blocks). Default 'off' → acknowledge and do nothing. 'dry_run' → store
 // the computed plan in ooh_report_queue, write nothing. Never routes anything
 // itself; never touches destination boards.
+//
+// TEXT NOISE (owner mandate 2026-10-07 — Inkbox caps iMessage at 100/day): the
+// dispatcher phone (Shai/Tyler/Jorge) is texted for ONLY four things —
+//   1. a sale / reload / upsell (buildSaleAlert, with the "missing sale info"
+//      nudge folded into that one text);
+//   2. a no-show at the door;
+//   3. an uncovered lead within 60 min (the watchdog);
+//   4. (there is no 4th — #1's folded nudge is the "missing sale info" case).
+// EVERYTHING ELSE that used to buzz the phone — a dispo that needs review or
+// errored, a routine "Issued:", a "[DRY RUN] would issue", "Free reps", a
+// could-not-issue, a managers-please-assign — now shows in the Close Kombat →
+// Dispo "Needs review" list instead (ooh_report_queue) and/or the decision log.
 // ═══════════════════════════════════════════════════════════════════════════
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { makeClient, type Supa } from "./supa.ts";
@@ -49,14 +61,7 @@ import {
   sourceCodeColId,
   sourceCodeToWrite,
 } from "./engine.ts";
-import {
-  type DispatchRep,
-  buildFreeRepsLine,
-  buildIssuedText,
-  firstName,
-  nowWallMinutes,
-  planIssue,
-} from "./dispatch.ts";
+import { type DispatchRep, firstName, nowWallMinutes, planIssue } from "./dispatch.ts";
 import { runWatchdog } from "./watchdog.ts";
 import { enrichHistory, logDispatchDecision } from "./history.ts";
 
@@ -212,21 +217,10 @@ serve(async (req) => {
           ? DISPATCHER_LABEL.processed
           : DISPATCHER_LABEL.needsReview,
     );
-    // Text the office ONLY for genuine failures (errors). Routine "needs
-    // review" items (e.g. an on-block report with no Lead ID the office must
-    // file by hand) are visible in the Dispo tab and no longer buzz the
-    // dispatcher's phone — that notification was too noisy. Best-effort.
-    if (status === "error") {
-      const raw = (row.raw ?? {}) as { customerName?: string | null; apptLabel?: string | null };
-      const lead = (raw.customerName ?? "").trim();
-      const appt = (raw.apptLabel ?? "").trim();
-      const who = lead
-        ? `${lead}${appt ? ` (${appt})` : ""} — rep ${String(row.rep_name ?? "?")}`
-        : String(row.rep_name ?? "?");
-      await sendDispatcherIMessage(
-        `Dispo write-back error: ${who}, result ${String(row.result ?? "?")}. Open Close Kombat → Dispo.`,
-      ).catch(() => undefined);
-    }
+    // No text for dispo outcomes — a "needs review" or an "error" both live in
+    // the Close Kombat → Dispo "Needs review" list now (owner mandate 2026-10-07:
+    // only a sale / no-show-at-door / uncovered-lead texts the phone). The
+    // Dispatcher column stamp above already flags it for the office at a glance.
   };
 
   // Hoisted so the catch-all error row still carries rep + lead detail (never a
@@ -550,11 +544,20 @@ serve(async (req) => {
 
 // ═══════════════════════════════════════════════════════════════════════════
 // LIVE ISSUING — hand each freed rep their next lead (Step 7). Pure decision in
-// dispatch.ts; this does the Monday reads/writes + the manager texts + the
-// decision log. In 'live' it writes people6 then Iss (firing Monday's own "New
-// Opportunity!" text); in 'dry_run' it only computes, logs and texts "[DRY
-// RUN]…". Returns the issued lead id (live only), else null. Never throws past
-// the caller's catch — a dispatch failure must never undo the write-back.
+// dispatch.ts; this does the Monday reads/writes + the decision log. In 'live'
+// it writes people6 then Iss (firing Monday's own "New Opportunity!" text,
+// which is how the REP learns — the dispatcher phone is NOT texted for a
+// routine issue); in 'dry_run' it only computes and logs. Returns the issued
+// lead id (live only), else null. Never throws past the caller's catch — a
+// dispatch failure must never undo the write-back.
+//
+// Text noise (owner mandate 2026-10-07): a routine "Issued:", a "[DRY RUN] would
+// issue", and the "Free reps" tail no longer text anyone — they live only in the
+// decision log. The two cases a human must act on — a lead the dispatcher could
+// NOT auto-issue (couldn't match the rep to a Monday user, or the write failed)
+// and a lead the rules send to a manager (language request / orphan job walk) —
+// are surfaced in the Close Kombat → Dispo "Needs review" list instead of a text
+// (live mode only; a dry-run rehearsal writes nothing, not even a queue row).
 // ═══════════════════════════════════════════════════════════════════════════
 async function runDispatch(p: {
   token: string;
@@ -582,7 +585,50 @@ async function runDispatch(p: {
 
   const chosen = new Set<string>(); // never issue the same lead to both partners
   let issued: string | null = null;
-  const freeNone: string[] = [];
+
+  // A dispatch exception the office must handle by hand → the "Needs review"
+  // list (ooh_report_queue), not a text. Keyed by a synthetic form_item_id per
+  // lead so repeated failures update one row instead of piling up; cleared when
+  // the lead is later issued cleanly. Live mode only — a dry-run writes nothing.
+  const dispatchReviewKey = (leadItemId: string) => `dispatch-${leadItemId}`;
+  const queueDispatchReview = async (v: {
+    leadItemId: string;
+    leadName: string | null;
+    boardId: string;
+    repName: string | null;
+    reason: string;
+  }): Promise<void> => {
+    if (p.mode !== "live") return;
+    try {
+      await p.supabase.from("ooh_report_queue").upsert(
+        {
+          form_item_id: dispatchReviewKey(v.leadItemId),
+          status: "needs_review",
+          reason: v.reason,
+          rep_name: v.repName,
+          office: p.office,
+          board_id: v.boardId,
+          target_item_id: v.leadItemId,
+          lead_id: v.leadItemId,
+          raw: { customerName: v.leadName, apptLabel: null },
+        },
+        { onConflict: "form_item_id" },
+      );
+    } catch {
+      /* best-effort — a queue hiccup must never undo the write-back */
+    }
+  };
+  const clearDispatchReview = async (leadItemId: string): Promise<void> => {
+    if (p.mode !== "live") return;
+    try {
+      await p.supabase
+        .from("ooh_report_queue")
+        .delete()
+        .eq("form_item_id", dispatchReviewKey(leadItemId));
+    } catch {
+      /* best-effort */
+    }
+  };
 
   for (const repName of p.repNames) {
     const att = attendance.get(firstName(repName));
@@ -644,19 +690,19 @@ async function runDispatch(p: {
         }
       }
       if (failReason) {
-        await sendDispatcherIMessage(
-          `Dispatch could not issue ${plan.lead.name} to ${repName}: ${failReason}. Please assign by hand.`,
-        ).catch(() => undefined);
-      } else {
-        await sendDispatcherIMessage(
-          buildIssuedText({
-            repName,
-            lead: plan.lead,
-            outOfLeadName: p.reportedLeadName,
-            outOfResultLabel: p.reportedResultLabel,
-            dryRun: p.mode !== "live",
-          }),
-        ).catch(() => undefined);
+        // Couldn't auto-issue (no Monday user match / write failed) → the office
+        // assigns by hand. Surface it in the Needs review list, not a text.
+        await queueDispatchReview({
+          leadItemId: plan.lead.itemId,
+          leadName: plan.lead.name,
+          boardId: plan.lead.boardId,
+          repName,
+          reason: `Couldn't auto-issue to ${repName}: ${failReason}. Assign by hand.`,
+        });
+      } else if (didIssue) {
+        // Routine issue — the rep already gets Monday's "New Opportunity!" text;
+        // no dispatcher text. Clear any stale needs-review row for this lead.
+        await clearDispatchReview(plan.lead.itemId);
       }
       await logDispatchDecision(p.supabase, {
         mode: p.mode,
@@ -675,9 +721,15 @@ async function runDispatch(p: {
         issued: didIssue,
       });
     } else if (plan.action === "manager") {
-      await sendDispatcherIMessage(
-        `Dispatch — managers please assign: ${plan.lead.name} (${plan.reason}).`,
-      ).catch(() => undefined);
+      // The rules withhold this lead for a human (language request / orphan job
+      // walk) → Needs review list, not a text. No rep_name: the office picks who.
+      await queueDispatchReview({
+        leadItemId: plan.lead.itemId,
+        leadName: plan.lead.name,
+        boardId: plan.lead.boardId,
+        repName: null,
+        reason: `Managers assign: ${plan.reason}.`,
+      });
       await logDispatchDecision(p.supabase, {
         mode: p.mode,
         trigger: "report",
@@ -695,7 +747,9 @@ async function runDispatch(p: {
         issued: false,
       });
     } else {
-      if (working && !off) freeNone.push(repName);
+      // Rep had no eligible lead (a "free rep") → decision log only. The owner
+      // explicitly cut the "Free reps" text (2026-10-07); it's visible in the
+      // decision log, and a truly uncovered lead is still caught by the watchdog.
       await logDispatchDecision(p.supabase, {
         mode: p.mode,
         trigger: "report",
@@ -715,8 +769,5 @@ async function runDispatch(p: {
     }
   }
 
-  if (freeNone.length) {
-    await sendDispatcherIMessage(buildFreeRepsLine(freeNone)).catch(() => undefined);
-  }
   return issued;
 }

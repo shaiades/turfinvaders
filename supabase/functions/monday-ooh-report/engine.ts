@@ -565,6 +565,12 @@ export function isSaleResult(form: OohForm): boolean {
  * sells: a loud banner, the rep(s), what they sold, and how much. Pure so the
  * verify script can assert it. Never invents an amount — a blank Sale Price just
  * omits the money line (owner rule: blank = unknown, don't backfill).
+ *
+ * "Missing sale info" is folded in as ONE trailing line, never a second text
+ * (owner mandate 2026-10-07 — we're at Inkbox's 100/day iMessage cap, so a sale
+ * is the only reason to text and the missing-info nudge rides the sale's own
+ * alert, once per sale). It carries no "$" figure so it reads as a nudge, not a
+ * money line.
  */
 export function buildSaleAlert(form: OohForm, customerName: string | null): string {
   const reps = [form.repName, form.partner].filter(Boolean).join(" & ") || "A rep";
@@ -576,6 +582,10 @@ export function buildSaleAlert(form: OohForm, customerName: string | null): stri
   lines.push(`Rep: ${reps}`);
   lines.push(`${kind}${what ? `: ${what}` : ""}`);
   if (customerName && customerName.trim()) lines.push(`Customer: ${customerName.trim()}`);
+  const missing: string[] = [];
+  if (amount == null) missing.push("amount");
+  if (!what) missing.push("what sold");
+  if (missing.length) lines.push(`⚠️ Missing ${missing.join(" + ")} — reply with it.`);
   return lines.join("\n");
 }
 

@@ -1225,10 +1225,13 @@ expectEq(
   expect("sale alert lists both reps", msg.includes("Jaxon Heilman & Nick Schoeben"));
   expect("sale alert says what sold", msg.includes("Sold: Roof 28 sq + gutters"));
   expect("sale alert names the customer", msg.includes("Customer: John Smith"));
+  expect("complete sale → no missing-info flag", !msg.includes("Missing"));
   console.log(`   e.g. →\n${msg.replace(/^/gm, "      ")}`);
 }
 {
-  // Upsell keeps its label; blank Sale Price omits the money line (never invent).
+  // Upsell keeps its label; blank Sale Price omits the money line (never invent)
+  // but folds the "missing sale info" nudge INTO this one text (owner mandate
+  // 2026-10-07 — a sale is the only reason to text, so the nudge rides it).
   const f = parseOohForm(
     "sale2",
     form({
@@ -1240,12 +1243,28 @@ expectEq(
   );
   const msg = buildSaleAlert(f, null);
   expect("upsell alert uses the Upsell label", msg.includes("Upsell: Windows"));
-  expect("no sale price → no money line", !msg.includes("$"));
+  expect("no sale price → no money line (no $ figure)", !msg.includes("$"));
+  expect("missing amount → flags it in the same text", msg.includes("Missing amount"));
+  expect("what sold present → not flagged as missing", !msg.includes("what sold"));
   expect(
     "single rep renders without an ampersand",
     msg.includes("Rep: Solo Rep") && !msg.includes(" & "),
   );
   expect("no customer → no Customer line", !msg.includes("Customer:"));
+}
+{
+  // A Sold with neither amount nor products → the nudge names both, once.
+  const f = parseOohForm(
+    "sale3",
+    form({
+      [FORM_COL.repName]: status(4, "Solo Rep"),
+      [FORM_COL.result]: status(RESULT.SOLD),
+      [FORM_COL.onBlock]: status(ON_BLOCK.YES),
+    }),
+  );
+  const msg = buildSaleAlert(f, "Jane Doe");
+  expect("bare sale flags both missing pieces", msg.includes("Missing amount + what sold"));
+  expect("missing-info nudge appears once", msg.split("Missing").length - 1 === 1);
 }
 
 // ════════════════════════════════════════════════════════════════════════════

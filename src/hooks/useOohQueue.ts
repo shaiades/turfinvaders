@@ -7,6 +7,7 @@ import {
   nextLeadForRep,
   pushLeadIssue,
   resolveOohQueueItem,
+  setDispatchMode,
 } from "@/lib/ooh.functions";
 import type { OohConfig, OohQueueRow } from "@/lib/ooh";
 
@@ -85,5 +86,12 @@ export function useOohMutations() {
     mutationFn: (vars: { boardId: string; repName: string }) => nextLeadForRep({ data: vars }),
   });
 
-  return { resolve, pushLead, nextLead, addNote };
+  // Flip the live-dispatch mode (owner only; the server fn enforces it). The
+  // Dispo chip cycles off → dry_run → live. Refresh so the chip reflects it.
+  const dispatchMode = useMutation({
+    mutationFn: (vars: { mode: "off" | "dry_run" | "live" }) => setDispatchMode({ data: vars }),
+    onSuccess: refresh,
+  });
+
+  return { resolve, pushLead, nextLead, addNote, dispatchMode };
 }
