@@ -216,8 +216,14 @@ serve(async (req) => {
     // file by hand) are visible in the Dispo tab and no longer buzz the
     // dispatcher's phone — that notification was too noisy. Best-effort.
     if (status === "error") {
+      const raw = (row.raw ?? {}) as { customerName?: string | null; apptLabel?: string | null };
+      const lead = (raw.customerName ?? "").trim();
+      const appt = (raw.apptLabel ?? "").trim();
+      const who = lead
+        ? `${lead}${appt ? ` (${appt})` : ""} — rep ${String(row.rep_name ?? "?")}`
+        : String(row.rep_name ?? "?");
       await sendDispatcherIMessage(
-        `Dispo write-back error: ${String(row.rep_name ?? "?")}, result ${String(row.result ?? "?")}. Open Close Kombat → Dispo.`,
+        `Dispo write-back error: ${who}, result ${String(row.result ?? "?")}. Open Close Kombat → Dispo.`,
       ).catch(() => undefined);
     }
   };
@@ -274,7 +280,7 @@ serve(async (req) => {
     // so a blank arrival can fall back to the appointment time (Rule 3 / #6).
     const detailsLine = buildDetailsLine(form, formItem.createdAtMs);
     const formLink = `https://tidal-remodeling.monday.com/boards/${FORM_BOARD_ID}/pulses/${formItemId}`;
-    baseRow = buildBaseQueueRow(form, detailsLine, plan);
+    baseRow = buildBaseQueueRow(form, detailsLine, plan, { customerName: formItem.name || null });
 
     // A plan the engine refuses to auto-apply (e.g. a reset result with no
     // reset date) goes to the office — press nothing (#4).

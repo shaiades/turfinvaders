@@ -155,6 +155,11 @@ function PushNextLeadButton({
 function QueueCard({ row }: { row: OohQueueRow }) {
   const { resolve, addNote } = useOohMutations();
   const canPush = !!row.board_id && !!row.rep_name;
+  // Lead (customer) name + appointment time, stashed in `raw` by the webhook —
+  // so the office can find the lead in Monday even when it couldn't auto-file.
+  const raw = (row.raw ?? {}) as { customerName?: string | null; apptLabel?: string | null };
+  const leadName = raw.customerName?.trim() || null;
+  const apptLabel = raw.apptLabel?.trim() || null;
   // "Add note to card" rescues a report the auto-writeback skipped: it needs a
   // real matched card (target + board, so the lead resolved and is active) and
   // some note text. Error rows are excluded — their write already touched Monday.
@@ -182,6 +187,12 @@ function QueueCard({ row }: { row: OohQueueRow }) {
           {row.status === "error" ? "Error" : "Review"}
         </Chip>
       </div>
+      {(leadName || apptLabel) && (
+        <p className="text-xs text-foreground">
+          <span className="text-muted-foreground">Lead:</span> {leadName ?? "—"}
+          {apptLabel ? ` · ${apptLabel}` : ""}
+        </p>
+      )}
       {row.reason && <p className="text-xs text-muted-foreground">{row.reason}</p>}
       {row.details_line && (
         <p className="rounded border border-border/40 bg-background/40 p-2 text-xs text-foreground/90">

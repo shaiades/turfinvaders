@@ -272,6 +272,7 @@ export type OohForm = {
   onBlock: number | null;
   result: ResultCode | null;
   leadId: string | null;
+  apptDate: { date: string; time: string | null } | null;
   address: string | null;
   phone: string | null;
   quotedText: string | null;
@@ -365,6 +366,7 @@ export function parseOohForm(formItemId: string, cols: ColMap): OohForm {
     onBlock: onBlock,
     result: (result as ResultCode | null) ?? null,
     leadId: (textVal(g(FORM_COL.leadId)) ?? "").match(/^\d+$/) ? textVal(g(FORM_COL.leadId)) : null,
+    apptDate: dateVal(g(FORM_COL.apptDate)),
     address: textVal(g(FORM_COL.address)),
     phone: textVal(g(FORM_COL.phone)),
     quotedText: textVal(g(FORM_COL.quoted)),
@@ -925,6 +927,7 @@ export function buildBaseQueueRow(
   form: OohForm,
   detailsLine: string,
   plan: WritePlan,
+  meta?: { customerName?: string | null },
 ): Record<string, unknown> {
   return {
     rep_name: form.repName,
@@ -934,7 +937,14 @@ export function buildBaseQueueRow(
     lead_id: form.leadId,
     details_line: detailsLine,
     plan: plan as unknown,
-    raw: form as unknown,
+    // Display fields the admin UI reads straight from `raw` (no schema change):
+    // the lead/customer name (the form item's title) and the appointment
+    // date/time, so a review item names WHO and WHEN — not just the rep.
+    raw: {
+      ...(form as unknown as Record<string, unknown>),
+      customerName: meta?.customerName ?? null,
+      apptLabel: form.apptDate ? fmtReset(form.apptDate) : null,
+    },
   };
 }
 
