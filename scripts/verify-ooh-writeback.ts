@@ -1259,7 +1259,7 @@ const inkboxCfg = (recipients: string[], apiKey: string | null = "test-key"): In
   );
   expect(
     "inkbox: X-API-Key header (NOT Bearer)",
-    calls[0].headers["X-API-Key"] === "test-key" &&
+    calls[0].headers["X-API-Key"] === "ApiKey_test-key" &&
       !("Authorization" in calls[0].headers) &&
       calls[0].headers["Content-Type"] === "application/json",
   );
