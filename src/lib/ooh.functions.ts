@@ -139,6 +139,54 @@ export const resolveOohQueueItem = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+const noteInput = z.object({ id: z.string().uuid() });
+
+/** Rescue a skipped report's note: post its free-text as an activity Update on
+ *  the matched block card (NO disposition change — never clobbers the office's
+ *  work), then mark the queue item handled. Only valid for rows with a matched,
+ *  resolved card (target_item_id + board_id) — e.g. "already dispositioned by
+ *  office" or a non-allow-listed board. Idempotent per form item. */
+export const addOohQueueNote = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => noteInput.parse(d))
+  .handler(async ({ data, context }): Promise<{ ok: true }> => {
+    await assertAdmin(context.supabase as unknown as AdminClient, context.userId);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: row, error: readErr } = await supabaseAdmin
+      .from("ooh_report_queue")
+      .select("target_item_id, board_id, details_line, rep_name, form_item_id")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (readErr) throw new Error(readErr.message);
+    if (!row) throw new Error("Report not found.");
+    const targetItemId = ((row.target_item_id as string | null) ?? "").trim();
+    const note = ((row.details_line as string | null) ?? "").trim();
+    if (!targetItemId)
+      throw new Error("No matched card for this report — add the note in Monday by hand.");
+    if (!note) throw new Error("This report has no note text to add.");
+    const s = await settings();
+    if (!s.token) throw new Error("No Monday API token configured.");
+    const rep = ((row.rep_name as string | null) ?? "").trim() || "rep";
+    const formItemId = ((row.form_item_id as string | null) ?? "").trim() || data.id;
+    const { postCardUpdate } = await import("@/lib/ooh.server");
+    await postCardUpdate(
+      s.token,
+      targetItemId,
+      `Dispo note (added by office) from ${rep}: ${note}`,
+      `ooh-note-${formItemId}`,
+    );
+    const { error: updErr } = await supabaseAdmin
+      .from("ooh_report_queue")
+      .update({
+        status: "processed",
+        decided_by: context.userId,
+        decided_at: new Date().toISOString(),
+      })
+      .eq("id", data.id);
+    if (updErr) throw new Error(updErr.message);
+    return { ok: true };
+  });
+
 /** The missing-reports list: issued leads (go-live onward) whose appointment
  *  has passed with no report, across the current SD + OC blocks. */
 export const listMissingReports = createServerFn({ method: "GET" })

@@ -2,7 +2,15 @@ import { useMemo, useState } from "react";
 import { ArcadePanel } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { AlertTriangle, CheckCircle2, Clock, Loader2, Send, X } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  Loader2,
+  MessageSquarePlus,
+  Send,
+  X,
+} from "lucide-react";
 import { oohOnBlockLabel, oohResultLabel, type OohQueueRow } from "@/lib/ooh";
 import { useMissingReports, useOohConfig, useOohMutations, useOohQueue } from "@/hooks/useOohQueue";
 
@@ -145,8 +153,13 @@ function PushNextLeadButton({
 }
 
 function QueueCard({ row }: { row: OohQueueRow }) {
-  const { resolve } = useOohMutations();
+  const { resolve, addNote } = useOohMutations();
   const canPush = !!row.board_id && !!row.rep_name;
+  // "Add note to card" rescues a report the auto-writeback skipped: it needs a
+  // real matched card (target + board, so the lead resolved and is active) and
+  // some note text. Error rows are excluded — their write already touched Monday.
+  const canAddNote =
+    row.status === "needs_review" && !!row.target_item_id && !!row.board_id && !!row.details_line;
   return (
     <div className="rounded-lg border border-border/40 bg-surface/50 p-3 space-y-2.5">
       <div className="flex items-start justify-between gap-2">
@@ -177,6 +190,26 @@ function QueueCard({ row }: { row: OohQueueRow }) {
       )}
       {row.error && <p className="text-xs text-destructive">{row.error}</p>}
       <div className="flex flex-wrap gap-2">
+        {canAddNote && (
+          <Button
+            variant="outline"
+            className="flex-1 min-w-[8rem]"
+            disabled={addNote.isPending}
+            onClick={() =>
+              addNote
+                .mutateAsync({ id: row.id })
+                .then(() => toast.success("Note added to the card"))
+                .catch((e) => toast.error(String(e instanceof Error ? e.message : e)))
+            }
+          >
+            {addNote.isPending ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <MessageSquarePlus className="size-4" />
+            )}
+            Add note to card
+          </Button>
+        )}
         {canPush && (
           <PushNextLeadButton
             boardId={row.board_id}
