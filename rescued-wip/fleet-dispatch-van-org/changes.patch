@@ -1,0 +1,709 @@
+diff --git a/src/components/FleetDispatch.tsx b/src/components/FleetDispatch.tsx
+index e6c4793..9dac5b8 100644
+--- a/src/components/FleetDispatch.tsx
++++ b/src/components/FleetDispatch.tsx
+@@ -49,7 +49,7 @@ import { useAuth } from "@/hooks/useAuth";
+ import { isManagerRole } from "@/lib/roles";
+ import { formatCurrency, normalizeName } from "@/lib/utils";
+ import { DEFAULT_OFFICE, OFFICE_LOCATIONS } from "@/lib/offices";
+-import { getDispatchProduction } from "@/lib/dispatch.functions";
++import { getDispatchProduction, vanKey } from "@/lib/dispatch.functions";
+ import { FleetDispatchManage } from "@/components/FleetDispatchManage";
+ 
+ /** One profile row as the board consumes it (dispatch membership). */
+@@ -83,6 +83,10 @@ export type Van = {
+ type Metric = {
+   canvasser_id: string;
+   metric_date: string;
++  // The van named on the card that produced this row (Monday's Van column),
++  // stamped at ingestion. NULL = no van on the card and none on the rep —
++  // the Lead Sources / Unassigned bucket.
++  team_id: string | null;
+   leads_confirmed: number;
+   no_answers: number;
+   killed: number;
+@@ -301,7 +305,7 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
+     queryFn: async () => {
+       const { data, error } = await supabase
+         .from("daily_metrics")
+-        .select("canvasser_id, metric_date, leads_confirmed, no_answers, killed, future")
++        .select("canvasser_id, metric_date, team_id, leads_confirmed, no_answers, killed, future")
+         .gte("metric_date", range.funnelStart)
+         .lte("metric_date", range.funnelEnd);
+       if (error) throw error;
+@@ -339,6 +343,15 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
+     () => new Map(Object.entries(production.data?.volume ?? {})),
+     [production.data],
+   );
++  // Keyed `canvasserId|teamId` — the van each row was earned on.
++  const pointsByVan = useMemo(
++    () => new Map(Object.entries(production.data?.pointsByVan ?? {})),
++    [production.data],
++  );
++  const volumeByVan = useMemo(
++    () => new Map(Object.entries(production.data?.volumeByVan ?? {})),
++    [production.data],
++  );
+ 
+   // Suspension window: the last 14 completed worked days (Sundays excluded).
+   // Feeds the donut check (first two days) and the zero-streak display.
+@@ -369,16 +382,19 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
+ 
+   // --- Derived ---
+ 
+-  // Sum all metric rows per canvasser_id across the selected range.
+-  const metricByCanvasser = useMemo(() => {
++  // Sum metric rows per canvasser AND van across the selected range — the van
++  // stamped on each row is the one Monday's Van column named on the card that
++  // produced it, so a rep who set for two vans is counted on each.
++  const metricByVan = useMemo(() => {
+     const acc = new Map<string, { conf: number; na: number; kil: number; fut: number }>();
+     for (const m of metrics) {
+-      const prev = acc.get(m.canvasser_id) ?? { conf: 0, na: 0, kil: 0, fut: 0 };
++      const k = vanKey(m.canvasser_id, m.team_id);
++      const prev = acc.get(k) ?? { conf: 0, na: 0, kil: 0, fut: 0 };
+       prev.conf += m.leads_confirmed ?? 0;
+       prev.na += m.no_answers ?? 0;
+       prev.kil += m.killed ?? 0;
+       prev.fut += m.future ?? 0;
+-      acc.set(m.canvasser_id, prev);
++      acc.set(k, prev);
+     }
+     return acc;
+   }, [metrics]);
+@@ -400,21 +416,10 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
+   );
+ 
+   // De-duplicate by normalized display_name. If any duplicate is a captain,
+-  // the merged row inherits the captain role. Metrics, points, and volume
+-  // from every duplicate canvasser_id aggregate into a single row.
+-  const rows = useMemo(() => {
+-    type Group = {
+-      key: string;
+-      ids: string[];
+-      display_name: string | null;
+-      office_location: string | null;
+-      team_office: string | null;
+-      role: "canvasser" | "captain";
+-      tracked: boolean;
+-      oldestCreated: string;
+-      team_id: string | null;
+-    };
+-    const groups = new Map<string, Group>();
++  // the merged rep inherits the captain role. Every duplicate canvasser_id
++  // contributes its production to the same rep.
++  const reps = useMemo(() => {
++    const groups = new Map<string, RepGroup>();
+     for (const c of visible) {
+       const key = normalizeName(c.display_name) || `id:${c.id}`;
+       const created = (c.created_at ?? "").slice(0, 10) || "9999-12-31";
+@@ -441,34 +446,60 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
+         if (!g.team_id && c.team_id) g.team_id = c.team_id;
+       }
+     }
+-    const enriched = Array.from(groups.values()).map((g) => {
+-      let conf = 0,
+-        kil = 0,
+-        fut = 0,
+-        pts = 0,
+-        vol = 0;
++    return Array.from(groups.values());
++  }, [visible]);
++
++  // One row per rep PER VAN (owner, 2026-07-31): production is attributed to
++  // the van each row was earned on, not to the rep's current profile van. A
++  // rep who set for two vans this week appears on both van cards with the
++  // leads they actually generated there; a rep with no production in range
++  // still appears once, on their own van, at zero.
++  const rows = useMemo(() => {
++    const enriched: FunnelRow[] = [];
++    for (const g of reps) {
++      const vanIds = new Set<string | null>([g.team_id]);
+       for (const id of g.ids) {
+-        const m = metricByCanvasser.get(id);
+-        if (m) {
+-          conf += m.conf;
+-          // Blowout absorbs N/A: every dead-end button result counts here.
+-          kil += m.kil + m.na;
+-          fut += m.fut;
++        for (const src of [metricByVan, pointsByVan, volumeByVan]) {
++          for (const k of src.keys()) {
++            if (!k.startsWith(`${id}|`)) continue;
++            const van = k.slice(id.length + 1);
++            vanIds.add(van === "" ? null : van);
++          }
+         }
+-        pts += pointsByUser.get(id) ?? 0;
+-        vol += volumeByUser.get(id) ?? 0;
+       }
+-      // Submitted = the sum of actioned results (owner, 2026-07-28):
+-      // Submitted ≡ Confirmed + Future + Blowout by construction.
+-      const sub = conf + fut + kil;
+-      return { g, conf, kil, fut, sub, pts, vol };
+-    });
++      for (const vanId of vanIds) {
++        let conf = 0,
++          kil = 0,
++          fut = 0,
++          pts = 0,
++          vol = 0;
++        for (const id of g.ids) {
++          const k = vanKey(id, vanId);
++          const m = metricByVan.get(k);
++          if (m) {
++            conf += m.conf;
++            // Blowout absorbs N/A: every dead-end button result counts here.
++            kil += m.kil + m.na;
++            fut += m.fut;
++          }
++          pts += pointsByVan.get(k) ?? 0;
++          vol += volumeByVan.get(k) ?? 0;
++        }
++        // Submitted = the sum of actioned results (owner, 2026-07-28):
++        // Submitted ≡ Confirmed + Future + Blowout by construction.
++        const sub = conf + fut + kil;
++        // Only the rep's own van earns a placeholder row; vans they merely
++        // produced for are listed solely when they have numbers there.
++        if (sub + pts + vol === 0 && vanId !== g.team_id) continue;
++        enriched.push({ g, vanId, conf, kil, fut, sub, pts, vol });
++      }
++    }
+     return enriched.sort((a, b) => {
+       if (b.sub !== a.sub) return b.sub - a.sub;
+       if (b.conf !== a.conf) return b.conf - a.conf;
+       return (a.g.display_name ?? "").localeCompare(b.g.display_name ?? "");
+     });
+-  }, [visible, metricByCanvasser, pointsByUser, volumeByUser]);
++  }, [reps, metricByVan, pointsByVan, volumeByVan]);
+ 
+   const totals = useMemo(() => {
+     let sub = 0,
+@@ -499,27 +530,29 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
+     const genOn = (ids: string[], day: string) =>
+       ids.reduce((a, id) => a + (genByDay.get(id)?.get(day) ?? 0), 0);
+     const [d1, d2] = workedDays;
+-    return rows.flatMap((r) => {
+-      if (!r.g.tracked || dismissed.has(r.g.key)) return [];
+-      if (r.g.oldestCreated > d2) return [];
+-      if (genOn(r.g.ids, d1) !== 0 || genOn(r.g.ids, d2) !== 0) return [];
++    // Per REP, not per rep-and-van: a rep split across two vans is still one
++    // person and must produce at most one doughnut chip.
++    return reps.flatMap((g) => {
++      if (!g.tracked || dismissed.has(g.key)) return [];
++      if (g.oldestCreated > d2) return [];
++      if (genOn(g.ids, d1) !== 0 || genOn(g.ids, d2) !== 0) return [];
+       // Consecutive zero worked days, newest backward, only days the profile existed.
+       let streak = 0;
+       let capped = true;
+       for (const day of workedDays) {
+-        if (day < r.g.oldestCreated) {
++        if (day < g.oldestCreated) {
+           capped = false;
+           break;
+         }
+-        if (genOn(r.g.ids, day) === 0) streak++;
++        if (genOn(g.ids, day) === 0) streak++;
+         else {
+           capped = false;
+           break;
+         }
+       }
+-      return [{ g: r.g, d1, d2, streak, streakLabel: `${streak}${capped ? "+" : ""}` }];
++      return [{ g, d1, d2, streak, streakLabel: `${streak}${capped ? "+" : ""}` }];
+     });
+-  }, [rows, genByDay, workedDays, tab, dayPreset, dismissed]);
++  }, [reps, genByDay, workedDays, tab, dayPreset, dismissed]);
+ 
+   const canManage = !readOnly && isManagerRole(realRole);
+ 
+@@ -769,14 +802,24 @@ function FleetDispatchInner({ readOnly }: { readOnly: boolean }) {
+   );
+ }
+ 
++/** One person on the board — duplicate profiles sharing a name merged. */
++type RepGroup = {
++  key: string;
++  ids: string[];
++  display_name: string | null;
++  office_location: string | null;
++  team_office: string | null;
++  role: "canvasser" | "captain";
++  tracked: boolean;
++  oldestCreated: string;
++  /** The rep's own van (profiles.team_id) — roster membership, not attribution. */
++  team_id: string | null;
++};
++
+ type FunnelRow = {
+-  g: {
+-    key: string;
+-    ids: string[];
+-    display_name: string | null;
+-    role: "canvasser" | "captain";
+-    team_id: string | null;
+-  };
++  g: RepGroup;
++  /** The van this row's production was earned on. Null = unassigned. */
++  vanId: string | null;
+   sub: number;
+   conf: number;
+   fut: number;
+@@ -846,14 +889,16 @@ function DispatchColHeader() {
+ function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
+   const { matches } = useOfficeFilter();
+ 
++  // Bucket by the van the row was EARNED on (Monday's Van column, stamped per
++  // card), not by the rep's profile van.
+   const rowsByVan = new Map<string, FunnelRow[]>();
+   const freeAgents: FunnelRow[] = [];
+   const vanIds = new Set(vans.map((v) => v.id));
+   for (const r of rows) {
+-    if (r.g.team_id && vanIds.has(r.g.team_id)) {
+-      const list = rowsByVan.get(r.g.team_id) ?? [];
++    if (r.vanId && vanIds.has(r.vanId)) {
++      const list = rowsByVan.get(r.vanId) ?? [];
+       list.push(r);
+-      rowsByVan.set(r.g.team_id, list);
++      rowsByVan.set(r.vanId, list);
+     } else {
+       freeAgents.push(r);
+     }
+@@ -949,7 +994,7 @@ function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
+                           ))}
+                         </div>
+                         {roster.map((r) => (
+-                          <DispatchRow key={r.g.key} r={r} />
++                          <DispatchRow key={`${r.g.key}|${r.vanId ?? ""}`} r={r} />
+                         ))}
+                       </div>
+                     )}
+@@ -978,7 +1023,7 @@ function DispatchFleet({ rows, vans }: { rows: FunnelRow[]; vans: Van[] }) {
+                   b.sub - a.sub || (a.g.display_name ?? "").localeCompare(b.g.display_name ?? ""),
+               )
+               .map((r) => (
+-                <DispatchRow key={r.g.key} r={r} />
++                <DispatchRow key={`${r.g.key}|${r.vanId ?? ""}`} r={r} />
+               ))}
+           </div>
+         </div>
+diff --git a/src/integrations/supabase/types.ts b/src/integrations/supabase/types.ts
+index a7c8d4b..150a3ee 100644
+--- a/src/integrations/supabase/types.ts
++++ b/src/integrations/supabase/types.ts
+@@ -247,6 +247,7 @@ export type Database = {
+           resets: number
+           sales: number
+           sits_ran_today: number
++          team_id: string | null
+           updated_at: string
+         }
+         Insert: {
+@@ -269,6 +270,7 @@ export type Database = {
+           resets?: number
+           sales?: number
+           sits_ran_today?: number
++          team_id?: string | null
+           updated_at?: string
+         }
+         Update: {
+@@ -291,6 +293,7 @@ export type Database = {
+           resets?: number
+           sales?: number
+           sits_ran_today?: number
++          team_id?: string | null
+           updated_at?: string
+         }
+         Relationships: [
+@@ -301,6 +304,13 @@ export type Database = {
+             referencedRelation: "profiles"
+             referencedColumns: ["id"]
+           },
++          {
++            foreignKeyName: "daily_metrics_team_id_fkey"
++            columns: ["team_id"]
++            isOneToOne: false
++            referencedRelation: "teams"
++            referencedColumns: ["id"]
++          },
+         ]
+       }
+       field_pins: {
+@@ -653,6 +663,7 @@ export type Database = {
+       }
+       teams: {
+         Row: {
++          aliases: string[]
+           captain_id: string | null
+           color: string
+           created_at: string
+@@ -662,6 +673,7 @@ export type Database = {
+           office_location: string
+         }
+         Insert: {
++          aliases?: string[]
+           captain_id?: string | null
+           color?: string
+           created_at?: string
+@@ -671,6 +683,7 @@ export type Database = {
+           office_location?: string
+         }
+         Update: {
++          aliases?: string[]
+           captain_id?: string | null
+           color?: string
+           created_at?: string
+@@ -931,7 +944,12 @@ export type Database = {
+       }
+       my_team_id: { Args: { _user_id: string }; Returns: string }
+       increment_leads_generated: {
+-        Args: { _canvasser_id: string; _metric_date: string; _office: string }
++        Args: {
++          _canvasser_id: string
++          _metric_date: string
++          _office: string
++          _team_id: string | null
++        }
+         Returns: undefined
+       }
+       reactivate_agent: { Args: { _user_id: string }; Returns: undefined }
+diff --git a/src/lib/dispatch.functions.ts b/src/lib/dispatch.functions.ts
+index 96d34a2..9386e9b 100644
+--- a/src/lib/dispatch.functions.ts
++++ b/src/lib/dispatch.functions.ts
+@@ -35,14 +35,14 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
+     const [logsR, leadsR] = await Promise.all([
+       supabaseAdmin
+         .from("daily_logs")
+-        .select("canvasser_id, demos_sits, sales, log_date")
++        .select("canvasser_id, team_id, demos_sits, sales, log_date")
+         .gte("log_date", data.log_start)
+         .lte("log_date", data.log_end),
+       // Two-sided superset fetch; the COALESCE(reviewed_at, created_at)
+       // re-window below is the authoritative filter (pay-engine parity).
+       supabaseAdmin
+         .from("leads")
+-        .select("canvasser_id, sale_amount, created_at, reviewed_at")
++        .select("canvasser_id, team_id, sale_amount, created_at, reviewed_at")
+         .eq("status", "confirmed")
+         .or(
+           `and(created_at.gte.${data.vol_start},created_at.lt.${data.vol_end}),and(reviewed_at.gte.${data.vol_start},reviewed_at.lt.${data.vol_end})`,
+@@ -51,26 +51,47 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
+     if (logsR.error) throw logsR.error;
+     if (leadsR.error) throw leadsR.error;
+ 
++    // Two views of the same rows: per canvasser (Manage Fleet's roster cards)
++    // and per canvasser-and-van (the Fleet Dispatch board, which attributes
++    // production to the van each row was earned on rather than to the rep's
++    // current profile van). Both are derived from one fetch so they can never
++    // disagree.
+     const points: Record<string, number> = {};
++    const pointsByVan: Record<string, number> = {};
+     for (const l of logsR.data ?? []) {
+       if (!l.canvasser_id) continue;
+       const pts = weeklyPoints(l.demos_sits ?? 0, l.sales ?? 0);
+-      if (pts > 0) points[l.canvasser_id] = (points[l.canvasser_id] ?? 0) + pts;
++      if (pts <= 0) continue;
++      points[l.canvasser_id] = (points[l.canvasser_id] ?? 0) + pts;
++      const k = vanKey(l.canvasser_id, l.team_id);
++      pointsByVan[k] = (pointsByVan[k] ?? 0) + pts;
+     }
+ 
+     const volStartMs = Date.parse(data.vol_start);
+     const volEndMs = Date.parse(data.vol_end);
+     const volume: Record<string, number> = {};
++    const volumeByVan: Record<string, number> = {};
+     for (const l of leadsR.data ?? []) {
+       if (!l.canvasser_id) continue;
+       const at = Date.parse(l.reviewed_at ?? l.created_at ?? "");
+       if (Number.isNaN(at) || at < volStartMs || at >= volEndMs) continue;
+-      volume[l.canvasser_id] = (volume[l.canvasser_id] ?? 0) + Number(l.sale_amount ?? 0);
++      const amount = Number(l.sale_amount ?? 0);
++      volume[l.canvasser_id] = (volume[l.canvasser_id] ?? 0) + amount;
++      const k = vanKey(l.canvasser_id, l.team_id);
++      volumeByVan[k] = (volumeByVan[k] ?? 0) + amount;
+     }
+ 
+-    return { points, volume };
++    return { points, volume, pointsByVan, volumeByVan };
+   });
+ 
++/**
++ * Composite key for the per-van production maps. An empty van segment means
++ * the row carries no van — the unassigned / lead-source bucket.
++ */
++export function vanKey(canvasserId: string, teamId: string | null | undefined): string {
++  return `${canvasserId}|${teamId ?? ""}`;
++}
++
+ /**
+  * Company-wide funnel baseline for the canvasser page's shared rate engine
+  * (owner decision, 2026-07-29: new reps see honest company averages, not
+diff --git a/src/routes/_authenticated/dashboard.tsx b/src/routes/_authenticated/dashboard.tsx
+index e3ae388..926d342 100644
+--- a/src/routes/_authenticated/dashboard.tsx
++++ b/src/routes/_authenticated/dashboard.tsx
+@@ -273,7 +273,7 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
+         supabase.from("profiles").select("id, team_id"),
+         supabase
+           .from("daily_metrics")
+-          .select("canvasser_id, leads_submitted, leads_confirmed, sales")
++          .select("canvasser_id, team_id, leads_submitted, leads_confirmed, sales")
+           .gte("metric_date", since),
+       ]);
+       if (teamsRes.error) throw teamsRes.error;
+@@ -283,7 +283,9 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
+       const teamByCanvasser = new Map((profilesRes.data ?? []).map((p) => [p.id, p.team_id]));
+       const perTeam = new Map<string, { submits: number; confirmed: number; sales: number }>();
+       for (const m of metricsRes.data ?? []) {
+-        const tid = teamByCanvasser.get(m.canvasser_id);
++        // The van stamped on the row (Monday's Van column) is the attribution;
++        // the rep's profile van is only a fallback for pre-2026-07-31 rows.
++        const tid = m.team_id ?? teamByCanvasser.get(m.canvasser_id);
+         if (!tid) continue;
+         const t = perTeam.get(tid) ?? { submits: 0, confirmed: 0, sales: 0 };
+         t.submits += m.leads_submitted ?? 0;
+diff --git a/supabase/functions/monday-live-dispatch/index.ts b/supabase/functions/monday-live-dispatch/index.ts
+index f7b163f..370a54d 100644
+--- a/supabase/functions/monday-live-dispatch/index.ts
++++ b/supabase/functions/monday-live-dispatch/index.ts
+@@ -482,41 +482,75 @@ serve(async (req) => {
+       data: { canvasserName, matchedId: match.id, matchedName: match.display_name, autoCreated },
+     })
+ 
+-    // ── Van sync ── Monday's Van column is authoritative for van membership
+-    // (owner, 2026-07-28): every card names the rep's van, so each event
+-    // refreshes profiles.team_id. Real reps only — pseudo lead-sources
+-    // (suspension_tracked=false) never join vans. Unknown van names are
+-    // logged for the owner to add in Fleet, never auto-created.
++    // ── Van resolution ── Monday's Van column is authoritative, and it is read
++    // PER CARD (owner, 2026-07-31): the van named on THIS card is the van this
++    // card's production belongs to. cardTeamId is stamped onto every counter
++    // row written below, so a rep who sets for two vans splits across both
++    // instead of having their entire history dragged onto whichever van
++    // happened to fire last. profiles.team_id still follows along for roster /
++    // van membership / RLS captain scoping, but no longer decides where a lead
++    // is counted. Real reps only — pseudo lead-sources (suspension_tracked =
++    // false) never join vans. Unknown van names are logged for the owner to add
++    // in Fleet, never auto-created.
++    //
++    // A card with no Van value falls back to the rep's current van: the board
++    // has to put the lead somewhere, and the rep's own van beats Unassigned.
++    let cardTeamId: string | null = match.team_id ?? null
+     try {
+       const vanCol =
+         cols.find((c) => c.id === 'dropdown__1' || c.column?.id === 'dropdown__1') ??
+         cols.find((c) => (c.column?.title || '').trim().toLowerCase() === 'van')
+       const vanName = ((vanCol?.text || '').split(',')[0] || '').trim()
+       if (vanName && match.suspension_tracked !== false) {
+-        const { data: teams } = await supabaseAdmin.from('teams').select('id, name')
++        const { data: teams } = await supabaseAdmin.from('teams').select('id, name, aliases')
++        // Monday's Van column does not always use the van's Fleet name — e.g.
++        // "Jorge" is the Miguel van. teams.aliases carries those alternates so
++        // the owner can add one without a code change.
++        const wantedVan = vanName.toLowerCase()
+         const team = (teams ?? []).find(
+-          (t) => (t.name || '').trim().toLowerCase() === vanName.toLowerCase(),
++          (t) =>
++            (t.name || '').trim().toLowerCase() === wantedVan ||
++            ((t.aliases ?? []) as string[]).some((a) => (a || '').trim().toLowerCase() === wantedVan),
+         )
+         if (!team) {
+           await supabaseAdmin.from('webhook_logs').insert({
+             step: 'Van_Unknown',
+             data: { pulseId: String(pulseId), vanName, canvasser: match.display_name },
+           })
+-        } else if (match.team_id !== team.id) {
+-          const { error: vanErr } = await supabaseAdmin
+-            .from('profiles')
+-            .update({ team_id: team.id })
+-            .eq('id', match.id)
+-          if (!vanErr) {
+-            await supabaseAdmin.from('webhook_logs').insert({
+-              step: 'Van_Synced',
+-              data: { pulseId: String(pulseId), canvasser: match.display_name, vanName, from: match.team_id, to: team.id },
+-            })
+-            match.team_id = team.id
++        } else {
++          // Attribution uses the card's van even if the profile write below
++          // fails — the counter row must not depend on the roster update.
++          cardTeamId = team.id
++          if (match.team_id !== team.id) {
++            const { error: vanErr } = await supabaseAdmin
++              .from('profiles')
++              .update({ team_id: team.id })
++              .eq('id', match.id)
++            if (!vanErr) {
++              await supabaseAdmin.from('webhook_logs').insert({
++                step: 'Van_Synced',
++                data: {
++                  pulseId: String(pulseId), canvasser: match.display_name, vanName,
++                  matchedVan: team.name, viaAlias: (team.name || '').trim().toLowerCase() !== wantedVan,
++                  from: match.team_id, to: team.id,
++                },
++              })
++              match.team_id = team.id
++            }
+           }
+         }
+       }
+-    } catch (_) { /* van sync must never break the pipeline */ }
++    } catch (_) { /* van resolution must never break the pipeline */ }
++
++    /**
++     * Scope a daily_metrics query to one van's row. team_id NULL is a real,
++     * single row (the unassigned / lead-source row), so it needs `is` rather
++     * than `eq` — the unique index is NULLS NOT DISTINCT to match.
++     */
++    const scopeVan = <T extends { eq: (c: string, v: string) => T; is: (c: string, v: null) => T }>(
++      q: T,
++      teamId: string | null,
++    ): T => (teamId ? q.eq('team_id', teamId) : q.is('team_id', null))
+ 
+     // ── Lead Status funnel branch ── the confirmation team's flips of the
+     // "Lead Status" column on the Incoming Leads board drive the Live Dispatch
+@@ -556,12 +590,18 @@ serve(async (req) => {
+       const statusOffice = boardOffice ?? match.office_location ?? 'San Diego'
+       const FUNNEL_KEYS = ['leads_confirmed', 'no_answers', 'killed', 'pending', 'future']
+ 
+-      const { data: statusRow } = await supabaseAdmin
+-        .from('daily_metrics')
+-        .select('id, leads_confirmed, no_answers, killed, pending, future')
+-        .eq('canvasser_id', match.id)
+-        .eq('metric_date', statusDate)
+-        .maybeSingle()
++      // Read and write the van's own row. A status flip undoes the previous
++      // bucket on the van named by the card TODAY — if the card's Van column
++      // changed between the two flips the undo lands on the new van's row and
++      // floors at 0, same as the pre-van behaviour floored at the rep level.
++      const { data: statusRow } = await scopeVan(
++        supabaseAdmin
++          .from('daily_metrics')
++          .select('id, leads_confirmed, no_answers, killed, pending, future')
++          .eq('canvasser_id', match.id)
++          .eq('metric_date', statusDate),
++        cardTeamId,
++      ).maybeSingle()
+       const statusCur: Record<string, number> = statusRow ?? {
+         leads_confirmed: 0, no_answers: 0, killed: 0, pending: 0, future: 0,
+       }
+@@ -579,12 +619,13 @@ serve(async (req) => {
+           canvasser_id: match.id,
+           metric_date: statusDate,
+           office_location: statusOffice,
++          team_id: cardTeamId,
+           leads_confirmed: statusNext.leads_confirmed ?? 0,
+           no_answers: statusNext.no_answers ?? 0,
+           killed: statusNext.killed ?? 0,
+           pending: statusNext.pending ?? 0,
+           future: statusNext.future ?? 0,
+-        }, { onConflict: 'canvasser_id,metric_date' })
++        }, { onConflict: 'canvasser_id,metric_date,team_id' })
+       if (statusErr) {
+         await supabaseAdmin.from('webhook_logs').insert({
+           step: 'Lead_Status_Upsert_Error',
+@@ -609,6 +650,7 @@ serve(async (req) => {
+           canvasser_id: match.id,
+           metric_date: statusDate,
+           office: statusOffice,
++          team_id: cardTeamId,
+           from: previousStatusFromEvent ?? null,
+           to: changedValue,
+           recordedAs: statusBucket,
+@@ -645,6 +687,7 @@ serve(async (req) => {
+         _canvasser_id: match.id,
+         _metric_date: genDate,
+         _office: genOffice,
++        _team_id: cardTeamId,
+       })
+       if (genErr) {
+         // Release the claim so Monday's redelivery can credit successfully.
+@@ -664,7 +707,7 @@ serve(async (req) => {
+       }
+       await supabaseAdmin.from('webhook_logs').insert({
+         step: 'Lead_Generated_Processed',
+-        data: { pulseId: pid, canvasser_id: match.id, metric_date: genDate, office: genOffice },
++        data: { pulseId: pid, canvasser_id: match.id, metric_date: genDate, office: genOffice, team_id: cardTeamId },
+       })
+       return new Response('Lead generated credited', { status: 200, headers: corsHeaders })
+     }
+@@ -792,7 +835,9 @@ serve(async (req) => {
+             .from('leads')
+             .insert({
+               canvasser_id: match.id,
+-              team_id: match.team_id ?? null,
++              // The van named on the selling card — Volume follows the card,
++              // not the rep's current van.
++              team_id: cardTeamId,
+               status: 'confirmed',
+               is_sale: true,
+               customer_name: item.name ?? null,
+@@ -905,12 +950,14 @@ serve(async (req) => {
+         }).select('id').single()
+       : { data: null }
+ 
+-    const { data: existing } = await supabaseAdmin
+-      .from('daily_metrics')
+-      .select('id, leads_submitted, blowouts, outside_leads, resets, pitch_missed, sales')
+-      .eq('canvasser_id', match.id)
+-      .eq('metric_date', metric_date)
+-      .maybeSingle()
++    const { data: existing } = await scopeVan(
++      supabaseAdmin
++        .from('daily_metrics')
++        .select('id, leads_submitted, blowouts, outside_leads, resets, pitch_missed, sales')
++        .eq('canvasser_id', match.id)
++        .eq('metric_date', metric_date),
++      cardTeamId,
++    ).maybeSingle()
+ 
+ 
+     const cur: Record<string, number> = existing ?? {
+@@ -936,6 +983,7 @@ serve(async (req) => {
+       canvasser_id: match.id,
+       metric_date,
+       office_location,
++      team_id: cardTeamId,
+       leads_submitted: (cur.leads_submitted ?? 0) + (creditNew ? 1 : 0),
+       blowouts: next.blowouts ?? 0,
+       outside_leads: next.outside_leads ?? 0,
+@@ -946,7 +994,7 @@ serve(async (req) => {
+ 
+     const { error: upErr } = await supabaseAdmin
+       .from('daily_metrics')
+-      .upsert(payload, { onConflict: 'canvasser_id,metric_date' })
++      .upsert(payload, { onConflict: 'canvasser_id,metric_date,team_id' })
+ 
+     if (upErr) {
+       // Release the claims so a Monday redelivery can re-apply.
+@@ -991,12 +1039,12 @@ serve(async (req) => {
+         // Rows are per (canvasser, day, OFFICE) — the board's office — so a
+         // rep working both blocks gets separate SD and OC rows.
+         await supabaseAdmin.from('daily_logs').upsert(
+-          { canvasser_id: match.id, team_id: match.team_id ?? null, log_date: metric_date, office_location },
++          { canvasser_id: match.id, team_id: cardTeamId, log_date: metric_date, office_location },
+           { onConflict: 'canvasser_id,log_date,office_location', ignoreDuplicates: true },
+         )
+         const { data: logRow, error: logReadErr } = await supabaseAdmin
+           .from('daily_logs')
+-          .select('id, ' + DAILY_LOG_KEYS.join(', '))
++          .select('id, team_id, ' + DAILY_LOG_KEYS.join(', '))
+           .eq('canvasser_id', match.id)
+           .eq('log_date', metric_date)
+           .eq('office_location', office_location)
+@@ -1008,10 +1056,15 @@ serve(async (req) => {
+           })
+         } else {
+           const row = logRow as unknown as Record<string, unknown> & { id: string }
+-          const logUpdate: Record<string, number> = {}
++          const logUpdate: Record<string, unknown> = {}
+           for (const [k, v] of Object.entries(delta)) {
+             if (v !== 0) logUpdate[k] = Math.max(0, Number(row[k] ?? 0) + v)
+           }
++          // Keep the row's van current. daily_logs is grained per (canvasser,
++          // day, office), not per van — the pay engine sums it by canvasser —
++          // so Points attribute to the van the rep's cards named that DAY,
++          // whereas the funnel counters above are per card.
++          if (cardTeamId && row.team_id !== cardTeamId) logUpdate.team_id = cardTeamId
+           const { error: logWriteErr } = await supabaseAdmin
+             .from('daily_logs')
+             .update(logUpdate as never)

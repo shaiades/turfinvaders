@@ -53,6 +53,7 @@ import {
   parseOohForm,
   planDisposition,
   planOfficeApptDisposition,
+  sourceCodeColId,
   sourceCodeToWrite,
 } from "./engine.ts";
 import {
@@ -219,10 +220,19 @@ serve(async (req) => {
           ? DISPATCHER_LABEL.processed
           : DISPATCHER_LABEL.needsReview,
     );
-    // Notify the office for anything that needs a human (best-effort).
-    if (status === "needs_review" || status === "error") {
+    // Text the office ONLY for genuine failures (errors). Routine "needs
+    // review" items (e.g. an on-block report with no Lead ID the office must
+    // file by hand) are visible in the Dispo tab and no longer buzz the
+    // dispatcher's phone — that notification was too noisy. Best-effort.
+    if (status === "error") {
+      const raw = (row.raw ?? {}) as { customerName?: string | null; apptLabel?: string | null };
+      const lead = (raw.customerName ?? "").trim();
+      const appt = (raw.apptLabel ?? "").trim();
+      const who = lead
+        ? `${lead}${appt ? ` (${appt})` : ""} — rep ${String(row.rep_name ?? "?")}`
+        : String(row.rep_name ?? "?");
       await sendDispatcherIMessage(
-        `Dispo report needs review: ${String(row.rep_name ?? "?")}, result ${String(row.result ?? "?")}. Open Close Kombat → Dispo.`,
+        `Dispo write-back error: ${who}, result ${String(row.result ?? "?")}. Open Close Kombat → Dispo.`,
       ).catch(() => undefined);
     }
   };
@@ -279,7 +289,7 @@ serve(async (req) => {
     // so a blank arrival can fall back to the appointment time (Rule 3 / #6).
     const detailsLine = buildDetailsLine(form, formItem.createdAtMs);
     const formLink = `https://tidal-remodeling.monday.com/boards/${FORM_BOARD_ID}/pulses/${formItemId}`;
-    baseRow = buildBaseQueueRow(form, detailsLine, plan);
+    baseRow = buildBaseQueueRow(form, detailsLine, plan, { customerName: formItem.name || null });
 
     // A self-gen / off-block SALE still texts leadership immediately, even
     // though its card is queued for the office (a rep who sold on their own
@@ -413,6 +423,14 @@ serve(async (req) => {
 
     const isCurrentBlock = block.boardId === activeSd || block.boardId === activeOc;
     const liveAllowed = mode === "live" && allowedBoards.has(block.boardId);
+    // Which office this block belongs to, by board (authoritative — the board
+    // decides which columns physically exist). Drives the office-specific Source
+    // Code column id (SD and OC use different ids) and live issuing below.
+    const office: "SD" | "OC" | null = isCurrentBlock
+      ? block.boardId === activeSd
+        ? "SD"
+        : "OC"
+      : null;
 
     // Details (Rule 3 / #6): rebuild now that the block is known, so a blank
     // arrival time falls back to the appointment time (date9, PT).
@@ -431,7 +449,10 @@ serve(async (req) => {
         block.sourceCode,
         block.source,
       );
-      if (code != null) fieldWrites[BLOCK_COL.sourceCode] = String(code);
+      // Write to the OFFICE-appropriate Source Code column — the SD and OC
+      // boards use different ids, so the single hardcoded id dropped every OC
+      // sale's code onto a non-existent column (never reached Sales Processing).
+      if (code != null) fieldWrites[sourceCodeColId(office)] = String(code);
       if (unknownSource)
         sourceCodeNote = ` (source "${block.source ?? ""}" unrecognized — set code=1)`;
     }
@@ -444,11 +465,6 @@ serve(async (req) => {
       [BLOCK_COL.details]: { text: combinedDetails },
     };
 
-    const office: "SD" | "OC" | null = isCurrentBlock
-      ? block.boardId === activeSd
-        ? "SD"
-        : "OC"
-      : null;
     const rowWithTarget = {
       ...baseRow,
       details_line: detailsLineForBlock,

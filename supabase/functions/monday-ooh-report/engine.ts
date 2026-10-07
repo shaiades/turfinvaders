@@ -12,7 +12,8 @@
 //
 // Column ids + status label ids/text were read LIVE from boards 18433859050
 // (form), 18432844990 (SD block) and 18432845324 (OC block) on 2026-10-03/04;
-// SD and OC blocks share identical column ids and status labels.
+// SD and OC blocks share identical column ids and status labels EXCEPT the
+// Source Code column, whose id differs per office — see SOURCE_CODE_COL.
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ── Boards ───────────────────────────────────────────────────────────────────
@@ -67,7 +68,8 @@ export const FORM_COL = {
   calledTexted: "single_selectiv9qswz", // 0 Yes | 1 No
 } as const;
 
-// ── Block columns (boards 18432844990 / 18432845324, identical) ──────────────
+// ── Block columns (boards 18432844990 / 18432845324, identical except Source
+//    Code — see SOURCE_CODE_COL) ──────────────────────────────────────────────
 export const BLOCK_COL = {
   name: "name",
   reps: "people6", // max 2 (pairs)
@@ -82,7 +84,8 @@ export const BLOCK_COL = {
   salePrice: "numbers",
   resetDate: "date", // date + time
   reloads: "dropdown2",
-  sourceCode: "numeric_mm35kwnj",
+  // Source Code lives at a DIFFERENT id per office — never add it here; use
+  // SOURCE_CODE_COL / sourceCodeColId so the write/read picks the right board's.
   // disposition status columns
   iss: "status", // Add Rep|Reload|CTC|Not Issued|Office Appt|Iss
   bo: "status4", // No Show|No show text|No Demo|None
@@ -94,6 +97,32 @@ export const BLOCK_COL = {
   // Appt sale (job walk / can-save / re-sign) BEFORE pressing status9 = Reload.
   advantage: "color_mkwkazqn",
 } as const;
+
+/**
+ * Source Code column id, PER OFFICE. Unlike every other block column, the SD and
+ * OC boards use DIFFERENT ids for "Source Code" (confirmed live 2026-10-07 on the
+ * active boards SD 18433845590 / OC 18433845468). Writing the SD id onto an OC
+ * item lands on a non-existent column — the code silently never arrives and the
+ * sale may not reach Sales Processing. Always pick the id by the block's office.
+ * Boards are re-cloned weekly, so re-confirm these via the Monday MCP if column
+ * ids drift (the office column id, color_mm2yd84r, has stayed shared).
+ */
+export const SOURCE_CODE_COL: Record<"SD" | "OC", string> = {
+  SD: "numeric_mm35kwnj",
+  OC: "numeric_mm35nm4y",
+} as const;
+
+/** Every office's Source Code column id. The read path requests all of them —
+ *  Monday silently omits the ids a board doesn't have — so the block's existing
+ *  code is read no matter which office it's on. */
+export const SOURCE_CODE_COL_IDS: readonly string[] = Object.values(SOURCE_CODE_COL);
+
+/** The Source Code column id to WRITE for a block item, chosen by office. Falls
+ *  back to the SD id when the office can't be resolved (keeps the pre-fix
+ *  behavior for a rare un-officed board rather than dropping the write). */
+export function sourceCodeColId(office: "SD" | "OC" | null | undefined): string {
+  return office ? SOURCE_CODE_COL[office] : SOURCE_CODE_COL.SD;
+}
 
 /** Exact Monday status label text (press by LABEL, never numeric index). */
 export const LABEL = {
@@ -285,9 +314,10 @@ export type OohForm = {
   onBlock: number | null;
   result: ResultCode | null;
   leadId: string | null;
-  /** Appointment date (YYYY-MM-DD) from the form — picks the block day-group to
-   *  search when there's no Lead ID (Rule 1). null → fall back to submit day. */
-  apptDate: string | null;
+  /** Appointment date/time from the form. Names WHO/WHEN on a review row, and
+   *  picks the block day-group to search when there's no Lead ID (Rule 1, via
+   *  matchWeekday — which reads .date). null → fall back to the submit day. */
+  apptDate: { date: string; time: string | null } | null;
   address: string | null;
   phone: string | null;
   quotedText: string | null;
@@ -381,7 +411,7 @@ export function parseOohForm(formItemId: string, cols: ColMap): OohForm {
     onBlock: onBlock,
     result: (result as ResultCode | null) ?? null,
     leadId: (textVal(g(FORM_COL.leadId)) ?? "").match(/^\d+$/) ? textVal(g(FORM_COL.leadId)) : null,
-    apptDate: dateVal(g(FORM_COL.apptDate))?.date ?? null,
+    apptDate: dateVal(g(FORM_COL.apptDate)),
     address: textVal(g(FORM_COL.address)),
     phone: textVal(g(FORM_COL.phone)),
     quotedText: textVal(g(FORM_COL.quoted)),
@@ -1034,9 +1064,12 @@ export function matchWithoutLeadId(input: {
 /** The block day-group to search for a no-Lead-ID match: the weekday of the
  *  appointment date when the form carries one (that's where the card lives),
  *  else the weekday of the submission (PT). Returns a BLOCK_DAY_GROUP key. */
-export function matchWeekday(apptDate: string | null | undefined, submitMs: number): number {
-  if (apptDate) {
-    const [y, mo, d] = apptDate.split("-").map(Number);
+export function matchWeekday(
+  apptDate: { date: string } | null | undefined,
+  submitMs: number,
+): number {
+  if (apptDate?.date) {
+    const [y, mo, d] = apptDate.date.split("-").map(Number);
     if ([y, mo, d].every(Number.isFinite)) {
       // Anchor at UTC noon so the civil weekday of the date can't slip a day.
       return new Date(Date.UTC(y, mo - 1, d, 12)).getUTCDay();
@@ -1168,6 +1201,7 @@ export function buildBaseQueueRow(
   form: OohForm,
   detailsLine: string,
   plan: WritePlan,
+  meta?: { customerName?: string | null },
 ): Record<string, unknown> {
   return {
     rep_name: form.repName,
@@ -1177,7 +1211,14 @@ export function buildBaseQueueRow(
     lead_id: form.leadId,
     details_line: detailsLine,
     plan: plan as unknown,
-    raw: form as unknown,
+    // Display fields the admin UI reads straight from `raw` (no schema change):
+    // the lead/customer name (the form item's title) and the appointment
+    // date/time, so a review item names WHO and WHEN — not just the rep.
+    raw: {
+      ...(form as unknown as Record<string, unknown>),
+      customerName: meta?.customerName ?? null,
+      apptLabel: form.apptDate ? fmtReset(form.apptDate) : null,
+    },
   };
 }
 
