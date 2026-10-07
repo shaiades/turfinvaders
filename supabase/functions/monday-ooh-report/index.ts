@@ -26,6 +26,8 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { makeClient, type Supa } from "./supa.ts";
 import {
   type BlockItem,
+  type FormItem,
+  createItem,
   fetchAttendance,
   fetchBlockItem,
   fetchDispatchDayItems,
@@ -42,10 +44,13 @@ import {
   BLOCK_COL,
   DISPATCHER_LABEL,
   FORM_BOARD_ID,
+  OFFICE_LABEL,
   OOH_DISPATCHER_COL,
+  blockDayGroupForAppt,
   buildBaseQueueRow,
   buildDetailsLine,
   buildSaleAlert,
+  createSourceText,
   hasExistingDisposition,
   isAllowedOohBoard,
   isOpenLead,
@@ -60,8 +65,16 @@ import {
   planDisposition,
   sourceCodeColId,
   sourceCodeToWrite,
+  weekdayOfDate,
+  type WritePlan,
 } from "./engine.ts";
-import { type DispatchRep, firstName, nowWallMinutes, planIssue } from "./dispatch.ts";
+import {
+  type DispatchRep,
+  firstName,
+  inferCreateOffice,
+  nowWallMinutes,
+  planIssue,
+} from "./dispatch.ts";
 import { runWatchdog } from "./watchdog.ts";
 import { enrichHistory, logDispatchDecision } from "./history.ts";
 
@@ -242,6 +255,11 @@ serve(async (req) => {
       "off" | "dry_run" | "live";
     const activeSd = (settings?.active_monday_board_sd as string | null) ?? null;
     const activeOc = (settings?.active_monday_board_oc as string | null) ?? null;
+    // Auto-create a line item on THIS week's block when a report can't land on
+    // the current block (a no-lead-id self-gen/upsell/reload, OR a matched lead
+    // sitting on an older block) — owner directive 2026-10-07. Hoisted here so
+    // both the create-target path and the old-block matched path can read it.
+    const autocreate = (settings?.ooh_autocreate as boolean | null) ?? false;
     const allowlist = ((settings?.ooh_writeback_board_allowlist as string | null) ?? "")
       .split(",")
       .map((s) => s.trim())
@@ -306,25 +324,79 @@ serve(async (req) => {
         ? `SALE written but leadership text failed: ${r.errors.join("; ").slice(0, 280)}`
         : null;
 
-    // Only the matched-lead path writes automatically. Create (self-gen /
-    // upsell / reload) is queued unless auto-create is explicitly enabled.
-    if (target.kind !== "write") {
-      const autocreate = (settings?.ooh_autocreate as boolean | null) ?? false;
-      if (target.kind === "create" && !autocreate) {
-        await finish("queued");
-        const saleRes = await alertSaleOnce(formItem.name || form.address); // self-gen SALE → text now
-        const ste = saleTextError(saleRes);
-        await queue("needs_review", `auto-create off — ${target.reason}`, {
-          ...baseRow,
-          ...(ste ? { error: ste } : {}),
+    // A report with no Lead ID (self-gen / upsell / reload) → create a line item
+    // on THIS week's block when auto-create is on (office inferred from the rep's
+    // attendance); otherwise queue it for the office to add by hand.
+    if (target.kind === "create") {
+      if (autocreate && mode === "live") {
+        const weekday = weekdayOfDate(form.apptDate?.date, formItem.createdAtMs);
+        const [sdNames, ocNames] = await Promise.all([
+          fetchAttendance(token, "SD", weekday)
+            .then((m) => new Set(m.keys()))
+            .catch(() => new Set<string>()),
+          fetchAttendance(token, "OC", weekday)
+            .then((m) => new Set(m.keys()))
+            .catch(() => new Set<string>()),
+        ]);
+        const createOffice = inferCreateOffice({
+          oldBlockOffice: null,
+          repName: form.repName,
+          partner: form.partner,
+          sdFirstNames: sdNames,
+          ocFirstNames: ocNames,
         });
-        return ok({ queued: "create (auto-create off)" });
-      }
-      if (target.kind === "queue") {
+        const createBoard =
+          createOffice === "SD" ? activeSd : createOffice === "OC" ? activeOc : null;
+        if (createOffice && createBoard) {
+          mondayTouched = true;
+          const res = await runAutoCreate({
+            token,
+            supabase,
+            office: createOffice,
+            currentBoardId: createBoard,
+            groupId: blockDayGroupForAppt(form.apptDate, formItem.createdAtMs),
+            form,
+            formItem,
+            plan,
+            oldBlockSource: null,
+            dispatchMode,
+            formItemId,
+            alertSale: () => alertSaleOnce(formItem.name || form.address),
+          });
+          if (res.ok) {
+            await stampDispatcher(DISPATCHER_LABEL.processed);
+            await finish("created", { target_item_id: res.itemId, board_id: createBoard });
+            return ok({ created: res.itemId, office: createOffice });
+          }
+          await finish("error");
+          await queue("error", `auto-create failed: ${res.error}`, { ...baseRow, error: res.error });
+          return ok({ error: res.error });
+        }
+        // Office couldn't be resolved → don't guess; send to review (owner rule).
         await finish("queued");
-        await queue("needs_review", target.reason, baseRow);
-        return ok({ queued: target.reason });
+        const saleRes = await alertSaleOnce(formItem.name || form.address);
+        const ste = saleTextError(saleRes);
+        await queue(
+          "needs_review",
+          `auto-create: couldn't resolve office for ${form.repName ?? "rep"} — ${target.reason}`,
+          { ...baseRow, ...(ste ? { error: ste } : {}) },
+        );
+        return ok({ queued: "auto-create office unresolved" });
       }
+      // auto-create off (or write-back not live) → queue + text the sale now.
+      await finish("queued");
+      const saleRes = await alertSaleOnce(formItem.name || form.address); // self-gen SALE → text now
+      const ste = saleTextError(saleRes);
+      await queue("needs_review", `auto-create off — ${target.reason}`, {
+        ...baseRow,
+        ...(ste ? { error: ste } : {}),
+      });
+      return ok({ queued: "create (auto-create off)" });
+    }
+    if (target.kind === "queue") {
+      await finish("queued");
+      await queue("needs_review", target.reason, baseRow);
+      return ok({ queued: target.reason });
     }
 
     // ── matched lead: resolve + gate ────────────────────────────────────────
@@ -407,6 +479,46 @@ serve(async (req) => {
     // Reps this report frees (the submitter + their partner, if any).
     const freedReps = [form.repName, form.partner].filter((r): r is string => !!r && !!r.trim());
     const resultLabel = (plan.status?.label ?? null) as string | null;
+
+    // Matched lead sitting on an OLDER block (not this week's) → add a fresh line
+    // item to THIS week's block and result it there, just like a self-gen (owner
+    // directive 2026-10-07). Reuses the old card's office. The already-
+    // dispositioned guard above already skipped handled cards, so this never
+    // re-creates a lead the office closed.
+    if (!isCurrentBlock && autocreate && mode === "live") {
+      const createOffice = block.office;
+      const createBoard =
+        createOffice === "SD" ? activeSd : createOffice === "OC" ? activeOc : null;
+      if (createOffice && createBoard) {
+        mondayTouched = true;
+        const res = await runAutoCreate({
+          token,
+          supabase,
+          office: createOffice,
+          currentBoardId: createBoard,
+          groupId: blockDayGroupForAppt(form.apptDate, formItem.createdAtMs),
+          form,
+          formItem,
+          plan,
+          oldBlockSource: block.source,
+          dispatchMode,
+          formItemId,
+          alertSale: () => alertSaleOnce(block.name),
+        });
+        if (res.ok) {
+          await stampDispatcher(DISPATCHER_LABEL.processed);
+          await finish("created", { target_item_id: res.itemId, board_id: createBoard });
+          return ok({ created: res.itemId, movedFrom: block.boardId, office: createOffice });
+        }
+        await finish("error");
+        await queue("error", `auto-create to current block failed: ${res.error}`, {
+          ...rowWithTarget,
+          error: res.error,
+        });
+        return ok({ error: res.error });
+      }
+      // Office unreadable on the old card → fall through to the review queue.
+    }
 
     if (!liveAllowed) {
       // dry-run / not allow-listed: store the plan, write nothing to the block.
@@ -770,4 +882,140 @@ async function runDispatch(p: {
   }
 
   return issued;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AUTO-CREATE — add a line item to THIS week's block and result it there, for a
+// report that can't land on the current block: a no-lead-id self-gen/upsell/
+// reload, or a matched lead sitting on an older block (owner directive
+// 2026-10-07 — "we add the line item to this week's block, just like a self-gen").
+// Mirrors the matched-lead write: non-status columns FIRST, then the ONE
+// disposition status in a SEPARATE call, so the block's "status changes"
+// automations fire and route it (Sold → Sales Processing, etc.). Then the SALE
+// text and live issuing, same as a matched sale. Never throws past the caller's
+// catch — the create + status are checked, the rest is best-effort.
+// ═══════════════════════════════════════════════════════════════════════════
+async function runAutoCreate(p: {
+  token: string;
+  supabase: Supa;
+  office: "SD" | "OC";
+  currentBoardId: string;
+  groupId: string;
+  form: ReturnType<typeof parseOohForm>;
+  formItem: FormItem;
+  plan: WritePlan;
+  oldBlockSource: string | null;
+  dispatchMode: "off" | "dry_run" | "live";
+  formItemId: string;
+  alertSale: () => Promise<InkboxResult | null>;
+}): Promise<{ ok: true; itemId: string } | { ok: false; error: string }> {
+  const name = (p.formItem.name || p.form.address || "OOH report").slice(0, 255);
+  const detailsLine = buildDetailsLine(p.form, p.formItem.createdAtMs);
+  const sourceText = createSourceText(p.form, p.oldBlockSource);
+
+  // Non-status columns. The disposition status is pressed SEPARATELY below so
+  // Monday's "status changes" automations fire (creating with a preset status
+  // would not route the card).
+  const cols: Record<string, unknown> = { ...p.plan.fieldWrites };
+  cols[BLOCK_COL.office] = { label: OFFICE_LABEL[p.office] };
+  if (p.form.apptDate)
+    cols[BLOCK_COL.apptDateTime] = {
+      date: p.form.apptDate.date,
+      ...(p.form.apptDate.time ? { time: p.form.apptDate.time } : {}),
+    };
+  cols[BLOCK_COL.source] = sourceText;
+  if (p.plan.fillSourceCodeIfBlank) {
+    const { code } = sourceCodeToWrite(p.form.result, null, sourceText);
+    if (code != null) cols[sourceCodeColId(p.office)] = String(code);
+  }
+  cols[BLOCK_COL.details] = { text: detailsLine };
+
+  // Reps (people6): credit the submitter + partner so the card is attributed and
+  // the live-issuer can free them. Best-effort — a name we can't resolve to a
+  // Monday user is simply omitted; it never blocks the create.
+  const repNames = [p.form.repName, p.form.partner].filter((r): r is string => !!r && !!r.trim());
+  if (repNames.length) {
+    const users = await fetchMondayUsers(p.token).catch(
+      () => [] as Array<{ id: string; name: string }>,
+    );
+    const uids = repNames.map((r) => resolveUserId(users, r)).filter((u): u is string => !!u);
+    if (uids.length)
+      cols[BLOCK_COL.reps] = {
+        personsAndTeams: uids.map((id) => ({ id: Number(id), kind: "person" })),
+      };
+  }
+
+  const newId = await createItem(
+    p.token,
+    p.currentBoardId,
+    p.groupId,
+    name,
+    cols,
+    `ooh-create-${p.formItemId}`,
+  );
+  if (!newId) return { ok: false, error: "create_item returned no id" };
+
+  if (p.plan.status) {
+    const r = await setStatus(
+      p.token,
+      p.currentBoardId,
+      newId,
+      p.plan.status.col,
+      p.plan.status.label,
+      `ooh-create-status-${p.formItemId}`,
+    );
+    if (r.error) return { ok: false, error: `setStatus: ${r.error}` };
+  }
+
+  const formLink = `https://tidal-remodeling.monday.com/boards/${FORM_BOARD_ID}/pulses/${p.formItemId}`;
+  await postUpdate(
+    p.token,
+    newId,
+    `Auto-created from OOH report by ${p.form.repName ?? "rep"} at ${laClock(p.formItem.createdAtMs)} — ${formLink}`,
+    oohUpdateKey(`create-${p.formItemId}`),
+  ).catch(() => undefined);
+
+  // SALE text — the same banner as a matched sale; a no-op for a non-sale result.
+  await p.alertSale().catch(() => null);
+
+  // Live issuing: hand the freed rep(s) their next lead, same as a matched sale.
+  if (p.dispatchMode !== "off" && !p.plan.atTheDoor) {
+    const syntheticBlock: BlockItem = {
+      id: newId,
+      name,
+      state: "active",
+      boardId: p.currentBoardId,
+      groupId: p.groupId,
+      office: p.office,
+      source: sourceText,
+      sourceCode: null,
+      details: detailsLine,
+      apptWallMinutes: null,
+      reps: repNames,
+      coords: null,
+      iss: null,
+      pm: null,
+      rs: null,
+      ol: null,
+      bo: null,
+      sale: null,
+    };
+    await runDispatch({
+      token: p.token,
+      supabase: p.supabase,
+      mode: p.dispatchMode === "live" ? "live" : "dry_run",
+      office: p.office,
+      block: syntheticBlock,
+      reportedLeadId: newId,
+      reportedLeadName: name,
+      reportedResultLabel: p.plan.status?.label ?? null,
+      repNames,
+      nowMs: p.formItem.createdAtMs,
+      formItemId: p.formItemId,
+    }).catch((e) =>
+      console.error("[ooh auto-create dispatch]", e instanceof Error ? e.message : e),
+    );
+  }
+
+  return { ok: true, itemId: newId };
 }

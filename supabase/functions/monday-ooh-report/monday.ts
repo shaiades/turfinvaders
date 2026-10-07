@@ -144,6 +144,10 @@ export type BlockItem = {
   state: string;
   boardId: string;
   groupId: string;
+  /** Office the card belongs to, from the Office column (color_mm2yd84r): San
+   *  Diego → "SD", Orange County → "OC". null when unreadable. Lets an old-block
+   *  report reuse the card's office when auto-creating onto the current block. */
+  office: "SD" | "OC" | null;
   source: string | null;
   sourceCode: number | null;
   details: string | null;
@@ -170,6 +174,7 @@ const BLOCK_READ_COLS = [
   BLOCK_COL.apptDateTime,
   BLOCK_COL.reps,
   BLOCK_COL.location,
+  BLOCK_COL.office,
   BLOCK_COL.iss,
   BLOCK_COL.pm,
   BLOCK_COL.rs,
@@ -248,12 +253,19 @@ export async function fetchBlockItem(token: string, itemId: string): Promise<Blo
   // one of the ids is ever present in the response — see BLOCK_READ_COLS).
   const sc = SOURCE_CODE_COL_IDS.map((id) => cols[id]?.text).find((t) => t != null) ?? "";
   const label = (id: string) => cols[id]?.text?.trim() || null;
+  const officeText = cols[BLOCK_COL.office]?.text?.trim() ?? "";
+  const office: "SD" | "OC" | null = /san\s*diego/i.test(officeText)
+    ? "SD"
+    : /orange/i.test(officeText)
+      ? "OC"
+      : null;
   return {
     id: String(it.id),
     name: String(it.name ?? ""),
     state: String(it.state ?? ""),
     boardId: String((it.board as { id?: string })?.id ?? ""),
     groupId: String((it.group as { id?: string })?.id ?? ""),
+    office,
     source: cols[BLOCK_COL.source]?.text?.trim() || null,
     sourceCode: sc && Number.isFinite(Number(sc)) ? Number(sc) : null,
     details: cols[BLOCK_COL.details]?.text ?? null,

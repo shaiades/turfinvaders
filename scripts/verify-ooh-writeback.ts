@@ -10,14 +10,17 @@
 import {
   AUTO_ISSUE_WITHOUT_REPORT,
   BLOCK_COL,
+  BLOCK_DAY_GROUP,
   FORM_COL,
   LABEL,
   ON_BLOCK,
   RESULT,
   applyDisposition,
+  blockDayGroupForAppt,
   buildBaseQueueRow,
   buildDetailsLine,
   buildSaleAlert,
+  createSourceText,
   hasExistingDisposition,
   isAllowedOohBoard,
   isBlankStatus,
@@ -36,6 +39,7 @@ import {
   sourceCodeColId,
   sourceCodeToWrite,
   timeInHouseMins,
+  weekdayOfDate,
   type AppliedOp,
   type ColMap,
   type DayItem,
@@ -73,6 +77,7 @@ import {
   isJobWalkMarker,
   isOlderHomeownerMarker,
   isRehashMarker,
+  inferCreateOffice,
   nowWallMinutes as dispatchNowWall,
   planIssue,
   planWatchdog,
@@ -1744,6 +1749,118 @@ function mkRep(over: Partial<DispatchRep>): DispatchRep {
   expect("marker: job walk", isJobWalkMarker("job walk for the sold roof"));
   expect("marker: older homeowner", isOlderHomeownerMarker("elderly homeowner, be patient"));
   expect("marker: no false rehash", !isRehashMarker("fresh canvass lead"));
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 15) AUTO-CREATE onto this week's block (office inference, day group, source)
+// ════════════════════════════════════════════════════════════════════════════
+{
+  // Office inference: old-block sale reuses the original card's office.
+  expectEq(
+    "office: old-block sale reuses the card's office",
+    inferCreateOffice({
+      oldBlockOffice: "OC",
+      repName: "Daniel Figueiredo",
+      partner: null,
+      sdFirstNames: new Set(["daniel"]), // even if SD also lists a Daniel, old office wins
+      ocFirstNames: new Set<string>(),
+    }),
+    "OC",
+  );
+  // Self-gen: infer from which office's attendance lists the rep.
+  expectEq(
+    "office: self-gen infers SD from attendance",
+    inferCreateOffice({
+      oldBlockOffice: null,
+      repName: "Jaxon Heilman",
+      partner: null,
+      sdFirstNames: new Set(["jaxon", "nick"]),
+      ocFirstNames: new Set(["sam", "alfredo"]),
+    }),
+    "SD",
+  );
+  expectEq(
+    "office: self-gen infers OC from attendance",
+    inferCreateOffice({
+      oldBlockOffice: null,
+      repName: "Sam Jones",
+      partner: null,
+      sdFirstNames: new Set(["jaxon"]),
+      ocFirstNames: new Set(["sam", "curtis"]),
+    }),
+    "OC",
+  );
+  expectEq(
+    "office: a partner on the card resolves it",
+    inferCreateOffice({
+      oldBlockOffice: null,
+      repName: "Unknown Rep",
+      partner: "Curtis Westergard",
+      sdFirstNames: new Set(["jaxon"]),
+      ocFirstNames: new Set(["curtis"]),
+    }),
+    "OC",
+  );
+  expectEq(
+    "office: rep in BOTH offices → null (don't guess)",
+    inferCreateOffice({
+      oldBlockOffice: null,
+      repName: "Alex",
+      partner: null,
+      sdFirstNames: new Set(["alex"]),
+      ocFirstNames: new Set(["alex"]),
+    }),
+    null,
+  );
+  expectEq(
+    "office: rep in NEITHER office → null (route to review)",
+    inferCreateOffice({
+      oldBlockOffice: null,
+      repName: "Ghost Rep",
+      partner: null,
+      sdFirstNames: new Set(["jaxon"]),
+      ocFirstNames: new Set(["sam"]),
+    }),
+    null,
+  );
+
+  // Day group: the appointment date's weekday (else today).
+  const NOW_FRI = Date.parse("2026-10-09T18:00:00Z"); // a Friday
+  expectEq(
+    "day group: appt on a Wednesday → Wednesday group",
+    blockDayGroupForAppt({ date: "2026-10-07" }, NOW_FRI), // 2026-10-07 is a Wednesday
+    BLOCK_DAY_GROUP[3],
+  );
+  expectEq(
+    "day group: no appt date → today's weekday",
+    blockDayGroupForAppt(null, NOW_FRI),
+    BLOCK_DAY_GROUP[weekdayOfDate(null, NOW_FRI)],
+  );
+  expectEq("weekday: 2026-10-07 is Wednesday", weekdayOfDate("2026-10-07", NOW_FRI), 3);
+  expectEq("weekday: bad date falls back to now's weekday", weekdayOfDate("", NOW_FRI) >= 0, true);
+
+  // Source text: reuse the old card's source, else the on-block kind.
+  const selfGen = parseOohForm(
+    "c1",
+    form({ [FORM_COL.result]: status(RESULT.SOLD), [FORM_COL.onBlock]: status(ON_BLOCK.SELF_GEN) }),
+  );
+  expectEq("source: self-gen → 'Self Gen'", createSourceText(selfGen, null), "Self Gen");
+  const upsell = parseOohForm(
+    "c2",
+    form({ [FORM_COL.result]: status(RESULT.SOLD), [FORM_COL.onBlock]: status(ON_BLOCK.UPSELL) }),
+  );
+  expectEq("source: upsell → 'Upsell'", createSourceText(upsell, null), "Upsell");
+  expectEq(
+    "source: old-block card's source is reused",
+    createSourceText(selfGen, "Rep Reset"),
+    "Rep Reset",
+  );
+  // And that reused source still drives Rule 4 Source Code (Rep Reset → 1).
+  expectEq(
+    "source: reused 'Rep Reset' → Source Code 1",
+    sourceCodeToWrite(RESULT.SOLD, null, createSourceText(selfGen, "Rep Reset")).code,
+    1,
+  );
 }
 
 if (failures > 0) {
