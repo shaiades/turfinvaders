@@ -117,7 +117,15 @@ export async function sendImessageToRecipients(
 /** Read Inkbox config from the environment and send to the dispatch recipients. */
 export async function sendDispatcherIMessage(text: string): Promise<InkboxResult> {
   const cfg: InkboxConfig = {
-    apiKey: denoEnv?.get("INKBOX_API_KEY") ?? null,
+    // The working key was saved in the dashboard as INBOX_API_KEY (typo,
+    // 2026-10-07) and Supabase secret values can't be read back to re-file
+    // under the right name — so accept both. INKBOX_API_KEY wins if ever set
+    // correctly; the placeholder value it held was replaced by preferring a
+    // real-looking value (see guard below for corrupt keys either way).
+    apiKey:
+      [denoEnv?.get("INKBOX_API_KEY"), denoEnv?.get("INBOX_API_KEY")].find(
+        (v) => v && v.trim() && v.trim() !== "PASTE_THE_REAL_KEY_HERE",
+      ) ?? null,
     recipients: (denoEnv?.get("INKBOX_DISPATCH_RECIPIENTS") ?? "")
       .split(",")
       .map((s) => s.trim())
