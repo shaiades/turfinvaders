@@ -20,11 +20,15 @@ const noCartoonArt = (c: RepCartoon | undefined): boolean => !(c?.portrait || c?
  * The canvasser-facing arcade high-score hall: a top-3 PODIUM over a ranked
  * high-score table, plus Van Wars. The Month tab carries the $100K Boss meter
  * and a Points / "Bonus Race · $" toggle — the old separate Bonus tab, folded
- * into Month (2026-10-05) so the $100K boss has exactly one home. Numbers ride
- * useArcadeLadder → getDispatchProduction, the same server aggregates Fleet
- * Dispatch shows, so the boards can never disagree. Privacy: sales, sits, sit
- * rate and bonus COUNT only — detailed take-home pay lives on the viewer's own
- * Paycheck card, never on a peer's row.
+ * into Month (2026-10-05) so the $100K boss has exactly one home. The live
+ * credited sale $ rides alongside points on EVERY row and tab (restored
+ * 2026-10-07, owner relay of Ernie's ask: the van gets hyped seeing the money
+ * tick when someone hits); the "Bonus Race" toggle only changes what the board
+ * RANKS by. Numbers ride useArcadeLadder → getDispatchProduction, the same
+ * server aggregates Fleet Dispatch shows, so the boards can never disagree.
+ * Privacy: the $ shown is credited sale VOLUME (net of cancels) — public, the
+ * same figure Bonus Race ranks on. Detailed take-home PAY stays on the viewer's
+ * own Paycheck card, never on a peer's row.
  */
 
 type Tab = "day" | "week" | "month";
@@ -355,6 +359,20 @@ function Podium({
               <span className="font-display text-[11px] tabular-nums text-victory">
                 {money ? fmtVol(r.vol) : `${r.pts} pts`}
               </span>
+              {/* Live sale $ rides under the ranking metric so the #1 spot shows
+                  the money the moment it lands. In the $-ranked Bonus Race the
+                  points sit here instead; a $0 row stays clean on points view. */}
+              {money ? (
+                <span className="font-display text-[10px] tabular-nums text-muted-foreground">
+                  {r.pts} pts
+                </span>
+              ) : (
+                r.vol > 0 && (
+                  <span className="font-display text-[10px] tabular-nums text-victory/90">
+                    {fmtVol(r.vol)}
+                  </span>
+                )
+              )}
               <div
                 className={`mt-1.5 w-full rounded-t-md border-x border-t border-border bg-[color-mix(in_oklab,var(--neon)_8%,transparent)] ${pedestal[p]}`}
               >
@@ -434,13 +452,24 @@ function ScoreRow({
             </span>
           )}
         </div>
-        <div className="flex shrink-0 items-center gap-2.5 font-display text-[11px] uppercase tracking-wider tabular-nums">
+        <div className="flex shrink-0 items-center gap-2 font-display text-[11px] uppercase tracking-wider tabular-nums">
+          {/* Points AND live sale $ side by side on every tab — the ranking
+              metric leads (the Bonus Race leads with $, every other view with
+              pts). A landed sale glows victory-green; $0 stays muted. */}
           {money ? (
-            <span className={r.vol > 0 ? "text-victory" : "text-muted-foreground/50"}>
-              {fmtVol(r.vol)}
-            </span>
+            <>
+              <span className={r.vol > 0 ? "text-victory" : "text-muted-foreground/50"}>
+                {fmtVol(r.vol)}
+              </span>
+              <span className="text-muted-foreground">{r.pts} pts</span>
+            </>
           ) : (
-            <span className="text-victory">{r.pts} pts</span>
+            <>
+              <span className="text-victory">{r.pts} pts</span>
+              <span className={r.vol > 0 ? "text-victory" : "text-muted-foreground/40"}>
+                {fmtVol(r.vol)}
+              </span>
+            </>
           )}
           {bonuses > 0 && (
             <span className="text-[var(--kombat-gold)]" title={`${bonuses} × $1,500 bonus`}>
