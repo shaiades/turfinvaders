@@ -211,10 +211,13 @@ serve(async (req) => {
           ? DISPATCHER_LABEL.processed
           : DISPATCHER_LABEL.needsReview,
     );
-    // Notify the office for anything that needs a human (best-effort).
-    if (status === "needs_review" || status === "error") {
+    // Text the office ONLY for genuine failures (errors). Routine "needs
+    // review" items (e.g. an on-block report with no Lead ID the office must
+    // file by hand) are visible in the Dispo tab and no longer buzz the
+    // dispatcher's phone — that notification was too noisy. Best-effort.
+    if (status === "error") {
       await sendDispatcherIMessage(
-        `Dispo report needs review: ${String(row.rep_name ?? "?")}, result ${String(row.result ?? "?")}. Open Close Kombat → Dispo.`,
+        `Dispo write-back error: ${String(row.rep_name ?? "?")}, result ${String(row.result ?? "?")}. Open Close Kombat → Dispo.`,
       ).catch(() => undefined);
     }
   };
