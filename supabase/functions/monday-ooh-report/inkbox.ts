@@ -50,6 +50,24 @@ const defaultFetch: InkboxFetch = (url, init) =>
   fetch(url, init) as unknown as Promise<InkboxFetchResponse>;
 
 /**
+ * A header value must be a valid ByteString — every char code ≤ 0xFF, no
+ * control chars (tab aside). An INKBOX_API_KEY pasted with a stray unicode
+ * character (a smart quote, a zero-width space) or a trailing newline otherwise
+ * throws an opaque `'headers' of 'RequestInit' … is not a valid ByteString` on
+ * EVERY send, so the SALE alert silently fails for all recipients. We trim on
+ * read; this catches whatever is left and turns a bad key into one clear,
+ * actionable error instead of a per-recipient crash.
+ */
+function headerSafe(v: string): boolean {
+  for (let i = 0; i < v.length; i++) {
+    const c = v.charCodeAt(i);
+    if (c === 0x09) continue; // tab is allowed
+    if (c < 0x20 || c > 0xff) return false; // control char, or beyond ByteString
+  }
+  return true;
+}
+
+/**
  * Send `text` to EACH recipient 1:1 via the Inkbox iMessage API. Pure w.r.t. the
  * environment (takes its config + a fetch impl) so it's unit-testable with a
  * mocked fetch. Never throws: a per-recipient failure is captured in `errors`
@@ -60,8 +78,18 @@ export async function sendImessageToRecipients(
   text: string,
   fetchImpl: InkboxFetch = defaultFetch,
 ): Promise<InkboxResult> {
-  if (!cfg.apiKey)
+  const apiKey = (cfg.apiKey ?? "").trim();
+  if (!apiKey)
     return { sent: false, attempted: 0, delivered: 0, skipped: "INKBOX_API_KEY not set" };
+  if (!headerSafe(apiKey))
+    return {
+      sent: false,
+      attempted: 0,
+      delivered: 0,
+      errors: [
+        "INKBOX_API_KEY has an invalid character — re-set the secret (likely a stray space, newline, or smart-quote from copy-paste).",
+      ],
+    };
   if (cfg.recipients.length === 0)
     return {
       sent: false,
@@ -79,7 +107,7 @@ export async function sendImessageToRecipients(
     try {
       const resp = await fetchImpl(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-API-Key": cfg.apiKey },
+        headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
         body: JSON.stringify({ to, text }),
       });
       if (resp.ok) delivered += 1;
@@ -99,7 +127,7 @@ export async function sendImessageToRecipients(
 /** Read Inkbox config from the environment and send to the dispatch recipients. */
 export async function sendDispatcherIMessage(text: string): Promise<InkboxResult> {
   const cfg: InkboxConfig = {
-    apiKey: denoEnv?.get("INKBOX_API_KEY") ?? null,
+    apiKey: (denoEnv?.get("INKBOX_API_KEY") ?? "").trim() || null,
     recipients: (denoEnv?.get("INKBOX_DISPATCH_RECIPIENTS") ?? "")
       .split(",")
       .map((s) => s.trim())

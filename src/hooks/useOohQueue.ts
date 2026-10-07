@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
+  addOohQueueNote,
   getOohConfig,
   listMissingReports,
   nextLeadForRep,
@@ -70,11 +71,19 @@ export function useOohMutations() {
     onSuccess: refresh,
   });
 
+  // Post a skipped report's note onto its matched card (activity Update), then
+  // mark the queue item handled. The note-rescue for reports the auto-writeback
+  // didn't write (already dispositioned / non-allow-listed board).
+  const addNote = useMutation({
+    mutationFn: (vars: { id: string }) => addOohQueueNote({ data: vars }),
+    onSuccess: refresh,
+  });
+
   // Resolve the rep's NEXT not-issued lead (name + time) before a Push (#12).
   // A read, not a write — so it does NOT invalidate the queue.
   const nextLead = useMutation({
     mutationFn: (vars: { boardId: string; repName: string }) => nextLeadForRep({ data: vars }),
   });
 
-  return { resolve, pushLead, nextLead };
+  return { resolve, pushLead, nextLead, addNote };
 }

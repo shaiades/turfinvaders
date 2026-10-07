@@ -42,6 +42,25 @@ export async function pushLeadIss(token: string, boardId: string, itemId: string
   );
 }
 
+/** Post a free-text Update (activity-feed note) on a block item WITHOUT
+ *  touching any disposition column — backs the admin "Add note to card" rescue
+ *  for reports the auto-writeback skipped (already dispositioned by office, a
+ *  non-allow-listed board, …). Idempotent per key so a double-tap can't
+ *  double-post. */
+export async function postCardUpdate(
+  token: string,
+  itemId: string,
+  body: string,
+  idempotencyKey: string,
+): Promise<void> {
+  await monday(
+    token,
+    `mutation ($i:ID!,$b:String!) { create_update(item_id:$i, body:$b) { id } }`,
+    { i: itemId, b: body },
+    { idempotencyKey },
+  );
+}
+
 type RawItem = {
   id: string;
   name: string;
