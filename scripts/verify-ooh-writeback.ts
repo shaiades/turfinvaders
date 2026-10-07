@@ -33,6 +33,7 @@ import {
   planDisposition,
   planRelease,
   reloadDropdownLabels,
+  sourceCodeColId,
   sourceCodeToWrite,
   timeInHouseMins,
   type AppliedOp,
@@ -451,6 +452,52 @@ expectEq(
   mapCase(RESULT.SOLD, ON_BLOCK.YES).fillSourceCodeIfBlank,
   true,
 );
+
+// The Source Code column id differs per office: the SD and OC block boards use
+// DIFFERENT ids (confirmed live 2026-10-07 on SD 18433845590 / OC 18433845468).
+// A single hardcoded id dropped every OC sale's code onto a column that doesn't
+// exist on the OC board — the code never landed and the sale could miss Sales
+// Processing. The write path must pick the id by the block's office.
+expectEq("source code col: SD", sourceCodeColId("SD"), "numeric_mm35kwnj");
+expectEq("source code col: OC", sourceCodeColId("OC"), "numeric_mm35nm4y");
+expect("source code col: SD and OC are distinct ids", sourceCodeColId("SD") !== sourceCodeColId("OC"));
+expectEq("source code col: unknown office falls back to the SD id", sourceCodeColId(null), "numeric_mm35kwnj");
+
+// End-to-end-ish (mirrors index.ts): a Sold on a blank-code block writes code 1
+// to the OFFICE-appropriate Source Code column via the mock writer — and NEVER
+// to the other office's id (the OC-sale-lost-on-the-SD-column regression).
+for (const [office, wantCol, otherCol, boardId] of [
+  ["OC", "numeric_mm35nm4y", "numeric_mm35kwnj", "18433845468"],
+  ["SD", "numeric_mm35kwnj", "numeric_mm35nm4y", "18433845590"],
+] as const) {
+  const f = parseOohForm(
+    `sc-${office}`,
+    form({
+      [FORM_COL.result]: status(RESULT.SOLD),
+      [FORM_COL.onBlock]: status(ON_BLOCK.YES),
+      [FORM_COL.leadId]: text("500"),
+    }),
+  );
+  const plan = planDisposition(f);
+  const fieldWrites: Record<string, MondayValue> = { ...plan.fieldWrites };
+  // The block's existing Source Code is blank → sourceCodeToWrite returns 1.
+  const { code } = sourceCodeToWrite(f.result, null, "Self Gen");
+  if (plan.fillSourceCodeIfBlank && code != null) {
+    fieldWrites[sourceCodeColId(office)] = String(code);
+  }
+  const cols: Record<string, MondayValue> = {
+    ...fieldWrites,
+    [BLOCK_COL.details]: { text: buildDetailsLine(f, SUBMIT) },
+  };
+  const mock = new MockMonday();
+  await applyDisposition(mock, boardId, "500", cols, plan.status);
+  const colsCall = mock.calls.find((c) => c.type === "columns");
+  expectEq(`source code: ${office} sale writes code 1 to ${wantCol}`, colsCall?.values?.[wantCol], "1");
+  expect(
+    `source code: ${office} sale never writes the other office's column (${otherCol})`,
+    !Object.prototype.hasOwnProperty.call(colsCall?.values ?? {}, otherCol),
+  );
+}
 
 // ════════════════════════════════════════════════════════════════════════════
 // 5) DETAILS one-liner + time-in-house PT math (Rule 3)
