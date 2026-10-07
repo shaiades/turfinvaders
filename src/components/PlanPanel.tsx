@@ -45,7 +45,15 @@ function fmtInt(n: number) {
   return Math.ceil(n).toLocaleString();
 }
 
-export function PlanPanel({ userId }: { userId: string }) {
+export function PlanPanel({
+  userId,
+  readOnly = false,
+}: {
+  userId: string;
+  /** View As canvasser pick: show the PICKED canvasser's playbook without
+   *  ever letting the preview overwrite their goals. */
+  readOnly?: boolean;
+}) {
   const stats = useCanvasserStats(userId);
   const { funnelRates, earnings } = stats;
   const [horizon, setHorizon] = useState<Horizon>("week");
@@ -115,11 +123,13 @@ export function PlanPanel({ userId }: { userId: string }) {
   ]);
 
   const saveGoals = useSaveGoals(userId);
-  const onSave = (patch: GoalsPatch) =>
+  const onSave = (patch: GoalsPatch) => {
+    if (readOnly) return;
     saveGoals.mutate(patch, {
       onSuccess: () => toast.success("Playbook updated · funnel re-engineered"),
       onError: (e: Error) => toast.error(e.message),
     });
+  };
 
   const horizonNoun = horizon === "week" ? "week" : "month";
 
@@ -189,7 +199,7 @@ export function PlanPanel({ userId }: { userId: string }) {
           weeklyGoal={stats.weeklyGoal}
           monthlyGoal={stats.monthlyGoal}
           avgCommission={stats.avgCommission}
-          saving={saveGoals.isPending || stats.profile.isLoading}
+          saving={saveGoals.isPending || stats.profile.isLoading || readOnly}
           onSave={onSave}
         />
 

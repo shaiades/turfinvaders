@@ -27,7 +27,10 @@ import { useOpenShift } from "@/hooks/useTimeClockSelf";
 const PUBLISHER_ROLES: readonly string[] = ["canvasser", "confirmer", "captain"];
 
 export function CrewBeacon() {
-  const { user, realRole, displayName, loading } = useAuth();
+  // realDisplayName, never displayName: the beacon BROADCASTS the name.
+  // Publisher roles can't use View As today, but a borrowed View-As name
+  // must never be one refactor away from painting the crew map.
+  const { user, realRole, realDisplayName, loading } = useAuth();
   const granted = useGeoGranted();
   const publisher = !loading && !!user?.id && !!realRole && PUBLISHER_ROLES.includes(realRole);
   const openShift = useOpenShift(user?.id ?? "", {
@@ -36,6 +39,6 @@ export function CrewBeacon() {
   });
   const enabled = publisher && granted && !!openShift.data;
   const { me } = useGeoWatch(enabled);
-  useCrewBeacon({ userId: user?.id, name: displayName, me, enabled });
+  useCrewBeacon({ userId: user?.id, name: realDisplayName, me, enabled });
   return null;
 }

@@ -14,6 +14,13 @@ export interface AuthState {
   displayName: string | null;
   /** The profile's actual name, untouched by the View As rep picker. */
   realDisplayName: string | null;
+  /** View As canvasser picker: the PREVIEWED canvasser's profile id, or null
+   *  outside an owner's picked-canvasser preview. Canvasser data is id-keyed
+   *  (daily_logs/earnings/ladder), so surfaces that show "my" canvasser data
+   *  read `previewCanvasserId ?? user.id` — for READS ONLY. Write surfaces
+   *  (time clock, desk log, goals, lead submit, badge persistence) must hide
+   *  or disable instead: nothing may ever be written as the picked player. */
+  previewCanvasserId: string | null;
   /** True only when the signed-in user's own profile is explicitly archived
    *  (is_active === false): they were removed from the roster, so the shell
    *  swaps the whole app for AccessRevokedScreen. Missing/failed profile
@@ -30,6 +37,16 @@ export const DEV_ROLE_STORAGE_KEY = "dev_role_override";
 // app to /close-kombat), so canvasser surfaces that broadcast the name (crew
 // map GPS) can never carry a borrowed one.
 export const DEV_NAME_STORAGE_KEY = "dev_name_override";
+// View As canvasser picker (owner request 2026-10-06): previewing "Canvasser"
+// as a SPECIFIC person — the Close Kombat rep picker's twin. Canvasser
+// surfaces key on the profile ID (not the display name), so the pick stores
+// BOTH: the name drives labels, the id drives read-only data swaps via
+// previewCanvasserId. Only honored while an owner's effective role is
+// canvasser; CrewBeacon stays silent in previews (publisher gate is on the
+// REAL role) so the borrowed name can never broadcast.
+export const DEV_CANVASSER_STORAGE_KEY = "dev_canvasser_override";
+
+export type CanvasserPick = { id: string; name: string };
 
 function readDevRole(): AppRole | null {
   if (typeof window === "undefined") return null;
@@ -43,11 +60,35 @@ function readDevName(): string | null {
   return v && v.trim() ? v.trim() : null;
 }
 
+function readDevCanvasser(): CanvasserPick | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(DEV_CANVASSER_STORAGE_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as Partial<CanvasserPick> | null;
+    if (!v || typeof v.id !== "string" || !v.id || typeof v.name !== "string" || !v.name.trim())
+      return null;
+    return { id: v.id, name: v.name.trim() };
+  } catch {
+    return null;
+  }
+}
+
 /** The name override, gated the same way readDevRole's consumer is: owner
  *  only, and only inside a Sales Rep preview. */
 function effectiveDevName(realRole: AppRole | null, effRole: AppRole | null): string | null {
   if (!canUseViewAs(realRole) || effRole !== "sales_rep") return null;
   return readDevName();
+}
+
+/** The canvasser pick, gated like the rep name override: owner only, and
+ *  only inside a Canvasser preview — a stale key must never leak elsewhere. */
+function effectiveCanvasserPick(
+  realRole: AppRole | null,
+  effRole: AppRole | null,
+): CanvasserPick | null {
+  if (!canUseViewAs(realRole) || effRole !== "canvasser") return null;
+  return readDevCanvasser();
 }
 
 // useAuth has no provider: AppShell, the page, ActiveRun, CrewBeacon, … each
@@ -100,6 +141,7 @@ export function useAuth(): AuthState {
     teamId: null,
     displayName: null,
     realDisplayName: null,
+    previewCanvasserId: null,
     accessRevoked: false,
   });
 
@@ -117,6 +159,7 @@ export function useAuth(): AuthState {
             teamId: null,
             displayName: null,
             realDisplayName: null,
+            previewCanvasserId: null,
             accessRevoked: false,
           });
         return;
@@ -130,6 +173,7 @@ export function useAuth(): AuthState {
       const override = canUseViewAs(realRole) ? readDevRole() : null;
       const effRole = privilegeRole(override ?? realRole);
       const realDisplayName = profile?.display_name ?? user.email ?? null;
+      const canvasserPick = effectiveCanvasserPick(realRole, effRole);
       if (active) {
         setState({
           loading: false,
@@ -140,8 +184,10 @@ export function useAuth(): AuthState {
           role: effRole,
           realRole,
           teamId: profile?.team_id ?? null,
-          displayName: effectiveDevName(realRole, effRole) ?? realDisplayName,
+          displayName:
+            effectiveDevName(realRole, effRole) ?? canvasserPick?.name ?? realDisplayName,
           realDisplayName,
+          previewCanvasserId: canvasserPick?.id ?? null,
           // Explicit false only — a null/missing profile (placeholder claim
           // in flight, transient read failure) must not read as removed.
           accessRevoked: profile?.is_active === false,
@@ -160,16 +206,24 @@ export function useAuth(): AuthState {
       setState((s) => {
         const override = canUseViewAs(s.realRole) ? readDevRole() : null;
         const effRole = privilegeRole(override ?? s.realRole);
+        const canvasserPick = effectiveCanvasserPick(s.realRole, effRole);
         return {
           ...s,
           role: effRole,
-          displayName: effectiveDevName(s.realRole, effRole) ?? s.realDisplayName,
+          displayName:
+            effectiveDevName(s.realRole, effRole) ?? canvasserPick?.name ?? s.realDisplayName,
+          previewCanvasserId: canvasserPick?.id ?? null,
         };
       });
     }
     window.addEventListener("dev-role-changed", onOverride);
     window.addEventListener("storage", (e) => {
-      if (e.key === DEV_ROLE_STORAGE_KEY || e.key === DEV_NAME_STORAGE_KEY) onOverride();
+      if (
+        e.key === DEV_ROLE_STORAGE_KEY ||
+        e.key === DEV_NAME_STORAGE_KEY ||
+        e.key === DEV_CANVASSER_STORAGE_KEY
+      )
+        onOverride();
     });
 
     return () => {
@@ -196,5 +250,13 @@ export function setDevNameOverride(name: string | null) {
   if (v) window.localStorage.setItem(DEV_NAME_STORAGE_KEY, v);
   else window.localStorage.removeItem(DEV_NAME_STORAGE_KEY);
   // Same event as the role override: one listener recomputes both.
+  window.dispatchEvent(new Event("dev-role-changed"));
+}
+
+export function setDevCanvasserOverride(pick: CanvasserPick | null) {
+  if (typeof window === "undefined") return;
+  const v = pick && pick.id && pick.name.trim() ? { id: pick.id, name: pick.name.trim() } : null;
+  if (v) window.localStorage.setItem(DEV_CANVASSER_STORAGE_KEY, JSON.stringify(v));
+  else window.localStorage.removeItem(DEV_CANVASSER_STORAGE_KEY);
   window.dispatchEvent(new Event("dev-role-changed"));
 }

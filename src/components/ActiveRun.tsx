@@ -162,7 +162,7 @@ export function ActiveRun({
   onOpenTurfTools?: () => void;
   onOpenCrewMap?: () => void;
 }) {
-  const { user, role, loading, displayName } = useAuth();
+  const { user, role, loading, realDisplayName } = useAuth();
   const qc = useQueryClient();
   const isCaptain = variant === "captain";
 
@@ -632,7 +632,9 @@ export function ActiveRun({
       {leadOpen && (
         <LeadSheet
           prefill={{
-            agent: selfProfile.data?.display_name ?? displayName ?? null,
+            // realDisplayName, never displayName: the lead's Agent is a
+            // WRITE — a View As name pick must not sign someone else's name.
+            agent: selfProfile.data?.display_name ?? realDisplayName ?? null,
             office: selfProfile.data?.office_location ?? null,
             address: leadAddress,
           }}
