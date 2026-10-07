@@ -90,6 +90,9 @@ export const BLOCK_COL = {
   rs: "status_2", // Reset|None
   pm: "status_1", // PM|PM w/ RS|None
   sale: "status9", // Sold|Upsell|Reload
+  // "Advantage+" status (membership flag). Set — with Reloads — on an Office
+  // Appt sale (job walk / can-save / re-sign) BEFORE pressing status9 = Reload.
+  advantage: "color_mkwkazqn",
 } as const;
 
 /** Exact Monday status label text (press by LABEL, never numeric index). */
@@ -106,10 +109,20 @@ export const LABEL = {
   noDemo: "No Demo",
   iss: "Iss",
   notIssued: "Not Issued",
+  officeAppt: "Office Appt",
+  advantagePlus: "Advantage+",
 } as const;
 
 /** Block Iss-column labels that keep their OWN flow — never auto-released. */
-export const RELEASE_EXCLUDED_STATUSES = ["Office Appt", "CTC", "Reload", "Add Rep"] as const;
+export const RELEASE_EXCLUDED_STATUSES = [LABEL.officeAppt, "CTC", "Reload", "Add Rep"] as const;
+
+/** True when a block item's Iss label is "Office Appt" — a job walk, can-save or
+ *  office appointment that keeps its own flow (owner brief Part 3). A report on
+ *  such a lead is written to Details only (never PM / Reset / OL / No Demo / BO);
+ *  a sale on it presses status9 = Reload, never Sold. */
+export function isOfficeApptStatus(iss: string | null | undefined): boolean {
+  return (iss ?? "").trim().toLowerCase() === LABEL.officeAppt.toLowerCase();
+}
 
 /** A status label is "blank" when it's empty or the explicit Monday "None". */
 export function isBlankStatus(label: string | null | undefined): boolean {
@@ -272,6 +285,9 @@ export type OohForm = {
   onBlock: number | null;
   result: ResultCode | null;
   leadId: string | null;
+  /** Appointment date (YYYY-MM-DD) from the form — picks the block day-group to
+   *  search when there's no Lead ID (Rule 1). null → fall back to submit day. */
+  apptDate: string | null;
   address: string | null;
   phone: string | null;
   quotedText: string | null;
@@ -365,6 +381,7 @@ export function parseOohForm(formItemId: string, cols: ColMap): OohForm {
     onBlock: onBlock,
     result: (result as ResultCode | null) ?? null,
     leadId: (textVal(g(FORM_COL.leadId)) ?? "").match(/^\d+$/) ? textVal(g(FORM_COL.leadId)) : null,
+    apptDate: dateVal(g(FORM_COL.apptDate))?.date ?? null,
     address: textVal(g(FORM_COL.address)),
     phone: textVal(g(FORM_COL.phone)),
     quotedText: textVal(g(FORM_COL.quoted)),
@@ -404,7 +421,9 @@ export function resultPrefix(form: OohForm): string {
     case RESULT.RESET:
       return "Reset";
     case RESULT.ONE_LEGGER:
-      return form.resetCall === 0 ? "Reset" : "OL";
+      // A one-legger with a reset date is a Reset; without one it's an OL
+      // (owner brief Part 2 — the reset DATE decides, not the reset-call flag).
+      return form.resetDate ? "Reset" : "OL";
     case RESULT.NO_DEMO:
       return "No demo";
     case RESULT.NO_SHOW_FINAL:
@@ -483,7 +502,9 @@ export function buildDetailsLine(
     if (form.inspection != null)
       bits.push(form.inspection === 0 ? "inspection done" : "no inspection");
     if (form.result === RESULT.ONE_LEGGER) {
-      bits.push(form.resetCall === 0 ? "reset set" : "no reset");
+      // Keyed on the reset DATE (what actually decides OL vs Reset), not the
+      // reset-call flag, so the note can never disagree with the disposition.
+      bits.push(form.resetDate ? "reset set" : "no reset");
     }
     if (form.resetDate) bits.push(`reset ${fmtReset(form.resetDate)}`);
     if (bits.length) parts.push(bits.join(", "));
@@ -520,7 +541,13 @@ export function buildDetailsLine(
     if (inHouse) parts.push(`In ${inHouse}`);
   }
 
-  return `${parts.join(". ")} (${laClock(submitMs)})`;
+  // Jorge's one-liner reads "<result> - <details…> (time)": a dash after the
+  // result prefix, then the rest joined by ". " (owner brief Part 2 — "No demo
+  // - <reason> (time)", "OL - <notes> (time)"). The quoted-product head already
+  // carries its own "– <quoted>" en-dash, so this just sets the first joiner.
+  const [lead, ...rest] = parts;
+  const body = rest.length ? `${lead} - ${rest.join(". ")}` : lead;
+  return `${body} (${laClock(submitMs)})`;
 }
 
 /** True when this submission is a SALE (any Sold result — on-block, self-gen,
@@ -546,6 +573,20 @@ export function buildSaleAlert(form: OohForm, customerName: string | null): stri
   lines.push(`${kind}${what ? `: ${what}` : ""}`);
   if (customerName && customerName.trim()) lines.push(`Customer: ${customerName.trim()}`);
   return lines.join("\n");
+}
+
+/**
+ * The at-the-door no-answer alert texted to the managers the moment a rep
+ * reports "AT THE DOOR - no answer" (owner brief Part 2). The lead stays open
+ * (rep still waiting), so this just asks a manager to call the customer. Pure so
+ * the verify script can assert the exact wording.
+ */
+export function buildNoShowAtDoorText(
+  customer: string | null,
+  timeClock: string,
+  rep: string | null,
+): string {
+  return `🔴 No show at the door: ${customer ?? "customer"}, ${timeClock}, ${rep ?? "rep"}. Please call the lead.`;
 }
 
 const WD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -721,9 +762,12 @@ export function planDisposition(form: OohForm): WritePlan {
       fieldWrites[BLOCK_COL.resetDate] = resetDateValue;
       return { ...base, status: { col: BLOCK_COL.rs, label: LABEL.reset } };
     case RESULT.ONE_LEGGER:
-      // Reset-call done (0) → Reset to Confirmed; no reset (1) → OL to Blowout.
-      if (form.resetCall === 0) {
-        if (resetDateValue) fieldWrites[BLOCK_COL.resetDate] = resetDateValue;
+      // Owner brief Part 2: a one-legger WITH a reset date → Reset (status_2) +
+      // the date; WITHOUT one → OL (status_3). The reset DATE is the source of
+      // truth (not the reset-call flag) — a Reset can't route to Confirmed with
+      // no date, and "they set a reset" means nothing without the date itself.
+      if (resetDateValue) {
+        fieldWrites[BLOCK_COL.resetDate] = resetDateValue;
         return { ...base, status: { col: BLOCK_COL.rs, label: LABEL.reset } };
       }
       return { ...base, status: { col: BLOCK_COL.ol, label: LABEL.ol } };
@@ -738,6 +782,38 @@ export function planDisposition(form: OohForm): WritePlan {
     default:
       return { ...base, status: null };
   }
+}
+
+/**
+ * Owner brief Part 3 — the plan for a report on an OFFICE APPT block item (job
+ * walk, can-save or office appointment; Iss = "Office Appt"). These keep their
+ * own flow, so we NEVER press PM / Reset / OL / No Demo / BO: a non-sale report
+ * is written to Details ONLY (status null). A SALE (Sold result — including a
+ * can-save saved at a lowered price or a re-sign) sets Advantage+ and the
+ * Reloads dropdown first, then presses status9 = Reload (never Sold), so it
+ * routes like a reload rather than a fresh sale. The caller still builds/append
+ * the Details line and runs live issuing afterwards.
+ */
+export function planOfficeApptDisposition(form: OohForm): WritePlan {
+  const fieldWrites: Record<string, MondayValue> = {};
+  const base = {
+    fieldWrites,
+    fillSourceCodeIfBlank: false,
+    atTheDoor: false,
+    needsReview: null as string | null,
+  };
+  if (form.result === RESULT.SOLD) {
+    if (form.salePrice != null) fieldWrites[BLOCK_COL.salePrice] = String(form.salePrice);
+    // Set Advantage+ and the Reloads dropdown in the FIRST (columns) call, then
+    // press status9 = Reload as the single disposition. Advantage+ is a member
+    // flag, not a routing disposition, so it rides the columns write.
+    fieldWrites[BLOCK_COL.advantage] = { label: LABEL.advantagePlus };
+    const labels = reloadDropdownLabels(form.quotedText);
+    if (labels.length > 0) fieldWrites[BLOCK_COL.reloads] = { labels };
+    return { ...base, status: { col: BLOCK_COL.sale, label: LABEL.saleReload } };
+  }
+  // Any non-sale result on an Office Appt → Details only, press nothing.
+  return { ...base, status: null };
 }
 
 // ── Rule 1: order of writes (two separate calls; one status) ─────────────────
@@ -778,13 +854,18 @@ export async function applyDisposition(
 export type Target =
   | { kind: "write"; leadId: string }
   | { kind: "create"; reason: string }
+  | { kind: "match"; reason: string }
   | { kind: "queue"; reason: string };
 
 /**
- * Decide where a submission is written (Rule: Lead ID → that block item;
- * blank + self-gen/upsell/reload → create a new item; otherwise admin queue).
- * The caller still verifies the Lead ID item is on a CURRENT block board and,
- * for create, resolves the office — unresolved cases fall back to the queue.
+ * Decide where a submission is written:
+ *   · Lead ID present → that block item (Rule 1);
+ *   · no Lead ID + self-gen / upsell / reload → create a new item;
+ *   · no Lead ID + on-block (Yes / unspecified) → MATCH it to a block item on
+ *     today's day-group (owner brief Part 1) — the caller fetches the day items
+ *     and runs matchWithoutLeadId, queueing for review only on 0 or 2+ hits.
+ * The caller still verifies a Lead ID item is on a CURRENT block board and, for
+ * create, resolves the office — unresolved cases fall back to the queue.
  */
 export function matchTarget(form: OohForm): Target {
   if (form.leadId) return { kind: "write", leadId: form.leadId };
@@ -796,10 +877,172 @@ export function matchTarget(form: OohForm): Target {
   ) {
     return { kind: "create", reason: `no lead id, on-block=${form.onBlock}` };
   }
-  if (form.onBlock === ON_BLOCK.YES) {
-    return { kind: "queue", reason: "on-block=Yes but no Lead ID" };
+  // On-block Yes (or unspecified) with no Lead ID: the block item exists but the
+  // rep's link didn't carry the id — match it by address / last name + rep.
+  return { kind: "match", reason: `no Lead ID, on-block=${form.onBlock ?? "unset"}` };
+}
+
+// ── Rule 1: match a Lead-ID-less submission to a block item ──────────────────
+/** One block day-group item, shaped for no-Lead-ID matching. */
+export type MatchCandidate = {
+  id: string;
+  /** Block item name (the customer name as it shows on the block). */
+  customerName: string | null;
+  /** Monday Location column text (the full formatted street address). */
+  address: string | null;
+  /** people6 rep display names. */
+  reps: string[];
+};
+
+/** Common US street-type suffixes → a single canonical abbreviation, so
+ *  "Nathan Circle" and "Nathan Cir" normalize to the same key. */
+const STREET_SUFFIX: Record<string, string> = {
+  street: "st",
+  st: "st",
+  avenue: "ave",
+  ave: "ave",
+  av: "ave",
+  drive: "dr",
+  dr: "dr",
+  road: "rd",
+  rd: "rd",
+  lane: "ln",
+  ln: "ln",
+  court: "ct",
+  ct: "ct",
+  circle: "cir",
+  cir: "cir",
+  boulevard: "blvd",
+  blvd: "blvd",
+  place: "pl",
+  pl: "pl",
+  terrace: "ter",
+  ter: "ter",
+  trail: "trl",
+  trl: "trl",
+  parkway: "pkwy",
+  pkwy: "pkwy",
+  highway: "hwy",
+  hwy: "hwy",
+  way: "way",
+  circ: "cir",
+};
+
+/**
+ * Normalize a street address to "<house number> <street name>" — lowercased,
+ * punctuation stripped, whitespace collapsed, the street-type suffix
+ * canonicalized, and everything past the first comma (city / state / zip /
+ * country) dropped. Returns null when there's nothing usable. The form address
+ * and the block Location text both come from the same geocoder, so after this
+ * they compare equal for the same house.
+ */
+export function normalizeAddress(addr: string | null | undefined): string | null {
+  if (!addr) return null;
+  const firstSegment = addr.split(",")[0] ?? "";
+  let s = firstSegment
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  // Drop a trailing unit / apt / suite token group ("… apt 3", "… unit b").
+  s = s.replace(/\b(?:apt|apartment|unit|ste|suite|no|num)\s+\w+$/i, "").trim();
+  if (!s) return null;
+  const tokens = s.split(" ");
+  if (tokens.length > 1) {
+    const last = tokens[tokens.length - 1];
+    if (STREET_SUFFIX[last]) tokens[tokens.length - 1] = STREET_SUFFIX[last];
   }
-  return { kind: "queue", reason: "no Lead ID and no on-block channel" };
+  return tokens.join(" ");
+}
+
+/**
+ * The customer's last name, lowercased and stripped to letters/digits.
+ * Handles the three shapes that show up on the block: "Last, First …" (comma →
+ * the part before it), "(parenthetical) notes" (dropped), and "First … Last"
+ * (the final token). Returns null when nothing usable remains.
+ */
+export function customerLastName(name: string | null | undefined): string | null {
+  if (!name) return null;
+  let s = name.trim();
+  if (s.includes(",")) {
+    s = s.split(",")[0].trim();
+  } else {
+    s = s.replace(/\([^)]*\)/g, " ").trim();
+    const tokens = s.split(/\s+/).filter(Boolean);
+    s = tokens[tokens.length - 1] ?? "";
+  }
+  s = s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return s || null;
+}
+
+/** Does a block rep name refer to the same rep as the form rep? Exact
+ *  normalized match, or a shared first name (the people6 display name and the
+ *  form's rep label can be spelled a little differently). */
+function repNameMatches(blockRep: string, formRep: string | null): boolean {
+  const a = normName(blockRep);
+  const b = normName(formRep);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  return a.split(" ")[0] === b.split(" ")[0] && a.split(" ")[0] !== "";
+}
+
+export type NoLeadMatch =
+  | { kind: "match"; id: string; by: "address" | "lastname-rep" }
+  | { kind: "review"; reason: string; count: number };
+
+/**
+ * Match a submission that has no Lead ID to exactly one block day-group item
+ * (owner brief Part 1): first by normalized customer address, and — only if
+ * the address finds nothing — by customer last name + rep. A unique hit on
+ * either key is the write target; 0 matches, or 2+ on whichever key we settled
+ * on, goes to Needs review (never guess between two leads). Pure: the caller
+ * supplies today's day-group candidates (both offices) and the rep name.
+ */
+export function matchWithoutLeadId(input: {
+  address: string | null;
+  customerName: string | null;
+  rep: string | null;
+  candidates: MatchCandidate[];
+}): NoLeadMatch {
+  const addrKey = normalizeAddress(input.address);
+  if (addrKey) {
+    const byAddr = input.candidates.filter((c) => normalizeAddress(c.address) === addrKey);
+    if (byAddr.length === 1) return { kind: "match", id: byAddr[0].id, by: "address" };
+    if (byAddr.length >= 2)
+      return { kind: "review", reason: `${byAddr.length} address matches`, count: byAddr.length };
+    // 0 address matches → fall through to last name + rep.
+  }
+  const last = customerLastName(input.customerName);
+  const rep = normName(input.rep);
+  if (last && rep) {
+    const byName = input.candidates.filter(
+      (c) =>
+        customerLastName(c.customerName) === last &&
+        c.reps.some((r) => repNameMatches(r, input.rep)),
+    );
+    if (byName.length === 1) return { kind: "match", id: byName[0].id, by: "lastname-rep" };
+    if (byName.length >= 2)
+      return {
+        kind: "review",
+        reason: `${byName.length} last-name + rep matches`,
+        count: byName.length,
+      };
+  }
+  return { kind: "review", reason: "no address or last-name + rep match", count: 0 };
+}
+
+/** The block day-group to search for a no-Lead-ID match: the weekday of the
+ *  appointment date when the form carries one (that's where the card lives),
+ *  else the weekday of the submission (PT). Returns a BLOCK_DAY_GROUP key. */
+export function matchWeekday(apptDate: string | null | undefined, submitMs: number): number {
+  if (apptDate) {
+    const [y, mo, d] = apptDate.split("-").map(Number);
+    if ([y, mo, d].every(Number.isFinite)) {
+      // Anchor at UTC noon so the civil weekday of the date can't slip a day.
+      return new Date(Date.UTC(y, mo - 1, d, 12)).getUTCDay();
+    }
+  }
+  return laWeekday(submitMs);
 }
 
 // ── Rule 7: one lead at a time (release-on-report) ───────────────────────────
