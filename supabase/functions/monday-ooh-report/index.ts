@@ -585,6 +585,10 @@ serve(async (req) => {
       target_item_id: leadId,
       board_id: block.boardId,
       office,
+      // The dry-run preview must show the FULL first call (incl. Advantage+,
+      // add-on Reloads, per-office Source Code) — not just the form-derived
+      // plan — so a shadow day is comparable to what live would write.
+      plan: { ...plan, columnValues } as unknown,
     };
 
     // Reps this report frees (the submitter + their partner, if any).
