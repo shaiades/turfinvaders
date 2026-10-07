@@ -1344,6 +1344,7 @@ function mkLead(over: Partial<DispatchLead>): DispatchLead {
     boardId: "B",
     reps: [],
     issLabel: "Not Issued",
+    hasDisposition: false,
     apptWallMinutes: 14 * 60,
     coords: null,
     products: [],
@@ -2233,6 +2234,65 @@ function mkRep(over: Partial<DispatchRep>): DispatchRep {
     secondReportOutcome({ alreadyDispositioned: true, writtenByUs: false }),
     "needs_review",
   );
+}
+
+// ── shadow-night 10/6 fixes ──────────────────────────────────────────────────
+{
+  // A Not-Issued card with a disposition already set (a Reset placeholder
+  // awaiting the office's re-slot — the Tenney case) is never auto-issued.
+  const rep = mkRep({ name: "Jonathan Paz", lastCoords: SD_A });
+  expectEq(
+    "placeholder: Not Issued + Reset pressed → never issued",
+    planIssue({
+      rep,
+      dayLeads: [mkLead({ itemId: "ph", hasDisposition: true })],
+      nowWallMinutes: 600,
+    }).action,
+    "none",
+  );
+  // A card with NO appointment time can't satisfy the time rule — office's job.
+  expectEq(
+    "placeholder: no appointment time → never issued",
+    planIssue({
+      rep,
+      dayLeads: [mkLead({ itemId: "tless", apptWallMinutes: null })],
+      nowWallMinutes: 600,
+    }).action,
+    "none",
+  );
+  // The phantom partner answers are not reps and never reach the planner.
+  for (const phantom of ["Nobody - I ran it solo", "Other"]) {
+    expect(`phantom partner filtered: ${phantom}`, /^(nobody|other)\b/i.test(phantom.trim()));
+  }
+}
+{
+  // Inkbox hardening: a trailing newline on the key (secrets paste trap) is
+  // trimmed and the send goes through; genuinely corrupt bytes (pbcopy
+  // mojibake) fail LOUDLY with an actionable error instead of fetch's cryptic
+  // "not a valid ByteString" constructor throw that killed shadow night.
+  const sent: string[] = [];
+  const okFetch: InkboxFetch = async (_url, init) => {
+    sent.push(init.headers["X-API-Key"]);
+    return { ok: true, status: 200, text: async () => "" };
+  };
+  const trimmed = await sendImessageToRecipients(
+    inkboxCfg(["+15551112222"], "test-key\n"),
+    "hi",
+    okFetch,
+  );
+  expect("inkbox: trailing newline on the key is trimmed + delivered", trimmed.sent);
+  expectEq("inkbox: the header carries the CLEAN key", sent[0], "test-key");
+  const bad = await sendImessageToRecipients(
+    inkboxCfg(["+15551112222"], "key\u2014mojibake"),
+    "hi",
+    okFetch,
+  );
+  expect(
+    "inkbox: mojibake key fails loudly, never constructs the request",
+    !bad.sent && (bad.errors?.[0] ?? "").includes("non-ASCII") && sent.length === 1,
+  );
+  const spaced = await sendImessageToRecipients(inkboxCfg([" +15551112222 "]), "hi", okFetch);
+  expect("inkbox: recipients are trimmed", spaced.sent);
 }
 
 if (failures > 0) {

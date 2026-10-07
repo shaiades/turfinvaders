@@ -9,6 +9,7 @@ import {
   SOURCE_CODE_COL,
   type ColMap,
   type DayItem,
+  hasExistingDisposition,
   laWallMinutesFromUtc,
   normName,
 } from "./engine.ts";
@@ -620,6 +621,13 @@ export async function fetchDispatchDayItems(
       /\brep\s*reset\b|\breset\b/i.test(reloadsText) ||
       /\breset\b/i.test(cols[BLOCK_COL.source]?.text ?? "") ||
       (rsLabel ?? "").toLowerCase() === "reset";
+    const dispo = {
+      pm: label(cols, BLOCK_COL.pm),
+      rs: rsLabel,
+      ol: label(cols, BLOCK_COL.ol),
+      bo: label(cols, BLOCK_COL.bo),
+      sale: label(cols, BLOCK_COL.sale),
+    };
     return {
       itemId: String(it.id),
       name: String(it.name ?? ""),
@@ -629,6 +637,9 @@ export async function fetchDispatchDayItems(
         .map((s) => s.trim())
         .filter(Boolean),
       issLabel: label(cols, BLOCK_COL.iss),
+      // A Not-Issued card with a disposition is a routed placeholder (Reset
+      // awaiting re-slot) — the planner must skip it (shadow night 10/6).
+      hasDisposition: hasExistingDisposition(dispo),
       apptWallMinutes: wallMinutesFromDate(
         cols[BLOCK_COL.apptDateTime]?.value ?? null,
         cols[BLOCK_COL.apptDateTime]?.text ?? null,
@@ -643,11 +654,7 @@ export async function fetchDispatchDayItems(
       jobWalkReps: [],
       requestedLanguage: detectRequestedLanguage(freeText),
       olderHomeowner: isOlderHomeownerMarker(freeText),
-      pm: label(cols, BLOCK_COL.pm),
-      rs: rsLabel,
-      ol: label(cols, BLOCK_COL.ol),
-      bo: label(cols, BLOCK_COL.bo),
-      sale: label(cols, BLOCK_COL.sale),
+      ...dispo,
     };
   });
 }

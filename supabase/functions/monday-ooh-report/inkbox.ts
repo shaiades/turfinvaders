@@ -60,9 +60,27 @@ export async function sendImessageToRecipients(
   text: string,
   fetchImpl: InkboxFetch = defaultFetch,
 ): Promise<InkboxResult> {
-  if (!cfg.apiKey)
+  // Harden the key: secrets set via copy/paste pick up trailing newlines or
+  // mojibake (the pbcopy trap), and fetch() rejects any header value that
+  // isn't a ByteString — which killed EVERY send on shadow night 10/6 with
+  // "'headers' of 'RequestInit' is not a valid ByteString". Trim fixes the
+  // newline case; anything still non-printable-ASCII is a corrupt secret and
+  // gets a loud, actionable error instead of the cryptic constructor throw.
+  const apiKey = (cfg.apiKey ?? "").trim();
+  if (!apiKey)
     return { sent: false, attempted: 0, delivered: 0, skipped: "INKBOX_API_KEY not set" };
-  if (cfg.recipients.length === 0)
+  if (!/^[\x20-\x7e]+$/.test(apiKey)) {
+    return {
+      sent: false,
+      attempted: 0,
+      delivered: 0,
+      errors: [
+        "INKBOX_API_KEY contains non-ASCII/control characters (pbcopy mojibake?) — re-set the secret and redeploy",
+      ],
+    };
+  }
+  const recipients = cfg.recipients.map((r) => r.trim()).filter(Boolean);
+  if (recipients.length === 0)
     return {
       sent: false,
       attempted: 0,
@@ -75,11 +93,11 @@ export async function sendImessageToRecipients(
   )}`;
   const errors: string[] = [];
   let delivered = 0;
-  for (const to of cfg.recipients) {
+  for (const to of recipients) {
     try {
       const resp = await fetchImpl(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-API-Key": cfg.apiKey },
+        headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
         body: JSON.stringify({ to, text }),
       });
       if (resp.ok) delivered += 1;
@@ -90,7 +108,7 @@ export async function sendImessageToRecipients(
   }
   return {
     sent: delivered > 0,
-    attempted: cfg.recipients.length,
+    attempted: recipients.length,
     delivered,
     ...(errors.length ? { errors } : {}),
   };

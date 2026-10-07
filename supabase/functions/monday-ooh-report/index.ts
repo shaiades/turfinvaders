@@ -591,8 +591,12 @@ serve(async (req) => {
       plan: { ...plan, columnValues } as unknown,
     };
 
-    // Reps this report frees (the submitter + their partner, if any).
-    const freedReps = [form.repName, form.partner].filter((r): r is string => !!r && !!r.trim());
+    // Reps this report frees (the submitter + their partner, if any). The
+    // partner answer "Nobody - I ran it solo" / "Other" is not a person —
+    // shadow night logged it as a rep that is "not working now".
+    const freedReps = [form.repName, form.partner]
+      .filter((r): r is string => !!r && !!r.trim())
+      .filter((r) => !/^(nobody|other)\b/i.test(r.trim()));
     const resultLabel = (plan.status?.label ?? null) as string | null;
 
     if (!liveAllowed) {

@@ -158,6 +158,12 @@ export type DispatchLead = {
   reps: string[];
   /** Iss-column label (status): "Iss" | "Not Issued" | "Office Appt" | … */
   issLabel: string | null;
+  /**
+   * A disposition column is already set (PM/RS/OL/BO/Sale). A Not-Issued card
+   * WITH a disposition is a routed placeholder (e.g. a Reset awaiting the
+   * office's re-slot) — shadow night 10/6 proved these must never be issued.
+   */
+  hasDisposition: boolean;
   /** Appointment wall-minutes (LA) for today — same ordering key the engine uses. */
   apptWallMinutes: number | null;
   /** House coordinates from the Monday Location column (null when unmapped). */
@@ -236,11 +242,16 @@ export function sameRep(a: string | null | undefined, b: string | null | undefin
   return fa !== "" && fa === firstName(b);
 }
 
-/** Is this an issuable, still-open-for-assignment lead at all? (Not Issued, and
- *  not one of the own-flow Iss statuses.) */
+/** Is this an issuable, still-open-for-assignment lead at all? Not Issued,
+ *  not one of the own-flow Iss statuses, no disposition already pressed (a
+ *  routed placeholder like a Reset awaiting re-slot keeps "Not Issued"), and
+ *  it must HAVE an appointment time — a time-less card can't satisfy "start ≥
+ *  now + drive + 45" and is the office's to schedule, never auto-issued. */
 export function isIssuableStatus(lead: DispatchLead): boolean {
   const iss = (lead.issLabel ?? "").trim().toLowerCase();
   if (EXCLUDED_ISS.has(iss)) return false;
+  if (lead.hasDisposition) return false;
+  if (lead.apptWallMinutes == null) return false;
   return iss === LABEL.notIssued.toLowerCase();
 }
 

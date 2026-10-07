@@ -88,8 +88,6 @@ export async function runWatchdog(supabase: Supa): Promise<WatchdogSummary> {
     missingReportAlerts: 0,
     lateReporters: [],
   };
-  if (!inWatchdogWindow(hour)) return { ...base, reason: "outside 7am–9pm PT" };
-
   const { data: settings } = await supabase
     .from("system_settings")
     .select(
@@ -101,11 +99,17 @@ export async function runWatchdog(supabase: Supa): Promise<WatchdogSummary> {
   const token = ((settings?.monday_api_token as string | null) ?? "").trim();
   if (!token) return { ...base, reason: "no Monday token" };
 
-  // 3. Sales Processing follow-ups ride the write-back switch, not dispatch.
+  // 3. Sales Processing follow-ups ride the write-back switch, not dispatch —
+  // and run around the clock: an evening Sold (Ellis, 10:07pm on shadow
+  // night) must fill as soon as the automation moves it, not at 7am.
   let salesProc: SalesProcSummary | undefined;
   if (writebackMode === "live") {
     salesProc = await processSalesProcFollowups(supabase, token).catch(() => undefined);
   }
+
+  // The alert watchdogs (1 + 2) keep office hours.
+  if (!inWatchdogWindow(hour))
+    return { ...base, ran: writebackMode === "live", reason: "outside 7am–9pm PT", salesProc };
 
   if (mode === "off")
     return { ...base, ran: writebackMode === "live", reason: "live_dispatch_mode off", salesProc };
