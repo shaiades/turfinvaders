@@ -15,13 +15,16 @@ import {
 } from "lucide-react";
 import { oohOnBlockLabel, oohResultLabel, type OohQueueRow } from "@/lib/ooh";
 import {
+  type DispatchDecisionRow,
   useAttendanceOverrideMutations,
   useAttendanceOverrides,
+  useDispatchDecisions,
   useMissingReports,
   useOohConfig,
   useOohMutations,
   useOohQueue,
 } from "@/hooks/useOohQueue";
+import { laTimeHM } from "@/lib/dates";
 
 /**
  * OOH admin tab — the office's cockpit for the Out of House write-back.
@@ -158,6 +161,87 @@ function PushNextLeadButton({
       )}
       {label}
     </Button>
+  );
+}
+
+/** One decision's action → the chip the office reads at a glance. */
+function decisionChip(d: DispatchDecisionRow): { label: string; cls: string } {
+  if (d.action === "issue") {
+    if (d.mode === "live" && d.issued)
+      return { label: "Issued", cls: "text-victory border-victory/50" };
+    if (d.mode === "live")
+      return { label: "Issue failed", cls: "text-destructive border-destructive/50" };
+    return { label: "Would issue", cls: "text-kombat-gold border-kombat-gold/50" };
+  }
+  if (d.action === "manager") return { label: "Manager", cls: "text-neon border-neon/50" };
+  if (d.action === "alert")
+    return { label: "Alert", cls: "text-destructive border-destructive/50" };
+  return { label: "No lead", cls: "text-muted-foreground border-border" };
+}
+
+/**
+ * Dispatch decisions (today, LA): the dispatcher's audit trail — who it issued
+ * (or would issue) which lead and why, straight from ooh_dispatch_decisions.
+ * This is the review loop for the dry-run shadow day and the live audit after:
+ * no chat window required.
+ */
+function DispatchDecisionsPanel() {
+  const decisions = useDispatchDecisions();
+  const rows = decisions.data ?? [];
+  return (
+    <ArcadePanel
+      title="Dispatch decisions"
+      faction="kombat"
+      info={<span className="text-[10px] text-muted-foreground">today · newest first</span>}
+      headline={<span className="font-display text-xs text-muted-foreground">{rows.length}</span>}
+    >
+      {decisions.data === null ? (
+        <p className="text-sm text-muted-foreground">
+          Decision log not available yet (migration pending).
+        </p>
+      ) : rows.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No decisions yet today — they appear the moment a report frees a rep.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {rows.map((d) => {
+            const chip = decisionChip(d);
+            const fit =
+              d.action === "issue"
+                ? [
+                    d.drive_minutes != null ? `${d.drive_minutes}m drive` : null,
+                    d.strength != null ? `strength ${d.strength}` : null,
+                    d.score != null ? `score ${d.score}` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")
+                : null;
+            return (
+              <div
+                key={d.id}
+                className="rounded-lg border border-border/40 bg-surface/50 p-3 space-y-1.5"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <p className="min-w-0 truncate text-sm font-medium text-foreground">
+                    {d.rep_name ?? "—"}
+                    {d.lead_name ? ` → ${d.lead_name}` : ""}
+                  </p>
+                  <Chip cls={chip.cls}>{chip.label}</Chip>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {laTimeHM(d.created_at)}
+                  {d.office ? ` · ${d.office}` : ""}
+                  {d.trigger === "watchdog" ? " · watchdog" : ""}
+                  {fit ? ` · ${fit}` : ""}
+                </p>
+                {d.reason && <p className="text-xs text-foreground/80">{d.reason}</p>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </ArcadePanel>
   );
 }
 
@@ -419,6 +503,8 @@ export function CloseKombatOohTab() {
           <p className="text-xs text-muted-foreground">{modeCopy.hint}</p>
         </div>
       </ArcadePanel>
+
+      <DispatchDecisionsPanel />
 
       <AttendanceOverridesPanel />
 

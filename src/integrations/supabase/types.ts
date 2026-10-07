@@ -2241,6 +2241,66 @@ export type Database = {
         }
         Relationships: []
       }
+      ooh_dispatch_decisions: {
+        Row: {
+          action: string
+          board_id: string | null
+          candidates: Json | null
+          created_at: string
+          drive_minutes: number | null
+          form_item_id: string | null
+          id: string
+          issued: boolean
+          lead_item_id: string | null
+          lead_name: string | null
+          mode: string
+          office: string | null
+          reason: string | null
+          rep_name: string | null
+          score: number | null
+          strength: number | null
+          trigger: string
+        }
+        Insert: {
+          action: string
+          board_id?: string | null
+          candidates?: Json | null
+          created_at?: string
+          drive_minutes?: number | null
+          form_item_id?: string | null
+          id?: string
+          issued?: boolean
+          lead_item_id?: string | null
+          lead_name?: string | null
+          mode: string
+          office?: string | null
+          reason?: string | null
+          rep_name?: string | null
+          score?: number | null
+          strength?: number | null
+          trigger: string
+        }
+        Update: {
+          action?: string
+          board_id?: string | null
+          candidates?: Json | null
+          created_at?: string
+          drive_minutes?: number | null
+          form_item_id?: string | null
+          id?: string
+          issued?: boolean
+          lead_item_id?: string | null
+          lead_name?: string | null
+          mode?: string
+          office?: string | null
+          reason?: string | null
+          rep_name?: string | null
+          score?: number | null
+          strength?: number | null
+          trigger?: string
+        }
+        Relationships: []
+      }
       ooh_processed_reports: {
         Row: {
           board_id: string | null

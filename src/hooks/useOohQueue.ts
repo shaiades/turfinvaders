@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { laMidnightUtcISO } from "@/lib/dates";
 import {
   getOohConfig,
   listMissingReports,
@@ -136,6 +137,49 @@ export function useAttendanceOverrideMutations() {
   });
 
   return { upsert, remove };
+}
+
+export type DispatchDecisionRow = {
+  id: string;
+  created_at: string;
+  mode: string;
+  trigger: string;
+  rep_name: string | null;
+  office: string | null;
+  lead_item_id: string | null;
+  lead_name: string | null;
+  action: string;
+  score: number | null;
+  drive_minutes: number | null;
+  strength: number | null;
+  reason: string | null;
+  issued: boolean;
+};
+
+/**
+ * Today's (LA) live-dispatch decision log — every issue / would-issue /
+ * manager / none / alert call with its reason, so the office can audit the
+ * dispatcher from the cockpit instead of a chat window. Polls (realtime
+ * discipline: aggregates poll); RLS = owner / office_staff.
+ */
+export function useDispatchDecisions(enabled = true) {
+  return useQuery({
+    queryKey: ["ooh", "decisions", laToday()],
+    enabled,
+    refetchInterval: 60_000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("ooh_dispatch_decisions")
+        .select(
+          "id, created_at, mode, trigger, rep_name, office, lead_item_id, lead_name, action, score, drive_minutes, strength, reason, issued",
+        )
+        .gte("created_at", laMidnightUtcISO(laToday()))
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (error) return null; // table not deployed yet → feature ships dark
+      return (data ?? []) as DispatchDecisionRow[];
+    },
+  });
 }
 
 export function useOohMutations() {
