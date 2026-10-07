@@ -119,6 +119,27 @@ serve(async (req) => {
     }
   }
 
+  // ── Manager-text smoke test (ops; same auth as the watchdog) ───────────────
+  // Sends ONE clearly-labeled test line to the dispatch recipients and returns
+  // the per-recipient result, so a key rotation can be verified in seconds
+  // instead of waiting for the day's first Sold. Never touches Monday.
+  if (url.searchParams.get("task") === "test-text") {
+    const notifySecret = denoEnv?.get("NOTIFY_SECRET");
+    const provided = req.headers.get("x-notify-secret") ?? url.searchParams.get("secret");
+    if (notifySecret && provided !== notifySecret) {
+      return new Response("unauthorized", { status: 401, headers: corsHeaders });
+    }
+    const result = await sendDispatcherIMessage(
+      "🔧 Dispatcher test text — Inkbox wiring check. Nothing to do, you can ignore this.",
+    ).catch((e) => ({
+      sent: false,
+      attempted: 0,
+      delivered: 0,
+      errors: [e instanceof Error ? e.message : String(e)],
+    }));
+    return ok(result);
+  }
+
   const raw = await req.text();
   if (!raw) return ok({ ignored: "empty body" });
   let body: Record<string, unknown>;
@@ -561,7 +582,10 @@ serve(async (req) => {
         ? addOnReloadLabels({
             quoted: form.quotedText,
             blockProducts: block.products,
-            notes: form.notes,
+            // Scan ALL the rep's words — Ellis (10/6) wrote "Reloads:Gutters +
+            // insulation" in the QUANTITIES box, not Notes, and the follow-up
+            // closed "nothing_to_fill".
+            notes: payText,
           })
         : [];
     if (isSaleResult(form) && !canSave) {
