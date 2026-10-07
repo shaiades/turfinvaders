@@ -21,10 +21,11 @@ const noCartoonArt = (c: RepCartoon | undefined): boolean => !(c?.portrait || c?
  * high-score table, plus Van Wars. The Month tab carries the $100K Boss meter
  * and a Points / "Bonus Race · $" toggle — the old separate Bonus tab, folded
  * into Month (2026-10-05) so the $100K boss has exactly one home. The live
- * credited sale $ rides alongside points on EVERY row and tab (restored
- * 2026-10-07, owner relay of Ernie's ask: the van gets hyped seeing the money
- * tick when someone hits); the "Bonus Race" toggle only changes what the board
- * RANKS by. Numbers ride useArcadeLadder → getDispatchProduction, the same
+ * credited sale $ and lead count ride alongside points on EVERY row and tab
+ * (the old "PTS → $ → LEADS" line, restored 2026-10-07 on owner relay of
+ * Ernie's ask: the van gets hyped seeing the money and leads tick when someone
+ * hits); the "Bonus Race" toggle only changes what the board RANKS by. Numbers
+ * ride useArcadeLadder → getDispatchProduction, the same
  * server aggregates Fleet Dispatch shows, so the boards can never disagree.
  * Privacy: the $ shown is credited sale VOLUME (net of cancels) — public, the
  * same figure Bonus Race ranks on. Detailed take-home PAY stays on the viewer's
@@ -359,20 +360,20 @@ function Podium({
               <span className="font-display text-[11px] tabular-nums text-victory">
                 {money ? fmtVol(r.vol) : `${r.pts} pts`}
               </span>
-              {/* Live sale $ rides under the ranking metric so the #1 spot shows
-                  the money the moment it lands. In the $-ranked Bonus Race the
-                  points sit here instead; a $0 row stays clean on points view. */}
-              {money ? (
-                <span className="font-display text-[10px] tabular-nums text-muted-foreground">
-                  {r.pts} pts
-                </span>
-              ) : (
-                r.vol > 0 && (
-                  <span className="font-display text-[10px] tabular-nums text-victory/90">
-                    {fmtVol(r.vol)}
+              {/* The two non-ranking metrics ride under the hero number so the
+                  top spots show the money and leads the moment they land. A $0 /
+                  0-lead part drops out so a fresh podium stays clean. */}
+              {(() => {
+                const parts = money
+                  ? [`${r.pts} pts`, r.lds > 0 ? `${r.lds} lds` : null]
+                  : [r.vol > 0 ? fmtVol(r.vol) : null, r.lds > 0 ? `${r.lds} lds` : null];
+                const text = parts.filter(Boolean).join(" · ");
+                return text ? (
+                  <span className="font-display text-[10px] tabular-nums text-muted-foreground">
+                    {text}
                   </span>
-                )
-              )}
+                ) : null;
+              })()}
               <div
                 className={`mt-1.5 w-full rounded-t-md border-x border-t border-border bg-[color-mix(in_oklab,var(--neon)_8%,transparent)] ${pedestal[p]}`}
               >
@@ -453,9 +454,10 @@ function ScoreRow({
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2 font-display text-[11px] uppercase tracking-wider tabular-nums">
-          {/* Points AND live sale $ side by side on every tab — the ranking
-              metric leads (the Bonus Race leads with $, every other view with
-              pts). A landed sale glows victory-green; $0 stays muted. */}
+          {/* Points · $ · leads side by side on every tab — the old board's
+              "PTS → $ → LEADS" line, restored. The ranking metric leads (Bonus
+              Race leads with $, every other view with pts); a landed sale glows
+              victory-green and leads glow hot-pink, each muted at 0. */}
           {money ? (
             <>
               <span className={r.vol > 0 ? "text-victory" : "text-muted-foreground/50"}>
@@ -471,6 +473,9 @@ function ScoreRow({
               </span>
             </>
           )}
+          <span className={r.lds > 0 ? "text-neon" : "text-muted-foreground/40"}>
+            {r.lds} lds
+          </span>
           {bonuses > 0 && (
             <span className="text-[var(--kombat-gold)]" title={`${bonuses} × $1,500 bonus`}>
               🪙×{bonuses}
