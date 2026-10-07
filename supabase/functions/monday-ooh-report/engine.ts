@@ -12,7 +12,8 @@
 //
 // Column ids + status label ids/text were read LIVE from boards 18433859050
 // (form), 18432844990 (SD block) and 18432845324 (OC block) on 2026-10-03/04;
-// SD and OC blocks share identical column ids and status labels.
+// SD and OC blocks share identical column ids and status labels EXCEPT the
+// Source Code column, whose id differs per office — see SOURCE_CODE_COL.
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ── Boards ───────────────────────────────────────────────────────────────────
@@ -67,7 +68,8 @@ export const FORM_COL = {
   calledTexted: "single_selectiv9qswz", // 0 Yes | 1 No
 } as const;
 
-// ── Block columns (boards 18432844990 / 18432845324, identical) ──────────────
+// ── Block columns (boards 18432844990 / 18432845324, identical except Source
+//    Code — see SOURCE_CODE_COL) ──────────────────────────────────────────────
 export const BLOCK_COL = {
   name: "name",
   reps: "people6", // max 2 (pairs)
@@ -82,7 +84,8 @@ export const BLOCK_COL = {
   salePrice: "numbers",
   resetDate: "date", // date + time
   reloads: "dropdown2",
-  sourceCode: "numeric_mm35kwnj",
+  // Source Code lives at a DIFFERENT id per office — never add it here; use
+  // SOURCE_CODE_COL / sourceCodeColId so the write/read picks the right board's.
   // disposition status columns
   iss: "status", // Add Rep|Reload|CTC|Not Issued|Office Appt|Iss
   bo: "status4", // No Show|No show text|No Demo|None
@@ -91,6 +94,32 @@ export const BLOCK_COL = {
   pm: "status_1", // PM|PM w/ RS|None
   sale: "status9", // Sold|Upsell|Reload
 } as const;
+
+/**
+ * Source Code column id, PER OFFICE. Unlike every other block column, the SD and
+ * OC boards use DIFFERENT ids for "Source Code" (confirmed live 2026-10-07 on the
+ * active boards SD 18433845590 / OC 18433845468). Writing the SD id onto an OC
+ * item lands on a non-existent column — the code silently never arrives and the
+ * sale may not reach Sales Processing. Always pick the id by the block's office.
+ * Boards are re-cloned weekly, so re-confirm these via the Monday MCP if column
+ * ids drift (the office column id, color_mm2yd84r, has stayed shared).
+ */
+export const SOURCE_CODE_COL: Record<"SD" | "OC", string> = {
+  SD: "numeric_mm35kwnj",
+  OC: "numeric_mm35nm4y",
+} as const;
+
+/** Every office's Source Code column id. The read path requests all of them —
+ *  Monday silently omits the ids a board doesn't have — so the block's existing
+ *  code is read no matter which office it's on. */
+export const SOURCE_CODE_COL_IDS: readonly string[] = Object.values(SOURCE_CODE_COL);
+
+/** The Source Code column id to WRITE for a block item, chosen by office. Falls
+ *  back to the SD id when the office can't be resolved (keeps the pre-fix
+ *  behavior for a rare un-officed board rather than dropping the write). */
+export function sourceCodeColId(office: "SD" | "OC" | null | undefined): string {
+  return office ? SOURCE_CODE_COL[office] : SOURCE_CODE_COL.SD;
+}
 
 /** Exact Monday status label text (press by LABEL, never numeric index). */
 export const LABEL = {

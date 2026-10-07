@@ -46,6 +46,7 @@ import {
   oohUpdateKey,
   parseOohForm,
   planDisposition,
+  sourceCodeColId,
   sourceCodeToWrite,
 } from "./engine.ts";
 import {
@@ -350,6 +351,14 @@ serve(async (req) => {
 
     const isCurrentBlock = block.boardId === activeSd || block.boardId === activeOc;
     const liveAllowed = mode === "live" && allowedBoards.has(block.boardId);
+    // Which office this block belongs to, by board (authoritative — the board
+    // decides which columns physically exist). Drives the office-specific Source
+    // Code column id (SD and OC use different ids) and live issuing below.
+    const office: "SD" | "OC" | null = isCurrentBlock
+      ? block.boardId === activeSd
+        ? "SD"
+        : "OC"
+      : null;
 
     // Details (Rule 3 / #6): rebuild now that the block is known, so a blank
     // arrival time falls back to the appointment time (date9, PT).
@@ -368,7 +377,10 @@ serve(async (req) => {
         block.sourceCode,
         block.source,
       );
-      if (code != null) fieldWrites[BLOCK_COL.sourceCode] = String(code);
+      // Write to the OFFICE-appropriate Source Code column — the SD and OC
+      // boards use different ids, so the single hardcoded id dropped every OC
+      // sale's code onto a non-existent column (never reached Sales Processing).
+      if (code != null) fieldWrites[sourceCodeColId(office)] = String(code);
       if (unknownSource)
         sourceCodeNote = ` (source "${block.source ?? ""}" unrecognized — set code=1)`;
     }
@@ -381,11 +393,6 @@ serve(async (req) => {
       [BLOCK_COL.details]: { text: combinedDetails },
     };
 
-    const office: "SD" | "OC" | null = isCurrentBlock
-      ? block.boardId === activeSd
-        ? "SD"
-        : "OC"
-      : null;
     const rowWithTarget = {
       ...baseRow,
       details_line: detailsLineForBlock,

@@ -4,7 +4,14 @@
 // read-only live-dispatch client (../monday-live-dispatch/monday.ts) is kept
 // separate on purpose: this one adds the write mutations the OOH flow needs,
 // and the edge runtime cannot share modules across functions safely.
-import { BLOCK_COL, type ColMap, type DayItem, laWallMinutesFromUtc, normName } from "./engine.ts";
+import {
+  BLOCK_COL,
+  SOURCE_CODE_COL_IDS,
+  type ColMap,
+  type DayItem,
+  laWallMinutesFromUtc,
+  normName,
+} from "./engine.ts";
 import {
   type DispatchLead,
   type LatLng,
@@ -156,7 +163,9 @@ export type BlockItem = {
 
 const BLOCK_READ_COLS = [
   BLOCK_COL.source,
-  BLOCK_COL.sourceCode,
+  // Both offices' Source Code ids — the OC id and the SD id differ; Monday
+  // omits whichever the board doesn't have, so we read the code either way.
+  ...SOURCE_CODE_COL_IDS,
   BLOCK_COL.details,
   BLOCK_COL.apptDateTime,
   BLOCK_COL.reps,
@@ -235,7 +244,9 @@ export async function fetchBlockItem(token: string, itemId: string): Promise<Blo
   const cols = colMapOf(
     it.column_values as Array<{ id: string; text: string | null; value: string | null }>,
   );
-  const sc = cols[BLOCK_COL.sourceCode]?.text ?? "";
+  // Source Code: read whichever office's column this board actually has (only
+  // one of the ids is ever present in the response — see BLOCK_READ_COLS).
+  const sc = SOURCE_CODE_COL_IDS.map((id) => cols[id]?.text).find((t) => t != null) ?? "";
   const label = (id: string) => cols[id]?.text?.trim() || null;
   return {
     id: String(it.id),
