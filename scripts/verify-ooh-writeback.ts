@@ -10,6 +10,7 @@
 import {
   AUTO_ISSUE_WITHOUT_REPORT,
   BLOCK_COL,
+  BLOCK_DAY_GROUP,
   FORM_COL,
   LABEL,
   ON_BLOCK,
@@ -17,20 +18,27 @@ import {
   applyDisposition,
   buildBaseQueueRow,
   buildDetailsLine,
+  buildNoShowAtDoorText,
   buildSaleAlert,
+  customerLastName,
   hasExistingDisposition,
   isAllowedOohBoard,
   isBlankStatus,
   isDuplicate,
+  isOfficeApptStatus,
   isOpenLead,
   isSaleResult,
   laClock,
   laWallMinutesFromUtc,
   lateReportCheck,
   matchTarget,
+  matchWeekday,
+  matchWithoutLeadId,
+  normalizeAddress,
   oohUpdateKey,
   parseOohForm,
   planDisposition,
+  planOfficeApptDisposition,
   planRelease,
   reloadDropdownLabels,
   sourceCodeColId,
@@ -38,6 +46,7 @@ import {
   timeInHouseMins,
   type AppliedOp,
   type ColMap,
+  type MatchCandidate,
   type DayItem,
   type MondayValue,
   type MondayWriter,
@@ -70,6 +79,7 @@ import {
   inWatchdogWindow,
   isCanSaveMarker,
   isFreeRep,
+  issLabelForLead,
   isJobWalkMarker,
   isOlderHomeownerMarker,
   isRehashMarker,
@@ -460,8 +470,15 @@ expectEq(
 // Processing. The write path must pick the id by the block's office.
 expectEq("source code col: SD", sourceCodeColId("SD"), "numeric_mm35kwnj");
 expectEq("source code col: OC", sourceCodeColId("OC"), "numeric_mm35nm4y");
-expect("source code col: SD and OC are distinct ids", sourceCodeColId("SD") !== sourceCodeColId("OC"));
-expectEq("source code col: unknown office falls back to the SD id", sourceCodeColId(null), "numeric_mm35kwnj");
+expect(
+  "source code col: SD and OC are distinct ids",
+  sourceCodeColId("SD") !== sourceCodeColId("OC"),
+);
+expectEq(
+  "source code col: unknown office falls back to the SD id",
+  sourceCodeColId(null),
+  "numeric_mm35kwnj",
+);
 
 // End-to-end-ish (mirrors index.ts): a Sold on a blank-code block writes code 1
 // to the OFFICE-appropriate Source Code column via the mock writer — and NEVER
@@ -492,7 +509,11 @@ for (const [office, wantCol, otherCol, boardId] of [
   const mock = new MockMonday();
   await applyDisposition(mock, boardId, "500", cols, plan.status);
   const colsCall = mock.calls.find((c) => c.type === "columns");
-  expectEq(`source code: ${office} sale writes code 1 to ${wantCol}`, colsCall?.values?.[wantCol], "1");
+  expectEq(
+    `source code: ${office} sale writes code 1 to ${wantCol}`,
+    colsCall?.values?.[wantCol],
+    "1",
+  );
   expect(
     `source code: ${office} sale never writes the other office's column (${otherCol})`,
     !Object.prototype.hasOwnProperty.call(colsCall?.values ?? {}, otherCol),
@@ -806,19 +827,24 @@ expectEq(
   "create",
 );
 expectEq(
-  "match: on-block Yes but no lead id → queue",
+  "match: on-block Yes but no lead id → match (owner brief Part 1)",
   matchTarget(parseOohForm("x", form({ [FORM_COL.onBlock]: status(ON_BLOCK.YES) }))).kind,
-  "queue",
+  "match",
 );
 expectEq(
-  "match: non-numeric lead id ignored → queue",
+  "match: no lead id and no on-block channel → match",
+  matchTarget(parseOohForm("x", form({}))).kind,
+  "match",
+);
+expectEq(
+  "match: non-numeric lead id ignored → match",
   matchTarget(
     parseOohForm(
       "x",
       form({ [FORM_COL.leadId]: text("not-a-number"), [FORM_COL.onBlock]: status(ON_BLOCK.YES) }),
     ),
   ).kind,
-  "queue",
+  "match",
 );
 
 // ── parse sanity ────────────────────────────────────────────────────────────
@@ -1725,6 +1751,437 @@ function mkRep(over: Partial<DispatchRep>): DispatchRep {
   expect("marker: job walk", isJobWalkMarker("job walk for the sold roof"));
   expect("marker: older homeowner", isOlderHomeownerMarker("elderly homeowner, be patient"));
   expect("marker: no false rehash", !isRehashMarker("fresh canvass lead"));
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 14) OWNER BRIEF 2026-10-07 — the write-back fixes. One block per numbered
+//     part of the brief, then the four real reports that went to Needs review.
+// ════════════════════════════════════════════════════════════════════════════
+
+// ── Part 1: MATCHING WITHOUT A LEAD ID ──────────────────────────────────────
+// normalizeAddress: first segment only, suffix canonicalized, unit dropped.
+expectEq(
+  "addr: full geocoded address → number + street",
+  normalizeAddress("32761 Nathan Cir, Dana Point, CA 92629, USA"),
+  "32761 nathan cir",
+);
+expectEq(
+  "addr: 'Circle' and 'Cir' canonicalize the same",
+  normalizeAddress("32761 Nathan Circle"),
+  normalizeAddress("32761 Nathan Cir, Dana Point, CA 92629, USA"),
+);
+expectEq(
+  "addr: 'Street' → 'st'",
+  normalizeAddress("8889 Stanwell Street, San Diego, CA 92126, USA"),
+  "8889 stanwell st",
+);
+expectEq(
+  "addr: multi-word street kept",
+  normalizeAddress("31241 Calle Del Campo, San Juan Capistrano, CA 92675, USA"),
+  "31241 calle del campo",
+);
+expectEq(
+  "addr: trailing unit dropped",
+  normalizeAddress("123 Main St Apt 4, City, CA"),
+  "123 main st",
+);
+expectEq("addr: null → null", normalizeAddress(null), null);
+expectEq("addr: blank → null", normalizeAddress("   "), null);
+
+// customerLastName: handles "First … Last", "Last, First", and parentheticals.
+expectEq("lastname: First First Last", customerLastName("Johan & Josette Sanchez"), "sanchez");
+expectEq("lastname: 'and' joiner", customerLastName("Matthew and Erica Curtis"), "curtis");
+expectEq("lastname: 'Last, First …'", customerLastName("Wang, Annie & parents"), "wang");
+expectEq(
+  "lastname: parenthetical dropped",
+  customerLastName("Steven Harobin (separated)"),
+  "harobin",
+);
+expectEq("lastname: null → null", customerLastName(null), null);
+
+// matchWithoutLeadId precedence: address first, then last name + rep, 0/2+ → review.
+const mc = (id: string, customerName: string, address: string, reps: string[]): MatchCandidate => ({
+  id,
+  customerName,
+  address,
+  reps,
+});
+{
+  const cands = [
+    mc("A", "Jane Doe", "100 First St, San Diego, CA", ["Someone Else"]),
+    mc("B", "Matthew & Erica Curtis (copy)", "32761 Nathan Cir, Dana Point, CA 92629, USA", [
+      "Ronnell Watson",
+    ]),
+  ];
+  expectEq(
+    "match: unique address hit → write that item",
+    matchWithoutLeadId({
+      address: "32761 Nathan Cir, Dana Point, CA 92629, USA",
+      customerName: "Matthew and Erica Curtis",
+      rep: "Ronell Watson",
+      candidates: cands,
+    }),
+    { kind: "match", id: "B", by: "address" },
+  );
+}
+{
+  // two cards at the same address → 2 candidates → Needs review (never guess).
+  const cands = [
+    mc("B1", "Curtis", "32761 Nathan Cir, Dana Point, CA 92629, USA", ["Ronnell Watson"]),
+    mc("B2", "Curtis duplicate", "32761 Nathan Circle", ["Someone Else"]),
+  ];
+  const r = matchWithoutLeadId({
+    address: "32761 Nathan Cir",
+    customerName: "Curtis",
+    rep: "Ronell Watson",
+    candidates: cands,
+  });
+  expectEq(
+    "match: 2+ address hits → review",
+    { kind: r.kind, count: (r as { count?: number }).count },
+    {
+      kind: "review",
+      count: 2,
+    },
+  );
+}
+{
+  // no address match → fall back to last name + rep (unique) → match.
+  const cands = [
+    mc("N1", "Steve Harobin", "9999 Other Rd, San Diego, CA", ["Bergan Lundak"]),
+    mc("N2", "Steve Jobs", "1 Infinite Loop, Cupertino, CA", ["Someone Else"]),
+  ];
+  expectEq(
+    "match: no address → last name + rep hit",
+    matchWithoutLeadId({
+      address: "totally different 42 Elsewhere Blvd",
+      customerName: "Steve Harobin",
+      rep: "Bergan Lundak",
+      candidates: cands,
+    }),
+    { kind: "match", id: "N1", by: "lastname-rep" },
+  );
+}
+{
+  // last name matches but the rep doesn't → not a candidate → review (0).
+  const cands = [mc("N1", "Steve Harobin", "9999 Other Rd", ["Someone Else"])];
+  expectEq(
+    "match: last name hit but wrong rep → review (0)",
+    matchWithoutLeadId({
+      address: "no match here",
+      customerName: "Steve Harobin",
+      rep: "Bergan Lundak",
+      candidates: cands,
+    }).kind,
+    "review",
+  );
+}
+expectEq(
+  "match: nothing matches → review (0)",
+  matchWithoutLeadId({
+    address: "1 Nowhere St",
+    customerName: "Ghost Person",
+    rep: "Nobody",
+    candidates: [mc("X", "Someone", "2 Elsewhere Ave", ["Who"])],
+  }),
+  { kind: "review", reason: "no address or last-name + rep match", count: 0 },
+);
+
+// matchWeekday: appt date wins; else the submit day (PT).
+expectEq("weekday: appt Wed 10/7 → 3", matchWeekday({ date: "2026-10-07", time: null }, SUBMIT), 3);
+expectEq("weekday: appt Tue 10/6 → 2", matchWeekday({ date: "2026-10-06", time: null }, SUBMIT), 2);
+expectEq("weekday: no appt → submit PT day (Wed)", matchWeekday(null, pdt("2026-10-07", 10, 0)), 3);
+expectEq("weekday → Wednesday block group", BLOCK_DAY_GROUP[3], "new_group7344");
+expectEq("weekday → Tuesday block group", BLOCK_DAY_GROUP[2], "new_group73798");
+
+// ── Part 2: results that MUST auto-process (no longer sent to review) ────────
+// One-legger: the reset DATE decides OL vs Reset — NOT the reset-call flag.
+{
+  // reset date present (even with "no reset" call) → Reset + date.
+  const p = mapCase(RESULT.ONE_LEGGER, ON_BLOCK.YES, {
+    [FORM_COL.resetCall]: status(1),
+    [FORM_COL.resetDate]: date("2026-10-11", "17:00:00"),
+  });
+  expectEq("OL w/ reset date → status_2 Reset", p.status, {
+    col: BLOCK_COL.rs,
+    label: LABEL.reset,
+  });
+  expectEq("OL w/ reset date writes the date", p.fieldWrites[BLOCK_COL.resetDate], {
+    date: "2026-10-11",
+    time: "17:00:00",
+  });
+}
+{
+  // no reset date (even with "reset set" call) → OL, no date.
+  const p = mapCase(RESULT.ONE_LEGGER, ON_BLOCK.YES, { [FORM_COL.resetCall]: status(0) });
+  expectEq("OL w/o reset date → status_3 OL", p.status, { col: BLOCK_COL.ol, label: LABEL.ol });
+  expect("OL w/o reset date writes no date", p.fieldWrites[BLOCK_COL.resetDate] === undefined);
+  expectEq("OL w/o reset date needs no review", p.needsReview, null);
+}
+// No demo auto-processes with the brief's "No demo - <reason> (time)" line.
+{
+  const f = parseOohForm(
+    "nd",
+    form({
+      [FORM_COL.result]: status(RESULT.NO_DEMO),
+      [FORM_COL.onBlock]: status(ON_BLOCK.YES),
+      [FORM_COL.whyNoDemo]: status(5, "Bad lead / wrong info"),
+      [FORM_COL.whatHappened]: text("renters, owners weren't home"),
+    }),
+  );
+  const p = planDisposition(f);
+  expectEq(
+    "No demo → status4 No Demo, no review",
+    { status: p.status, review: p.needsReview },
+    {
+      status: { col: BLOCK_COL.bo, label: LABEL.noDemo },
+      review: null,
+    },
+  );
+  const line = buildDetailsLine(f, SUBMIT);
+  expect(
+    "No demo details read 'No demo - <reason> (time)'",
+    line.startsWith("No demo - Bad lead / wrong info: renters, owners weren't home") &&
+      line.endsWith("(10:08)"),
+  );
+}
+// One-legger details read "OL - <notes> (time)".
+{
+  const f = parseOohForm(
+    "olnotes",
+    form({
+      [FORM_COL.result]: status(RESULT.ONE_LEGGER),
+      [FORM_COL.onBlock]: status(ON_BLOCK.YES),
+      [FORM_COL.notes]: text("one leg, wife works days"),
+    }),
+  );
+  const line = buildDetailsLine(f, SUBMIT);
+  expect(
+    "OL details read 'OL - … <notes> (time)'",
+    line.startsWith("OL - ") &&
+      line.includes("one leg, wife works days") &&
+      line.endsWith("(10:08)"),
+  );
+}
+// At the door: the manager text reads exactly as the brief specifies.
+expectEq(
+  "at-the-door text matches the brief",
+  buildNoShowAtDoorText("Matthew & Erica Curtis", "11:30", "Ronell Watson"),
+  "🔴 No show at the door: Matthew & Erica Curtis, 11:30, Ronell Watson. Please call the lead.",
+);
+// Reset (not pitched) with a date auto-processes to status_2 Reset.
+{
+  const p = mapCase(RESULT.RESET, ON_BLOCK.YES, {
+    [FORM_COL.resetDate]: date("2026-10-11", "18:00:00"),
+  });
+  expectEq(
+    "Reset + date → status_2 Reset, no review",
+    { status: p.status, review: p.needsReview },
+    {
+      status: { col: BLOCK_COL.rs, label: LABEL.reset },
+      review: null,
+    },
+  );
+  expectEq("Reset writes the reset date (UTC as given)", p.fieldWrites[BLOCK_COL.resetDate], {
+    date: "2026-10-11",
+    time: "18:00:00",
+  });
+}
+
+// ── Part 3: JOB WALKS / CAN-SAVES / OFFICE APPTS (Iss = "Office Appt") ───────
+expectEq("office-appt: 'Office Appt' is detected", isOfficeApptStatus("Office Appt"), true);
+expectEq("office-appt: 'Iss' is not an office appt", isOfficeApptStatus("Iss"), false);
+expectEq("office-appt: blank is not an office appt", isOfficeApptStatus(null), false);
+{
+  // Non-sale on an office appt → Details only (no disposition status pressed).
+  for (const r of [
+    RESULT.PITCH_MISS,
+    RESULT.RESET,
+    RESULT.ONE_LEGGER,
+    RESULT.NO_DEMO,
+    RESULT.NO_SHOW_FINAL,
+    RESULT.AT_THE_DOOR,
+  ]) {
+    const p = planOfficeApptDisposition(
+      parseOohForm(
+        "oa",
+        form({ [FORM_COL.result]: status(r), [FORM_COL.onBlock]: status(ON_BLOCK.YES) }),
+      ),
+    );
+    expect(`office-appt result ${r}: no status pressed`, p.status === null);
+    expect(`office-appt result ${r}: not flagged at-the-door`, p.atTheDoor === false);
+    expect(
+      `office-appt result ${r}: never sets PM/Reset/OL/No Demo/BO`,
+      !([BLOCK_COL.pm, BLOCK_COL.rs, BLOCK_COL.ol, BLOCK_COL.bo] as string[]).some((c) =>
+        Object.prototype.hasOwnProperty.call(p.fieldWrites, c),
+      ),
+    );
+  }
+}
+{
+  // A SALE on an office appt → Advantage+ + Reloads first, then status9 = Reload.
+  const f = parseOohForm(
+    "oasale",
+    form({
+      [FORM_COL.result]: status(RESULT.SOLD),
+      [FORM_COL.onBlock]: status(ON_BLOCK.YES),
+      [FORM_COL.quoted]: { text: "Roof, Turf", value: null },
+      [FORM_COL.salePrice]: num(41000),
+    }),
+  );
+  const p = planOfficeApptDisposition(f);
+  expectEq("office-appt sale → status9 Reload (never Sold)", p.status, {
+    col: BLOCK_COL.sale,
+    label: LABEL.saleReload,
+  });
+  expectEq("office-appt sale sets Advantage+", p.fieldWrites[BLOCK_COL.advantage], {
+    label: LABEL.advantagePlus,
+  });
+  expectEq("office-appt sale maps Reloads from quoted", p.fieldWrites[BLOCK_COL.reloads], {
+    labels: ["Roof", "Turf"],
+  });
+  expectEq("office-appt sale writes the Sale Price", p.fieldWrites[BLOCK_COL.salePrice], "41000");
+  expect("office-appt sale never presses Sold", p.status?.label !== LABEL.sold);
+}
+
+// ── Part 4: NEXT LEAD — the rep's own job walk issues as Office Appt ─────────
+expectEq(
+  "next: a job walk issues as Office Appt",
+  issLabelForLead({ isJobWalk: true }),
+  LABEL.officeAppt,
+);
+expectEq("next: a normal lead issues as Iss", issLabelForLead({ isJobWalk: false }), LABEL.iss);
+
+// ── Part 5: DUPLICATES — a block that already has a result is a duplicate ────
+expectEq(
+  "dup: partner already recorded OL → duplicate (write nothing)",
+  hasExistingDisposition({ pm: null, rs: null, ol: "OL", bo: null, sale: null }),
+  true,
+);
+expectEq(
+  "dup: another rep already recorded a Reload → duplicate",
+  hasExistingDisposition({ pm: null, rs: null, ol: null, bo: null, sale: "Reload" }),
+  true,
+);
+expectEq(
+  "dup: only 'No show text' is NOT a duplicate (lead still open)",
+  hasExistingDisposition({ pm: null, rs: null, ol: null, bo: "No show text", sale: null }),
+  false,
+);
+
+// ── The four reports that went to Needs review, end-to-end ──────────────────
+// Candidate day-group (both offices combined), as fetchMatchCandidates returns
+// them — the real block cards (names/addresses/reps read live 2026-10-07).
+const DAY_CANDIDATES: MatchCandidate[] = [
+  mc(
+    "13230979094",
+    "Johan & Josette Sanchez (copy)",
+    "31241 Calle Del Campo, San Juan Capistrano, CA 92675, USA",
+    ["Ronnell Watson"],
+  ),
+  mc(
+    "13231833197",
+    "Matthew & Erica Curtis (copy)",
+    "32761 Nathan Cir, Dana Point, CA 92629, USA",
+    ["Ronnell Watson"],
+  ),
+  mc(
+    "13232009484",
+    "Steven Harobin (separated) (copy)",
+    "3939 Catamarca Dr, San Diego, CA 92124, USA",
+    ["Bergan Lundak"],
+  ),
+  mc(
+    "13225007884",
+    "Wang, Annie & Parents (copy)",
+    "8889 Stanwell Street, San Diego, CA 92126, USA",
+    ["Edward Romero", "Josh OConnor"],
+  ),
+  mc("99999", "Unrelated Lead", "100 Nowhere Ave, San Diego, CA 92101, USA", ["Nobody Here"]),
+];
+
+type RealReport = {
+  label: string;
+  customer: string;
+  rep: string;
+  address: string;
+  result: number;
+  resetDate?: { date: string; time?: string } | null;
+  expectId: string;
+  expectStatus: { col: string; label: string } | null;
+  expectAtTheDoor?: boolean;
+};
+const REAL_REPORTS: RealReport[] = [
+  {
+    label: "Sanchez / Ronell",
+    customer: "Johan & Josette Sanchez",
+    rep: "Ronell Watson",
+    address: "31241 Calle Del Campo, San Juan Capistrano, CA 92675, USA",
+    result: RESULT.ONE_LEGGER,
+    expectId: "13230979094",
+    expectStatus: { col: BLOCK_COL.ol, label: LABEL.ol }, // no reset date → OL
+  },
+  {
+    label: "Curtis / Ronell",
+    customer: "Matthew and Erica Curtis",
+    rep: "Ronell Watson",
+    address: "32761 Nathan Cir, Dana Point, CA 92629, USA",
+    result: RESULT.AT_THE_DOOR,
+    expectId: "13231833197",
+    expectStatus: { col: BLOCK_COL.bo, label: LABEL.noShowText },
+    expectAtTheDoor: true,
+  },
+  {
+    label: "Harobin / Bergan",
+    customer: "Steve Harobin",
+    rep: "Bergan Lundak",
+    address: "3939 Catamarca Dr, San Diego, CA 92124, USA",
+    result: RESULT.NO_DEMO,
+    expectId: "13232009484",
+    expectStatus: { col: BLOCK_COL.bo, label: LABEL.noDemo },
+  },
+  {
+    label: "Wang / Edward",
+    customer: "Wang, Annie & parents",
+    rep: "Edward Romero",
+    address: "8889 Stanwell Street, San Diego, CA 92126, USA",
+    result: RESULT.NO_DEMO,
+    expectId: "13225007884",
+    expectStatus: { col: BLOCK_COL.bo, label: LABEL.noDemo },
+  },
+];
+for (const rep of REAL_REPORTS) {
+  const f = parseOohForm(
+    `real-${rep.label}`,
+    form({
+      [FORM_COL.repName]: status(0, rep.rep),
+      [FORM_COL.result]: status(rep.result),
+      [FORM_COL.onBlock]: status(ON_BLOCK.YES),
+      [FORM_COL.address]: text(rep.address),
+      ...(rep.resetDate
+        ? { [FORM_COL.resetDate]: date(rep.resetDate.date, rep.resetDate.time) }
+        : {}),
+    }),
+  );
+  // matchTarget: no Lead ID + on-block → match path.
+  expectEq(`${rep.label}: routes to the match path (not the queue)`, matchTarget(f).kind, "match");
+  // The matcher finds the one block card by address.
+  const m = matchWithoutLeadId({
+    address: f.address,
+    customerName: rep.customer,
+    rep: f.repName,
+    candidates: DAY_CANDIDATES,
+  });
+  expectEq(`${rep.label}: matches its block card by address`, m, {
+    kind: "match",
+    id: rep.expectId,
+    by: "address",
+  });
+  // And the disposition auto-processes to the expected status.
+  const p = planDisposition(f);
+  expectEq(`${rep.label}: auto-processes (no review)`, p.needsReview, null);
+  expectEq(`${rep.label}: presses the right disposition`, p.status, rep.expectStatus);
+  if (rep.expectAtTheDoor) expectEq(`${rep.label}: flagged at-the-door`, p.atTheDoor, true);
 }
 
 if (failures > 0) {

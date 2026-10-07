@@ -9,6 +9,7 @@ import {
   SOURCE_CODE_COL_IDS,
   type ColMap,
   type DayItem,
+  type MatchCandidate,
   laWallMinutesFromUtc,
   normName,
 } from "./engine.ts";
@@ -337,6 +338,59 @@ export async function fetchDayGroupItems(
       ol: label(cols, BLOCK_COL.ol),
       bo: label(cols, BLOCK_COL.bo),
       sale: label(cols, BLOCK_COL.sale),
+    };
+  });
+}
+
+/** Fetch one block day-group as no-Lead-ID match candidates (owner brief Part
+ *  1): each item's id, name (customer), Location text (address) and people6
+ *  reps. Best-effort — a query failure returns []. The board is a current SD/OC
+ *  block; the caller searches both offices' day-groups and dedupes by id. */
+export async function fetchMatchCandidates(
+  token: string,
+  boardId: string,
+  groupId: string,
+): Promise<MatchCandidate[]> {
+  const { data } = await graphql(
+    token,
+    `
+      query ($b: ID!, $g: [String], $cols: [String!]) {
+        boards(ids: [$b]) {
+          groups(ids: $g) {
+            items_page(limit: 200) {
+              items {
+                id
+                name
+                column_values(ids: $cols) {
+                  id
+                  text
+                  value
+                }
+              }
+            }
+          }
+        }
+      }
+    `,
+    { b: boardId, g: [groupId], cols: [BLOCK_COL.location, BLOCK_COL.reps] },
+  );
+  const boards =
+    (data?.boards as Array<{
+      groups?: Array<{ items_page?: { items?: Array<Record<string, unknown>> } }>;
+    }>) ?? [];
+  const items = boards[0]?.groups?.[0]?.items_page?.items ?? [];
+  return items.map((it) => {
+    const cols = colMapOf(
+      it.column_values as Array<{ id: string; text: string | null; value: string | null }>,
+    );
+    return {
+      id: String(it.id),
+      customerName: String(it.name ?? "") || null,
+      address: cols[BLOCK_COL.location]?.text?.trim() || null,
+      reps: (cols[BLOCK_COL.reps]?.text ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
     };
   });
 }
