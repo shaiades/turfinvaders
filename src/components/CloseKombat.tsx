@@ -301,6 +301,15 @@ function CloseKombatInner({
     leverFlashTimer.current = window.setTimeout(() => setLeverFlash(null), 1300);
   };
 
+  // The Kombat Month belt-ladder "Weekly Activity Test" gate drops the rep
+  // straight into the test: jump to the Goals tab (where the panel lives) and
+  // bump this nonce so the freshly-mounted ActivityTestPanel opens the sheet.
+  const [activityTestSignal, setActivityTestSignal] = useState(0);
+  const takeActivityTest = () => {
+    setPageTab("goals");
+    setActivityTestSignal((n) => n + 1);
+  };
+
   // --- Range engine: Day / Week (Mon–Sun) / Month / Year, all LA-calendar ---
   const [tab, setTab] = useState<RangeTab>("day");
   const [dayPreset, setDayPreset] = useState<DayPreset>("today");
@@ -2052,6 +2061,7 @@ function CloseKombatInner({
             displayName={displayName}
             isAdmin={isAdmin}
             isPreview={isPreview}
+            onTakeActivityTest={isRep ? takeActivityTest : undefined}
           />
         </TabsContent>
 
@@ -2087,6 +2097,7 @@ function CloseKombatInner({
               displayName={displayName}
               isPreview={isPreview}
               onLeverPulse={pulseLever}
+              openSignal={activityTestSignal}
             />
           </TabsContent>
         )}

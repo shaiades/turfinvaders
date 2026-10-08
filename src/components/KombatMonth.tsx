@@ -135,11 +135,14 @@ export function KombatMonthTab({
   displayName,
   isAdmin,
   isPreview,
+  onTakeActivityTest,
 }: {
   userId: string | null;
   displayName: string | null;
   isAdmin: boolean;
   isPreview: boolean;
+  /** Rep-only: open the Weekly Activity Test from the eligibility gate. */
+  onTakeActivityTest?: () => void;
 }) {
   const qc = useQueryClient();
   const rulesQuery = useKombatRules();
@@ -505,6 +508,7 @@ export function KombatMonthTab({
           eligibility={eligibility}
           canSubmit={!!userId && !isPreview}
           onSubmitProof={() => setProofOpen(true)}
+          onTakeTest={onTakeActivityTest}
           totals={totals}
           cartoons={cartoons}
         />

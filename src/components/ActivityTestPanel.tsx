@@ -10,7 +10,7 @@
 // FIELD-VERIFIED stamp, and every write stay own-account-only facts —
 // each is hidden or disabled in preview rather than shown as a lie.
 
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import {
   Check,
@@ -149,12 +149,15 @@ export function ActivityTestPanel({
   displayName,
   isPreview,
   onLeverPulse,
+  openSignal,
 }: {
   userId: string | undefined;
   displayName: string | null;
   isPreview: boolean;
   /** Fires the one-shot neon ring on the matching Goals FunnelTile. */
   onLeverPulse?: (lever: "closePct" | "sitPct") => void;
+  /** Nonce bumped by the Kombat Month gate to open the test straight away. */
+  openSignal?: number;
 }) {
   const reduced = usePrefersReducedMotion();
   const todayISO = laTodayISO();
@@ -293,6 +296,27 @@ export function ActivityTestPanel({
     setReviewTake(null);
     setRetakeOpen(true);
   };
+
+  // Open-on-signal: the Kombat Month belt-ladder "Weekly Activity Test" gate
+  // switches to this tab and bumps `openSignal` to drop the rep straight into
+  // the test. Switching tabs remounts this panel, so we latch the request and
+  // fire once the subject + takes have resolved — opening before they load
+  // would no-op. Skip when capped (already tested this LA week) or read-only
+  // (preview / sign-in still settling): the panel already shows that status.
+  const handledSignal = useRef(0);
+  const openPending = useRef(false);
+  useEffect(() => {
+    if (openSignal && openSignal !== handledSignal.current) {
+      handledSignal.current = openSignal;
+      openPending.current = true;
+    }
+    if (!openPending.current || resolving || testsQuery.isLoading) return;
+    openPending.current = false;
+    if (canWrite && !capped) {
+      setReviewTake(null);
+      setRetakeOpen(true);
+    }
+  }, [openSignal, resolving, testsQuery.isLoading, canWrite, capped]);
 
   const blockStyle = (i: number) => ({ animationDelay: `${i * 60}ms` });
 
