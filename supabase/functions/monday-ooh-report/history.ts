@@ -93,6 +93,45 @@ export type DispatchDecision = {
   candidates?: unknown;
 };
 
+/** One people6 / status write, for the Rule 21 audit (item, old → new, reason,
+ *  time). Logged around EVERY such write the dispatcher makes. */
+export type DispatchWrite = {
+  mode: "dry_run" | "live";
+  trigger: "report" | "watchdog" | "late_cover";
+  formItemId: string | null;
+  boardId: string | null;
+  itemId: string;
+  leadName: string | null;
+  columnId: string;
+  columnLabel: string | null;
+  oldValue: string | null;
+  newValue: string | null;
+  reason: string;
+};
+
+/** Append one people6 / status write to the audit table (Rule 21). Best-effort —
+ *  an audit hiccup must never undo the write it is recording. */
+export async function logDispatchWrite(supabase: Supa, w: DispatchWrite): Promise<void> {
+  try {
+    await supabase.from("ooh_dispatch_writes").insert({
+      mode: w.mode,
+      trigger: w.trigger,
+      form_item_id: w.formItemId,
+      board_id: w.boardId,
+      item_id: w.itemId,
+      lead_name: w.leadName,
+      column_id: w.columnId,
+      column_label: w.columnLabel,
+      old_value: w.oldValue,
+      new_value: w.newValue,
+      reason: w.reason,
+      actor: "dispatch",
+    });
+  } catch (e) {
+    console.error("[ooh dispatch write-audit]", e instanceof Error ? e.message : String(e));
+  }
+}
+
 /** Append one dispatch decision to the audit table. Best-effort. */
 export async function logDispatchDecision(supabase: Supa, d: DispatchDecision): Promise<void> {
   try {

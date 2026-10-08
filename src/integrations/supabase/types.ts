@@ -2307,6 +2307,57 @@ export type Database = {
         }
         Relationships: []
       }
+      ooh_dispatch_writes: {
+        Row: {
+          actor: string
+          board_id: string | null
+          column_id: string
+          column_label: string | null
+          created_at: string
+          form_item_id: string | null
+          id: string
+          item_id: string
+          lead_name: string | null
+          mode: string
+          new_value: string | null
+          old_value: string | null
+          reason: string | null
+          trigger: string | null
+        }
+        Insert: {
+          actor?: string
+          board_id?: string | null
+          column_id: string
+          column_label?: string | null
+          created_at?: string
+          form_item_id?: string | null
+          id?: string
+          item_id: string
+          lead_name?: string | null
+          mode: string
+          new_value?: string | null
+          old_value?: string | null
+          reason?: string | null
+          trigger?: string | null
+        }
+        Update: {
+          actor?: string
+          board_id?: string | null
+          column_id?: string
+          column_label?: string | null
+          created_at?: string
+          form_item_id?: string | null
+          id?: string
+          item_id?: string
+          lead_name?: string | null
+          mode?: string
+          new_value?: string | null
+          old_value?: string | null
+          reason?: string | null
+          trigger?: string | null
+        }
+        Relationships: []
+      }
       respawn_requests: {
         Row: {
           approved_shifts: string[] | null

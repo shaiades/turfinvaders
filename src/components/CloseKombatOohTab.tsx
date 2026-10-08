@@ -12,7 +12,13 @@ import {
   X,
 } from "lucide-react";
 import { oohOnBlockLabel, oohResultLabel, type OohQueueRow } from "@/lib/ooh";
-import { useMissingReports, useOohConfig, useOohMutations, useOohQueue } from "@/hooks/useOohQueue";
+import {
+  useDispatchWrites,
+  useMissingReports,
+  useOohConfig,
+  useOohMutations,
+  useOohQueue,
+} from "@/hooks/useOohQueue";
 import { useAuth } from "@/hooks/useAuth";
 
 /**
@@ -325,6 +331,7 @@ export function CloseKombatOohTab() {
   const cfg = useOohConfig();
   const queue = useOohQueue();
   const missing = useMissingReports();
+  const writes = useDispatchWrites();
   // Owner-only: the live-dispatch chip becomes a tap-to-cycle toggle. realRole
   // (not the View-As role) so an owner previewing a rep keeps the control.
   const { realRole } = useAuth();
@@ -460,6 +467,89 @@ export function CloseKombatOohTab() {
           </div>
         </ArcadePanel>
       )}
+
+      {/* Rule 21: every people6 / status write the dispatcher made, old → new,
+          with the reason and time — Shai's audit of what the dispatcher touched. */}
+      <ArcadePanel
+        title="Dispatch write log"
+        faction="kombat"
+        info={
+          <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+            <Clock className="size-3" /> people6 · Iss · old → new
+          </span>
+        }
+        headline={
+          <span className="font-display text-xs text-muted-foreground">
+            {(writes.data ?? []).length}
+          </span>
+        }
+      >
+        {writes.data === null ? (
+          <p className="text-sm text-muted-foreground">
+            Write log not available yet (migration pending).
+          </p>
+        ) : (writes.data ?? []).length === 0 ? (
+          <p className="text-sm text-muted-foreground">No people6 / status writes recorded yet.</p>
+        ) : (
+          <>
+            <div className="hidden overflow-x-auto md:block">
+              <table className="w-full min-w-0 text-left text-xs">
+                <thead className="text-muted-foreground">
+                  <tr>
+                    <th className="py-1 pr-3 font-display uppercase tracking-widest">Time</th>
+                    <th className="py-1 pr-3 font-display uppercase tracking-widest">Lead</th>
+                    <th className="py-1 pr-3 font-display uppercase tracking-widest">Col</th>
+                    <th className="py-1 pr-3 font-display uppercase tracking-widest">Old → New</th>
+                    <th className="py-1 pr-3 font-display uppercase tracking-widest">Reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(writes.data ?? []).slice(0, 100).map((w) => (
+                    <tr key={w.id} className="border-t border-border/40 align-top">
+                      <td className="py-1 pr-3 whitespace-nowrap text-muted-foreground">
+                        {new Date(w.created_at).toLocaleString()}
+                      </td>
+                      <td className="py-1 pr-3">{w.lead_name || w.item_id}</td>
+                      <td className="py-1 pr-3">
+                        {w.column_label || w.column_id}
+                        {w.mode === "dry_run" ? " (dry)" : ""}
+                      </td>
+                      <td className="py-1 pr-3 text-muted-foreground">
+                        {(w.old_value || "∅") + " → " + (w.new_value || "∅")}
+                      </td>
+                      <td className="py-1 pr-3 text-muted-foreground">{w.reason}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="space-y-2 md:hidden">
+              {(writes.data ?? []).slice(0, 50).map((w) => (
+                <div
+                  key={w.id}
+                  className="rounded-lg border border-border/40 bg-surface/50 p-3 space-y-1"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate text-sm font-medium text-foreground">
+                      {w.lead_name || w.item_id}
+                    </span>
+                    <span className="shrink-0 text-[10px] text-muted-foreground">
+                      {w.column_label || w.column_id}
+                      {w.mode === "dry_run" ? " (dry)" : ""}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {(w.old_value || "∅") + " → " + (w.new_value || "∅")}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {new Date(w.created_at).toLocaleString()} · {w.reason}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </ArcadePanel>
     </div>
   );
 }

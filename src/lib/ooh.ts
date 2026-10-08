@@ -70,6 +70,25 @@ export type OohQueueRow = {
   updated_at: string;
 };
 
+/** One audited people6 / status write the dispatcher made (Rule 21) — the row
+ *  the review page lists: item, column, old → new, reason, time. */
+export type OohDispatchWrite = {
+  id: string;
+  created_at: string;
+  mode: string; // 'dry_run' | 'live'
+  trigger: string | null; // 'report' | 'watchdog' | 'late_cover'
+  form_item_id: string | null;
+  board_id: string | null;
+  item_id: string;
+  lead_name: string | null;
+  column_id: string; // 'people6' | 'status' | …
+  column_label: string | null; // 'Reps' | 'Iss'
+  old_value: string | null;
+  new_value: string | null;
+  reason: string | null;
+  actor: string;
+};
+
 export type MissingReport = {
   itemId: string;
   boardId: string;

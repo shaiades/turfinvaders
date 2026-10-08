@@ -1247,6 +1247,13 @@ expectEq(
       [FORM_COL.onBlock]: status(ON_BLOCK.YES),
       [FORM_COL.quantities]: text("Roof 28 sq + gutters"),
       [FORM_COL.salePrice]: num(34900),
+      // A COMPLETE sale fills every Sold-only field (Rule 10) → no missing nudge.
+      [FORM_COL.depositAmount]: num(1000),
+      [FORM_COL.depositPaidWith]: status(0, "cc"),
+      [FORM_COL.balancePaidWith]: status(0, "Synchrony"),
+      [FORM_COL.advantagePlus]: status(0, "Advantage+"),
+      [FORM_COL.reload]: text("None"),
+      [FORM_COL.howClosed]: status(1, "Marketing drop"),
     }),
   );
   const msg = buildSaleAlert(f, "John Smith");
@@ -1274,7 +1281,7 @@ expectEq(
   const msg = buildSaleAlert(f, null);
   expect("upsell alert uses the Upsell label", msg.includes("Upsell: Windows"));
   expect("no sale price → no money line (no $ figure)", !msg.includes("$"));
-  expect("missing amount → flags it in the same text", msg.includes("Missing amount"));
+  expect("missing sale price → flags it in the same text", msg.includes("sale price"));
   expect("what sold present → not flagged as missing", !msg.includes("what sold"));
   expect(
     "single rep renders without an ampersand",
@@ -1293,7 +1300,10 @@ expectEq(
     }),
   );
   const msg = buildSaleAlert(f, "Jane Doe");
-  expect("bare sale flags both missing pieces", msg.includes("Missing amount + what sold"));
+  expect(
+    "bare sale flags both missing pieces",
+    msg.includes("sale price") && msg.includes("what sold"),
+  );
   expect("missing-info nudge appears once", msg.split("Missing").length - 1 === 1);
 }
 
@@ -1559,33 +1569,48 @@ function mkRep(over: Partial<DispatchRep>): DispatchRep {
     "none",
   );
 
-  // time rule: too soon (now 10:00 + 20 drive + 45 = 11:05; lead at 10:30)
+  // Rule 5: reachable iff appt ≥ now + drive + 10 (now 10:00, coordless → 20m
+  // drive). drive+5 away → too soon; drive+10 away → just reachable.
   expectEq(
-    "plan: lead too soon is skipped",
+    "plan: lead too soon (< drive+10) is skipped",
     planIssue({
       rep,
-      dayLeads: [mkLead({ itemId: "soon", apptWallMinutes: 630 })],
+      dayLeads: [mkLead({ itemId: "soon", apptWallMinutes: 600 + 20 + 5 })],
       nowWallMinutes: 600,
     }).action,
     "none",
   );
+  expectEq(
+    "plan: lead exactly drive+10 away is reachable",
+    planIssue({
+      rep,
+      dayLeads: [mkLead({ itemId: "ok", apptWallMinutes: 600 + 20 + 10 })],
+      nowWallMinutes: 600,
+    }).action,
+    "issue",
+  );
 
-  // Tier A (own reset) beats a nearer Tier B lead
-  const tier = planIssue({
+  // Rule 5/7/9: the SOONEST-starting uncovered lead wins over the rep's own
+  // LATER lead (the Yakup/Smith fix — soonest coverage comes first).
+  const soonest = planIssue({
     rep,
     dayLeads: [
       mkLead({
-        itemId: "A",
+        itemId: "mine-late",
         reps: ["Jaxon Heilman"],
         isReset: true,
-        coords: SD_FAR,
-        apptWallMinutes: 14 * 60,
+        coords: SD_NEAR,
+        apptWallMinutes: 16 * 60,
       }),
-      mkLead({ itemId: "B", coords: SD_NEAR, apptWallMinutes: 14 * 60 }),
+      mkLead({ itemId: "uncovered-soon", coords: SD_FAR, apptWallMinutes: 14 * 60 }),
     ],
     nowWallMinutes: 600,
   });
-  expectEq("plan: own reset/job walk goes first", tier.action === "issue" && tier.lead.itemId, "A");
+  expectEq(
+    "plan: soonest uncovered lead beats a later own lead",
+    soonest.action === "issue" && soonest.lead.itemId,
+    "uncovered-soon",
+  );
 
   // nearest Tier B wins
   const nearest = planIssue({

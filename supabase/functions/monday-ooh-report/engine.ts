@@ -28,13 +28,37 @@ export const DISPATCHER_LABEL = {
   needsReview: "Needs review",
   error: "Error",
 } as const;
-/** Destinations the block's own automations own — NEVER written here. For docs. */
+/** Destinations the block's own automations own — the block's "status changes"
+ *  automations do the ROUTING (we never move cards). Sales Processing is the one
+ *  exception we WRITE to: after a Sold routes a card there, Rule 13 fills the
+ *  deposit / finance / membership / reloads columns on the moved card. */
 export const DESTINATION_BOARDS = {
   salesProcessing: "4155553389",
   rehashLog: "4155519215",
   blowoutLog: "4155519525",
   confirmedSD: "4155519846",
   confirmedOC: "18411299428",
+} as const;
+
+/** The boards a Sold card is routed to by the block automations and must then be
+ *  treated as "already handled" if a duplicate report lands (Rule 16b). */
+export const HANDLED_DESTINATION_BOARD_IDS: readonly string[] = [
+  DESTINATION_BOARDS.salesProcessing,
+  DESTINATION_BOARDS.rehashLog,
+  DESTINATION_BOARDS.blowoutLog,
+  DESTINATION_BOARDS.confirmedSD,
+  DESTINATION_BOARDS.confirmedOC,
+];
+
+/** Sales Processing board (4155553389) columns the dispatcher fills AFTER a Sold
+ *  routes the card there (owner mandate 2026-10-08, Rule 13). Read live
+ *  2026-10-08. `finance` = the balance payment method; `advantage` mirrors the
+ *  block Advantage+ flag; `reloads` duplicates the add-on list. */
+export const SALES_PROCESSING_COL = {
+  depositAmt: "numbers5",
+  finance: "dropdown6", // balance payment method
+  advantage: "color_mkwkmx6g", // Advantage+ / Non Member
+  reloads: "dup__of_product9",
 } as const;
 
 // ── Form columns (board 18433859050) ────────────────────────────────────────
@@ -66,6 +90,16 @@ export const FORM_COL = {
   whatHappened: "long_textpk8jpais",
   minutesWaited: "numberbudx8yh5",
   calledTexted: "single_selectiv9qswz", // 0 Yes | 1 No
+  // ── Sold-only fields (owner mandate 2026-10-08, Rule 10). The rep answers
+  //    these on a Sold / Upsell / Reload, and every one is written to the block
+  //    BEFORE the sale button is pressed (Rule 11). "None" on reload = nothing.
+  depositAmount: "numbergsk30l04",
+  depositPaidWith: "single_selectdjom6k5",
+  balancePaidWith: "single_select8h5yf7b",
+  advantagePlus: "single_selectl7kpnp0",
+  reload: "multi_select5gjmmc55", // add-ons / future reloads ("None" = nothing)
+  howClosed: "single_select0pehjgd", // At passing | Marketing drop | Commercial drop call | Other
+  howClosedOther: "short_textrdjfvkb3",
 } as const;
 
 // ── Block columns (boards 18432844990 / 18432845324, identical except Source
@@ -367,6 +401,14 @@ export type OohForm = {
   whatHappened: string | null;
   minutesWaited: number | null;
   calledTexted: number | null; // 0 Yes | 1 No
+  // ── Sold-only fields (Rule 10) ──
+  depositAmount: number | null;
+  depositPaidWith: string | null;
+  balancePaidWith: string | null;
+  advantagePlus: string | null; // the rep's Advantage+ answer (label text)
+  reloadAddOns: string | null; // the reload multi-select text ("None" = nothing)
+  howClosed: string | null;
+  howClosedOther: string | null;
 };
 
 function statusText(c: ColVal | undefined): string | null {
@@ -461,6 +503,13 @@ export function parseOohForm(formItemId: string, cols: ColMap): OohForm {
     whatHappened: textVal(g(FORM_COL.whatHappened)),
     minutesWaited: numVal(g(FORM_COL.minutesWaited)),
     calledTexted: statusIndex(g(FORM_COL.calledTexted)),
+    depositAmount: numVal(g(FORM_COL.depositAmount)),
+    depositPaidWith: statusText(g(FORM_COL.depositPaidWith)),
+    balancePaidWith: statusText(g(FORM_COL.balancePaidWith)),
+    advantagePlus: statusText(g(FORM_COL.advantagePlus)),
+    reloadAddOns: textVal(g(FORM_COL.reload)),
+    howClosed: statusText(g(FORM_COL.howClosed)),
+    howClosedOther: textVal(g(FORM_COL.howClosedOther)),
   };
 }
 
@@ -496,6 +545,56 @@ export function resultPrefix(form: OohForm): string {
 
 const dropName = (d: string | null): string | null =>
   !d || /no drop call/i.test(d) ? null : d.replace(/^other manager$/i, "Other mgr");
+
+/** The block "Advantage+" membership label (color_mkwkazqn) a sale's form answer
+ *  maps to: "Advantage+" when the rep says yes, else "Non Member" (Rule 11). A
+ *  blank answer returns null → the caller leaves the column alone. */
+export function membershipLabel(advantageAnswer: string | null | undefined): string | null {
+  const t = (advantageAnswer ?? "").trim().toLowerCase();
+  if (!t) return null;
+  if (/non|no\b|none|not/.test(t)) return "Non Member";
+  if (/adv|yes|member|plus|\+/.test(t)) return LABEL.advantagePlus;
+  return "Non Member";
+}
+
+/** The reload / add-on dropdown (dropdown2) labels for a sale's reload answer
+ *  (Rule 11 — "every add-on or future reload except 'None'"). Reuses the product
+ *  → dropdown mapping; an explicit "None" (or blank) yields []. */
+export function reloadAddOnLabels(reloadAnswer: string | null | undefined): string[] {
+  const t = (reloadAnswer ?? "").trim();
+  if (!t || /^none$/i.test(t)) return [];
+  return reloadDropdownLabels(t.replace(/\bnone\b/gi, ""));
+}
+
+/** How the rep closed it, for the Details line: the label verbatim, with
+ *  "Other" expanded to the free-text ("Other: <text>"). null when unanswered. */
+export function howClosedText(form: OohForm): string | null {
+  const h = (form.howClosed ?? "").trim();
+  if (!h) return null;
+  if (/^other$/i.test(h)) return form.howClosedOther ? `Other: ${form.howClosedOther}` : "Other";
+  return h;
+}
+
+/**
+ * The office-style money/close segment of a Sold Details line (Rule 11):
+ *   "$1000 deposit cc balance Synchrony, closed at marketing drop, dc Shai".
+ * Each piece is omitted when its field is blank, so a half-filled sale still
+ * produces a clean line (the missing pieces are nudged for separately, Rule 14).
+ */
+export function buildSaleDetailsSegment(form: OohForm): string | null {
+  const bits: string[] = [];
+  const deposit: string[] = [];
+  if (form.depositAmount != null)
+    deposit.push(`$${form.depositAmount.toLocaleString("en-US")} deposit`);
+  if (form.depositPaidWith) deposit.push(form.depositPaidWith);
+  if (form.balancePaidWith) deposit.push(`balance ${form.balancePaidWith}`);
+  if (deposit.length) bits.push(deposit.join(" "));
+  const closed = howClosedText(form);
+  if (closed) bits.push(`closed at ${closed}`);
+  const drop = dropName(form.dropCall);
+  if (drop) bits.push(`dc ${drop}`);
+  return bits.length ? bits.join(", ") : null;
+}
 
 /** Minutes elapsed in the house: submit wall-minutes − arrival wall-minutes.
  *  Arrival falls back to the block appointment time when the form field is
@@ -534,17 +633,23 @@ export function buildDetailsLine(
     form.result === RESULT.PITCH_MISS || form.result === RESULT.PM_WITH_RESET;
 
   const quoted = form.quantities || form.quotedText;
-  const head = isQuoteResult && quoted ? `${resultPrefix(form)} – ${quoted}` : resultPrefix(form);
-  parts.push(head);
-
-  // Pricing (Sold / PM branches).
-  if (isQuoteResult && (form.highPrice != null || form.lowPrice != null)) {
-    const hi = form.highPrice != null ? `High $${form.highPrice.toLocaleString("en-US")}` : null;
-    const lo = form.lowPrice != null ? `Low $${form.lowPrice.toLocaleString("en-US")}` : null;
-    parts.push([hi, lo].filter(Boolean).join(" / "));
-  }
-  if (form.result === RESULT.SOLD && form.salePrice != null) {
-    parts.push(`Sale $${form.salePrice.toLocaleString("en-US")}`);
+  if (form.result === RESULT.SOLD) {
+    // Office style (Rule 11): lead with the quoted products, then the money /
+    // close segment, e.g. "15sq shingles 13sq flat, $1000 deposit cc balance
+    // Synchrony, closed at marketing drop, dc Shai (1:02)". The block "Price"
+    // column carries the total, so the Sold line itself shows the DEPOSIT.
+    parts.push(quoted || resultPrefix(form));
+    const saleSeg = buildSaleDetailsSegment(form);
+    if (saleSeg) parts.push(saleSeg);
+  } else {
+    const head = isQuoteResult && quoted ? `${resultPrefix(form)} – ${quoted}` : resultPrefix(form);
+    parts.push(head);
+    // Pricing (PM branches only — a Sold shows its deposit in the segment above).
+    if (isQuoteResult && (form.highPrice != null || form.lowPrice != null)) {
+      const hi = form.highPrice != null ? `High $${form.highPrice.toLocaleString("en-US")}` : null;
+      const lo = form.lowPrice != null ? `Low $${form.lowPrice.toLocaleString("en-US")}` : null;
+      parts.push([hi, lo].filter(Boolean).join(" / "));
+    }
   }
 
   // Objection (PM branches only).
@@ -590,9 +695,11 @@ export function buildDetailsLine(
   // Free-form notes for the office.
   if (form.notes) parts.push(form.notes);
 
-  // Drop call.
-  const drop = dropName(form.dropCall);
-  if (drop) parts.push(`Drop: ${drop}`);
+  // Drop call (non-Sold only; a Sold carries "dc <name>" in its sale segment).
+  if (form.result !== RESULT.SOLD) {
+    const drop = dropName(form.dropCall);
+    if (drop) parts.push(`Drop: ${drop}`);
+  }
 
   // Time in house (not for at-the-door, which has no completed appointment).
   if (form.result !== RESULT.AT_THE_DOOR) {
@@ -637,11 +744,29 @@ export function buildSaleAlert(form: OohForm, customerName: string | null): stri
   lines.push(`Rep: ${reps}`);
   lines.push(`${kind}${what ? `: ${what}` : ""}`);
   if (customerName && customerName.trim()) lines.push(`Customer: ${customerName.trim()}`);
-  const missing: string[] = [];
-  if (amount == null) missing.push("amount");
-  if (!what) missing.push("what sold");
+  const missing = missingSaleFields(form);
   if (missing.length) lines.push(`⚠️ Missing ${missing.join(" + ")} — reply with it.`);
   return lines.join("\n");
+}
+
+/**
+ * The Sold-only fields (Rule 10) that are blank on a sale — for the ONE
+ * "missing sale info" nudge folded into the sale alert (Rule 14 / Rule 19;
+ * never a second text). "None" is a valid Reload answer, so only a truly blank
+ * reload counts as missing. Pure, so the nudge can be asserted and a batch scan
+ * of older reports can reuse it.
+ */
+export function missingSaleFields(form: OohForm): string[] {
+  const missing: string[] = [];
+  if (form.salePrice == null) missing.push("sale price");
+  if (!(form.quantities || form.quotedText)) missing.push("what sold");
+  if (form.depositAmount == null) missing.push("deposit amount");
+  if (!form.depositPaidWith) missing.push("deposit method");
+  if (!form.balancePaidWith) missing.push("balance method");
+  if (!form.advantagePlus) missing.push("Advantage+");
+  if (!form.reloadAddOns) missing.push("reload");
+  if (!form.howClosed) missing.push("how closed");
+  return missing;
 }
 
 /**
@@ -796,6 +921,29 @@ export type WritePlan = {
 };
 
 /**
+ * The non-status, non-Details column writes EVERY sale (Sold / Upsell / Reload)
+ * lands BEFORE the sale button is pressed (Rule 11): the total Price, the
+ * Advantage+ membership flag, and the Reloads dropdown (every add-on / future
+ * reload the rep listed, except "None"). A Reload result also folds its quoted
+ * products into the Reloads dropdown. Blank fields are simply omitted (Rule 14
+ * nudges for what's missing) — we never write a guess.
+ */
+export function saleFieldWrites(form: OohForm): Record<string, MondayValue> {
+  const w: Record<string, MondayValue> = {};
+  if (form.salePrice != null) w[BLOCK_COL.salePrice] = String(form.salePrice);
+  const member = membershipLabel(form.advantagePlus);
+  if (member) w[BLOCK_COL.advantage] = { label: member };
+  const reloads = Array.from(
+    new Set([
+      ...reloadAddOnLabels(form.reloadAddOns),
+      ...(form.onBlock === ON_BLOCK.RELOAD ? reloadDropdownLabels(form.quotedText) : []),
+    ]),
+  );
+  if (reloads.length) w[BLOCK_COL.reloads] = { labels: reloads };
+  return w;
+}
+
+/**
  * Map a parsed form to the block write plan (Rules 1, 2, 5 + branch questions).
  * Returns the NON-Details field writes plus the single status press; the caller
  * builds/append Details and (for Sold) fills Source Code.
@@ -814,14 +962,13 @@ export function planDisposition(form: OohForm): WritePlan {
 
   switch (form.result) {
     case RESULT.SOLD: {
-      if (form.salePrice != null) fieldWrites[BLOCK_COL.salePrice] = String(form.salePrice);
+      // Rule 11: write Price + Advantage+ + Reloads FIRST (all in the columns
+      // call); the sale button is pressed LAST by the caller (Rule 12).
+      Object.assign(fieldWrites, saleFieldWrites(form));
       if (form.onBlock === ON_BLOCK.UPSELL) {
         return { ...base, status: { col: BLOCK_COL.sale, label: LABEL.upsell } };
       }
       if (form.onBlock === ON_BLOCK.RELOAD) {
-        // Map the quoted products onto the Reloads dropdown — never "Room".
-        const labels = reloadDropdownLabels(form.quotedText);
-        if (labels.length > 0) fieldWrites[BLOCK_COL.reloads] = { labels };
         return { ...base, status: { col: BLOCK_COL.sale, label: LABEL.saleReload } };
       }
       // On-block Yes (0) or self-gen/own (2): a Sold that must reach Sales
@@ -887,17 +1034,48 @@ export function planOfficeApptDisposition(form: OohForm): WritePlan {
     needsReview: null as string | null,
   };
   if (form.result === RESULT.SOLD) {
-    if (form.salePrice != null) fieldWrites[BLOCK_COL.salePrice] = String(form.salePrice);
-    // Set Advantage+ and the Reloads dropdown in the FIRST (columns) call, then
-    // press status9 = Reload as the single disposition. Advantage+ is a member
-    // flag, not a routing disposition, so it rides the columns write.
-    fieldWrites[BLOCK_COL.advantage] = { label: LABEL.advantagePlus };
-    const labels = reloadDropdownLabels(form.quotedText);
-    if (labels.length > 0) fieldWrites[BLOCK_COL.reloads] = { labels };
-    return { ...base, status: { col: BLOCK_COL.sale, label: LABEL.saleReload } };
+    // Rule 11: Price + Advantage+ + Reloads in the FIRST (columns) call, then the
+    // single sale button LAST. Advantage+ is a member flag, not a routing
+    // disposition, so it rides the columns write.
+    Object.assign(fieldWrites, saleFieldWrites(form));
+    // An office-appt sale presses Reload/Upsell, so the QUOTED products ARE the
+    // reload — fold them into the Reloads dropdown alongside any add-ons.
+    const officeReloads = Array.from(
+      new Set([...reloadDropdownLabels(form.quotedText), ...reloadAddOnLabels(form.reloadAddOns)]),
+    );
+    if (officeReloads.length) fieldWrites[BLOCK_COL.reloads] = { labels: officeReloads };
+    // Office-appt sales default to Advantage+ when the rep didn't answer the
+    // membership question (the prior office-appt behavior); an explicit
+    // "Non Member" answer from saleFieldWrites is respected.
+    if (!(BLOCK_COL.advantage in fieldWrites))
+      fieldWrites[BLOCK_COL.advantage] = { label: LABEL.advantagePlus };
+    // Rule 15: press status9 = Upsell or Reload, whichever it really is (a saved
+    // can-save is a Reload) — NEVER Sold on an Office Appt.
+    const label = form.onBlock === ON_BLOCK.UPSELL ? LABEL.upsell : LABEL.saleReload;
+    return { ...base, status: { col: BLOCK_COL.sale, label } };
   }
-  // Any non-sale result on an Office Appt → Details only, press nothing.
+  // Any non-sale result on an Office Appt → Details only, press nothing (Rule 15).
   return { ...base, status: null };
+}
+
+/**
+ * Rule 13 — the columns to fill on the Sales Processing card (board 4155553389)
+ * AFTER the block's Sold automation has routed the card there: Deposit Amt
+ * (numbers5), Finance = the balance payment method (dropdown6), Advantage+
+ * (color_mkwkmx6g) and the Reloads (dup__of_product9). Pure; the caller locates
+ * the routed card and writes these. Blank fields are omitted (never a guess) and
+ * surface in the Rule 14 missing-info nudge instead. Returns {} when a sale
+ * carries none of these (nothing to fill).
+ */
+export function planSalesProcessingWrite(form: OohForm): Record<string, MondayValue> {
+  const w: Record<string, MondayValue> = {};
+  if (form.depositAmount != null) w[SALES_PROCESSING_COL.depositAmt] = String(form.depositAmount);
+  if (form.balancePaidWith) w[SALES_PROCESSING_COL.finance] = { labels: [form.balancePaidWith] };
+  const member = membershipLabel(form.advantagePlus);
+  if (member) w[SALES_PROCESSING_COL.advantage] = { label: member };
+  const reloads = reloadAddOnLabels(form.reloadAddOns);
+  if (reloads.length) w[SALES_PROCESSING_COL.reloads] = { labels: reloads };
+  return w;
 }
 
 // ── Rule 1: order of writes (two separate calls; one status) ─────────────────
@@ -1282,4 +1460,81 @@ export function buildBaseQueueRow(
 export function isDuplicate(processed: Iterable<string>, formItemId: string): boolean {
   for (const id of processed) if (id === formItemId) return true;
   return false;
+}
+
+// ── Rule 16: auto-handle duplicates (stop the Needs Review pile-up) ──────────
+/** True when a block item is already on one of the boards the Sold / Reset /
+ *  Blowout automations route cards to (Sales Processing / Rehash / Blowout /
+ *  Confirmed) — a report landing on it is already handled (Rule 16b). */
+export function isHandledDestinationBoard(boardId: string | null | undefined): boolean {
+  return !!boardId && HANDLED_DESTINATION_BOARD_IDS.includes(String(boardId));
+}
+
+/** A "customer + day" key for spotting the second partner's copy of a report
+ *  already processed for the same customer that day (Rule 16a). Keyed by the
+ *  customer's last name + normalized address (when present) + the appointment
+ *  (or submit) date — the address keeps two different same-last-name customers
+ *  on the same day from colliding. null when the name or date is unknowable, so
+ *  an un-keyable report is never wrongly deduped. */
+export function customerDayKey(
+  customerName: string | null | undefined,
+  date: string | null | undefined,
+  address?: string | null | undefined,
+): string | null {
+  const last = customerLastName(customerName);
+  const d = (date ?? "").trim();
+  if (!last || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return null;
+  const addr = normalizeAddress(address) ?? "";
+  return `${last}|${addr}|${d}`;
+}
+
+/** Rule 16a: is THIS report the second partner's copy of one already processed
+ *  for the same customer that day? True iff its customer+day key matches a key
+ *  in `processedKeys`. Pure — the caller supplies the day's already-processed
+ *  keys. */
+export function isSecondPartnerCopy(
+  thisKey: string | null,
+  processedKeys: Iterable<string>,
+): boolean {
+  if (!thisKey) return false;
+  for (const k of processedKeys) if (k === thisKey) return true;
+  return false;
+}
+
+// ── Rule 3: never overwrite a human (activity-log guard) ─────────────────────
+/** The two block columns the dispatcher must never clobber once a human has
+ *  touched them today: Reps (people6) and the Iss status. */
+export const GUARDED_WRITE_COLS: readonly string[] = [BLOCK_COL.reps, BLOCK_COL.iss];
+
+/** One block-item activity-log entry, flattened from Monday's activity_logs. */
+export type ActivityLogEntry = {
+  columnId: string | null;
+  /** The Monday user id who made the change (null for an automation / system). */
+  userId: string | null;
+  createdAtMs: number | null;
+};
+
+/**
+ * Rule 3 guard. True when a HUMAN — any Monday user that is NOT the dispatcher —
+ * changed one of the guarded columns (people6 / Iss status) on this item TODAY
+ * (LA). When true, the dispatcher must not write people6 OR status on the item
+ * again (the Langley 3:30 regression, Rule 4: Tyler set Jaxon + Edward; the
+ * dispatcher must never re-write people6 over him). A change with no user id is
+ * an automation/system event and never blocks. Pure.
+ */
+export function humanTouchedGuardedColsToday(input: {
+  logs: ActivityLogEntry[];
+  dispatcherUserId: string | null;
+  todayLA: string;
+  guardedColumnIds?: readonly string[];
+}): boolean {
+  const guarded = new Set(input.guardedColumnIds ?? GUARDED_WRITE_COLS);
+  const disp = input.dispatcherUserId ? String(input.dispatcherUserId) : null;
+  return input.logs.some((e) => {
+    if (!e.columnId || !guarded.has(e.columnId)) return false;
+    if (!e.userId) return false; // automation / system — never a "human"
+    if (disp && String(e.userId) === disp) return false; // the dispatcher itself
+    if (e.createdAtMs == null) return false;
+    return laDate(e.createdAtMs) === input.todayLA;
+  });
 }

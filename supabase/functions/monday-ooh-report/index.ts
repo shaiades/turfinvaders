@@ -32,10 +32,15 @@ import {
   fetchBlockItem,
   fetchDispatchDayItems,
   fetchFormItem,
+  fetchItemActivity,
   fetchMatchCandidates,
+  fetchMondayMe,
   fetchMondayUsers,
+  fetchPeopleColumnIds,
+  findItemOnBoardByName,
   postUpdate,
   resolveUserId,
+  resolveUserIdByFirstName,
   setColumns,
   setPeopleColumn,
   setStatus,
@@ -44,8 +49,10 @@ import { sendDispatcherIMessage, type InkboxResult } from "./inkbox.ts";
 import {
   BLOCK_COL,
   BLOCK_DAY_GROUP,
+  DESTINATION_BOARDS,
   DISPATCHER_LABEL,
   FORM_BOARD_ID,
+  GUARDED_WRITE_COLS,
   OFFICE_LABEL,
   type MatchCandidate,
   OOH_DISPATCHER_COL,
@@ -55,12 +62,16 @@ import {
   buildNoShowAtDoorText,
   buildSaleAlert,
   createSourceText,
+  customerDayKey,
   hasExistingDisposition,
+  humanTouchedGuardedColsToday,
   isAllowedOohBoard,
+  isHandledDestinationBoard,
   isOfficeApptStatus,
   isOpenLead,
   isSaleResult,
   laClock,
+  laDate,
   laWeekday,
   matchTarget,
   matchWeekday,
@@ -70,21 +81,28 @@ import {
   parseOohForm,
   planDisposition,
   planOfficeApptDisposition,
+  planSalesProcessingWrite,
   sourceCodeColId,
   sourceCodeToWrite,
   weekdayOfDate,
   type WritePlan,
 } from "./engine.ts";
 import {
+  type DispatchPairingOverride,
   type DispatchRep,
+  choosePartner,
   firstName,
   inferCreateOffice,
+  isFreeRep,
   issLabelForLead,
+  mergePeople,
+  mustPair,
   nowWallMinutes,
   planIssue,
+  withPairing,
 } from "./dispatch.ts";
 import { runWatchdog } from "./watchdog.ts";
-import { enrichHistory, logDispatchDecision } from "./history.ts";
+import { enrichHistory, logDispatchDecision, logDispatchWrite } from "./history.ts";
 
 const denoEnv = (globalThis as { Deno?: { env: { get(k: string): string | undefined } } }).Deno
   ?.env;
@@ -126,6 +144,58 @@ serve(async (req) => {
       console.error("[ooh watchdog] error", e instanceof Error ? e.message : String(e));
       return ok({ error: e instanceof Error ? e.message : String(e) });
     }
+  }
+
+  // ── Rule 13: Sales Processing fill ──────────────────────────────────────────
+  // Pointed at by the Sales Processing board's "item created" webhook
+  // (…/monday-ooh-report?task=sales-processing&secret=…). When a Sold routes a
+  // card onto board 4155553389, fill its deposit / finance / Advantage+ /
+  // reloads from the pending row stored when the sale button was pressed.
+  if (url.searchParams.get("task") === "sales-processing") {
+    const spSecret = denoEnv?.get("MONDAY_OOH_SECRET") ?? denoEnv?.get("MONDAY_WEBHOOK_SECRET");
+    const spProvided = req.headers.get("x-monday-secret") ?? url.searchParams.get("secret");
+    const spEnforce =
+      denoEnv?.get("MONDAY_OOH_ENFORCE_SECRET") === "true" ||
+      denoEnv?.get("MONDAY_WEBHOOK_ENFORCE_SECRET") === "true";
+    if (spSecret && spProvided !== spSecret && spEnforce) {
+      return new Response("unauthorized", { status: 401, headers: corsHeaders });
+    }
+    const spRaw = await req.text();
+    let spBody: Record<string, unknown> = {};
+    try {
+      spBody = spRaw ? JSON.parse(spRaw) : {};
+    } catch {
+      return ok({ ignored: "non-JSON body" });
+    }
+    if (spBody.challenge) {
+      return new Response(JSON.stringify({ challenge: spBody.challenge }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const spEvent = ((spBody.data as Record<string, unknown>)?.event ??
+      (spBody.event as Record<string, unknown>) ??
+      spBody) as Record<string, unknown>;
+    const spItemId = String(spEvent.pulseId ?? spEvent.itemId ?? spEvent.pulse_id ?? "");
+    const spName = String(spEvent.pulseName ?? spEvent.itemName ?? "");
+    if (!spItemId || !/^\d+$/.test(spItemId)) return ok({ ignored: "no SP item id" });
+    const supabase = makeClient(
+      denoEnv?.get("SUPABASE_URL") ?? "",
+      denoEnv?.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+    );
+    const { data: spSettings } = await supabase
+      .from("system_settings")
+      .select("monday_api_token")
+      .maybeSingle();
+    const spToken = ((spSettings?.monday_api_token as string | null) ?? "").trim();
+    if (!spToken) return ok({ ignored: "no token" });
+    const res = await fillSalesProcessingForItem(spToken, supabase, spItemId, spName).catch(
+      (e) => ({
+        filled: false,
+        reason: e instanceof Error ? e.message : String(e),
+      }),
+    );
+    return ok(res);
   }
 
   const raw = await req.text();
@@ -253,7 +323,7 @@ serve(async (req) => {
     const { data: settings } = await supabase
       .from("system_settings")
       .select(
-        "monday_api_token, active_monday_board_sd, active_monday_board_oc, ooh_writeback_mode, ooh_writeback_board_allowlist, ooh_autocreate, live_dispatch_mode",
+        "monday_api_token, active_monday_board_sd, active_monday_board_oc, ooh_writeback_mode, ooh_writeback_board_allowlist, ooh_autocreate, live_dispatch_mode, dispatch_pairing",
       )
       .maybeSingle();
     const token = ((settings?.monday_api_token as string | null) ?? "").trim();
@@ -261,6 +331,11 @@ serve(async (req) => {
     const mode = (settings?.ooh_writeback_mode as string | null) ?? "off";
     const dispatchMode = ((settings?.live_dispatch_mode as string | null) ?? "off") as
       "off" | "dry_run" | "live";
+    // Rule 8: the hot-reps / hot-pairs roster the owner tunes in settings (the
+    // Close Kombat / pairing analytics drop straight in — no code change).
+    const dispatchCfg = withPairing(
+      (settings?.dispatch_pairing as DispatchPairingOverride | null) ?? null,
+    );
     const activeSd = (settings?.active_monday_board_sd as string | null) ?? null;
     const activeOc = (settings?.active_monday_board_oc as string | null) ?? null;
     // Auto-create a line item on THIS week's block when a report can't land on
@@ -287,6 +362,11 @@ serve(async (req) => {
       return ok({ error: "no token" });
     }
 
+    // Rule 3: the Monday user the dispatcher writes AS (excluded from the
+    // human-touch guard). Resolved once, only when dispatch will run.
+    const dispatcherUserId =
+      dispatchMode !== "off" ? await fetchMondayMe(token).catch(() => null) : null;
+
     // ── fetch + parse the form submission ───────────────────────────────────
     const formItem = await fetchFormItem(token, formItemId);
     if (!formItem) {
@@ -302,6 +382,44 @@ serve(async (req) => {
     const detailsLine = buildDetailsLine(form, formItem.createdAtMs);
     const formLink = `https://tidal-remodeling.monday.com/boards/${FORM_BOARD_ID}/pulses/${formItemId}`;
     baseRow = buildBaseQueueRow(form, detailsLine, plan, { customerName: formItem.name || null });
+
+    // ── Rule 16a: the second partner's copy ─────────────────────────────────
+    // A report for a customer whose report we ALREADY processed today (the
+    // partner filed first) → auto-mark Handled, write NOTHING. We stamp every
+    // processed report with a customer+day+address key and dedupe on it, so
+    // these never pile up in Needs Review.
+    const custKey = customerDayKey(
+      formItem.name,
+      form.apptDate?.date ?? laDate(formItem.createdAtMs),
+      form.address,
+    );
+    if (custKey) {
+      await supabase
+        .from("ooh_processed_reports")
+        .update({ customer_key: custKey })
+        .eq("form_item_id", formItemId);
+      const { data: sib } = await supabase
+        .from("ooh_processed_reports")
+        .select("form_item_id")
+        .eq("customer_key", custKey)
+        .neq("form_item_id", formItemId)
+        .in("outcome", ["written", "created", "duplicate", "processed"])
+        .limit(1);
+      if ((sib?.length ?? 0) > 0) {
+        await finish("duplicate");
+        await supabase.from("ooh_report_queue").upsert(
+          {
+            form_item_id: formItemId,
+            status: "processed",
+            reason: "duplicate — partner's copy; same customer already processed today",
+            ...baseRow,
+          },
+          { onConflict: "form_item_id" },
+        );
+        await stampDispatcher(DISPATCHER_LABEL.processed);
+        return ok({ duplicatePartnerCopy: custKey });
+      }
+    }
 
     // A self-gen / off-block SALE still texts leadership immediately, even
     // though its card is queued for the office (a rep who sold on their own
@@ -367,6 +485,8 @@ serve(async (req) => {
             dispatchMode,
             formItemId,
             alertSale: () => alertSaleOnce(formItem.name || form.address),
+            cfg: dispatchCfg,
+            dispatcherUserId,
           });
           if (res.ok) {
             await stampDispatcher(DISPATCHER_LABEL.processed);
@@ -374,7 +494,10 @@ serve(async (req) => {
             return ok({ created: res.itemId, office: createOffice });
           }
           await finish("error");
-          await queue("error", `auto-create failed: ${res.error}`, { ...baseRow, error: res.error });
+          await queue("error", `auto-create failed: ${res.error}`, {
+            ...baseRow,
+            error: res.error,
+          });
           return ok({ error: res.error });
         }
         // Office couldn't be resolved → don't guess; send to review (owner rule).
@@ -445,6 +568,27 @@ serve(async (req) => {
         target_item_id: leadId,
       });
       return ok({ queued: "lead not found" });
+    }
+
+    // Rule 16b: the card was already routed to a destination board (Sales
+    // Processing / Rehash / Blowout / Confirmed) by its own automation → already
+    // handled. Mark Processed, write NOTHING (never re-route a routed card).
+    if (isHandledDestinationBoard(block.boardId)) {
+      await finish("duplicate", { target_item_id: leadId, board_id: block.boardId });
+      await supabase.from("ooh_report_queue").upsert(
+        {
+          form_item_id: formItemId,
+          status: "processed",
+          reason:
+            "already routed to a destination board (Sales Processing / Rehash / Blowout / Confirmed)",
+          ...baseRow,
+          target_item_id: leadId,
+          board_id: block.boardId,
+        },
+        { onConflict: "form_item_id" },
+      );
+      await stampDispatcher(DISPATCHER_LABEL.processed);
+      return ok({ handledDestination: block.boardId });
     }
 
     // Duplicate guard (#3 / owner brief Part 5): the block already carries a
@@ -570,6 +714,8 @@ serve(async (req) => {
           dispatchMode,
           formItemId,
           alertSale: () => alertSaleOnce(block.name),
+          cfg: dispatchCfg,
+          dispatcherUserId,
         });
         if (res.ok) {
           await stampDispatcher(DISPATCHER_LABEL.processed);
@@ -609,6 +755,8 @@ serve(async (req) => {
           repNames: freedReps,
           nowMs: formItem.createdAtMs,
           formItemId,
+          cfg: dispatchCfg,
+          dispatcherUserId,
         }).catch((e) => console.error("[ooh dispatch dry]", e instanceof Error ? e.message : e));
       }
       return ok({ dryRun: true, target: leadId, board: block.boardId });
@@ -670,6 +818,45 @@ serve(async (req) => {
     // The write-back succeeded → Dispatcher column shows Processed.
     await stampDispatcher(DISPATCHER_LABEL.processed);
 
+    // Rule 13: a Sold routes to Sales Processing — remember the deposit /
+    // finance / Advantage+ / reloads to fill on the moved card (the SP-board
+    // webhook pointed at ?task=sales-processing completes it), and try an
+    // immediate fill in case the automation already moved the card.
+    if (wplan.status?.col === BLOCK_COL.sale) {
+      const spValues = planSalesProcessingWrite(form);
+      if (Object.keys(spValues).length > 0) {
+        await supabase
+          .from("ooh_sales_processing_pending")
+          .upsert(
+            {
+              form_item_id: formItemId,
+              customer_key: customerDayKey(
+                block.name,
+                form.apptDate?.date ?? laDate(formItem.createdAtMs),
+                form.address,
+              ),
+              customer_name: block.name,
+              board_id: block.boardId,
+              values: spValues,
+            },
+            { onConflict: "form_item_id" },
+          )
+          .then(
+            () => undefined,
+            () => undefined,
+          );
+        const spId = await findItemOnBoardByName(
+          token,
+          DESTINATION_BOARDS.salesProcessing,
+          block.name,
+        ).catch(() => null);
+        if (spId)
+          await fillSalesProcessingForItem(token, supabase, spId, block.name).catch(
+            () => undefined,
+          );
+      }
+    }
+
     // ── Rule 6 / owner brief Part 2: at-the-door → message the managers; issue
     // nothing (the rep is still waiting at the door). ────────────────────────
     let released: string | null = null;
@@ -693,6 +880,8 @@ serve(async (req) => {
         repNames: freedReps,
         nowMs: formItem.createdAtMs,
         formItemId,
+        cfg: dispatchCfg,
+        dispatcherUserId,
       }).catch((e) => {
         console.error("[ooh dispatch]", e instanceof Error ? e.message : e);
         return null;
@@ -751,10 +940,13 @@ async function runDispatch(p: {
   repNames: string[];
   nowMs: number;
   formItemId: string;
+  cfg: typeof import("./dispatch.ts").DISPATCH_CONFIG;
+  dispatcherUserId: string | null;
 }): Promise<string | null> {
   if (p.repNames.length === 0) return null;
   const weekday = laWeekday(p.nowMs);
   const nowWall = nowWallMinutes(p.nowMs);
+  const todayLA = laDate(p.nowMs);
 
   const [attendance, dayItems, users] = await Promise.all([
     fetchAttendance(p.token, p.office, weekday).catch(() => new Map()),
@@ -762,6 +954,58 @@ async function runDispatch(p: {
     fetchMondayUsers(p.token).catch(() => [] as Array<{ id: string; name: string }>),
   ]);
   await enrichHistory(p.supabase, dayItems).catch(() => undefined);
+
+  // Working / free reps across the office (Rule 8 — the pool a must-pair rep's
+  // partner is drawn from). Open-lead count excludes the just-reported lead.
+  const openLeadsFor = (name: string) =>
+    dayItems.filter(
+      (l) =>
+        l.itemId !== p.reportedLeadId &&
+        l.reps.map(normName).includes(normName(name)) &&
+        isOpenLead({ iss: l.issLabel, pm: l.pm, rs: l.rs, ol: l.ol, bo: l.bo, sale: l.sale }),
+    ).length;
+  const workingReps: DispatchRep[] = [];
+  for (const [name, att] of attendance as Map<
+    string,
+    { amOn: boolean; pmOn: boolean; amOff: boolean; pmOff: boolean }
+  >) {
+    if (!(att.amOn || att.pmOn)) continue;
+    const off = att.amOff && att.pmOff && !att.amOn && !att.pmOn;
+    workingReps.push({
+      name,
+      office: p.office,
+      working: true,
+      off,
+      openLeadCount: openLeadsFor(name),
+      lastCoords: null,
+    });
+  }
+  const freeReps = workingReps.filter(isFreeRep);
+
+  // Rule 3: has a HUMAN (not the dispatcher) changed people6 / Iss on this lead
+  // today? The window is the last 24h; the pure predicate filters to today (LA).
+  // Best-effort read failure → don't block (Rule 1's additive write still keeps
+  // any manager's rep). Only relevant to a live write.
+  const guardBlocked = async (leadItemId: string, boardId: string): Promise<boolean> => {
+    if (p.mode !== "live") return false;
+    try {
+      const logs = await fetchItemActivity(
+        p.token,
+        boardId,
+        leadItemId,
+        new Date(p.nowMs - 86_400_000).toISOString(),
+        new Date(p.nowMs).toISOString(),
+      );
+      return humanTouchedGuardedColsToday({
+        logs,
+        dispatcherUserId: p.dispatcherUserId,
+        todayLA,
+        guardedColumnIds: GUARDED_WRITE_COLS,
+      });
+    } catch {
+      return false;
+    }
+  };
 
   const chosen = new Set<string>(); // never issue the same lead to both partners
   let issued: string | null = null;
@@ -829,30 +1073,123 @@ async function runDispatch(p: {
       lastCoords: p.block.coords,
     };
     const pool = dayItems.filter((l) => l.itemId !== p.reportedLeadId && !chosen.has(l.itemId));
-    const plan = planIssue({ rep, dayLeads: pool, nowWallMinutes: nowWall });
+    const plan = planIssue({ rep, dayLeads: pool, nowWallMinutes: nowWall, cfg: p.cfg });
 
     if (plan.action === "issue") {
       chosen.add(plan.lead.itemId);
       let didIssue = false;
       let failReason: string | null = null;
+
+      // ── Rule 8: two reps unless the rep is hot (Daniel never alone) ────────
+      // When the rep can't go solo and the lead carries no partner yet, pick a
+      // free partner to ADD (never replace). No partner available → withhold for
+      // a manager; never issue the rep alone.
+      let partnerName: string | null = null;
+      if (mustPair(repName, p.cfg)) {
+        const existingPartners = plan.lead.reps
+          .map(normName)
+          .filter((n) => n && n !== normName(repName));
+        if (existingPartners.length === 0) {
+          const partner = choosePartner({
+            rep,
+            lead: plan.lead,
+            freeReps: freeReps.filter((fr) => firstName(fr.name) !== firstName(repName)),
+            cfg: p.cfg,
+          });
+          if (partner) partnerName = partner.name;
+          else {
+            chosen.delete(plan.lead.itemId);
+            await queueDispatchReview({
+              leadItemId: plan.lead.itemId,
+              leadName: plan.lead.name,
+              boardId: plan.lead.boardId,
+              repName,
+              reason: `${repName} can't run solo and no partner is free — assign a partner (Rule 8).`,
+            });
+            await logDispatchDecision(p.supabase, {
+              mode: p.mode,
+              trigger: "report",
+              formItemId: p.formItemId,
+              repName,
+              office: p.office,
+              boardId: plan.lead.boardId,
+              leadItemId: plan.lead.itemId,
+              leadName: plan.lead.name,
+              action: "manager",
+              score: plan.score,
+              driveMinutes: plan.driveMinutes,
+              strength: plan.strength,
+              reason: `needs a partner (Rule 8): ${plan.reason}`,
+              issued: false,
+            });
+            continue;
+          }
+        }
+      }
+
       if (p.mode === "live") {
         const uid = resolveUserId(users, repName);
         if (!uid) {
           failReason = `couldn't match ${repName} to a Monday user`;
+        } else if (await guardBlocked(plan.lead.itemId, plan.lead.boardId)) {
+          // Rule 3/4: a human changed people6 or Iss on this lead today — never
+          // touch it again (the Langley 3:30 fix). A protective SKIP, not a
+          // failure: no needs-review row, just the decision log.
+          chosen.delete(plan.lead.itemId);
+          await logDispatchDecision(p.supabase, {
+            mode: p.mode,
+            trigger: "report",
+            formItemId: p.formItemId,
+            repName,
+            office: p.office,
+            boardId: plan.lead.boardId,
+            leadItemId: plan.lead.itemId,
+            leadName: plan.lead.name,
+            action: "none",
+            score: plan.score,
+            driveMinutes: plan.driveMinutes,
+            strength: plan.strength,
+            reason: "skipped — a human changed people6/Iss on this lead today (Rule 3)",
+            issued: false,
+          });
+          continue;
         } else {
-          // Manager-override safe: we only ever write to a lead that was Not
-          // Issued (Tier A carries the rep; Tier B is unassigned) — never one a
-          // person already touched.
+          const partnerUid = partnerName
+            ? (resolveUserId(users, partnerName) ?? resolveUserIdByFirstName(users, partnerName))
+            : null;
+          // ── Rule 1: people6 is ADDITIVE ──────────────────────────────────
+          // Union the reps already on the lead with the issued rep (+ partner);
+          // never drop anyone a manager put there (the Langley Jaxon+Edward fix).
+          const existingIds = await fetchPeopleColumnIds(
+            p.token,
+            plan.lead.itemId,
+            BLOCK_COL.reps,
+          ).catch(() => [] as string[]);
+          const merged = mergePeople(existingIds, [uid, ...(partnerUid ? [partnerUid] : [])]);
           const r1 = await setPeopleColumn(
             p.token,
             plan.lead.boardId,
             plan.lead.itemId,
             BLOCK_COL.reps,
-            [uid],
+            merged,
             `ooh-people-${plan.lead.itemId}`,
           );
           if (r1.error) failReason = `people6: ${r1.error}`;
           else {
+            // Rule 21: audit the people6 write (old → new).
+            await logDispatchWrite(p.supabase, {
+              mode: p.mode,
+              trigger: "report",
+              formItemId: p.formItemId,
+              boardId: plan.lead.boardId,
+              itemId: plan.lead.itemId,
+              leadName: plan.lead.name,
+              columnId: BLOCK_COL.reps,
+              columnLabel: "Reps",
+              oldValue: existingIds.join(","),
+              newValue: merged.join(","),
+              reason: plan.reason,
+            });
             // Owner brief Part 4: the rep's OWN job walk is pressed "Office
             // Appt" (keeps its own flow), everything else "Iss".
             const issLabel = issLabelForLead(plan.lead);
@@ -866,6 +1203,19 @@ async function runDispatch(p: {
             );
             if (r2.error) failReason = `Iss: ${r2.error}`;
             else {
+              await logDispatchWrite(p.supabase, {
+                mode: p.mode,
+                trigger: "report",
+                formItemId: p.formItemId,
+                boardId: plan.lead.boardId,
+                itemId: plan.lead.itemId,
+                leadName: plan.lead.name,
+                columnId: BLOCK_COL.iss,
+                columnLabel: "Iss",
+                oldValue: plan.lead.issLabel ?? null,
+                newValue: issLabel,
+                reason: plan.reason,
+              });
               didIssue = true;
               issued = plan.lead.itemId;
             }
@@ -900,7 +1250,8 @@ async function runDispatch(p: {
         score: plan.score,
         driveMinutes: plan.driveMinutes,
         strength: plan.strength,
-        reason: failReason ?? plan.reason,
+        reason:
+          failReason ?? (partnerName ? `${plan.reason} (+ partner ${partnerName})` : plan.reason),
         issued: didIssue,
       });
     } else if (plan.action === "manager") {
@@ -979,6 +1330,8 @@ async function runAutoCreate(p: {
   dispatchMode: "off" | "dry_run" | "live";
   formItemId: string;
   alertSale: () => Promise<InkboxResult | null>;
+  cfg: typeof import("./dispatch.ts").DISPATCH_CONFIG;
+  dispatcherUserId: string | null;
 }): Promise<{ ok: true; itemId: string } | { ok: false; error: string }> {
   const name = (p.formItem.name || p.form.address || "OOH report").slice(0, 255);
   const detailsLine = buildDetailsLine(p.form, p.formItem.createdAtMs);
@@ -1083,10 +1436,63 @@ async function runAutoCreate(p: {
       repNames,
       nowMs: p.formItem.createdAtMs,
       formItemId: p.formItemId,
+      cfg: p.cfg,
+      dispatcherUserId: p.dispatcherUserId,
     }).catch((e) =>
       console.error("[ooh auto-create dispatch]", e instanceof Error ? e.message : e),
     );
   }
 
   return { ok: true, itemId: newId };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Rule 13 — fill a Sales Processing card. Matches the created card (by
+// normalized customer name) to an unfilled pending row stored when the Sold
+// button was pressed, writes its deposit / finance / Advantage+ / reloads, and
+// marks the pending row filled. Best-effort; never throws past its caller.
+// ═══════════════════════════════════════════════════════════════════════════
+async function fillSalesProcessingForItem(
+  token: string,
+  supabase: Supa,
+  spItemId: string,
+  spName: string,
+): Promise<{ filled: boolean; reason: string }> {
+  const want = normName(spName ?? "");
+  if (!spItemId || !want) return { filled: false, reason: "no SP item id / name" };
+  const { data: rows } = await supabase
+    .from("ooh_sales_processing_pending")
+    .select("form_item_id, customer_name, values")
+    .is("filled_at", null)
+    .order("created_at", { ascending: false })
+    .limit(100);
+  const match = (
+    (rows as Array<{
+      form_item_id: string;
+      customer_name: string | null;
+      values: Record<string, unknown>;
+    }> | null) ?? []
+  ).find((r) => normName(String(r.customer_name ?? "")) === want);
+  if (!match) return { filled: false, reason: "no pending SP row for this card" };
+  const values = match.values ?? {};
+  if (Object.keys(values).length === 0) {
+    await supabase
+      .from("ooh_sales_processing_pending")
+      .update({ filled_at: new Date().toISOString(), sp_item_id: spItemId })
+      .eq("form_item_id", match.form_item_id);
+    return { filled: true, reason: "nothing to write" };
+  }
+  const r = await setColumns(
+    token,
+    DESTINATION_BOARDS.salesProcessing,
+    spItemId,
+    values,
+    `ooh-sp-${match.form_item_id}`,
+  );
+  if (r.error) return { filled: false, reason: `setColumns: ${r.error}` };
+  await supabase
+    .from("ooh_sales_processing_pending")
+    .update({ filled_at: new Date().toISOString(), sp_item_id: spItemId })
+    .eq("form_item_id", match.form_item_id);
+  return { filled: true, reason: "filled" };
 }

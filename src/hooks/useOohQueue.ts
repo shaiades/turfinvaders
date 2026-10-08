@@ -9,7 +9,7 @@ import {
   resolveOohQueueItem,
   setDispatchMode,
 } from "@/lib/ooh.functions";
-import type { OohConfig, OohQueueRow } from "@/lib/ooh";
+import type { OohConfig, OohDispatchWrite, OohQueueRow } from "@/lib/ooh";
 
 /**
  * OOH admin data layer. The queue reads straight through the browser client
@@ -33,6 +33,28 @@ export function useOohQueue(enabled = true) {
         .limit(200);
       if (error) return null;
       return (data ?? []) as OohQueueRow[];
+    },
+  });
+}
+
+/**
+ * Rule 21 audit: every people6 / status write the dispatcher made (item, old →
+ * new, reason, time). Reads straight through under RLS (owner / office_staff);
+ * an error renders nothing (table not deployed yet — migration 20261010120000).
+ */
+export function useDispatchWrites(enabled = true) {
+  return useQuery({
+    queryKey: ["ooh", "writes"],
+    enabled,
+    refetchInterval: 60_000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("ooh_dispatch_writes")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(200);
+      if (error) return null;
+      return (data ?? []) as OohDispatchWrite[];
     },
   });
 }
