@@ -51,6 +51,7 @@ import {
   firstName,
   inWatchdogWindow,
   isFreeRep,
+  isNeverSolo,
   mergePeople,
   mustPair,
   nowWallMinutes,
@@ -335,7 +336,9 @@ async function coverLate(p: {
       reason: "no Monday user",
     };
 
-  // Rule 8: Daniel never alone — add a partner when the closest rep can't solo.
+  // Rule 8: add a partner when the closest rep shouldn't solo. Two tiers
+  // (owner, 2026-10-08 pm): the soft "pair whenever possible" tier covers SOLO
+  // when nobody is free; only neverSolo (Daniel) is never sent alone.
   let partnerUid: string | null = null;
   if (mustPair(plan.rep.name, p.cfg) && p.lead.reps.length === 0) {
     const partner = choosePartner({
@@ -344,15 +347,16 @@ async function coverLate(p: {
       freeReps: p.freeReps.filter((fr) => firstName(fr.name) !== firstName(plan.rep.name)),
       cfg: p.cfg,
     });
-    if (!partner)
+    if (!partner && isNeverSolo(plan.rep.name, p.cfg))
       return {
         covered: false,
         repName: plan.rep.name,
         driveMinutes: plan.driveMinutes,
         reason: "can't run solo, no partner free (Rule 8)",
       };
-    partnerUid =
-      resolveUserId(p.users, partner.name) ?? resolveUserIdByFirstName(p.users, partner.name);
+    if (partner)
+      partnerUid =
+        resolveUserId(p.users, partner.name) ?? resolveUserIdByFirstName(p.users, partner.name);
   }
 
   // Rule 1: union existing people6 with the late rep (+ partner) — never remove.
