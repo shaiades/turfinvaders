@@ -32,6 +32,7 @@ import {
   fetchBlockItem,
   fetchDispatchDayItems,
   fetchFormItem,
+  fetchMatchCandidates,
   fetchMondayUsers,
   postUpdate,
   resolveUserId,
@@ -42,27 +43,33 @@ import {
 import { sendDispatcherIMessage, type InkboxResult } from "./inkbox.ts";
 import {
   BLOCK_COL,
+  BLOCK_DAY_GROUP,
   DISPATCHER_LABEL,
   FORM_BOARD_ID,
   OFFICE_LABEL,
+  type MatchCandidate,
   OOH_DISPATCHER_COL,
   blockDayGroupForAppt,
   buildBaseQueueRow,
   buildDetailsLine,
+  buildNoShowAtDoorText,
   buildSaleAlert,
   createSourceText,
   hasExistingDisposition,
   isAllowedOohBoard,
+  isOfficeApptStatus,
   isOpenLead,
   isSaleResult,
-  LABEL,
   laClock,
   laWeekday,
   matchTarget,
+  matchWeekday,
+  matchWithoutLeadId,
   normName,
   oohUpdateKey,
   parseOohForm,
   planDisposition,
+  planOfficeApptDisposition,
   sourceCodeColId,
   sourceCodeToWrite,
   weekdayOfDate,
@@ -72,6 +79,7 @@ import {
   type DispatchRep,
   firstName,
   inferCreateOffice,
+  issLabelForLead,
   nowWallMinutes,
   planIssue,
 } from "./dispatch.ts";
@@ -295,14 +303,6 @@ serve(async (req) => {
     const formLink = `https://tidal-remodeling.monday.com/boards/${FORM_BOARD_ID}/pulses/${formItemId}`;
     baseRow = buildBaseQueueRow(form, detailsLine, plan, { customerName: formItem.name || null });
 
-    // A plan the engine refuses to auto-apply (e.g. a reset result with no
-    // reset date) goes to the office — press nothing (#4).
-    if (plan.needsReview) {
-      await finish("queued");
-      await queue("needs_review", plan.needsReview, baseRow);
-      return ok({ queued: plan.needsReview });
-    }
-
     // A self-gen / off-block SALE still texts leadership immediately, even
     // though its card is queued for the office (a rep who sold on their own
     // shouldn't wait on card-creation for the SALE to land). Only in live mode;
@@ -324,10 +324,15 @@ serve(async (req) => {
         ? `SALE written but leadership text failed: ${r.errors.join("; ").slice(0, 280)}`
         : null;
 
-    // A report with no Lead ID (self-gen / upsell / reload) → create a line item
-    // on THIS week's block when auto-create is on (office inferred from the rep's
-    // attendance); otherwise queue it for the office to add by hand.
-    if (target.kind === "create") {
+    // ── Resolve the block item to write to ──────────────────────────────────
+    // Lead ID → that item. No Lead ID + on-block → match it to today's block
+    // day-group (owner brief Part 1). Self-gen / upsell / reload → create a line
+    // item on THIS week's block when auto-create is on (owner directive
+    // 2026-10-07; office inferred from the rep's attendance), else queue it.
+    let leadId: string;
+    if (target.kind === "write") {
+      leadId = form.leadId!;
+    } else if (target.kind === "create") {
       if (autocreate && mode === "live") {
         const weekday = weekdayOfDate(form.apptDate?.date, formItem.createdAtMs);
         const [sdNames, ocNames] = await Promise.all([
@@ -392,15 +397,46 @@ serve(async (req) => {
         ...(ste ? { error: ste } : {}),
       });
       return ok({ queued: "create (auto-create off)" });
-    }
-    if (target.kind === "queue") {
+    } else if (target.kind === "match") {
+      // Owner brief Part 1: no Lead ID — match the submission to a block item on
+      // today's day-group across BOTH offices' current boards, by normalized
+      // address first, then customer last name + rep. Queue for review only on
+      // 0 or 2+ candidates (never guess between two leads).
+      const weekday = matchWeekday(form.apptDate, formItem.createdAtMs);
+      const groupId = BLOCK_DAY_GROUP[weekday];
+      const seen = new Set<string>();
+      const candidates: MatchCandidate[] = [];
+      for (const b of [activeSd, activeOc].filter((x): x is string => !!x)) {
+        const cs = await fetchMatchCandidates(token, b, groupId).catch(
+          () => [] as MatchCandidate[],
+        );
+        for (const c of cs)
+          if (!seen.has(c.id)) {
+            seen.add(c.id);
+            candidates.push(c);
+          }
+      }
+      const m = matchWithoutLeadId({
+        address: form.address,
+        customerName: formItem.name || null,
+        rep: form.repName,
+        candidates,
+      });
+      if (m.kind === "review") {
+        await finish("queued");
+        await queue("needs_review", `no Lead ID — ${m.reason}`, baseRow);
+        return ok({ queued: `no lead id match: ${m.reason}` });
+      }
+      console.log(`[ooh] matched ${formItemId} → ${m.id} by ${m.by}`);
+      leadId = m.id;
+    } else {
+      // matchTarget no longer returns "queue" — safety net only.
       await finish("queued");
       await queue("needs_review", target.reason, baseRow);
       return ok({ queued: target.reason });
     }
 
-    // ── matched lead: resolve + gate ────────────────────────────────────────
-    const leadId = (target as { leadId?: string }).leadId ?? form.leadId!;
+    // ── fetch + gate the matched block ──────────────────────────────────────
     const block = await fetchBlockItem(token, leadId);
     if (!block || block.state !== "active") {
       await finish("queued");
@@ -411,17 +447,47 @@ serve(async (req) => {
       return ok({ queued: "lead not found" });
     }
 
-    // Already-dispositioned guard (#3): if the office pressed a disposition by
-    // hand, write NOTHING — so a lead can never be routed twice. (The
-    // at-the-door "No show text" marker doesn't count; the lead is still open.)
+    // Duplicate guard (#3 / owner brief Part 5): the block already carries a
+    // result — the partner reported first, or another rep named the same
+    // customer — so this report is a DUPLICATE. Mark it Processed as a duplicate
+    // and write NOTHING; a lead can never be routed twice. (The at-the-door
+    // "No show text" marker doesn't count; the lead is still open.)
     if (hasExistingDisposition(block)) {
+      await finish("duplicate", { target_item_id: leadId, board_id: block.boardId });
+      await supabase.from("ooh_report_queue").upsert(
+        {
+          form_item_id: formItemId,
+          status: "processed",
+          reason: "duplicate — block already has a result",
+          ...baseRow,
+          target_item_id: leadId,
+          board_id: block.boardId,
+        },
+        { onConflict: "form_item_id" },
+      );
+      await stampDispatcher(DISPATCHER_LABEL.processed);
+      return ok({ duplicate: leadId });
+    }
+
+    // Owner brief Part 3: a block item whose Iss = "Office Appt" (job walk /
+    // can-save / office appointment) keeps its own flow — the result goes to
+    // Details ONLY (never PM / Reset / OL / No Demo / BO); a SALE on it sets
+    // Advantage+ + Reloads then presses status9 = Reload (never Sold). Every
+    // other lead uses the normal disposition plan.
+    const officeAppt = isOfficeApptStatus(block.iss);
+    const wplan = officeAppt ? planOfficeApptDisposition(form) : plan;
+
+    // A normal plan the engine refuses to auto-apply (a reset result with no
+    // reset date) goes to the office — press nothing (#4). Office-appt plans
+    // never need review (Details only, or a Reload).
+    if (wplan.needsReview) {
       await finish("queued", { target_item_id: leadId, board_id: block.boardId });
-      await queue("needs_review", "already dispositioned by office", {
+      await queue("needs_review", wplan.needsReview, {
         ...baseRow,
         target_item_id: leadId,
         board_id: block.boardId,
       });
-      return ok({ queued: "already dispositioned" });
+      return ok({ queued: wplan.needsReview });
     }
 
     const isCurrentBlock = block.boardId === activeSd || block.boardId === activeOc;
@@ -444,9 +510,9 @@ serve(async (req) => {
     const detailsLineForBlock = buildDetailsLine(form, formItem.createdAtMs, apptFallback);
 
     // Source Code fill (Rule 4), computed against the block's live values.
-    const fieldWrites: Record<string, unknown> = { ...plan.fieldWrites };
+    const fieldWrites: Record<string, unknown> = { ...wplan.fieldWrites };
     let sourceCodeNote = "";
-    if (plan.fillSourceCodeIfBlank) {
+    if (wplan.fillSourceCodeIfBlank) {
       const { code, unknownSource } = sourceCodeToWrite(
         form.result,
         block.sourceCode,
@@ -478,7 +544,7 @@ serve(async (req) => {
 
     // Reps this report frees (the submitter + their partner, if any).
     const freedReps = [form.repName, form.partner].filter((r): r is string => !!r && !!r.trim());
-    const resultLabel = (plan.status?.label ?? null) as string | null;
+    const resultLabel = (wplan.status?.label ?? null) as string | null;
 
     // Matched lead sitting on an OLDER block (not this week's) → add a fresh line
     // item to THIS week's block and result it there, just like a self-gen (owner
@@ -530,7 +596,7 @@ serve(async (req) => {
       );
       // Live-issuing can still be REHEARSED here (no block was written, so it can
       // only ever simulate): compute + log the decision and text "[DRY RUN]…".
-      if (dispatchMode !== "off" && office && !plan.atTheDoor) {
+      if (dispatchMode !== "off" && office && !wplan.atTheDoor) {
         await runDispatch({
           token,
           supabase,
@@ -560,13 +626,13 @@ serve(async (req) => {
       );
       if (r1.error) throw new Error(`setColumns: ${r1.error}`);
     }
-    if (plan.status) {
+    if (wplan.status) {
       const r2 = await setStatus(
         token,
         block.boardId,
         leadId,
-        plan.status.col,
-        plan.status.label,
+        wplan.status.col,
+        wplan.status.label,
         `ooh-status-${formItemId}`,
       );
       if (r2.error) throw new Error(`setStatus: ${r2.error}`);
@@ -604,11 +670,12 @@ serve(async (req) => {
     // The write-back succeeded → Dispatcher column shows Processed.
     await stampDispatcher(DISPATCHER_LABEL.processed);
 
-    // ── Rule 6: at-the-door → message the office; issue nothing ─────────────
+    // ── Rule 6 / owner brief Part 2: at-the-door → message the managers; issue
+    // nothing (the rep is still waiting at the door). ────────────────────────
     let released: string | null = null;
-    if (plan.atTheDoor) {
+    if (wplan.atTheDoor) {
       await sendDispatcherIMessage(
-        `No show at the door: ${block.name}, ${laClock(formItem.createdAtMs)}, ${form.repName ?? "rep"}. Office please call the lead.`,
+        buildNoShowAtDoorText(block.name, laClock(formItem.createdAtMs), form.repName),
       ).catch(() => undefined);
     } else if (dispatchMode !== "off" && office) {
       // ── Live issuing (Step 7): hand the freed rep(s) their next lead. In
@@ -635,9 +702,10 @@ serve(async (req) => {
     await finish("written", { target_item_id: leadId, board_id: block.boardId });
     return ok({
       written: leadId,
-      status: plan.status?.label ?? null,
+      status: wplan.status?.label ?? null,
       released,
-      atTheDoor: plan.atTheDoor,
+      atTheDoor: wplan.atTheDoor,
+      officeAppt,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -785,12 +853,15 @@ async function runDispatch(p: {
           );
           if (r1.error) failReason = `people6: ${r1.error}`;
           else {
+            // Owner brief Part 4: the rep's OWN job walk is pressed "Office
+            // Appt" (keeps its own flow), everything else "Iss".
+            const issLabel = issLabelForLead(plan.lead);
             const r2 = await setStatus(
               p.token,
               plan.lead.boardId,
               plan.lead.itemId,
               BLOCK_COL.iss,
-              LABEL.iss,
+              issLabel,
               `ooh-iss-${plan.lead.itemId}`,
             );
             if (r2.error) failReason = `Iss: ${r2.error}`;

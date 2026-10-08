@@ -487,6 +487,16 @@ export function buildIssuedText(input: {
   return `${head}: ${firstNameDisplay(input.repName)} → ${when} ${shortLead(input.lead.name)}${products}${outOf}.`;
 }
 
+/**
+ * Owner brief Part 4: the Iss-column label to press when live issuing hands a
+ * rep a lead. A job walk is the rep's OWN appointment and keeps its own flow,
+ * so it's pressed "Office Appt" (never auto-released again); every other issued
+ * lead is pressed "Iss" (which fires Monday's "New Opportunity!" text). Pure.
+ */
+export function issLabelForLead(lead: Pick<DispatchLead, "isJobWalk">): string {
+  return lead.isJobWalk ? LABEL.officeAppt : LABEL.iss;
+}
+
 /** Display-cased first name for a text ("Jaxon", not "jaxon"). */
 function firstNameDisplay(name: string): string {
   const raw = (name ?? "").trim().split(/\s+/)[0] ?? "";
