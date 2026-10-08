@@ -5,6 +5,7 @@
 // separate on purpose: this one adds the write mutations the OOH flow needs,
 // and the edge runtime cannot share modules across functions safely.
 import {
+  type ActivityLogEntry,
   BLOCK_COL,
   SOURCE_CODE_COL_IDS,
   type ColMap,
@@ -746,6 +747,179 @@ export function resolveUserId(
   });
   if (fl.length === 1) return fl[0].id;
   return null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Rule 3 (never overwrite a human) + Rule 1 (people6 is additive) reads.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** The Monday user id the dispatcher writes AS (whoever owns the API token).
+ *  Rule 3 excludes this id when checking whether a HUMAN touched a column. */
+export async function fetchMondayMe(token: string): Promise<string | null> {
+  const { data } = await graphql(
+    token,
+    `
+      query {
+        me {
+          id
+        }
+      }
+    `,
+  );
+  const id = (data?.me as { id?: string } | undefined)?.id;
+  return id ? String(id) : null;
+}
+
+/** Parse a Monday people column's value JSON → the person user ids (strings).
+ *  Pure (teams dropped; only `kind: "person"` entries). */
+export function parsePeopleColumnValue(value: string | null | undefined): string[] {
+  if (!value) return [];
+  try {
+    const v = JSON.parse(value) as {
+      personsAndTeams?: Array<{ id: number | string; kind?: string }>;
+    };
+    return (v.personsAndTeams ?? [])
+      .filter((p) => (p.kind ?? "person") === "person")
+      .map((p) => String(p.id));
+  } catch {
+    return [];
+  }
+}
+
+/** Read an item's current people-column user ids (for the Rule 1 union write). */
+export async function fetchPeopleColumnIds(
+  token: string,
+  itemId: string,
+  columnId: string,
+): Promise<string[]> {
+  const { data } = await graphql(
+    token,
+    `
+      query ($ids: [ID!], $cols: [String!]) {
+        items(ids: $ids) {
+          column_values(ids: $cols) {
+            id
+            value
+          }
+        }
+      }
+    `,
+    { ids: [itemId], cols: [columnId] },
+  );
+  const it = ((data?.items as Array<Record<string, unknown>>) ?? [])[0];
+  const cv = (it?.column_values as Array<{ id: string; value: string | null }>) ?? [];
+  return parsePeopleColumnValue(cv.find((c) => c.id === columnId)?.value ?? null);
+}
+
+/** Monday activity_logs created_at is a string in 1e-7-second units — convert
+ *  to epoch ms. Returns null when it can't be read as a plausible 2020–2100
+ *  instant (the caller then treats the entry as "now", the protective default). */
+function parseActivityCreatedAt(raw: unknown): number | null {
+  if (raw == null) return null;
+  const n = Number(raw);
+  if (Number.isFinite(n)) {
+    const ms = n / 10000;
+    if (ms > 1_577_836_800_000 && ms < 4_102_444_800_000) return ms;
+  }
+  const p = Date.parse(String(raw));
+  return Number.isFinite(p) ? p : null;
+}
+
+/** Read one item's activity log within [fromISO, toISO] → flattened entries
+ *  (Rule 3). The window is set to today (LA) by the caller, so an unparseable
+ *  created_at defaults to now() — i.e. it still counts as a today change and
+ *  blocks the write (we'd rather skip than clobber a manager). */
+export async function fetchItemActivity(
+  token: string,
+  boardId: string,
+  itemId: string,
+  fromISO: string,
+  toISO: string,
+): Promise<ActivityLogEntry[]> {
+  const { data } = await graphql(
+    token,
+    `
+      query ($b: ID!, $ids: [ID!], $from: ISO8601DateTime, $to: ISO8601DateTime) {
+        boards(ids: [$b]) {
+          activity_logs(item_ids: $ids, from: $from, to: $to, limit: 200) {
+            event
+            data
+            created_at
+            user_id
+          }
+        }
+      }
+    `,
+    { b: boardId, ids: [itemId], from: fromISO, to: toISO },
+  );
+  const logs =
+    ((data?.boards as Array<{ activity_logs?: Array<Record<string, unknown>> }>) ?? [])[0]
+      ?.activity_logs ?? [];
+  const out: ActivityLogEntry[] = [];
+  for (const l of logs) {
+    let columnId: string | null = null;
+    try {
+      const d = JSON.parse(String(l.data ?? "{}")) as { column_id?: string };
+      columnId = d.column_id ? String(d.column_id) : null;
+    } catch {
+      /* non-JSON data (non-column event) */
+    }
+    out.push({
+      columnId,
+      userId: l.user_id != null ? String(l.user_id) : null,
+      createdAtMs: parseActivityCreatedAt(l.created_at) ?? Date.now(),
+    });
+  }
+  return out;
+}
+
+/** Find the single active item on a board whose name matches `name` (normalized)
+ *  — used to locate the Sales Processing card a Sold routed to (Rule 13). null
+ *  when there is no confident single match. */
+export async function findItemOnBoardByName(
+  token: string,
+  boardId: string,
+  name: string,
+): Promise<string | null> {
+  const want = normName(name);
+  if (!want) return null;
+  const { data } = await graphql(
+    token,
+    `
+      query ($b: ID!) {
+        boards(ids: [$b]) {
+          items_page(limit: 500) {
+            items {
+              id
+              name
+              state
+            }
+          }
+        }
+      }
+    `,
+    { b: boardId },
+  );
+  const items =
+    ((data?.boards as Array<{ items_page?: { items?: Array<Record<string, unknown>> } }>) ?? [])[0]
+      ?.items_page?.items ?? [];
+  const hits = items.filter(
+    (it) => String(it.state ?? "active") === "active" && normName(String(it.name ?? "")) === want,
+  );
+  return hits.length === 1 ? String(hits[0].id) : null;
+}
+
+/** Resolve a rep to a Monday user id by FIRST NAME when the full name didn't
+ *  resolve — used for a pairing partner picked off the attendance board (keyed
+ *  by first name). null unless exactly one Monday user shares that first name. */
+export function resolveUserIdByFirstName(
+  users: Array<{ id: string; name: string }>,
+  name: string,
+): string | null {
+  const f = normName(name).split(" ")[0];
+  if (!f) return null;
+  const hits = users.filter((u) => normName(u.name).split(" ")[0] === f);
+  return hits.length === 1 ? hits[0].id : null;
 }
 
 /** Write a people column (e.g. people6 Reps) with the given Monday user ids. */

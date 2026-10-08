@@ -70,6 +70,25 @@ export type OohQueueRow = {
   updated_at: string;
 };
 
+/** One audited people6 / status write the dispatcher made (Rule 21) — the row
+ *  the review page lists: item, column, old → new, reason, time. */
+export type OohDispatchWrite = {
+  id: string;
+  created_at: string;
+  mode: string; // 'dry_run' | 'live'
+  trigger: string | null; // 'report' | 'watchdog' | 'late_cover'
+  form_item_id: string | null;
+  board_id: string | null;
+  item_id: string;
+  lead_name: string | null;
+  column_id: string; // 'people6' | 'status' | …
+  column_label: string | null; // 'Reps' | 'Iss'
+  old_value: string | null;
+  new_value: string | null;
+  reason: string | null;
+  actor: string;
+};
+
 export type MissingReport = {
   itemId: string;
   boardId: string;
@@ -186,16 +205,26 @@ export function oohNormName(n: string | null | undefined): string {
   return (n ?? "").toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+/** Iss labels that HIDE a lead from the rep portal (owner portal fix
+ *  2026-10-08, the Yin/Ronnell bug): only "Not Issued" and "CTC". */
+const MY_LEAD_HIDDEN_STATUSES = new Set(["not issued", "ctc"]);
+
 /**
- * The rep "My Leads" visibility rule (#11): show a lead only when it is issued
- * (Iss) or an Office Appt, OR already reported today (any disposition). Never
- * surface a Not-Issued lead — that breaks one-lead-at-a-time and would leak the
- * address of a lead the rep hasn't been given yet.
+ * The rep "My Leads" visibility rule (#11, tightened by the owner's 2026-10-08
+ * portal fix — the Yin/Ronnell bug): show every lead the rep is on (people6)
+ * whose status is Iss, Office Appt, or **Add Rep** ("this lead still needs a
+ * SECOND rep" — the current rep still goes!), and KEEP a lead visible whatever
+ * a manager later flips the status to, except Not Issued / CTC. A reported
+ * lead (any disposition) also stays visible, shown as done. A blank status is
+ * hidden — the lead was never issued, and its address must not leak
+ * (one-lead-at-a-time).
  */
 export function isMyLeadVisible(c: OohDispositionLabels & { iss: string | null }): boolean {
   const iss = (c.iss ?? "").trim();
   const reported = oohHasDisposition(c) || (c.bo ?? "").trim() === OOH_NO_SHOW_TEXT;
-  return reported || iss === OOH_ISS || /^office appt/i.test(iss);
+  if (reported) return true;
+  if (!iss) return false;
+  return !MY_LEAD_HIDDEN_STATUSES.has(iss.toLowerCase());
 }
 
 /** A block item as the "push next lead" planner needs it. */

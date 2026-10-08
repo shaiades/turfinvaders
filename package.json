@@ -30,6 +30,7 @@
     "verify:activity": "npx tsx scripts/verify-activity.ts",
     "verify:respawn": "npx tsx scripts/verify-respawn.ts",
     "verify:ooh": "npx tsx scripts/verify-ooh-writeback.ts",
+    "verify:dispatch-rules": "npx tsx scripts/verify-dispatch-rules.ts",
     "verify:canvasserpay": "npx tsx scripts/verify-canvasser-pay.ts",
     "verify:vanwars": "npx tsx scripts/verify-vanwars.ts",
     "verify:confirmer": "npx tsx scripts/verify-confirmer.ts"

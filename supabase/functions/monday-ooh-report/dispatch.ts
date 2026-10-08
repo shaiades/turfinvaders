@@ -27,9 +27,14 @@ import { LABEL, laHourMinute, normName } from "./engine.ts";
 const DRIVE_MIN_PER_MILE = 2;
 
 export const DISPATCH_CONFIG = {
-  /** A next lead must start at least this many minutes after "now plus drive
-   *  time from the rep's last address" (owner rule). */
-  minLeadLeadMinutes: 45,
+  /** Minutes of lead time a freed rep needs BEYOND drive time to still make a
+   *  lead's start (owner mandate 2026-10-08, Rule 5 — "a rep can take a lead if
+   *  drive time + 10 min ≤ time until it starts"). */
+  coverBufferMinutes: 10,
+  /** "Cover first" horizon: leads starting within this many minutes are covered
+   *  before any later lead is looked at (Rule 7 — "every lead in the next 2
+   *  hours"). */
+  coverWindowMinutes: 120,
   /** Minutes/mile for the drive-time estimate (haversine × this). */
   driveMinPerMile: DRIVE_MIN_PER_MILE,
   /** When a lead or the rep's last address has no coordinates, assume this many
@@ -59,7 +64,42 @@ export const DISPATCH_CONFIG = {
   /** Watchdog runs only during these LA hours (7 AM–9 PM PT). `endHour` is
    *  exclusive-ish: a run at 20:59 is in; 21:00 is out. */
   watchdogWindow: { startHour: 7, endHour: 21 },
+  // ── Rule 8: pairing ─────────────────────────────────────────────────────────
+  /** Reps who may run a lead SOLO ("hot" reps). First-name match. When this list
+   *  is EMPTY only `neverSolo` is force-paired, so live dispatch is unchanged
+   *  until the owner populates the roster from the Close Kombat / pairing
+   *  analytics (via system_settings.dispatch_pairing). */
+  hotReps: [] as readonly string[],
+  /** Reps who must NEVER be the only rep on a lead (Rule 8 — "Daniel never goes
+   *  alone"). First-name match, case-insensitive. */
+  neverSolo: ["Daniel"] as readonly string[],
+  /** Preferred (hot) partners per first name, from the pairing analytics — the
+   *  pairing picks a free preferred partner first. */
+  preferredPartners: {} as Readonly<Record<string, readonly string[]>>,
 } as const;
+
+/** The pairing roster (Rule 8) as the owner stores it in
+ *  system_settings.dispatch_pairing — merged over DISPATCH_CONFIG by the edge
+ *  fn so the analytics can be tuned with no code change. */
+export type DispatchPairingOverride = {
+  hotReps?: string[];
+  neverSolo?: string[];
+  preferredPartners?: Record<string, string[]>;
+};
+
+/** Merge a stored pairing roster over the defaults → a cfg the planner accepts. */
+export function withPairing(
+  override: DispatchPairingOverride | null | undefined,
+  base: typeof DISPATCH_CONFIG = DISPATCH_CONFIG,
+): typeof DISPATCH_CONFIG {
+  if (!override) return base;
+  return {
+    ...base,
+    hotReps: override.hotReps ?? base.hotReps,
+    neverSolo: override.neverSolo ?? base.neverSolo,
+    preferredPartners: override.preferredPartners ?? base.preferredPartners,
+  };
+}
 
 /**
  * The rep-strength table (owner brief). First-name match, case-insensitive. A
@@ -210,6 +250,170 @@ export function sameRep(a: string | null | undefined, b: string | null | undefin
   return fa !== "" && fa === firstName(b);
 }
 
+// ── Rule 1: people6 is additive — never remove a rep ─────────────────────────
+/**
+ * Union the reps already on people6 with the rep(s) being issued, preserving
+ * everyone already there (Rule 1 — "Never remove anyone from people6. When you
+ * issue a lead, ADD the rep to whoever is already there"). De-duped, order-
+ * stable (existing first). This is the fix for the Langley 3:30 regression
+ * (Rule 4): Tyler had set Jaxon + Edward; writing only Jaxon erased Edward.
+ */
+export function mergePeople(
+  existing: Array<string | number>,
+  add: Array<string | number>,
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const id of [...existing, ...add]) {
+    const s = String(id).trim();
+    if (!s || seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
+  }
+  return out;
+}
+
+// ── Rule 8: two reps unless the rep is hot ───────────────────────────────────
+/**
+ * Must this rep be PAIRED (never run a lead solo)? True when they're in
+ * `neverSolo` (Daniel always), OR — once a `hotReps` roster is configured — when
+ * they aren't a hot (solo-OK) rep. An EMPTY hotReps roster forces only
+ * neverSolo, so live dispatch is unchanged until the owner drops the roster into
+ * system_settings.dispatch_pairing from the Close Kombat / pairing analytics.
+ */
+export function mustPair(repName: string | null | undefined, cfg = DISPATCH_CONFIG): boolean {
+  const fn = firstName(repName);
+  if (!fn) return false;
+  if (cfg.neverSolo.map((n) => firstName(n)).includes(fn)) return true;
+  if (cfg.hotReps.length === 0) return false;
+  return !cfg.hotReps.map((n) => firstName(n)).includes(fn);
+}
+
+/**
+ * Pick a partner to ADD for a rep who can't go solo (Rule 8 — "meet this by
+ * ADDING a second rep, never replacing one"). A free, working, same-office rep,
+ * preferring a configured hot partner, then the one nearest the lead; never the
+ * rep themselves, anyone already on the lead, or a rep the lead's history
+ * excludes (rehash/can-save). null when none is available — the caller then
+ * withholds the lead for a manager rather than sending the rep alone.
+ */
+export function choosePartner(input: {
+  rep: DispatchRep;
+  lead: DispatchLead;
+  freeReps: DispatchRep[];
+  cfg?: typeof DISPATCH_CONFIG;
+}): DispatchRep | null {
+  const cfg = input.cfg ?? DISPATCH_CONFIG;
+  const repFn = firstName(input.rep.name);
+  const excluded = new Set(input.lead.excludedReps.map(normName));
+  const onLead = new Set(input.lead.reps.map(normName));
+  const pool = input.freeReps.filter((r) => {
+    if (firstName(r.name) === repFn) return false;
+    if (r.office !== input.rep.office) return false;
+    if (excluded.has(normName(r.name))) return false;
+    if (onLead.has(normName(r.name))) return false;
+    return hardRuleCheck(r, input.lead, cfg).ok;
+  });
+  if (pool.length === 0) return null;
+  const preferred = (cfg.preferredPartners[repFn] ?? []).map((n) => firstName(n));
+  const pref = pool.find((r) => preferred.includes(firstName(r.name)));
+  if (pref) return pref;
+  return [...pool].sort(
+    (a, b) =>
+      driveMinutes(a.lastCoords, input.lead.coords, cfg) -
+      driveMinutes(b.lastCoords, input.lead.coords, cfg),
+  )[0];
+}
+
+// ── Rule 6: send the closest rep late when nobody can cover in time ──────────
+export type LateCoverPlan =
+  | {
+      action: "assign-late";
+      lead: DispatchLead;
+      rep: DispatchRep;
+      driveMinutes: number;
+      lateMinutes: number;
+      reason: string;
+    }
+  | { action: "none"; reason: string };
+
+/** The Details note added to a lead covered late (Rule 6, verbatim style). */
+export function runningLateNote(lateMinutes: number): string {
+  return `running ~${lateMinutes} min late, office please call customer`;
+}
+
+/**
+ * Rule 6: an uncovered lead no FREE rep can reach in time — still send the
+ * CLOSEST working rep. Picks the working (not-off), hard-rule-eligible rep with
+ * the smallest drive to the lead and reports how many minutes late they'd
+ * arrive. Returns "none" when no eligible rep exists (e.g. a language lead → a
+ * manager assigns). Pure; the caller writes people6 (additively, Rule 1) + Iss
+ * and texts the managers.
+ */
+export function planLateCoverage(input: {
+  lead: DispatchLead;
+  workingReps: DispatchRep[];
+  nowWallMinutes: number;
+  cfg?: typeof DISPATCH_CONFIG;
+}): LateCoverPlan {
+  const cfg = input.cfg ?? DISPATCH_CONFIG;
+  const eligible = input.workingReps.filter(
+    (r) => !r.off && r.working && hardRuleCheck(r, input.lead, cfg).ok,
+  );
+  if (eligible.length === 0) return { action: "none", reason: "no eligible rep to cover late" };
+  const closest = [...eligible].sort(
+    (a, b) =>
+      driveMinutes(a.lastCoords, input.lead.coords, cfg) -
+      driveMinutes(b.lastCoords, input.lead.coords, cfg),
+  )[0];
+  const dm = driveMinutes(closest.lastCoords, input.lead.coords, cfg);
+  const arrival = input.nowWallMinutes + dm;
+  const lateMinutes =
+    input.lead.apptWallMinutes != null ? Math.max(0, arrival - input.lead.apptWallMinutes) : 0;
+  return {
+    action: "assign-late",
+    lead: input.lead,
+    rep: closest,
+    driveMinutes: dm,
+    lateMinutes,
+    reason: `closest working rep, ~${lateMinutes}m late`,
+  };
+}
+
+// ── Rule 19/20: which events may text the managers ───────────────────────────
+/** The ONLY events that text the dispatcher phone (owner mandate 2026-10-07,
+ *  extended by Rule 6 2026-10-08): a sale/reload/upsell, a no-show at the door,
+ *  an uncovered lead within 60 min nobody can cover, the missing-sale-info nudge
+ *  (folded into the sale text), and a running-late cover (Rule 6). */
+export type ManagerTextTrigger =
+  "sale" | "no_show_at_door" | "uncovered_within_60" | "missing_sale_info" | "running_late";
+export const MANAGER_TEXT_TRIGGERS: readonly ManagerTextTrigger[] = [
+  "sale",
+  "no_show_at_door",
+  "uncovered_within_60",
+  "missing_sale_info",
+  "running_late",
+];
+/** Events that must NEVER text — they show in the app (Needs review / decision
+ *  log) instead (Rule 20). */
+export type AppOnlyEvent =
+  "dry_run_would_issue" | "needs_review" | "free_reps" | "routine_issue" | "routine_dispo";
+/** Rule 19/20 classifier: should this event text the managers? The edge fn
+ *  routes every would-be text through it so the 100/day cap is never breached. */
+export function shouldTextManagers(event: ManagerTextTrigger | AppOnlyEvent): boolean {
+  return (MANAGER_TEXT_TRIGGERS as readonly string[]).includes(event);
+}
+
+/**
+ * Owner portal fix 2026-10-08 (#3): "Add Rep" = the lead KEEPS its current rep
+ * and needs ONE MORE. A freed rep may be ADDED to people6 (union — never
+ * removing anyone) and the STATUS IS NOT TOUCHED. The manager setting Add Rep
+ * is itself the request, so this is the one status that invites a people6 add.
+ */
+export function isAddRepStatus(lead: Pick<DispatchLead, "issLabel">): boolean {
+  return (lead.issLabel ?? "").trim().toLowerCase() === "add rep";
+}
+
 /** Is this an issuable, still-open-for-assignment lead at all? (Not Issued, and
  *  not one of the own-flow Iss statuses.) */
 export function isIssuableStatus(lead: DispatchLead): boolean {
@@ -352,6 +556,9 @@ export type IssuePlan =
       strength: number;
       score: number;
       reason: string;
+      /** True for an "Add Rep" lead (#3): ADD the rep to people6, do NOT touch
+       *  the status. False for a normal issue (people6 add + Iss press). */
+      addRep: boolean;
     }
   | { action: "manager"; lead: DispatchLead; reason: string }
   | { action: "none"; reason: string };
@@ -393,56 +600,81 @@ export function planIssue(input: PlanIssueInput): IssuePlan {
   }
 
   const rn = normName(rep.name);
+  // Rule 5: a lead is reachable iff it starts at least drive + 10 min from now.
   const earliestStart = (lead: DispatchLead) =>
-    nowWallMinutes + driveMinutes(rep.lastCoords, lead.coords, cfg) + cfg.minLeadLeadMinutes;
+    nowWallMinutes + driveMinutes(rep.lastCoords, lead.coords, cfg) + cfg.coverBufferMinutes;
 
-  // Tier A: the rep's own Not-Issued reset / job walk.
-  const tierA = dayLeads.filter((l) => isIssuableStatus(l) && l.reps.map(normName).includes(rn));
-  // Tier B: unassigned Not-Issued leads.
-  const tierB = dayLeads.filter((l) => isIssuableStatus(l) && l.reps.length === 0);
+  // Candidate pool: every issuable lead that either already carries this rep
+  // (their own reset / job walk) OR is unassigned. Both compete on COVERAGE
+  // priority (Rules 5/7/9) — the rep's own lead is only favored as a final
+  // tie-break (ownBonus) when start time AND drive are otherwise equal.
+  const isMine = (l: DispatchLead) => l.reps.map(normName).includes(rn);
+  // Pool: Not-Issued leads (unassigned or the rep's own) PLUS "Add Rep" leads —
+  // a lead that keeps its current rep and needs ONE MORE (#3); the freed rep
+  // qualifies only if they aren't already on it.
+  const inPool = (l: DispatchLead) =>
+    (isIssuableStatus(l) && (l.reps.length === 0 || isMine(l))) ||
+    (isAddRepStatus(l) && !isMine(l));
 
   // Leads we had to withhold for a human (language / orphan job walk) so the
-  // caller can forward them even when nothing is auto-issued. (An array, not a
-  // mutable closure variable — TS can't narrow a `let` assigned inside a nested
-  // function, which would make it read as `never`.)
+  // caller can forward them even when nothing is auto-issued.
   const managerLeads: Array<{ lead: DispatchLead; reason: string }> = [];
 
-  const eligible = (pool: DispatchLead[]): ScoredCandidate[] => {
-    const out: ScoredCandidate[] = [];
-    for (const lead of pool) {
-      const hr = hardRuleCheck(rep, lead, cfg);
-      if (!hr.ok) {
-        if (hr.disposition === "manager") managerLeads.push({ lead, reason: hr.reason });
-        continue;
-      }
-      // Time rule: the lead must start late enough for the rep to get there.
-      if (lead.apptWallMinutes != null && lead.apptWallMinutes < earliestStart(lead)) continue;
-      out.push(scoreCandidate(rep, lead, nowWallMinutes, cfg));
+  const eligible: Array<ScoredCandidate & { ownLead: boolean; addRep: boolean }> = [];
+  for (const lead of dayLeads) {
+    if (!inPool(lead)) continue;
+    const hr = hardRuleCheck(rep, lead, cfg);
+    if (!hr.ok) {
+      if (hr.disposition === "manager") managerLeads.push({ lead, reason: hr.reason });
+      continue;
     }
-    return out;
-  };
+    // Rule 5: skip leads that start too soon for the rep to physically reach.
+    if (lead.apptWallMinutes != null && lead.apptWallMinutes < earliestStart(lead)) continue;
+    eligible.push({
+      ...scoreCandidate(rep, lead, nowWallMinutes, cfg),
+      ownLead: isMine(lead),
+      addRep: isAddRepStatus(lead),
+    });
+  }
 
-  const pick = (cands: ScoredCandidate[]): ScoredCandidate | null => {
-    if (cands.length === 0) return null;
-    // Nearest first; among those within the tie window of the nearest, the
-    // highest strength wins. Final order by composite score for stability.
-    const sorted = [...cands].sort((a, b) => a.driveMinutes - b.driveMinutes);
-    const nearest = sorted[0].driveMinutes;
-    const contenders = sorted.filter((c) => c.driveMinutes - nearest <= cfg.tieWindowMinutes);
-    contenders.sort((a, b) => b.score - a.score);
-    return contenders[0];
-  };
+  // Coverage ordering (owner mandate 2026-10-08):
+  //   1. Rule 7 — leads starting within the next 2h come before any later lead;
+  //   2. Rule 5/9 — among those, the SOONEST-starting lead wins (this is the
+  //      Yakup/Smith fix: the 2:00 uncovered lead beats the 4:00 one);
+  //   3. nearest drive, then strength, then the rep's own lead as a tie-break.
+  const withinWindow = (c: (typeof eligible)[number]) =>
+    c.lead.apptWallMinutes != null &&
+    c.lead.apptWallMinutes - nowWallMinutes <= cfg.coverWindowMinutes
+      ? 0
+      : 1;
+  const startKey = (c: (typeof eligible)[number]) => c.lead.apptWallMinutes ?? Infinity;
+  eligible.sort((a, b) => {
+    const w = withinWindow(a) - withinWindow(b);
+    if (w) return w;
+    const s = startKey(a) - startKey(b);
+    if (s) return s;
+    const d = a.driveMinutes - b.driveMinutes;
+    if (d) return d;
+    const sc = b.score - a.score;
+    if (sc) return sc;
+    return (b.ownLead ? 1 : 0) - (a.ownLead ? 1 : 0);
+  });
 
-  const chosen = pick(eligible(tierA)) ?? pick(eligible(tierB));
+  const chosen = eligible[0];
   if (chosen) {
-    const tier = tierA.includes(chosen.lead) ? "own reset/job walk" : "nearest open lead";
+    const tier = chosen.addRep
+      ? "add-rep second"
+      : chosen.ownLead
+        ? "own reset/job walk"
+        : "soonest uncovered lead";
     return {
       action: "issue",
       lead: chosen.lead,
       driveMinutes: chosen.driveMinutes,
       strength: chosen.strength,
       score: chosen.score,
-      reason: `${tier}: ${chosen.driveMinutes}m drive, strength ${chosen.strength}`,
+      reason: `${tier}: starts ${startKey(chosen)}, ${chosen.driveMinutes}m drive, strength ${chosen.strength}`,
+      addRep: chosen.addRep,
     };
   }
   const mgr = managerLeads[0];
@@ -509,6 +741,23 @@ export function buildFreeRepsLine(freeRepNames: string[]): string {
   return `Free reps (no lead to give): ${freeRepNames.map(firstNameDisplay).join(", ")}.`;
 }
 
+/**
+ * Rule 6: the "running late" alert texted to the managers when the closest rep
+ * was sent to an uncovered lead they can't reach on time — "office please call
+ * customer". One of the allowed manager texts (shouldTextManagers). Pure.
+ */
+export function buildRunningLateText(input: {
+  office: "SD" | "OC";
+  leadName: string;
+  repName: string;
+  lateMinutes: number;
+  apptClock: string;
+}): string {
+  return `🟧 Running ~${input.lateMinutes} min late (${input.office}): ${firstNameDisplay(
+    input.repName,
+  )} → ${shortLead(input.leadName)} at ${input.apptClock}. Office please call the customer.`;
+}
+
 // ── Uncovered-lead watchdog (owner "Uncovered lead watchdog") ────────────────
 export type WatchdogLead = {
   itemId: string;
@@ -533,11 +782,10 @@ export function inWatchdogWindow(hour: number, cfg = DISPATCH_CONFIG): boolean {
 /**
  * Decide which uncovered leads to alert the managers about. A lead qualifies
  * when it has no rep (people6 empty, Not Issued), starts within
- * `watchdogWithinMinutes`, hasn't already been alerted, AND no rep is free to
- * take it. The suggested rep is the nearest/strongest free rep if ANY exists
- * (there won't be in the alert case, by definition — so it suggests the best
- * free rep ignoring the "nobody free" gate, as a hint for the manager). Pure;
- * the caller records each alerted lead so it never repeats.
+ * `watchdogWithinMinutes`, hasn't already been alerted, AND no free rep can
+ * reach it ON TIME (drive + 10 ≤ time until start — Rules 5/6). The caller
+ * then late-covers it with the closest working rep (Rule 6) or texts the
+ * managers, and records each alerted lead so it never repeats. Pure.
  */
 export function planWatchdog(input: {
   nowWallMinutes: number;
@@ -556,7 +804,6 @@ export function planWatchdog(input: {
 }): WatchdogResult {
   const cfg = input.cfg ?? DISPATCH_CONFIG;
   const alerts: WatchdogResult["alerts"] = [];
-  const nobodyFree = input.freeReps.length === 0;
 
   for (const lead of input.leads) {
     if (lead.reps.length > 0) continue; // covered
@@ -565,15 +812,24 @@ export function planWatchdog(input: {
     const minutesOut = lead.apptWallMinutes - input.nowWallMinutes;
     if (minutesOut < 0 || minutesOut > cfg.watchdogWithinMinutes) continue;
     if (input.alreadyAlerted.has(lead.itemId)) continue;
-    // Only alert when nobody is free to take it (a free rep would have been
-    // issued it already on their report).
-    if (!nobodyFree) continue;
+    // Rule 6: alert (and late-cover) when no free rep can get there ON TIME —
+    // drive + 10 ≤ time until start. A free rep who can still make it will be
+    // issued the lead by the report flow, so no alert.
+    const dl = input.dispatchLeadsById?.get(lead.itemId);
+    const someFreeRepOnTime = input.freeReps.some(
+      (r) =>
+        input.nowWallMinutes +
+          driveMinutes(r.lastCoords, dl?.coords ?? null, cfg) +
+          cfg.coverBufferMinutes <=
+        (lead.apptWallMinutes as number),
+    );
+    if (someFreeRepOnTime) continue;
     alerts.push({
       lead,
       // Hint the manager at the best-fit working rep (even though none are
-      // strictly free — that's why we're alerting).
+      // strictly free/on-time — that's why we're alerting).
       suggestedRep: suggestBestRep(lead, input.workingReps, input.dispatchLeadsById, cfg),
-      reason: `uncovered lead starts in ${minutesOut}m, no free rep`,
+      reason: `uncovered lead starts in ${minutesOut}m, no free rep can make it`,
     });
   }
 
