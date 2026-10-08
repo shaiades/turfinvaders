@@ -290,6 +290,18 @@ export function mustPair(repName: string | null | undefined, cfg = DISPATCH_CONF
 }
 
 /**
+ * Is this rep HARD-blocked from running alone (Rule 8's "Daniel never goes
+ * alone")? Splits the two pairing tiers (owner, 2026-10-08 pm):
+ *   · neverSolo  → partner or WITHHOLD to managers — never issued alone;
+ *   · mustPair but not neverSolo ("pair whenever possible": Jaxon, Garett) →
+ *     partner when one is free, SOLO FALLBACK when nobody is.
+ */
+export function isNeverSolo(repName: string | null | undefined, cfg = DISPATCH_CONFIG): boolean {
+  const fn = firstName(repName);
+  return !!fn && cfg.neverSolo.map((n) => firstName(n)).includes(fn);
+}
+
+/**
  * Pick a partner to ADD for a rep who can't go solo (Rule 8 — "meet this by
  * ADDING a second rep, never replacing one"). A free, working, same-office rep,
  * preferring a configured hot partner, then the one nearest the lead; never the

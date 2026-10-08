@@ -42,6 +42,7 @@ import {
   type DispatchRep,
   buildRunningLateText,
   choosePartner,
+  isNeverSolo,
   issLabelForLead,
   mergePeople,
   mustPair,
@@ -352,6 +353,15 @@ function mkRep(over: Partial<DispatchRep> = {}): DispatchRep {
     "Rule 8: no free rep → no partner (caller withholds, never solo)",
     choosePartner({ rep: mkRep({ name: "Daniel Figueiredo" }), lead: mkLead(), freeReps: [] }),
     null,
+  );
+  // Two pairing tiers (owner, 2026-10-08 pm): neverSolo (Daniel) is withheld
+  // when no partner is free; the soft "pair whenever possible" tier (a rep
+  // outside hotReps, e.g. Jaxon) pairs when possible and goes SOLO otherwise.
+  const tierCfg = withPairing({ hotReps: ["Yakup"], neverSolo: ["Daniel"] });
+  expect("Rule 8: Daniel is HARD never-solo (withheld)", isNeverSolo("Daniel Figueiredo", tierCfg));
+  expect(
+    "Rule 8: a pair-when-possible rep still pairs when someone is free",
+    mustPair("Jaxon Heilman", tierCfg) && !isNeverSolo("Jaxon Heilman", tierCfg),
   );
 }
 

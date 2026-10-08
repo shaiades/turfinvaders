@@ -95,6 +95,7 @@ import {
   firstName,
   inferCreateOffice,
   isFreeRep,
+  isNeverSolo,
   issLabelForLead,
   mergePeople,
   mustPair,
@@ -1228,6 +1229,7 @@ async function runDispatch(p: {
       // free partner to ADD (never replace). No partner available → withhold for
       // a manager; never issue the rep alone.
       let partnerName: string | null = null;
+      let soloFallback = false;
       if (mustPair(repName, p.cfg)) {
         const existingPartners = plan.lead.reps
           .map(normName)
@@ -1240,7 +1242,13 @@ async function runDispatch(p: {
             cfg: p.cfg,
           });
           if (partner) partnerName = partner.name;
-          else {
+          else if (!isNeverSolo(repName, p.cfg)) {
+            // Soft tier (owner, 2026-10-08 pm): "pair whenever possible" reps
+            // (Jaxon / Garett) go SOLO when nobody is free — proceed; the issue
+            // decision below carries the note. Only neverSolo (Daniel) is
+            // withheld for a manager.
+            soloFallback = true;
+          } else {
             chosen.delete(plan.lead.itemId);
             await queueDispatchReview({
               leadItemId: plan.lead.itemId,
@@ -1404,7 +1412,12 @@ async function runDispatch(p: {
         driveMinutes: plan.driveMinutes,
         strength: plan.strength,
         reason:
-          failReason ?? (partnerName ? `${plan.reason} (+ partner ${partnerName})` : plan.reason),
+          failReason ??
+          (partnerName
+            ? `${plan.reason} (+ partner ${partnerName})`
+            : soloFallback
+              ? `${plan.reason} (no partner free — solo fallback)`
+              : plan.reason),
         issued: didIssue,
       });
     } else if (plan.action === "manager") {
