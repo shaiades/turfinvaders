@@ -83,9 +83,9 @@ export async function runWatchdog(supabase: Supa): Promise<WatchdogSummary> {
 
   const { data: settings } = await supabase
     .from("system_settings")
-    .select(
-      "monday_api_token, active_monday_board_sd, active_monday_board_oc, live_dispatch_mode, dispatch_pairing",
-    )
+    // select("*") on purpose — a not-yet-migrated dispatch_pairing column must
+    // never fail the whole settings read (deploy-order safety).
+    .select("*")
     .maybeSingle();
   const mode = (settings?.live_dispatch_mode as string | null) ?? "off";
   if (mode === "off")

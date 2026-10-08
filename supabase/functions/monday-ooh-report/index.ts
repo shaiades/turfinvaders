@@ -322,9 +322,11 @@ serve(async (req) => {
     // ── settings ──────────────────────────────────────────────────────────
     const { data: settings } = await supabase
       .from("system_settings")
-      .select(
-        "monday_api_token, active_monday_board_sd, active_monday_board_oc, ooh_writeback_mode, ooh_writeback_board_allowlist, ooh_autocreate, live_dispatch_mode, dispatch_pairing",
-      )
+      // select("*") on purpose: a narrow list naming a not-yet-migrated column
+      // (dispatch_pairing) would fail the WHOLE read and stall the live write-back
+      // if the function deploys before the migration. One row; same as
+      // monday-live-dispatch.
+      .select("*")
       .maybeSingle();
     const token = ((settings?.monday_api_token as string | null) ?? "").trim();
     oohToken = token || null;
