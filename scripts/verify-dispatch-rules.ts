@@ -420,9 +420,15 @@ function mkRep(over: Partial<DispatchRep> = {}): DispatchRep {
   );
   const plan = planDisposition(f);
   expectEq("Rule 11: Price is written", plan.fieldWrites[BLOCK_COL.salePrice], "28000");
-  expectEq("Rule 11: Advantage+ is written", plan.fieldWrites[BLOCK_COL.advantage], {
-    label: "Advantage+",
-  });
+  expectEq(
+    "Rule 11: Advantage+ is a BUTTON (its own press), not a column note",
+    plan.advantageStatus,
+    { col: BLOCK_COL.advantage, label: "Advantage+" },
+  );
+  expect(
+    "Rule 11: Advantage+ never rides the columns call",
+    !(BLOCK_COL.advantage in plan.fieldWrites),
+  );
   expectEq("Rule 11: Reloads add-ons are written", plan.fieldWrites[BLOCK_COL.reloads], {
     labels: ["Gutters"],
   });
@@ -438,7 +444,8 @@ function mkRep(over: Partial<DispatchRep> = {}): DispatchRep {
   expectEq("Rule 11: reload 'None' maps to no labels", reloadAddOnLabels("None"), []);
 }
 
-// Rule 12 — the sale BUTTON is pressed LAST: columns call first, status second.
+// Rule 12 — order of presses: columns call first, then the Advantage+ BUTTON
+// (its own press — "it is not a note"), then the result button LAST.
 {
   const ops: AppliedOp[] = [];
   const writer: MondayWriter = {
@@ -455,16 +462,24 @@ function mkRep(over: Partial<DispatchRep> = {}): DispatchRep {
       [FORM_COL.result]: status(RESULT.SOLD),
       [FORM_COL.onBlock]: status(ON_BLOCK.YES),
       [FORM_COL.salePrice]: num(28000),
+      [FORM_COL.advantagePlus]: status(0, "Advantage+"),
     }),
   );
   const plan = planDisposition(f);
-  const done = await applyDisposition(writer, "B", "123", plan.fieldWrites, plan.status);
-  expectEq(
-    "Rule 12: two ops — columns then status",
-    done.map((o) => o.kind),
-    ["columns", "status"],
+  const done = await applyDisposition(
+    writer,
+    "B",
+    "123",
+    plan.fieldWrites,
+    plan.status,
+    plan.advantageStatus,
   );
-  expectEq("Rule 12: the last op is the Sold button", done[done.length - 1], {
+  expectEq(
+    "Rule 12: columns → Advantage+ button → result button",
+    done.map((o) => (o.kind === "columns" ? "columns" : (o as { col: string }).col)),
+    ["columns", BLOCK_COL.advantage, BLOCK_COL.sale],
+  );
+  expectEq("Rule 12: the LAST op is the sale button", done[done.length - 1], {
     kind: "status",
     col: BLOCK_COL.sale,
     label: LABEL.sold,
@@ -561,6 +576,11 @@ function mkRep(over: Partial<DispatchRep> = {}): DispatchRep {
       label: LABEL.upsell,
     },
   );
+  expectEq(
+    "Rule 15: the office-appt sale's Advantage+ is its own button press",
+    planOfficeApptDisposition(reload).advantageStatus,
+    { col: BLOCK_COL.advantage, label: LABEL.advantagePlus },
+  );
   expect("Rule 15: 'Office Appt' is recognized", isOfficeApptStatus("Office Appt"));
 }
 
@@ -649,6 +669,57 @@ function mkRep(over: Partial<DispatchRep> = {}): DispatchRep {
   expect(
     "Rule 18: a Not-Issued lead is NOT shown (one-lead-at-a-time)",
     !isMyLeadVisible({ iss: "Not Issued", ...blank }),
+  );
+}
+
+// ═══ PORTAL FIX (owner 2026-10-08) — the Yin/Ronnell regression ═════════════
+// OC "Yin" 1:00 was issued to Ronnell; a manager flipped the status to
+// "Add Rep" (= this lead still needs a SECOND rep) and the lead vanished from
+// Ronnell's portal, so he didn't go. That must never happen again.
+{
+  const blank = { pm: null, rs: null, ol: null, bo: null, sale: null };
+  // #1 — Iss / Office Appt / Add Rep are all visible; Not Issued / CTC hide.
+  expect(
+    "Yin/Ronnell #1: an Add Rep lead STAYS in the rep's portal",
+    isMyLeadVisible({ iss: "Add Rep", ...blank }),
+  );
+  expect("Yin/Ronnell #1: Not Issued hides", !isMyLeadVisible({ iss: "Not Issued", ...blank }));
+  expect("Yin/Ronnell #1: CTC hides", !isMyLeadVisible({ iss: "CTC", ...blank }));
+  // #2 — once issued, ANY other manager status flip keeps it visible.
+  expect(
+    "Yin/Ronnell #2: a manager flip to any other status keeps it visible",
+    isMyLeadVisible({ iss: "Reload", ...blank }),
+  );
+  // #3 — dispatch: Add Rep = keep the current rep, ADD one more, don't touch
+  // the status.
+  const freed = mkRep({ name: "Nick Schoeben", lastCoords: SD_A });
+  const yin = mkLead({
+    itemId: "yin",
+    name: "Yin",
+    reps: ["Ronnell Vital"],
+    issLabel: "Add Rep",
+    coords: SD_NEAR,
+    apptWallMinutes: 13 * 60,
+  });
+  const plan = planIssue({ rep: freed, dayLeads: [yin], nowWallMinutes: 11 * 60 });
+  expect(
+    "Yin/Ronnell #3: a freed nearby rep is routed to the Add Rep lead",
+    plan.action === "issue" && plan.lead.itemId === "yin",
+  );
+  expect(
+    "Yin/Ronnell #3: the plan is ADD-only — the status is never pressed",
+    plan.action === "issue" && plan.addRep === true,
+  );
+  expectEq(
+    "Yin/Ronnell #3: people6 keeps Ronnell and adds the second rep",
+    mergePeople(["ronnell-id"], ["nick-id"]),
+    ["ronnell-id", "nick-id"],
+  );
+  const ronnell = mkRep({ name: "Ronnell Vital" });
+  expectEq(
+    "Yin/Ronnell #3: the current rep is never re-issued their own Add Rep lead",
+    planIssue({ rep: ronnell, dayLeads: [yin], nowWallMinutes: 11 * 60 }).action,
+    "none",
   );
 }
 

@@ -776,6 +776,32 @@ serve(async (req) => {
       );
       if (r1.error) throw new Error(`setColumns: ${r1.error}`);
     }
+    // Rule 11 (owner 2026-10-08): Advantage+ is a BUTTON — its own press, after
+    // the columns write and BEFORE the result button. Never a column note.
+    if (wplan.advantageStatus) {
+      const rA = await setStatus(
+        token,
+        block.boardId,
+        leadId,
+        wplan.advantageStatus.col,
+        wplan.advantageStatus.label,
+        `ooh-advantage-${formItemId}`,
+      );
+      if (rA.error) throw new Error(`setStatus(Advantage+): ${rA.error}`);
+      await logDispatchWrite(supabase, {
+        mode: "live",
+        trigger: "report",
+        formItemId,
+        boardId: block.boardId,
+        itemId: leadId,
+        leadName: block.name,
+        columnId: wplan.advantageStatus.col,
+        columnLabel: "Advantage+",
+        oldValue: null,
+        newValue: wplan.advantageStatus.label,
+        reason: `dispo report from ${form.repName ?? "rep"}`,
+      });
+    }
     if (wplan.status) {
       const r2 = await setStatus(
         token,
@@ -1155,7 +1181,10 @@ async function runDispatch(p: {
         const uid = resolveUserId(users, repName);
         if (!uid) {
           failReason = `couldn't match ${repName} to a Monday user`;
-        } else if (await guardBlocked(plan.lead.itemId, plan.lead.boardId)) {
+        } else if (!plan.addRep && (await guardBlocked(plan.lead.itemId, plan.lead.boardId))) {
+          // (An "Add Rep" lead is exempt from the guard: the manager setting
+          // Add Rep today IS the request to add a rep, the people6 write is a
+          // pure union, and the status is never touched on these.)
           // Rule 3/4: a human changed people6 or Iss on this lead today — never
           // touch it again (the Langley 3:30 fix). A protective SKIP, not a
           // failure: no needs-review row, just the decision log.
@@ -1214,34 +1243,41 @@ async function runDispatch(p: {
               newValue: merged.join(","),
               reason: plan.reason,
             });
-            // Owner brief Part 4: the rep's OWN job walk is pressed "Office
-            // Appt" (keeps its own flow), everything else "Iss".
-            const issLabel = issLabelForLead(plan.lead);
-            const r2 = await setStatus(
-              p.token,
-              plan.lead.boardId,
-              plan.lead.itemId,
-              BLOCK_COL.iss,
-              issLabel,
-              `ooh-iss-${plan.lead.itemId}`,
-            );
-            if (r2.error) failReason = `Iss: ${r2.error}`;
-            else {
-              await logDispatchWrite(p.supabase, {
-                mode: p.mode,
-                trigger: "report",
-                formItemId: p.formItemId,
-                boardId: plan.lead.boardId,
-                itemId: plan.lead.itemId,
-                leadName: plan.lead.name,
-                columnId: BLOCK_COL.iss,
-                columnLabel: "Iss",
-                oldValue: plan.lead.issLabel ?? null,
-                newValue: issLabel,
-                reason: plan.reason,
-              });
+            if (plan.addRep) {
+              // #3 "Add Rep": the people6 ADD above is the whole job — the
+              // lead keeps its current rep AND its status (never pressed).
               didIssue = true;
               issued = plan.lead.itemId;
+            } else {
+              // Owner brief Part 4: the rep's OWN job walk is pressed "Office
+              // Appt" (keeps its own flow), everything else "Iss".
+              const issLabel = issLabelForLead(plan.lead);
+              const r2 = await setStatus(
+                p.token,
+                plan.lead.boardId,
+                plan.lead.itemId,
+                BLOCK_COL.iss,
+                issLabel,
+                `ooh-iss-${plan.lead.itemId}`,
+              );
+              if (r2.error) failReason = `Iss: ${r2.error}`;
+              else {
+                await logDispatchWrite(p.supabase, {
+                  mode: p.mode,
+                  trigger: "report",
+                  formItemId: p.formItemId,
+                  boardId: plan.lead.boardId,
+                  itemId: plan.lead.itemId,
+                  leadName: plan.lead.name,
+                  columnId: BLOCK_COL.iss,
+                  columnLabel: "Iss",
+                  oldValue: plan.lead.issLabel ?? null,
+                  newValue: issLabel,
+                  reason: plan.reason,
+                });
+                didIssue = true;
+                issued = plan.lead.itemId;
+              }
             }
           }
         }
@@ -1402,6 +1438,32 @@ async function runAutoCreate(p: {
     `ooh-create-${p.formItemId}`,
   );
   if (!newId) return { ok: false, error: "create_item returned no id" };
+
+  // Rule 11: the Advantage+ BUTTON gets its own press before the result button.
+  if (p.plan.advantageStatus) {
+    const rA = await setStatus(
+      p.token,
+      p.currentBoardId,
+      newId,
+      p.plan.advantageStatus.col,
+      p.plan.advantageStatus.label,
+      `ooh-create-advantage-${p.formItemId}`,
+    );
+    if (rA.error) return { ok: false, error: `setStatus(Advantage+): ${rA.error}` };
+    await logDispatchWrite(p.supabase, {
+      mode: "live",
+      trigger: "report",
+      formItemId: p.formItemId,
+      boardId: p.currentBoardId,
+      itemId: newId,
+      leadName: name,
+      columnId: p.plan.advantageStatus.col,
+      columnLabel: "Advantage+",
+      oldValue: null,
+      newValue: p.plan.advantageStatus.label,
+      reason: "auto-created from OOH report",
+    });
+  }
 
   if (p.plan.status) {
     const r = await setStatus(

@@ -404,6 +404,16 @@ export function shouldTextManagers(event: ManagerTextTrigger | AppOnlyEvent): bo
   return (MANAGER_TEXT_TRIGGERS as readonly string[]).includes(event);
 }
 
+/**
+ * Owner portal fix 2026-10-08 (#3): "Add Rep" = the lead KEEPS its current rep
+ * and needs ONE MORE. A freed rep may be ADDED to people6 (union — never
+ * removing anyone) and the STATUS IS NOT TOUCHED. The manager setting Add Rep
+ * is itself the request, so this is the one status that invites a people6 add.
+ */
+export function isAddRepStatus(lead: Pick<DispatchLead, "issLabel">): boolean {
+  return (lead.issLabel ?? "").trim().toLowerCase() === "add rep";
+}
+
 /** Is this an issuable, still-open-for-assignment lead at all? (Not Issued, and
  *  not one of the own-flow Iss statuses.) */
 export function isIssuableStatus(lead: DispatchLead): boolean {
@@ -546,6 +556,9 @@ export type IssuePlan =
       strength: number;
       score: number;
       reason: string;
+      /** True for an "Add Rep" lead (#3): ADD the rep to people6, do NOT touch
+       *  the status. False for a normal issue (people6 add + Iss press). */
+      addRep: boolean;
     }
   | { action: "manager"; lead: DispatchLead; reason: string }
   | { action: "none"; reason: string };
@@ -595,14 +608,19 @@ export function planIssue(input: PlanIssueInput): IssuePlan {
   // (their own reset / job walk) OR is unassigned. Both compete on COVERAGE
   // priority (Rules 5/7/9) — the rep's own lead is only favored as a final
   // tie-break (ownBonus) when start time AND drive are otherwise equal.
+  const isMine = (l: DispatchLead) => l.reps.map(normName).includes(rn);
+  // Pool: Not-Issued leads (unassigned or the rep's own) PLUS "Add Rep" leads —
+  // a lead that keeps its current rep and needs ONE MORE (#3); the freed rep
+  // qualifies only if they aren't already on it.
   const inPool = (l: DispatchLead) =>
-    isIssuableStatus(l) && (l.reps.length === 0 || l.reps.map(normName).includes(rn));
+    (isIssuableStatus(l) && (l.reps.length === 0 || isMine(l))) ||
+    (isAddRepStatus(l) && !isMine(l));
 
   // Leads we had to withhold for a human (language / orphan job walk) so the
   // caller can forward them even when nothing is auto-issued.
   const managerLeads: Array<{ lead: DispatchLead; reason: string }> = [];
 
-  const eligible: Array<ScoredCandidate & { ownLead: boolean }> = [];
+  const eligible: Array<ScoredCandidate & { ownLead: boolean; addRep: boolean }> = [];
   for (const lead of dayLeads) {
     if (!inPool(lead)) continue;
     const hr = hardRuleCheck(rep, lead, cfg);
@@ -614,7 +632,8 @@ export function planIssue(input: PlanIssueInput): IssuePlan {
     if (lead.apptWallMinutes != null && lead.apptWallMinutes < earliestStart(lead)) continue;
     eligible.push({
       ...scoreCandidate(rep, lead, nowWallMinutes, cfg),
-      ownLead: lead.reps.map(normName).includes(rn),
+      ownLead: isMine(lead),
+      addRep: isAddRepStatus(lead),
     });
   }
 
@@ -643,7 +662,11 @@ export function planIssue(input: PlanIssueInput): IssuePlan {
 
   const chosen = eligible[0];
   if (chosen) {
-    const tier = chosen.ownLead ? "own reset/job walk" : "soonest uncovered lead";
+    const tier = chosen.addRep
+      ? "add-rep second"
+      : chosen.ownLead
+        ? "own reset/job walk"
+        : "soonest uncovered lead";
     return {
       action: "issue",
       lead: chosen.lead,
@@ -651,6 +674,7 @@ export function planIssue(input: PlanIssueInput): IssuePlan {
       strength: chosen.strength,
       score: chosen.score,
       reason: `${tier}: starts ${startKey(chosen)}, ${chosen.driveMinutes}m drive, strength ${chosen.strength}`,
+      addRep: chosen.addRep,
     };
   }
   const mgr = managerLeads[0];

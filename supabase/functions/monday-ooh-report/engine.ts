@@ -909,8 +909,11 @@ export type MondayValue = unknown;
 export type WritePlan = {
   /** Non-status, non-Details field writes for the FIRST call (Rule 1). */
   fieldWrites: Record<string, MondayValue>;
-  /** The ONE disposition status to press in the SECOND call (Rule 1). */
+  /** The ONE disposition status to press in the LAST call (Rule 1/12). */
   status: { col: string; label: string } | null;
+  /** The Advantage+ membership BUTTON — pressed on its own, after the columns
+   *  write and BEFORE `status` (Rule 11; never batched as a column note). */
+  advantageStatus: { col: string; label: string } | null;
   /** Fill Source Code (if the block's is blank) before pressing Sold (Rule 4). */
   fillSourceCodeIfBlank: boolean;
   /** This submission releases nothing and holds the rep at the door (Rule 6/7). */
@@ -931,8 +934,9 @@ export type WritePlan = {
 export function saleFieldWrites(form: OohForm): Record<string, MondayValue> {
   const w: Record<string, MondayValue> = {};
   if (form.salePrice != null) w[BLOCK_COL.salePrice] = String(form.salePrice);
-  const member = membershipLabel(form.advantagePlus);
-  if (member) w[BLOCK_COL.advantage] = { label: member };
+  // NOTE: Advantage+ is NOT here — it is a status BUTTON pressed on its own,
+  // after these columns and before the result button (owner, 2026-10-08). See
+  // saleAdvantageStatus.
   const reloads = Array.from(
     new Set([
       ...reloadAddOnLabels(form.reloadAddOns),
@@ -941,6 +945,18 @@ export function saleFieldWrites(form: OohForm): Record<string, MondayValue> {
   );
   if (reloads.length) w[BLOCK_COL.reloads] = { labels: reloads };
   return w;
+}
+
+/**
+ * The Advantage+ membership BUTTON (color_mkwkazqn) to press for a sale — its
+ * own status press, AFTER the columns write and BEFORE the result button
+ * (owner, 2026-10-08: "advantage+ is a button and gets pushed before the
+ * result button; it is not a note"). null when the rep didn't answer — we
+ * never press a guess.
+ */
+export function saleAdvantageStatus(form: OohForm): { col: string; label: string } | null {
+  const member = membershipLabel(form.advantagePlus);
+  return member ? { col: BLOCK_COL.advantage, label: member } : null;
 }
 
 /**
@@ -958,23 +974,30 @@ export function planDisposition(form: OohForm): WritePlan {
     fillSourceCodeIfBlank: false,
     atTheDoor: false,
     needsReview: null as string | null,
+    advantageStatus: null as { col: string; label: string } | null,
   };
 
   switch (form.result) {
     case RESULT.SOLD: {
-      // Rule 11: write Price + Advantage+ + Reloads FIRST (all in the columns
-      // call); the sale button is pressed LAST by the caller (Rule 12).
+      // Rule 11: write Price + Reloads + Details FIRST (the columns call), then
+      // press the Advantage+ BUTTON, then the sale button LAST (Rule 12).
       Object.assign(fieldWrites, saleFieldWrites(form));
+      const advantageStatus = saleAdvantageStatus(form);
       if (form.onBlock === ON_BLOCK.UPSELL) {
-        return { ...base, status: { col: BLOCK_COL.sale, label: LABEL.upsell } };
+        return { ...base, advantageStatus, status: { col: BLOCK_COL.sale, label: LABEL.upsell } };
       }
       if (form.onBlock === ON_BLOCK.RELOAD) {
-        return { ...base, status: { col: BLOCK_COL.sale, label: LABEL.saleReload } };
+        return {
+          ...base,
+          advantageStatus,
+          status: { col: BLOCK_COL.sale, label: LABEL.saleReload },
+        };
       }
       // On-block Yes (0) or self-gen/own (2): a Sold that must reach Sales
       // Processing — fill a blank Source Code (Rule 4).
       return {
         ...base,
+        advantageStatus,
         status: { col: BLOCK_COL.sale, label: LABEL.sold },
         fillSourceCodeIfBlank: true,
       };
@@ -1032,11 +1055,11 @@ export function planOfficeApptDisposition(form: OohForm): WritePlan {
     fillSourceCodeIfBlank: false,
     atTheDoor: false,
     needsReview: null as string | null,
+    advantageStatus: null as { col: string; label: string } | null,
   };
   if (form.result === RESULT.SOLD) {
-    // Rule 11: Price + Advantage+ + Reloads in the FIRST (columns) call, then the
-    // single sale button LAST. Advantage+ is a member flag, not a routing
-    // disposition, so it rides the columns write.
+    // Rule 11: Price + Reloads + Details in the FIRST (columns) call, then the
+    // Advantage+ BUTTON, then the single sale button LAST (Rule 12).
     Object.assign(fieldWrites, saleFieldWrites(form));
     // An office-appt sale presses Reload/Upsell, so the QUOTED products ARE the
     // reload — fold them into the Reloads dropdown alongside any add-ons.
@@ -1044,15 +1067,18 @@ export function planOfficeApptDisposition(form: OohForm): WritePlan {
       new Set([...reloadDropdownLabels(form.quotedText), ...reloadAddOnLabels(form.reloadAddOns)]),
     );
     if (officeReloads.length) fieldWrites[BLOCK_COL.reloads] = { labels: officeReloads };
+    // Advantage+ is a BUTTON pressed before the result (owner, 2026-10-08).
     // Office-appt sales default to Advantage+ when the rep didn't answer the
     // membership question (the prior office-appt behavior); an explicit
-    // "Non Member" answer from saleFieldWrites is respected.
-    if (!(BLOCK_COL.advantage in fieldWrites))
-      fieldWrites[BLOCK_COL.advantage] = { label: LABEL.advantagePlus };
+    // "Non Member" answer is respected.
+    const advantageStatus = saleAdvantageStatus(form) ?? {
+      col: BLOCK_COL.advantage,
+      label: LABEL.advantagePlus,
+    };
     // Rule 15: press status9 = Upsell or Reload, whichever it really is (a saved
     // can-save is a Reload) — NEVER Sold on an Office Appt.
     const label = form.onBlock === ON_BLOCK.UPSELL ? LABEL.upsell : LABEL.saleReload;
-    return { ...base, status: { col: BLOCK_COL.sale, label } };
+    return { ...base, advantageStatus, status: { col: BLOCK_COL.sale, label } };
   }
   // Any non-sale result on an Office Appt → Details only, press nothing (Rule 15).
   return { ...base, status: null };
@@ -1089,9 +1115,10 @@ export type AppliedOp =
 
 /**
  * Apply a plan in the mandated order: FIRST one change_multiple_column_values
- * (Details + any of Sale Price / Reset Date / Reloads / Source Code), THEN a
- * SEPARATE call that presses exactly ONE disposition status. Never combines the
- * two; never presses two statuses. Returns the ops it performed, in order.
+ * (Details + any of Sale Price / Reset Date / Reloads / Source Code), THEN the
+ * Advantage+ BUTTON when the plan carries one (its own press — owner,
+ * 2026-10-08: "it is not a note"), THEN a SEPARATE call that presses exactly
+ * ONE disposition status, LAST. Never combines them. Returns the ops in order.
  */
 export async function applyDisposition(
   writer: MondayWriter,
@@ -1099,11 +1126,16 @@ export async function applyDisposition(
   itemId: string,
   columnValues: Record<string, MondayValue>,
   status: { col: string; label: string } | null,
+  advantageStatus: { col: string; label: string } | null = null,
 ): Promise<AppliedOp[]> {
   const ops: AppliedOp[] = [];
   if (Object.keys(columnValues).length > 0) {
     await writer.setColumns(boardId, itemId, columnValues);
     ops.push({ kind: "columns", values: columnValues });
+  }
+  if (advantageStatus) {
+    await writer.setStatus(boardId, itemId, advantageStatus.col, advantageStatus.label);
+    ops.push({ kind: "status", col: advantageStatus.col, label: advantageStatus.label });
   }
   if (status) {
     await writer.setStatus(boardId, itemId, status.col, status.label);

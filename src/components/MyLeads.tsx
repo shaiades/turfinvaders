@@ -36,6 +36,11 @@ function statusPill(c: MyLeadCard): { text: string; cls: string; done: boolean }
     return { text: "CTC", cls: "border-border text-muted-foreground", done: false };
   if (iss === "Iss")
     return { text: "To run", cls: "border-kombat-gold/50 text-kombat-gold", done: false };
+  // "Add Rep" = the lead still needs a SECOND rep — but the CURRENT rep still
+  // runs it (owner portal fix 2026-10-08, the Yin/Ronnell bug: it must never
+  // vanish from their portal).
+  if (/^add rep/i.test(iss))
+    return { text: "To run · +1 rep", cls: "border-kombat-gold/50 text-kombat-gold", done: false };
   return { text: iss || "Upcoming", cls: "border-neon/50 text-neon", done: false };
 }
 

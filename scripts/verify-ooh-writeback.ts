@@ -1153,7 +1153,7 @@ expectEq(
   true,
 );
 expectEq(
-  "myleads: CTC / Add Rep hidden",
+  "myleads: CTC hidden (Add Rep is now VISIBLE — owner portal fix 10/8)",
   isMyLeadVisible({ iss: "CTC", pm: null, rs: null, ol: null, bo: null, sale: null }),
   false,
 );
@@ -2179,7 +2179,8 @@ expectEq("office-appt: blank is not an office appt", isOfficeApptStatus(null), f
   }
 }
 {
-  // A SALE on an office appt → Advantage+ + Reloads first, then status9 = Reload.
+  // A SALE on an office appt → Reloads in the columns call, the Advantage+
+  // BUTTON pressed on its own, then status9 = Reload LAST.
   const f = parseOohForm(
     "oasale",
     form({
@@ -2194,9 +2195,14 @@ expectEq("office-appt: blank is not an office appt", isOfficeApptStatus(null), f
     col: BLOCK_COL.sale,
     label: LABEL.saleReload,
   });
-  expectEq("office-appt sale sets Advantage+", p.fieldWrites[BLOCK_COL.advantage], {
+  expectEq("office-appt sale presses the Advantage+ BUTTON", p.advantageStatus, {
+    col: BLOCK_COL.advantage,
     label: LABEL.advantagePlus,
   });
+  expect(
+    "office-appt sale keeps Advantage+ out of the columns note",
+    !(BLOCK_COL.advantage in p.fieldWrites),
+  );
   expectEq("office-appt sale maps Reloads from quoted", p.fieldWrites[BLOCK_COL.reloads], {
     labels: ["Roof", "Turf"],
   });
