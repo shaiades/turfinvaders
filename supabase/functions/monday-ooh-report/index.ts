@@ -38,6 +38,7 @@ import {
   fetchMondayUsers,
   fetchPeopleColumnIds,
   findItemOnBoardByName,
+  mondayGraphql,
   postUpdate,
   resolveUserId,
   resolveUserIdByFirstName,
@@ -213,6 +214,98 @@ serve(async (req) => {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
+  }
+
+  // ── Admin: ensure the Sales Processing "item created" webhook (Rule 13) ────
+  // Deploy-side tooling, not a Monday event (owner-approved 2026-10-08). The
+  // delivery URL must carry the shared webhook secret, and that secret lives
+  // only in this function's env — so the function registers its own webhook,
+  // exactly like monday-live-dispatch's ensure_lead_date_webhook. Auth: the
+  // project's service-role key in x-admin-key, compared by digest. Handled
+  // BEFORE the Monday secret gate (this call legitimately carries no Monday
+  // secret).
+  if (body.adminAction === "ensure_sales_processing_webhook") {
+    const digest = async (v: string) => {
+      const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(v));
+      return Array.from(new Uint8Array(d))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+    };
+    const adminKey = req.headers.get("x-admin-key") ?? "";
+    const serviceKey = denoEnv?.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    if (!serviceKey || !adminKey || (await digest(adminKey)) !== (await digest(serviceKey))) {
+      return new Response("unauthorized", { status: 401, headers: corsHeaders });
+    }
+    const webhookSecret =
+      denoEnv?.get("MONDAY_OOH_SECRET") ?? denoEnv?.get("MONDAY_WEBHOOK_SECRET") ?? "";
+    if (!webhookSecret) {
+      return ok({
+        ok: false,
+        error: "MONDAY_OOH_SECRET is not set — refusing to register a secretless webhook",
+      });
+    }
+    const admin = makeClient(
+      denoEnv?.get("SUPABASE_URL") ?? "",
+      denoEnv?.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+    );
+    const { data: sRow } = await admin
+      .from("system_settings")
+      .select("id, monday_api_token, monday_webhooks")
+      .limit(1)
+      .maybeSingle();
+    const adminToken = ((sRow?.monday_api_token as string | null) ?? "").trim();
+    if (!adminToken) return ok({ ok: false, error: "no Monday token in system_settings" });
+    const spBoard = DESTINATION_BOARDS.salesProcessing;
+    const listRes = await mondayGraphql(
+      adminToken,
+      `query { webhooks (board_id: ${spBoard}) { id event } }`,
+    );
+    if (listRes.error) return ok({ ok: false, error: `webhook list failed: ${listRes.error}` });
+    const hooks = (listRes.data?.webhooks ?? []) as Array<{ id: string; event: string }>;
+    // Monday doesn't expose a webhook's URL, so an existing create_pulse hook
+    // can't be verified as OURS — report it and only create alongside it when
+    // the caller explicitly passes force:true.
+    const existing = hooks.filter((h) => h.event === "create_pulse");
+    if (existing.length > 0 && body.force !== true) {
+      return ok({
+        ok: true,
+        existing: existing.map((h) => String(h.id)),
+        note: "a create_pulse webhook already exists on Sales Processing — pass force:true to register ours alongside it",
+      });
+    }
+    const hookUrl = `https://xogitpqeuwalerxygvjw.supabase.co/functions/v1/monday-ooh-report?task=sales-processing&secret=${webhookSecret}`;
+    if (hookUrl.length > 255) {
+      return ok({
+        ok: false,
+        error: `webhook URL is ${hookUrl.length} chars — Monday caps at 255`,
+      });
+    }
+    const createRes = await mondayGraphql(
+      adminToken,
+      `mutation { create_webhook (board_id: ${spBoard}, url: ${JSON.stringify(hookUrl)}, event: create_pulse) { id } }`,
+    );
+    const createdId = (createRes.data?.create_webhook as { id?: string } | undefined)?.id;
+    if (createRes.error || !createdId) {
+      return ok({
+        ok: false,
+        error: `create_webhook failed: ${createRes.error ?? "no id returned"}`,
+      });
+    }
+    const registry = Array.isArray(sRow?.monday_webhooks)
+      ? [...(sRow.monday_webhooks as unknown[])]
+      : [];
+    registry.push({
+      event: "create_pulse",
+      board_id: spBoard,
+      webhook_id: String(createdId),
+      registered_at: new Date().toISOString(),
+      purpose: "rule13-sales-processing-fill",
+    });
+    await admin
+      .from("system_settings")
+      .update({ monday_webhooks: registry })
+      .eq("id", (sRow as { id: unknown }).id);
+    return ok({ ok: true, created: String(createdId) });
   }
 
   // Secret gate. Prefer a dedicated MONDAY_OOH_SECRET so this webhook is

@@ -36,6 +36,17 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export type MondayResult = { data: Record<string, unknown> | null; error: string | null };
 
+/** Raw GraphQL access for deploy-side admin tooling (webhook self-registration
+ *  — see index.ts ensure_sales_processing_webhook). Same bounded-retry client
+ *  as every other call here. */
+export function mondayGraphql(
+  token: string,
+  query: string,
+  variables?: Record<string, unknown>,
+): Promise<MondayResult> {
+  return graphql(token, query, variables);
+}
+
 async function graphql(
   token: string,
   query: string,
