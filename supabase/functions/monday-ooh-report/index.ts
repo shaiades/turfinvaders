@@ -262,15 +262,15 @@ serve(async (req) => {
     );
     if (listRes.error) return ok({ ok: false, error: `webhook list failed: ${listRes.error}` });
     const hooks = (listRes.data?.webhooks ?? []) as Array<{ id: string; event: string }>;
-    // Monday doesn't expose a webhook's URL, so an existing create_pulse hook
+    // Monday doesn't expose a webhook's URL, so an existing create_item hook
     // can't be verified as OURS — report it and only create alongside it when
     // the caller explicitly passes force:true.
-    const existing = hooks.filter((h) => h.event === "create_pulse");
+    const existing = hooks.filter((h) => h.event === "create_item");
     if (existing.length > 0 && body.force !== true) {
       return ok({
         ok: true,
         existing: existing.map((h) => String(h.id)),
-        note: "a create_pulse webhook already exists on Sales Processing — pass force:true to register ours alongside it",
+        note: "a create_item webhook already exists on Sales Processing — pass force:true to register ours alongside it",
       });
     }
     const hookUrl = `https://xogitpqeuwalerxygvjw.supabase.co/functions/v1/monday-ooh-report?task=sales-processing&secret=${webhookSecret}`;
@@ -282,7 +282,7 @@ serve(async (req) => {
     }
     const createRes = await mondayGraphql(
       adminToken,
-      `mutation { create_webhook (board_id: ${spBoard}, url: ${JSON.stringify(hookUrl)}, event: create_pulse) { id } }`,
+      `mutation { create_webhook (board_id: ${spBoard}, url: ${JSON.stringify(hookUrl)}, event: create_item) { id } }`,
     );
     const createdId = (createRes.data?.create_webhook as { id?: string } | undefined)?.id;
     if (createRes.error || !createdId) {
@@ -295,7 +295,7 @@ serve(async (req) => {
       ? [...(sRow.monday_webhooks as unknown[])]
       : [];
     registry.push({
-      event: "create_pulse",
+      event: "create_item",
       board_id: spBoard,
       webhook_id: String(createdId),
       registered_at: new Date().toISOString(),
