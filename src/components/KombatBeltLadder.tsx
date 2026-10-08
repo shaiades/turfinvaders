@@ -39,6 +39,7 @@ export function KombatBeltLadder({
   eligibility,
   canSubmit,
   onSubmitProof,
+  onTakeTest,
   totals = [],
   cartoons,
 }: {
@@ -51,6 +52,9 @@ export function KombatBeltLadder({
   eligibility: EligibilityStatus;
   canSubmit: boolean;
   onSubmitProof: () => void;
+  /** Rep-only: open the Weekly Activity Test straight from its gate. When
+   *  absent (e.g. an owner/office viewer) the gate stays a read-only chip. */
+  onTakeTest?: () => void;
   /** All reps — to stack everyone's fighter on the belt they've reached. */
   totals?: RepTotals[];
   cartoons?: Map<string, RepCartoon>;
@@ -324,6 +328,7 @@ export function KombatBeltLadder({
             ok={eligibility.testsOk}
             label="Weekly Activity Test"
             detail={`${eligibility.weeksHit}/${eligibility.weeksDue} weeks`}
+            onClick={onTakeTest}
           />
           <Gate
             ok={eligibility.saleOk}
@@ -369,14 +374,20 @@ function BeltIcon({
   );
 }
 
-function Gate({ ok, label, detail }: { ok: boolean; label: string; detail: string }) {
-  return (
-    <div
-      className={
-        "flex items-start gap-2 rounded-md border px-2.5 py-2 " +
-        (ok ? "border-victory/40 bg-victory/5" : "border-border")
-      }
-    >
+function Gate({
+  ok,
+  label,
+  detail,
+  onClick,
+}: {
+  ok: boolean;
+  label: string;
+  detail: string;
+  /** When set, the gate becomes a button that fires this (e.g. take the test). */
+  onClick?: () => void;
+}) {
+  const inner = (
+    <>
       <span
         aria-hidden
         className={
@@ -391,7 +402,31 @@ function Gate({ ok, label, detail }: { ok: boolean; label: string; detail: strin
           {label}
         </span>
         <span className="block text-[10px] text-muted-foreground">{detail}</span>
+        {onClick && (
+          <span className="mt-0.5 block text-[10px] font-semibold uppercase tracking-wide text-kombat-gold">
+            {ok ? "Take it again →" : "Take the test →"}
+          </span>
+        )}
       </span>
-    </div>
+    </>
   );
+  const base =
+    "flex items-start gap-2 rounded-md border px-2.5 py-2 text-left " +
+    (ok ? "border-victory/40 bg-victory/5" : "border-border");
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className={
+          base +
+          " min-h-11 w-full transition-colors hover:border-kombat-gold/60 hover:bg-kombat-gold/5 " +
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-kombat-gold/50 md:min-h-0"
+        }
+      >
+        {inner}
+      </button>
+    );
+  }
+  return <div className={base}>{inner}</div>;
 }
