@@ -786,6 +786,28 @@ serve(async (req) => {
         `ooh-status-${formItemId}`,
       );
       if (r2.error) throw new Error(`setStatus: ${r2.error}`);
+      // Rule 21: audit the disposition status press (old → new).
+      const oldByCol: Record<string, string | null> = {
+        [BLOCK_COL.pm]: block.pm,
+        [BLOCK_COL.rs]: block.rs,
+        [BLOCK_COL.ol]: block.ol,
+        [BLOCK_COL.bo]: block.bo,
+        [BLOCK_COL.sale]: block.sale,
+        [BLOCK_COL.iss]: block.iss,
+      };
+      await logDispatchWrite(supabase, {
+        mode: "live",
+        trigger: "report",
+        formItemId,
+        boardId: block.boardId,
+        itemId: leadId,
+        leadName: block.name,
+        columnId: wplan.status.col,
+        columnLabel: null,
+        oldValue: oldByCol[wplan.status.col] ?? null,
+        newValue: wplan.status.label,
+        reason: `dispo report from ${form.repName ?? "rep"}`,
+      });
     }
 
     // Activity-log note on the block item. Keyed by the FORM item id so a
@@ -1391,6 +1413,20 @@ async function runAutoCreate(p: {
       `ooh-create-status-${p.formItemId}`,
     );
     if (r.error) return { ok: false, error: `setStatus: ${r.error}` };
+    // Rule 21: audit the status press on the auto-created card (old = blank).
+    await logDispatchWrite(p.supabase, {
+      mode: "live",
+      trigger: "report",
+      formItemId: p.formItemId,
+      boardId: p.currentBoardId,
+      itemId: newId,
+      leadName: name,
+      columnId: p.plan.status.col,
+      columnLabel: null,
+      oldValue: null,
+      newValue: p.plan.status.label,
+      reason: "auto-created from OOH report",
+    });
   }
 
   const formLink = `https://tidal-remodeling.monday.com/boards/${FORM_BOARD_ID}/pulses/${p.formItemId}`;
