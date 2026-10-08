@@ -255,6 +255,32 @@ export function hardRuleCheck(
   return { ok: true };
 }
 
+// ── Auto-create office inference (owner "add it to this week's block") ────────
+/**
+ * Which office an auto-created item belongs to. An old-block sale reuses the
+ * original card's office; a no-lead-id report infers it from which office's
+ * attendance lists the rep (by first name, the same loose key the dispatcher
+ * matches on). null when it can't be decided confidently — both offices list
+ * the rep, or neither does — so the caller routes to review instead of guessing.
+ */
+export function inferCreateOffice(input: {
+  oldBlockOffice: "SD" | "OC" | null;
+  repName: string | null;
+  partner: string | null;
+  sdFirstNames: ReadonlySet<string>;
+  ocFirstNames: ReadonlySet<string>;
+}): "SD" | "OC" | null {
+  if (input.oldBlockOffice) return input.oldBlockOffice;
+  const names = [input.repName, input.partner]
+    .filter((n): n is string => !!n && !!n.trim())
+    .map((n) => firstName(n));
+  const inSD = names.some((n) => input.sdFirstNames.has(n));
+  const inOC = names.some((n) => input.ocFirstNames.has(n));
+  if (inSD && !inOC) return "SD";
+  if (inOC && !inSD) return "OC";
+  return null;
+}
+
 // ── Scoring (nearest first, then strength) ───────────────────────────────────
 /** Rep-strength bonus for a (rep, lead) pair, from REP_STRENGTH. */
 export function strengthBonus(repName: string, lead: DispatchLead, cfg = DISPATCH_CONFIG): number {

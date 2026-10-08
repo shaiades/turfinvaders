@@ -24,6 +24,17 @@ async function assertAdmin(supabase: AdminClient, userId: string): Promise<void>
   }
 }
 
+/** Owner-ONLY gate — stricter than assertAdmin (office_staff excluded). The
+ *  live-dispatch switch flips whether Turf Invaders writes to live Monday, so
+ *  it's the owner's lever alone (owner mandate 2026-10-07). */
+async function assertOwner(supabase: AdminClient, userId: string): Promise<void> {
+  const { data } = await supabase.from("user_roles").select("role").eq("user_id", userId);
+  const roles = ((data as Array<{ role: string }> | null) ?? []).map((r) => r.role);
+  if (!roles.includes("owner")) {
+    throw new Error("Only the owner can change the live-dispatch mode.");
+  }
+}
+
 async function settings(): Promise<{
   token: string;
   mode: OohConfig["mode"];
@@ -68,6 +79,26 @@ export const getOohConfig = createServerFn({ method: "GET" })
       formUrl: s.formUrl,
       autocreate: s.autocreate,
     };
+  });
+
+const dispatchModeInput = z.object({ mode: z.enum(["off", "dry_run", "live"]) });
+
+/** Set system_settings.live_dispatch_mode (owner only). The Dispo chip cycles
+ *  off → dry_run → live; this persists the chosen value. Returns the saved mode
+ *  so the UI can confirm. */
+export const setDispatchMode = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => dispatchModeInput.parse(d))
+  .handler(async ({ data, context }): Promise<{ ok: true; mode: OohConfig["dispatchMode"] }> => {
+    await assertOwner(context.supabase as unknown as AdminClient, context.userId);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    // system_settings is a singleton keyed by a boolean id (always true).
+    const { error } = await supabaseAdmin
+      .from("system_settings")
+      .update({ live_dispatch_mode: data.mode })
+      .eq("id", true);
+    if (error) throw new Error(error.message);
+    return { ok: true, mode: data.mode };
   });
 
 const pushInput = z.object({

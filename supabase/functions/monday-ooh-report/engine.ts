@@ -223,6 +223,35 @@ export const BLOCK_DAY_GROUP: Record<number, string> = {
   0: "new_group", // Sunday
 };
 
+/** The block "Office" status column (color_mm2yd84r) label text, per office.
+ *  Write by LABEL, never index (the "press by label" doctrine). */
+export const OFFICE_LABEL: Record<"SD" | "OC", string> = {
+  SD: "San Diego",
+  OC: "Orange County",
+};
+
+/** Weekday (0=Sun..6=Sat) of a calendar date string "YYYY-MM-DD". Noon UTC so
+ *  the date's own day is returned regardless of timezone; falls back to the
+ *  given now-instant's LA weekday on a missing/bad date. */
+export function weekdayOfDate(date: string | null | undefined, nowMs: number): number {
+  const parts = (date ?? "").split("-").map(Number);
+  if (parts.length === 3 && parts.every(Number.isFinite)) {
+    const [y, m, d] = parts;
+    return new Date(Date.UTC(y, m - 1, d, 12)).getUTCDay();
+  }
+  return laWeekday(nowMs);
+}
+
+/** The current block's day-group id for an auto-created item: the appointment
+ *  date's weekday (else today). Group ids are shared across the SD + OC boards. */
+export function blockDayGroupForAppt(
+  apptDate: { date: string } | null | undefined,
+  nowMs: number,
+): string {
+  const wd = weekdayOfDate(apptDate?.date, nowMs);
+  return BLOCK_DAY_GROUP[wd] ?? BLOCK_DAY_GROUP[laWeekday(nowMs)];
+}
+
 // Form "Result" (single_selectorxwgbu) index → meaning.
 export const RESULT = {
   SOLD: 0,
@@ -591,6 +620,12 @@ export function isSaleResult(form: OohForm): boolean {
  * sells: a loud banner, the rep(s), what they sold, and how much. Pure so the
  * verify script can assert it. Never invents an amount — a blank Sale Price just
  * omits the money line (owner rule: blank = unknown, don't backfill).
+ *
+ * "Missing sale info" is folded in as ONE trailing line, never a second text
+ * (owner mandate 2026-10-07 — we're at Inkbox's 100/day iMessage cap, so a sale
+ * is the only reason to text and the missing-info nudge rides the sale's own
+ * alert, once per sale). It carries no "$" figure so it reads as a nudge, not a
+ * money line.
  */
 export function buildSaleAlert(form: OohForm, customerName: string | null): string {
   const reps = [form.repName, form.partner].filter(Boolean).join(" & ") || "A rep";
@@ -602,6 +637,10 @@ export function buildSaleAlert(form: OohForm, customerName: string | null): stri
   lines.push(`Rep: ${reps}`);
   lines.push(`${kind}${what ? `: ${what}` : ""}`);
   if (customerName && customerName.trim()) lines.push(`Customer: ${customerName.trim()}`);
+  const missing: string[] = [];
+  if (amount == null) missing.push("amount");
+  if (!what) missing.push("what sold");
+  if (missing.length) lines.push(`⚠️ Missing ${missing.join(" + ")} — reply with it.`);
   return lines.join("\n");
 }
 
@@ -681,6 +720,21 @@ export function sourceCodeToWrite(
   // Unknown/empty source: default to 1 so the sale still reaches Sales
   // Processing, but flag it so the office can correct a Job Walk/Can Save typo.
   return { code: 1, unknownSource: true };
+}
+
+/** The Source text to stamp on an auto-created block item so Rule 4 Source Code
+ *  resolves and the office can see where it came from. An old-block sale reuses
+ *  the original card's source; a no-lead-id report uses its on-block kind. */
+export function createSourceText(form: OohForm, oldBlockSource: string | null): string {
+  if (oldBlockSource && oldBlockSource.trim()) return oldBlockSource.trim();
+  switch (form.onBlock) {
+    case ON_BLOCK.UPSELL:
+      return "Upsell";
+    case ON_BLOCK.RELOAD:
+      return "Reload";
+    default:
+      return "Self Gen"; // self-gen, or an on-block lead whose card had no source
+  }
 }
 
 // ── Reloads dropdown (dropdown2) — map the quoted products onto its labels ────
