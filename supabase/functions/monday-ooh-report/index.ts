@@ -139,7 +139,48 @@ serve(async (req) => {
     const supabase = makeClient(SUPABASE_URL, SERVICE_ROLE);
     try {
       const result = await runWatchdog(supabase);
-      return ok(result);
+      // Rule 13 sweep (belt for the item_moved_to_board webhook's braces):
+      // fill any unfilled SP pending row whose card has already arrived on
+      // Sales Processing — a moved-in card fires no create_item, so without
+      // this a missed/misconfigured event would strand the fill forever.
+      let spSwept = 0;
+      try {
+        const { data: st } = await supabase
+          .from("system_settings")
+          .select("monday_api_token")
+          .maybeSingle();
+        const tok = ((st?.monday_api_token as string | null) ?? "").trim();
+        if (tok) {
+          const { data: pend } = await supabase
+            .from("ooh_sales_processing_pending")
+            .select("form_item_id, customer_name")
+            .is("filled_at", null)
+            .order("created_at", { ascending: false })
+            .limit(20);
+          for (const r of (pend ?? []) as Array<{
+            form_item_id: string;
+            customer_name: string | null;
+          }>) {
+            if (!r.customer_name) continue;
+            const spId = await findItemOnBoardByName(
+              tok,
+              DESTINATION_BOARDS.salesProcessing,
+              r.customer_name,
+            ).catch(() => null);
+            if (!spId) continue;
+            const filled = await fillSalesProcessingForItem(
+              tok,
+              supabase,
+              spId,
+              r.customer_name,
+            ).catch(() => null);
+            if (filled?.filled) spSwept += 1;
+          }
+        }
+      } catch {
+        /* the sweep is best-effort — never fails the watchdog */
+      }
+      return ok({ ...result, spSwept });
     } catch (e) {
       console.error("[ooh watchdog] error", e instanceof Error ? e.message : String(e));
       return ok({ error: e instanceof Error ? e.message : String(e) });
@@ -177,7 +218,7 @@ serve(async (req) => {
       (spBody.event as Record<string, unknown>) ??
       spBody) as Record<string, unknown>;
     const spItemId = String(spEvent.pulseId ?? spEvent.itemId ?? spEvent.pulse_id ?? "");
-    const spName = String(spEvent.pulseName ?? spEvent.itemName ?? "");
+    let spName = String(spEvent.pulseName ?? spEvent.itemName ?? "");
     if (!spItemId || !/^\d+$/.test(spItemId)) return ok({ ignored: "no SP item id" });
     const supabase = makeClient(
       denoEnv?.get("SUPABASE_URL") ?? "",
@@ -189,6 +230,11 @@ serve(async (req) => {
       .maybeSingle();
     const spToken = ((spSettings?.monday_api_token as string | null) ?? "").trim();
     if (!spToken) return ok({ ignored: "no token" });
+    // item_moved_to_board payloads don't carry pulseName — fetch it.
+    if (!spName) {
+      const it = await fetchFormItem(spToken, spItemId).catch(() => null);
+      spName = it?.name ?? "";
+    }
     const res = await fillSalesProcessingForItem(spToken, supabase, spItemId, spName).catch(
       (e) => ({
         filled: false,
@@ -261,17 +307,6 @@ serve(async (req) => {
     );
     if (listRes.error) return ok({ ok: false, error: `webhook list failed: ${listRes.error}` });
     const hooks = (listRes.data?.webhooks ?? []) as Array<{ id: string; event: string }>;
-    // Monday doesn't expose a webhook's URL, so an existing create_item hook
-    // can't be verified as OURS — report it and only create alongside it when
-    // the caller explicitly passes force:true.
-    const existing = hooks.filter((h) => h.event === "create_item");
-    if (existing.length > 0 && body.force !== true) {
-      return ok({
-        ok: true,
-        existing: existing.map((h) => String(h.id)),
-        note: "a create_item webhook already exists on Sales Processing — pass force:true to register ours alongside it",
-      });
-    }
     const hookUrl = `https://xogitpqeuwalerxygvjw.supabase.co/functions/v1/monday-ooh-report?task=sales-processing&secret=${webhookSecret}`;
     if (hookUrl.length > 255) {
       return ok({
@@ -279,32 +314,52 @@ serve(async (req) => {
         error: `webhook URL is ${hookUrl.length} chars — Monday caps at 255`,
       });
     }
-    const createRes = await mondayGraphql(
-      adminToken,
-      `mutation { create_webhook (board_id: ${spBoard}, url: ${JSON.stringify(hookUrl)}, event: create_item) { id } }`,
-    );
-    const createdId = (createRes.data?.create_webhook as { id?: string } | undefined)?.id;
-    if (createRes.error || !createdId) {
-      return ok({
-        ok: false,
-        error: `create_webhook failed: ${createRes.error ?? "no id returned"}`,
-      });
-    }
+    // Ensure BOTH arrival events: create_item (a card born on SP) AND
+    // item_moved_to_board (the normal case — the block automation MOVES the
+    // Sold card over, which does NOT fire create_item; learned live on the
+    // first Sold, Juarez 2026-10-08). Monday doesn't expose a webhook's URL,
+    // so an existing hook of the same event can't be verified as OURS — it's
+    // reported and skipped unless force:true.
     const registry = Array.isArray(sRow?.monday_webhooks)
       ? [...(sRow.monday_webhooks as unknown[])]
       : [];
-    registry.push({
-      event: "create_item",
-      board_id: spBoard,
-      webhook_id: String(createdId),
-      registered_at: new Date().toISOString(),
-      purpose: "rule13-sales-processing-fill",
-    });
-    await admin
-      .from("system_settings")
-      .update({ monday_webhooks: registry })
-      .eq("id", (sRow as { id: unknown }).id);
-    return ok({ ok: true, created: String(createdId) });
+    const created: Record<string, string> = {};
+    const existing: Record<string, string[]> = {};
+    for (const eventType of ["create_item", "item_moved_to_board"]) {
+      const have = hooks.filter((h) => h.event === eventType);
+      if (have.length > 0 && body.force !== true) {
+        existing[eventType] = have.map((h) => String(h.id));
+        continue;
+      }
+      const createRes = await mondayGraphql(
+        adminToken,
+        `mutation { create_webhook (board_id: ${spBoard}, url: ${JSON.stringify(hookUrl)}, event: ${eventType}) { id } }`,
+      );
+      const createdId = (createRes.data?.create_webhook as { id?: string } | undefined)?.id;
+      if (createRes.error || !createdId) {
+        return ok({
+          ok: false,
+          created,
+          existing,
+          error: `create_webhook(${eventType}) failed: ${createRes.error ?? "no id returned"}`,
+        });
+      }
+      created[eventType] = String(createdId);
+      registry.push({
+        event: eventType,
+        board_id: spBoard,
+        webhook_id: String(createdId),
+        registered_at: new Date().toISOString(),
+        purpose: "rule13-sales-processing-fill",
+      });
+    }
+    if (Object.keys(created).length > 0) {
+      await admin
+        .from("system_settings")
+        .update({ monday_webhooks: registry })
+        .eq("id", (sRow as { id: unknown }).id);
+    }
+    return ok({ ok: true, created, existing });
   }
 
   // Secret gate. Prefer a dedicated MONDAY_OOH_SECRET so this webhook is
