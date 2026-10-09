@@ -39,7 +39,6 @@ import {
   fetchPeopleColumnIds,
   findItemOnBoardByName,
   mondayGraphql,
-  postUpdate,
   resolveUserId,
   resolveUserIdByFirstName,
   setColumns,
@@ -78,7 +77,6 @@ import {
   matchWeekday,
   matchWithoutLeadId,
   normName,
-  oohUpdateKey,
   parseOohForm,
   planDisposition,
   planOfficeApptDisposition,
@@ -476,7 +474,6 @@ serve(async (req) => {
     // that have no block). The write path rebuilds it once the block is known,
     // so a blank arrival can fall back to the appointment time (Rule 3 / #6).
     const detailsLine = buildDetailsLine(form, formItem.createdAtMs);
-    const formLink = `https://tidal-remodeling.monday.com/boards/${FORM_BOARD_ID}/pulses/${formItemId}`;
     baseRow = buildBaseQueueRow(form, detailsLine, plan, { customerName: formItem.name || null });
 
     // ── Rule 16a: the second partner's copy ─────────────────────────────────
@@ -765,10 +762,12 @@ serve(async (req) => {
       if (unknownSource)
         sourceCodeNote = ` (source "${block.source ?? ""}" unrecognized — set code=1)`;
     }
-    // Details: APPEND, never overwrite (Rule 3).
+    // Details: APPEND, never overwrite (Rule 3). The unknown-source flag rides
+    // the Details line — the update notes are gone (owner ruling, see below).
+    const detailsWithFlags = `${detailsLineForBlock}${sourceCodeNote}`;
     const combinedDetails = block.details?.trim()
-      ? `${block.details.trim()}\n${detailsLineForBlock}`
-      : detailsLineForBlock;
+      ? `${block.details.trim()}\n${detailsWithFlags}`
+      : detailsWithFlags;
     const columnValues: Record<string, unknown> = {
       ...fieldWrites,
       [BLOCK_COL.details]: { text: combinedDetails },
@@ -930,14 +929,9 @@ serve(async (req) => {
       });
     }
 
-    // Activity-log note on the block item. Keyed by the FORM item id so a
-    // SECOND report on the same lead still posts its note (#7).
-    await postUpdate(
-      token,
-      leadId,
-      `Dispo report from ${form.repName ?? "rep"} at ${laClock(formItem.createdAtMs)} — ${formLink}${sourceCodeNote}`,
-      oohUpdateKey(formItemId),
-    ).catch(() => undefined);
+    // NO Monday update note here — owner ruling (10/6, reaffirmed 10/8 pm):
+    // updates notify reps/managers. Details carries the record; the unknown-
+    // source flag rides the Details line (folded in above).
 
     // SALE → text leadership (Tyler / Shai / Jorge) with a loud banner: the
     // rep(s), what they sold, how much. Best-effort; live mode only. A send
@@ -1627,13 +1621,8 @@ async function runAutoCreate(p: {
     }
   }
 
-  const formLink = `https://tidal-remodeling.monday.com/boards/${FORM_BOARD_ID}/pulses/${p.formItemId}`;
-  await postUpdate(
-    p.token,
-    newId,
-    `Auto-created from OOH report by ${p.form.repName ?? "rep"} at ${laClock(p.formItem.createdAtMs)} — ${formLink}`,
-    oohUpdateKey(`create-${p.formItemId}`),
-  ).catch(() => undefined);
+  // NO Monday update note on the created card — owner ruling (10/6,
+  // reaffirmed 10/8 pm): updates notify reps/managers; Details is the record.
 
   // SALE text — the same banner as a matched sale; a no-op for a non-sale result.
   await p.alertSale().catch(() => null);
