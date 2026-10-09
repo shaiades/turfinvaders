@@ -15,6 +15,25 @@
 -- Apply via: supabase db query --linked --file supabase/migrations/20261019120000_attendance_overrides.sql
 -- ═══════════════════════════════════════════════════════════════════════════
 
+-- PR #363's branch SQL was run against prod before that PR was closed, leaving
+-- an attendance_overrides table in the OLD shape (for_date, no rep_key /
+-- updated_at) that no shipped code ever read or wrote. Replace it — but only
+-- while it's empty; rows would mean something started using it after all, and
+-- that calls for a human, not a silent drop.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'attendance_overrides'
+      AND column_name = 'for_date'
+  ) THEN
+    IF EXISTS (SELECT 1 FROM public.attendance_overrides) THEN
+      RAISE EXCEPTION 'attendance_overrides has the legacy PR #363 shape AND rows — migrate it by hand';
+    END IF;
+    DROP TABLE public.attendance_overrides;
+  END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS public.attendance_overrides (
   id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   override_date date NOT NULL,             -- the LA calendar day it applies to
