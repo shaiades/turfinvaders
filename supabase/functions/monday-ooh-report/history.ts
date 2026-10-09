@@ -11,6 +11,7 @@
 // score, reason, mode, issued) so Shai can review and Claude can learn.
 // ═══════════════════════════════════════════════════════════════════════════
 import { normName } from "./engine.ts";
+import type { AttendanceOverride } from "./dispatch.ts";
 import type { DispatchDayItem } from "./monday.ts";
 import type { Supa } from "./supa.ts";
 
@@ -72,6 +73,34 @@ export async function enrichHistory(supabase: Supa, leads: DispatchDayItem[]): P
     const reps = Array.from(priorReps);
     if (lead.isRehash || lead.isCanSave) lead.excludedReps = reps;
     if (lead.isJobWalk) lead.jobWalkReps = reps;
+  }
+}
+
+/**
+ * Today's manager attendance overrides for one office (attendance_overrides,
+ * written from Close Kombat → Dispo). The caller lays them over the Monday
+ * board read with applyAttendanceOverrides — the app always beats the board.
+ * Best-effort: a read failure (including the table not deployed yet) returns
+ * no overrides, so the dispatcher falls back to the board alone.
+ */
+export async function fetchAttendanceOverrides(
+  supabase: Supa,
+  dateLA: string,
+  office: "SD" | "OC",
+): Promise<AttendanceOverride[]> {
+  try {
+    const { data, error } = await supabase
+      .from("attendance_overrides")
+      .select("rep_name, status")
+      .eq("override_date", dateLA)
+      .eq("office", office);
+    if (error) return [];
+    return ((data as Array<{ rep_name: string; status: string }> | null) ?? []).map((r) => ({
+      repName: r.rep_name,
+      status: r.status === "on" ? ("on" as const) : ("off" as const),
+    }));
+  } catch {
+    return [];
   }
 }
 

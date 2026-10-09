@@ -235,6 +235,42 @@ export function isFreeRep(rep: DispatchRep): boolean {
   return rep.openLeadCount === 0;
 }
 
+// ── Attendance overrides (the app beats the board) ──────────────────────────
+/** One office's attendance map value, as fetchAttendance builds it. Declared
+ *  structurally here (not imported from monday.ts) so this module stays pure —
+ *  the verify script runs it under Node with no Deno module graph. */
+export type AttendanceShifts = { amOn: boolean; pmOn: boolean; amOff: boolean; pmOff: boolean };
+
+/** A manager's On/Off override for one rep today (attendance_overrides row). */
+export type AttendanceOverride = { repName: string; status: "on" | "off" };
+
+/**
+ * Lay the managers' app overrides OVER the Monday attendance board (the one
+ * unshipped piece of the 10/6 playbook, PR #363): an "off" row pulls a rep out
+ * of the working pool even though the board says On; an "on" row forces them in
+ * — INCLUDING a rep the board doesn't list at all (the entry is created).
+ * Keyed by FIRST NAME, the same loose key fetchAttendance keys its map by, so
+ * a full-name override matches the board's loosely-labeled rows. Returns a new
+ * map; the input is never mutated. Pure.
+ */
+export function applyAttendanceOverrides(
+  attendance: ReadonlyMap<string, AttendanceShifts>,
+  overrides: readonly AttendanceOverride[],
+): Map<string, AttendanceShifts> {
+  const out = new Map(attendance);
+  for (const o of overrides) {
+    const key = firstName(o.repName);
+    if (!key) continue;
+    out.set(
+      key,
+      o.status === "on"
+        ? { amOn: true, pmOn: true, amOff: false, pmOff: false }
+        : { amOn: false, pmOn: false, amOff: true, pmOff: true },
+    );
+  }
+  return out;
+}
+
 // ── Hard rules (never-issue filters) ─────────────────────────────────────────
 /** Iss-column labels that keep their own flow — never auto-issued. */
 const EXCLUDED_ISS = new Set(["office appt", "ctc", "reload", "add rep"].map((s) => s));

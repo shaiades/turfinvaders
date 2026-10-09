@@ -1,7 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
-import type { MissingReport, OohConfig } from "@/lib/ooh";
+import { attendanceOverrideKey, type MissingReport, type OohConfig } from "@/lib/ooh";
+import { laTodayISO } from "@/lib/dates";
 
 /**
  * OOH admin/config server fns. Config read is open to any signed-in user (the
@@ -215,6 +216,55 @@ export const addOohQueueNote = createServerFn({ method: "POST" })
       })
       .eq("id", data.id);
     if (updErr) throw new Error(updErr.message);
+    return { ok: true };
+  });
+
+const overrideInput = z.object({
+  office: z.enum(["SD", "OC"]),
+  repName: z.string().min(1).max(200),
+  status: z.enum(["on", "off"]),
+});
+
+/** Flip a rep On/Off for TODAY (the 10/6 playbook's attendance override, PR
+ *  #363's unshipped piece). The dispatcher lays the row over the Monday
+ *  attendance board in live issuing + the watchdog, so the app always beats the
+ *  board — including turning ON a rep the board doesn't list. One row per
+ *  (day, office, rep); flipping again replaces it. Owner / office_staff. */
+export const setAttendanceOverride = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => overrideInput.parse(d))
+  .handler(async ({ data, context }): Promise<{ ok: true }> => {
+    await assertAdmin(context.supabase as unknown as AdminClient, context.userId);
+    const repKey = attendanceOverrideKey(data.repName);
+    if (!repKey) throw new Error("Rep name is required.");
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { error } = await supabaseAdmin.from("attendance_overrides").upsert(
+      {
+        override_date: laTodayISO(),
+        office: data.office,
+        rep_name: data.repName.trim(),
+        rep_key: repKey,
+        status: data.status,
+        created_by: context.userId,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "override_date,office,rep_key" },
+    );
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+const clearOverrideInput = z.object({ id: z.string().uuid() });
+
+/** Remove an attendance override — the Monday board's own word applies again. */
+export const clearAttendanceOverride = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => clearOverrideInput.parse(d))
+  .handler(async ({ data, context }): Promise<{ ok: true }> => {
+    await assertAdmin(context.supabase as unknown as AdminClient, context.userId);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { error } = await supabaseAdmin.from("attendance_overrides").delete().eq("id", data.id);
+    if (error) throw new Error(error.message);
     return { ok: true };
   });
 

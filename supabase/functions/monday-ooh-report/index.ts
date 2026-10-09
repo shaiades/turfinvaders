@@ -87,8 +87,10 @@ import {
   type WritePlan,
 } from "./engine.ts";
 import {
+  type AttendanceShifts,
   type DispatchPairingOverride,
   type DispatchRep,
+  applyAttendanceOverrides,
   choosePartner,
   firstName,
   inferCreateOffice,
@@ -104,7 +106,12 @@ import {
 import { runWatchdog } from "./watchdog.ts";
 import { runApprovalsDecision, runBuildApprovals } from "./approvals-live.ts";
 import { APPROVALS_BOARD_ID, APPROVALS_COL, type ProposalInput } from "./approvals.ts";
-import { enrichHistory, logDispatchDecision, logDispatchWrite } from "./history.ts";
+import {
+  enrichHistory,
+  fetchAttendanceOverrides,
+  logDispatchDecision,
+  logDispatchWrite,
+} from "./history.ts";
 
 const denoEnv = (globalThis as { Deno?: { env: { get(k: string): string | undefined } } }).Deno
   ?.env;
@@ -498,7 +505,10 @@ serve(async (req) => {
     }
     const hookUrl = `https://xogitpqeuwalerxygvjw.supabase.co/functions/v1/monday-ooh-report?task=approvals&secret=${webhookSecret}`;
     if (hookUrl.length > 255) {
-      return ok({ ok: false, error: `webhook URL is ${hookUrl.length} chars — Monday caps at 255` });
+      return ok({
+        ok: false,
+        error: `webhook URL is ${hookUrl.length} chars — Monday caps at 255`,
+      });
     }
     const cfg = JSON.stringify(JSON.stringify({ columnId: APPROVALS_COL.decision }));
     const createRes = await mondayGraphql(
@@ -1308,11 +1318,16 @@ async function runDispatch(p: {
   const nowWall = nowWallMinutes(p.nowMs);
   const todayLA = laDate(p.nowMs);
 
-  const [attendance, dayItems, users] = await Promise.all([
-    fetchAttendance(p.token, p.office, weekday).catch(() => new Map()),
+  const [boardAttendance, dayItems, users, overrides] = await Promise.all([
+    fetchAttendance(p.token, p.office, weekday).catch(() => new Map<string, AttendanceShifts>()),
     fetchDispatchDayItems(p.token, p.block.boardId, p.block.groupId).catch(() => []),
     fetchMondayUsers(p.token).catch(() => [] as Array<{ id: string; name: string }>),
+    fetchAttendanceOverrides(p.supabase, todayLA, p.office),
   ]);
+  // Manager overrides from the app BEAT the attendance board (the 10/6
+  // playbook's last unshipped piece): an Off row pulls a listed rep out of the
+  // pool; an On row forces a rep in — even one the board doesn't list at all.
+  const attendance = applyAttendanceOverrides(boardAttendance, overrides);
   await enrichHistory(p.supabase, dayItems).catch(() => undefined);
 
   // Working / free reps across the office (Rule 8 — the pool a must-pair rep's
@@ -1325,10 +1340,7 @@ async function runDispatch(p: {
         isOpenLead({ iss: l.issLabel, pm: l.pm, rs: l.rs, ol: l.ol, bo: l.bo, sale: l.sale }),
     ).length;
   const workingReps: DispatchRep[] = [];
-  for (const [name, att] of attendance as Map<
-    string,
-    { amOn: boolean; pmOn: boolean; amOff: boolean; pmOff: boolean }
-  >) {
+  for (const [name, att] of attendance) {
     if (!(att.amOn || att.pmOn)) continue;
     const off = att.amOff && att.pmOff && !att.amOn && !att.pmOn;
     workingReps.push({

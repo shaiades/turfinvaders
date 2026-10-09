@@ -38,10 +38,14 @@ import {
   type MondayWriter,
 } from "../supabase/functions/monday-ooh-report/engine";
 import {
+  type AttendanceShifts,
   type DispatchLead,
   type DispatchRep,
+  applyAttendanceOverrides,
   buildRunningLateText,
   choosePartner,
+  firstName,
+  isFreeRep,
   isNeverSolo,
   isAvoidPair,
   issLabelForLead,
@@ -68,7 +72,7 @@ import {
   selectApproveAllTargets,
   wouldRemoveRep,
 } from "../supabase/functions/monday-ooh-report/approvals";
-import { isMyLeadVisible } from "../src/lib/ooh";
+import { attendanceOverrideKey, isMyLeadVisible } from "../src/lib/ooh";
 
 let failures = 0;
 function expectEq(label: string, got: unknown, want: unknown) {
@@ -842,6 +846,107 @@ function mkRep(over: Partial<DispatchRep> = {}): DispatchRep {
   );
 }
 
+// ═══ ATTENDANCE OVERRIDES (the 10/6 playbook's last piece, PR #363) ═════════
+// A manager's app override for TODAY beats the Monday attendance board in both
+// the report-flow issuer and the watchdog — an Off row pulls a listed rep out
+// of the pool, an On row forces one in, INCLUDING a rep the board doesn't list.
+{
+  const ON: AttendanceShifts = { amOn: true, pmOn: true, amOff: false, pmOff: false };
+  const OFF: AttendanceShifts = { amOn: false, pmOn: false, amOff: true, pmOff: true };
+  const board = new Map<string, AttendanceShifts>([
+    ["jaxon", ON],
+    ["nick", OFF],
+  ]);
+  const out = applyAttendanceOverrides(board, [
+    { repName: "Jaxon Heilman", status: "off" },
+    { repName: "Nick Schoeben", status: "on" },
+    { repName: "Ghost Rep", status: "on" },
+  ]);
+  expectEq("Override: Off beats the board's On", out.get("jaxon"), OFF);
+  expectEq("Override: On beats the board's Off", out.get("nick"), ON);
+  expectEq("Override: On ADDS a rep the board doesn't list", out.get("ghost"), ON);
+  expectEq("Override: the board map itself is never mutated", board.get("jaxon"), ON);
+  expectEq(
+    "Override: no overrides → the board stands",
+    [...applyAttendanceOverrides(board, []).entries()],
+    [...board.entries()],
+  );
+  // The override is keyed by FIRST name — the same loose key fetchAttendance
+  // uses — and the app-side rep_key mirrors the engine's firstName exactly.
+  expectEq(
+    "Override: app rep_key mirrors the engine's attendance key",
+    attendanceOverrideKey("  Jaxon   Heilman "),
+    firstName("Jaxon Heilman"),
+  );
+  // Downstream, the glue derives working/off from the overridden shifts the
+  // same way it does from the board — so a forced-Off rep is never free (no
+  // next lead, never a partner) and a forced-On ghost can be issued to.
+  const asRep = (name: string, att: AttendanceShifts): DispatchRep => ({
+    name,
+    office: "SD",
+    working: att.amOn || att.pmOn,
+    off: att.amOff && att.pmOff && !att.amOn && !att.pmOn,
+    openLeadCount: 0,
+    lastCoords: null,
+  });
+  expect(
+    "Override: a forced-Off rep is not free",
+    !isFreeRep(asRep("Jaxon Heilman", out.get("jaxon")!)),
+  );
+  expect(
+    "Override: a forced-On unlisted rep IS free to issue to",
+    isFreeRep(asRep("Ghost Rep", out.get("ghost")!)),
+  );
+  expectEq(
+    "Override: the issuer skips a forced-Off rep",
+    planIssue({
+      rep: asRep("Jaxon Heilman", out.get("jaxon")!),
+      dayLeads: [mkLead({ apptWallMinutes: 14 * 60 })],
+      nowWallMinutes: 10 * 60,
+    }).action,
+    "none",
+  );
+  expectEq(
+    "Override: the issuer hands a forced-On unlisted rep a lead",
+    planIssue({
+      rep: asRep("Ghost Rep", out.get("ghost")!),
+      dayLeads: [mkLead({ apptWallMinutes: 14 * 60 })],
+      nowWallMinutes: 10 * 60,
+    }).action,
+    "issue",
+  );
+  // Watchdog side: a forced-On rep who can cover in time means NO uncovered
+  // alert; force them Off and the alert fires.
+  const soonLead = {
+    itemId: "wd-ovr",
+    name: "Soon",
+    apptWallMinutes: 10 * 60 + 50,
+    reps: [],
+    issLabel: "Not Issued",
+  };
+  const freeGhost = { ...asRep("Ghost Rep", ON), lastCoords: SD_A };
+  const covered = planWatchdog({
+    nowWallMinutes: 10 * 60,
+    leads: [soonLead],
+    freeReps: [freeGhost],
+    lateReporters: [],
+    workingReps: [freeGhost],
+    alreadyAlerted: new Set<string>(),
+    dispatchLeadsById: new Map([["wd-ovr", mkLead({ itemId: "wd-ovr", coords: SD_A })]]),
+  });
+  expectEq("Override: a forced-On rep covers the watchdog's lead", covered.alerts.length, 0);
+  const uncovered = planWatchdog({
+    nowWallMinutes: 10 * 60,
+    leads: [soonLead],
+    freeReps: [], // the only rep was forced Off → not working, not free
+    lateReporters: [],
+    workingReps: [],
+    alreadyAlerted: new Set<string>(),
+    dispatchLeadsById: new Map([["wd-ovr", mkLead({ itemId: "wd-ovr", coords: SD_A })]]),
+  });
+  expectEq("Override: forcing that rep Off leaves the lead uncovered", uncovered.alerts.length, 1);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // H / I / J — NIGHTLY APPROVALS (owner mandate 2026-10-08 night, rules 1–10)
 // ═══════════════════════════════════════════════════════════════════════════
@@ -879,7 +984,11 @@ function mkDayItem(over: Partial<ApprovalsDayItem> = {}): ApprovalsDayItem {
     rows.map((r) => r.blockItemId).sort(),
     ["1", "2", "3"],
   );
-  expectEq("Rule H1: rows carry the office section", rows.every((r) => r.office === "SD"), true);
+  expectEq(
+    "Rule H1: rows carry the office section",
+    rows.every((r) => r.office === "SD"),
+    true,
+  );
 }
 
 // Rule H2 — each row shows time, customer, city, Source, status, current reps
@@ -935,9 +1044,7 @@ function mkDayItem(over: Partial<ApprovalsDayItem> = {}): ApprovalsDayItem {
   const rows = buildApprovalsRows({
     office: "SD",
     items: [mkDayItem({ itemId: "1", reps: ["Yakup Sancakli"] })],
-    proposals: [
-      { blockItemId: "1", addReps: ["Jonathan Paz"], reason: "Yakup needs a partner" },
-    ],
+    proposals: [{ blockItemId: "1", addReps: ["Jonathan Paz"], reason: "Yakup needs a partner" }],
   });
   const s = rows[0].suggestion;
   expect("Rule H4: diff shows Current: …", s.includes("Current: Yakup Sancakli"));
@@ -995,7 +1102,12 @@ function mkDayItem(over: Partial<ApprovalsDayItem> = {}): ApprovalsDayItem {
 // Rule I6 — a reset belongs to the rep who set it: a replace-shaped proposal
 // on a reset NEVER removes them; the add (if any) survives as "Add …".
 {
-  const reset = mkDayItem({ itemId: "7", reps: ["Yakup Sancakli"], isReset: true, rs: LABEL.reset });
+  const reset = mkDayItem({
+    itemId: "7",
+    reps: ["Yakup Sancakli"],
+    isReset: true,
+    rs: LABEL.reset,
+  });
   const sanitized = sanitizeProposal(reset, {
     blockItemId: "7",
     proposedReps: ["Jonathan Paz"], // "Yakup → Jonathan"
@@ -1010,11 +1122,9 @@ function mkDayItem(over: Partial<ApprovalsDayItem> = {}): ApprovalsDayItem {
 // Rule I7 — the original rep comes from people6, else the report (rep +
 // partner) that created the reset; unknown ⇒ propose NOTHING for that row.
 {
-  expectEq(
-    "Rule I7: people6 names the owner",
-    resetOwners({ reps: ["Yakup Sancakli"] }, null),
-    ["Yakup Sancakli"],
-  );
+  expectEq("Rule I7: people6 names the owner", resetOwners({ reps: ["Yakup Sancakli"] }, null), [
+    "Yakup Sancakli",
+  ]);
   expectEq(
     "Rule I7: empty people6 falls back to the creating report's rep + partner",
     resetOwners({ reps: [] }, { repName: "Yakup Sancakli", partner: "Bergan Lundak" }),
@@ -1075,7 +1185,11 @@ function mkDayItem(over: Partial<ApprovalsDayItem> = {}): ApprovalsDayItem {
     items: [yakupReset],
     proposals: [{ blockItemId: "911", proposedReps: ["Yakup Sancakli"] }],
   });
-  expectEq("Rule I9: a pure-removal proposal shows 'No change'", noAdd[0].suggestion, NO_CHANGE_TEXT);
+  expectEq(
+    "Rule I9: a pure-removal proposal shows 'No change'",
+    noAdd[0].suggestion,
+    NO_CHANGE_TEXT,
+  );
 }
 
 // Rule J10 — every approved or rejected proposal lands in the rule-G audit
@@ -1108,4 +1222,6 @@ if (failures > 0) {
   console.error(`\n${failures} failure(s)`);
   process.exit(1);
 }
-console.log("\nAll dispatch-rule assertions passed (A–G 1–21 + nightly approvals H/I/J 1–10).");
+console.log(
+  "\nAll dispatch-rule assertions passed (A–G 1–21 + nightly approvals H/I/J 1–10 + attendance overrides).",
+);

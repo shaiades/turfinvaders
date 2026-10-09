@@ -41,10 +41,12 @@ import {
   setStatus,
 } from "./monday.ts";
 import {
+  type AttendanceShifts,
   type DispatchLead,
   type DispatchPairingOverride,
   type DispatchRep,
   type WatchdogLead,
+  applyAttendanceOverrides,
   buildRunningLateText,
   choosePartner,
   findLateReporters,
@@ -63,7 +65,7 @@ import {
   withPairing,
 } from "./dispatch.ts";
 import { sendDispatcherIMessage } from "./inkbox.ts";
-import { logDispatchDecision, logDispatchWrite } from "./history.ts";
+import { fetchAttendanceOverrides, logDispatchDecision, logDispatchWrite } from "./history.ts";
 
 export type WatchdogSummary = {
   ran: boolean;
@@ -126,20 +128,22 @@ export async function runWatchdog(supabase: Supa): Promise<WatchdogSummary> {
 
   for (const { office, boardId } of offices) {
     if (!boardId) continue;
-    const [dayItems, attendance] = await Promise.all([
+    const [dayItems, boardAttendance, overrides] = await Promise.all([
       fetchDispatchDayItems(token, boardId, groupId).catch(() => []),
-      fetchAttendance(token, office, weekday).catch(() => new Map()),
+      fetchAttendance(token, office, weekday).catch(() => new Map<string, AttendanceShifts>()),
+      fetchAttendanceOverrides(supabase, todayLA, office),
     ]);
     if (dayItems.length === 0) continue;
+    // Manager overrides from the app BEAT the attendance board here too (the
+    // 10/6 playbook's last unshipped piece): an Off row pulls a listed rep out
+    // of the pool; an On row forces one in — even a rep the board doesn't list.
+    const attendance = applyAttendanceOverrides(boardAttendance, overrides);
 
     // Working reps + their open-lead counts → free set. Attendance is keyed by
     // FIRST NAME (the boards label rows loosely), so match day-item reps —
     // which carry full people6 names — by first name too.
     const workingReps: DispatchRep[] = [];
-    for (const [name, att] of attendance as Map<
-      string,
-      { amOn: boolean; pmOn: boolean; amOff: boolean; pmOff: boolean }
-    >) {
+    for (const [name, att] of attendance) {
       const working = att.amOn || att.pmOn;
       if (!working) continue;
       const off = att.amOff && att.pmOff && !att.amOn && !att.pmOn;

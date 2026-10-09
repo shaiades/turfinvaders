@@ -2,14 +2,17 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
   addOohQueueNote,
+  clearAttendanceOverride,
   getOohConfig,
   listMissingReports,
   nextLeadForRep,
   pushLeadIssue,
   resolveOohQueueItem,
+  setAttendanceOverride,
   setDispatchMode,
 } from "@/lib/ooh.functions";
-import type { OohConfig, OohDispatchWrite, OohQueueRow } from "@/lib/ooh";
+import { laTodayISO } from "@/lib/dates";
+import type { AttendanceOverrideRow, OohConfig, OohDispatchWrite, OohQueueRow } from "@/lib/ooh";
 
 /**
  * OOH admin data layer. The queue reads straight through the browser client
@@ -69,6 +72,26 @@ export function useOohConfig(enabled = true) {
   });
 }
 
+/** Today's attendance overrides (the Dispo panel list). Reads straight through
+ *  under RLS (owner / office_staff); an error renders nothing — table not
+ *  deployed yet (migration 20261019120000) and the feature ships dark. */
+export function useAttendanceOverrides(enabled = true) {
+  return useQuery({
+    queryKey: ["ooh", "attendance-overrides"],
+    enabled,
+    refetchInterval: 60_000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("attendance_overrides")
+        .select("*")
+        .eq("override_date", laTodayISO())
+        .order("created_at", { ascending: false });
+      if (error) return null;
+      return (data ?? []) as AttendanceOverrideRow[];
+    },
+  });
+}
+
 /** Missing-reports list (admin; reads the current blocks via a server fn). */
 export function useMissingReports(enabled = true) {
   return useQuery({
@@ -115,5 +138,17 @@ export function useOohMutations() {
     onSuccess: refresh,
   });
 
-  return { resolve, pushLead, nextLead, addNote, dispatchMode };
+  // Attendance overrides: force a rep On/Off for today (beats the Monday
+  // attendance board in live issuing + the watchdog), and undo one.
+  const setOverride = useMutation({
+    mutationFn: (vars: { office: "SD" | "OC"; repName: string; status: "on" | "off" }) =>
+      setAttendanceOverride({ data: vars }),
+    onSuccess: refresh,
+  });
+  const clearOverride = useMutation({
+    mutationFn: (vars: { id: string }) => clearAttendanceOverride({ data: vars }),
+    onSuccess: refresh,
+  });
+
+  return { resolve, pushLead, nextLead, addNote, dispatchMode, setOverride, clearOverride };
 }

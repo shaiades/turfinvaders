@@ -2418,6 +2418,42 @@ export type Database = {
         }
         Relationships: []
       }
+      attendance_overrides: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          office: string
+          override_date: string
+          rep_key: string
+          rep_name: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          office: string
+          override_date: string
+          rep_key: string
+          rep_name: string
+          status: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          office?: string
+          override_date?: string
+          rep_key?: string
+          rep_name?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       respawn_requests: {
         Row: {
           approved_shifts: string[] | null
