@@ -1597,6 +1597,36 @@ async function runAutoCreate(p: {
     });
   }
 
+  // Rule 13: an auto-created sale routes to Sales Processing exactly like a
+  // matched one — stage its deposit / finance / Advantage+ / reloads for the
+  // SP-board webhook to fill (gap caught on the first live auto-created
+  // Upsell, Meyer 2026-10-08: only the matched path staged a pending row).
+  if (p.plan.status?.col === BLOCK_COL.sale) {
+    const spValues = planSalesProcessingWrite(p.form);
+    if (Object.keys(spValues).length > 0) {
+      await p.supabase
+        .from("ooh_sales_processing_pending")
+        .upsert(
+          {
+            form_item_id: p.formItemId,
+            customer_key: customerDayKey(
+              name,
+              p.form.apptDate?.date ?? laDate(p.formItem.createdAtMs),
+              p.form.address,
+            ),
+            customer_name: name,
+            board_id: p.currentBoardId,
+            values: spValues,
+          },
+          { onConflict: "form_item_id" },
+        )
+        .then(
+          () => undefined,
+          () => undefined,
+        );
+    }
+  }
+
   const formLink = `https://tidal-remodeling.monday.com/boards/${FORM_BOARD_ID}/pulses/${p.formItemId}`;
   await postUpdate(
     p.token,
