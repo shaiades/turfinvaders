@@ -54,6 +54,19 @@ import {
   withPairing,
 } from "../supabase/functions/monday-ooh-report/dispatch";
 import { parsePeopleColumnValue } from "../supabase/functions/monday-ooh-report/monday";
+import {
+  CHANGED_BY_OFFICE_NOTE,
+  NO_CHANGE_TEXT,
+  type ApprovalsDayItem,
+  applyGuard,
+  applyWriteIds,
+  buildApprovalsRows,
+  decisionKind,
+  resetOwners,
+  sanitizeProposal,
+  selectApproveAllTargets,
+  wouldRemoveRep,
+} from "../supabase/functions/monday-ooh-report/approvals";
 import { isMyLeadVisible } from "../src/lib/ooh";
 
 let failures = 0;
@@ -800,8 +813,270 @@ function mkRep(over: Partial<DispatchRep> = {}): DispatchRep {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// H / I / J — NIGHTLY APPROVALS (owner mandate 2026-10-08 night, rules 1–10)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function mkDayItem(over: Partial<ApprovalsDayItem> = {}): ApprovalsDayItem {
+  return {
+    ...mkLead(),
+    pm: null,
+    rs: null,
+    ol: null,
+    bo: null,
+    sale: null,
+    sourceText: "RepCard",
+    detailsText: "Gate code 1234",
+    addressText: "6345 Southern Rd, La Mesa, CA 91942, USA",
+    ...over,
+  };
+}
+
+// Rule H1 — one row per block item of tomorrow's group, EVERY item included
+// (not only the changed ones), for each office.
+{
+  const items = [
+    mkDayItem({ itemId: "1", name: "Avila", apptWallMinutes: 9 * 60 }),
+    mkDayItem({ itemId: "2", name: "Burke", apptWallMinutes: 13 * 60, reps: ["Yakup Sancakli"] }),
+    mkDayItem({ itemId: "3", name: "Chen", apptWallMinutes: 17 * 60 + 30 }),
+  ];
+  const rows = buildApprovalsRows({
+    office: "SD",
+    items,
+    proposals: [{ blockItemId: "1", addReps: ["Jonathan Paz"], reason: "first lead" }],
+  });
+  expectEq(
+    "Rule H1: every item in tomorrow's group gets a row, changed or not",
+    rows.map((r) => r.blockItemId).sort(),
+    ["1", "2", "3"],
+  );
+  expectEq("Rule H1: rows carry the office section", rows.every((r) => r.office === "SD"), true);
+}
+
+// Rule H2 — each row shows time, customer, city, Source, status, current reps
+// (people6), Details (long_text3) and the proposal beside them; sorted by time.
+{
+  const items = [
+    mkDayItem({ itemId: "2", name: "Burke", apptWallMinutes: 17 * 60 + 30 }),
+    mkDayItem({
+      itemId: "1",
+      name: "Avila",
+      apptWallMinutes: 9 * 60,
+      reps: ["Yakup Sancakli", "Bergan Lundak"],
+      issLabel: LABEL.iss,
+      rs: LABEL.reset,
+      products: ["roof"],
+    }),
+    mkDayItem({ itemId: "3", name: "NoTime", apptWallMinutes: null }),
+  ];
+  const rows = buildApprovalsRows({ office: "SD", items, proposals: [] });
+  expectEq(
+    "Rule H2: sorted by time (unknown time last)",
+    rows.map((r) => r.blockItemId),
+    ["1", "2", "3"],
+  );
+  const avila = rows[0];
+  expectEq("Rule H2: time cell (engine wall-clock format)", avila.timeText, "9am");
+  expectEq("Rule H2: customer name", avila.name, "Avila");
+  expectEq("Rule H2: city from the Location address", avila.cityText, "La Mesa");
+  expectEq("Rule H2: Source (text)", avila.sourceText, "RepCard");
+  expectEq("Rule H2: status = Iss + set dispositions", avila.blockStatusText, "Iss · Reset");
+  expectEq("Rule H2: current reps (people6)", avila.currentRepNames, [
+    "Yakup Sancakli",
+    "Bergan Lundak",
+  ]);
+  expectEq("Rule H2: Details (long_text3)", avila.leadNotes, "Gate code 1234");
+  expect("Rule H2: the proposal sits in its own cell", typeof avila.suggestion === "string");
+}
+
+// Rule H3 — rows with no proposal say exactly "No change".
+{
+  const rows = buildApprovalsRows({
+    office: "OC",
+    items: [mkDayItem({ itemId: "9", reps: ["Sam"] })],
+    proposals: [],
+  });
+  expectEq("Rule H3: untouched rows read 'No change'", rows[0].suggestion, NO_CHANGE_TEXT);
+  expectEq("Rule H3: untouched rows carry no pending change", rows[0].hasChange, false);
+}
+
+// Rule H4 — a change shows as a Current → Proposed diff with its reason; the
+// Approve-all selection takes ONLY rows still pending with a change.
+{
+  const rows = buildApprovalsRows({
+    office: "SD",
+    items: [mkDayItem({ itemId: "1", reps: ["Yakup Sancakli"] })],
+    proposals: [
+      { blockItemId: "1", addReps: ["Jonathan Paz"], reason: "Yakup needs a partner" },
+    ],
+  });
+  const s = rows[0].suggestion;
+  expect("Rule H4: diff shows Current: …", s.includes("Current: Yakup Sancakli"));
+  expect(
+    "Rule H4: diff shows Proposed: … (add-only)",
+    s.includes("Proposed: Yakup Sancakli + Jonathan Paz"),
+  );
+  expect("Rule H4: the reason rides along", s.includes("Yakup needs a partner"));
+
+  const targets = selectApproveAllTargets([
+    { state: "pending" as const, addNames: ["Jonathan"] }, // still pending → in
+    { state: "applied" as const, addNames: ["Jonathan"] }, // already applied → out
+    { state: "skipped" as const, addNames: ["Jonathan"] }, // office changed it → out
+    { state: "rejected" as const, addNames: ["Jonathan"] }, // rejected → out
+    { state: "pending" as const, addNames: [] }, // "No change" → out
+  ]);
+  expectEq("Rule H4: Approve-all applies only rows still pending a change", targets.length, 1);
+}
+
+// Rule H5 — nothing is written until Approve; the pre-write re-read drops the
+// proposal when people6 OR a status changed, with the exact owner wording.
+{
+  const snapshot = {
+    repNames: ["Yakup Sancakli"],
+    iss: LABEL.notIssued,
+    pm: null,
+    rs: null,
+    ol: null,
+    bo: null,
+    sale: null,
+  };
+  const unchanged = applyGuard({
+    snapshot,
+    current: { ...snapshot, repNames: ["yakup  sancakli"] }, // normalized compare
+  });
+  expectEq("Rule H5: unchanged item passes the guard", unchanged, { ok: true });
+  const repsChanged = applyGuard({
+    snapshot,
+    current: { ...snapshot, repNames: ["Yakup Sancakli", "Nick Smith"] },
+  });
+  expectEq("Rule H5: people6 changed since proposal → dropped", repsChanged, {
+    ok: false,
+    note: CHANGED_BY_OFFICE_NOTE,
+  });
+  const statusChanged = applyGuard({
+    snapshot,
+    current: { ...snapshot, iss: LABEL.iss },
+  });
+  expectEq("Rule H5: status changed since proposal → dropped", statusChanged, {
+    ok: false,
+    note: "Changed by office, skipped",
+  });
+}
+
+// Rule I6 — a reset belongs to the rep who set it: a replace-shaped proposal
+// on a reset NEVER removes them; the add (if any) survives as "Add …".
+{
+  const reset = mkDayItem({ itemId: "7", reps: ["Yakup Sancakli"], isReset: true, rs: LABEL.reset });
+  const sanitized = sanitizeProposal(reset, {
+    blockItemId: "7",
+    proposedReps: ["Jonathan Paz"], // "Yakup → Jonathan"
+    reason: "second rep",
+  });
+  expectEq("Rule I6: the reset's rep is never removed", sanitized?.droppedRemovals, [
+    "Yakup Sancakli",
+  ]);
+  expectEq("Rule I6: the second rep is proposed as an ADD", sanitized?.addReps, ["Jonathan Paz"]);
+}
+
+// Rule I7 — the original rep comes from people6, else the report (rep +
+// partner) that created the reset; unknown ⇒ propose NOTHING for that row.
+{
+  expectEq(
+    "Rule I7: people6 names the owner",
+    resetOwners({ reps: ["Yakup Sancakli"] }, null),
+    ["Yakup Sancakli"],
+  );
+  expectEq(
+    "Rule I7: empty people6 falls back to the creating report's rep + partner",
+    resetOwners({ reps: [] }, { repName: "Yakup Sancakli", partner: "Bergan Lundak" }),
+    ["Yakup Sancakli", "Bergan Lundak"],
+  );
+  expectEq("Rule I7: neither known → owner unknown", resetOwners({ reps: [] }, null), null);
+  const orphanReset = mkDayItem({ itemId: "8", reps: [], isReset: true });
+  expectEq(
+    "Rule I7: unknown owner → no proposal at all for that row",
+    sanitizeProposal(orphanReset, { blockItemId: "8", proposedReps: ["Jonathan Paz"] }, null),
+    null,
+  );
+}
+
+// Rule I8 — ALL people6 changes are add-only (same as rule A1), approvals
+// board and live dispatch alike. applyWriteIds is the ONE write shape; a
+// write that would drop anyone is refused by wouldRemoveRep.
+{
+  expectEq(
+    "Rule I8: the write is union(current, adds) — never fewer",
+    applyWriteIds(["10", "20"], ["30", "10"]),
+    ["10", "20", "30"],
+  );
+  expectEq(
+    "Rule I8: live dispatch's mergePeople is the same add-only union",
+    mergePeople(["10", "20"], ["30"]),
+    ["10", "20", "30"],
+  );
+  expect("Rule I8: dropping a rep is detected and refused", wouldRemoveRep(["10", "20"], ["20"]));
+  expect(
+    "Rule I8: an add-only result passes the removal gate",
+    !wouldRemoveRep(["10", "20"], applyWriteIds(["10", "20"], ["30"])),
+  );
+}
+
+// Rule I9 — the 10/8-night test case verbatim: Yakup's own reset proposed as
+// "Yakup → Jonathan" must show "No change" or "Add Jonathan", never a replace.
+{
+  const yakupReset = mkDayItem({
+    itemId: "911",
+    name: "Yakup's reset",
+    reps: ["Yakup Sancakli"],
+    isReset: true,
+    rs: LABEL.reset,
+  });
+  const rows = buildApprovalsRows({
+    office: "SD",
+    items: [yakupReset],
+    proposals: [{ blockItemId: "911", proposedReps: ["Jonathan Paz"], reason: "stronger closer" }],
+  });
+  const s = rows[0].suggestion;
+  expect("Rule I9: shows 'Add Jonathan', not a replace", s.startsWith("Add Jonathan"));
+  expect("Rule I9: Yakup stays in the proposed set", s.includes("Yakup Sancakli + Jonathan Paz"));
+  expect("Rule I9: the dropped replace is called out", s.includes("dropped: reps are add-only"));
+  // And the same proposal with NO add (pure removal) collapses to "No change".
+  const noAdd = buildApprovalsRows({
+    office: "SD",
+    items: [yakupReset],
+    proposals: [{ blockItemId: "911", proposedReps: ["Yakup Sancakli"] }],
+  });
+  expectEq("Rule I9: a pure-removal proposal shows 'No change'", noAdd[0].suggestion, NO_CHANGE_TEXT);
+}
+
+// Rule J10 — every approved or rejected proposal lands in the rule-G audit
+// with who decided, when, and old → new values.
+{
+  const audit = {
+    trigger: "approvals",
+    actor: "approvals:Tyler Ward",
+    oldValue: "Yakup Sancakli",
+    newValue: "Yakup Sancakli, Jonathan Paz",
+    reason: "approved by Tyler Ward: Yakup needs a partner",
+    createdAt: "2026-10-09T03:00:00Z",
+  };
+  expect(
+    "Rule J10: the audit row names the approver, the time and old → new",
+    audit.trigger === "approvals" &&
+      audit.actor.includes("Tyler Ward") &&
+      audit.oldValue !== audit.newValue &&
+      !!audit.createdAt,
+  );
+  // The decision webhook only acts on real decisions — Pending/unknown are
+  // no-ops, Approve/Don't approve/Change/Add rep act.
+  expectEq("Rule J10: Pending is a no-op", decisionKind("Pending"), "pending");
+  expectEq("Rule J10: Approve applies", decisionKind("Approve"), "approve");
+  expectEq("Rule J10: Don't approve records a rejection", decisionKind("Don't approve"), "reject");
+  expectEq("Rule J10: Add rep is a manager-directed add", decisionKind("Add rep"), "add_rep");
+}
+
 if (failures > 0) {
   console.error(`\n${failures} failure(s)`);
   process.exit(1);
 }
-console.log("\nAll 21 dispatch-rule assertions passed.");
+console.log("\nAll dispatch-rule assertions passed (A–G 1–21 + nightly approvals H/I/J 1–10).");

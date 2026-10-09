@@ -2307,6 +2307,66 @@ export type Database = {
         }
         Relationships: []
       }
+      nightly_approvals: {
+        Row: {
+          applied_at: string | null
+          approvals_item_id: string
+          block_board_id: string
+          block_item_id: string
+          created_at: string
+          decided_at: string | null
+          decided_by: string | null
+          id: string
+          lead_date: string | null
+          lead_name: string | null
+          office: string | null
+          proposed_add_names: string[]
+          reason: string | null
+          result_note: string | null
+          snapshot_rep_names: string[]
+          snapshot_statuses: Json | null
+          state: string
+        }
+        Insert: {
+          applied_at?: string | null
+          approvals_item_id: string
+          block_board_id: string
+          block_item_id: string
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          id?: string
+          lead_date?: string | null
+          lead_name?: string | null
+          office?: string | null
+          proposed_add_names?: string[]
+          reason?: string | null
+          result_note?: string | null
+          snapshot_rep_names?: string[]
+          snapshot_statuses?: Json | null
+          state?: string
+        }
+        Update: {
+          applied_at?: string | null
+          approvals_item_id?: string
+          block_board_id?: string
+          block_item_id?: string
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          id?: string
+          lead_date?: string | null
+          lead_name?: string | null
+          office?: string | null
+          proposed_add_names?: string[]
+          reason?: string | null
+          result_note?: string | null
+          snapshot_rep_names?: string[]
+          snapshot_statuses?: Json | null
+          state?: string
+        }
+        Relationships: []
+      }
       ooh_dispatch_writes: {
         Row: {
           actor: string
