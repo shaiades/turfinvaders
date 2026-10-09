@@ -89,6 +89,30 @@ export type OohDispatchWrite = {
   actor: string;
 };
 
+/** One manager attendance override (attendance_overrides row): forces a rep
+ *  On/Off for TODAY, beating the Monday attendance board in live issuing and
+ *  the watchdog — including turning ON a rep the board doesn't list. */
+export type AttendanceOverrideRow = {
+  id: string;
+  override_date: string; // YYYY-MM-DD (LA)
+  office: "SD" | "OC";
+  rep_name: string;
+  rep_key: string;
+  status: "on" | "off";
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/** The dispatcher's attendance key for an override: lowercased FIRST name.
+ *  MIRRORS firstName() in supabase/functions/monday-ooh-report/dispatch.ts
+ *  (the loose key fetchAttendance keys its map by) — the edge fn can't be
+ *  imported here, so the rule is duplicated and asserted in
+ *  scripts/verify-dispatch-rules.ts. */
+export function attendanceOverrideKey(name: string | null | undefined): string {
+  return oohNormName(name).split(" ")[0] ?? "";
+}
+
 export type MissingReport = {
   itemId: string;
   boardId: string;

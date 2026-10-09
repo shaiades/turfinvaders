@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { ArcadePanel } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import {
   AlertTriangle,
@@ -9,10 +10,13 @@ import {
   Loader2,
   MessageSquarePlus,
   Send,
+  UserCheck,
+  UserX,
   X,
 } from "lucide-react";
 import { oohOnBlockLabel, oohResultLabel, type OohQueueRow } from "@/lib/ooh";
 import {
+  useAttendanceOverrides,
   useDispatchWrites,
   useMissingReports,
   useOohConfig,
@@ -24,6 +28,8 @@ import { useAuth } from "@/hooks/useAuth";
 /**
  * OOH admin tab — the office's cockpit for the Out of House write-back.
  * - A status banner (mode / form link / auto-create).
+ * - "Attendance overrides": force a rep On/Off for today — beats the Monday
+ *   attendance board in live issuing + the watchdog.
  * - "Needs review" queue: unmatched or errored submissions, with Push lead,
  *   Dismiss and Mark-handled.
  * - "Dry-run previews": the plan the webhook WOULD apply (while mode = dry_run
@@ -197,6 +203,156 @@ function PushNextLeadButton({
       )}
       {label}
     </Button>
+  );
+}
+
+/**
+ * Attendance overrides — the 10/6 playbook's last unshipped piece (PR #363).
+ * A manager forces a rep On or Off for TODAY; the dispatcher lays the row over
+ * the Monday attendance-board read in live issuing AND the watchdog, so the
+ * app always wins — including turning ON a rep the board doesn't list at all.
+ * Owner / office_staff only (the tab is admin-gated; RLS + the server fns
+ * enforce it server-side). Mobile-first per AGENTS.md.
+ */
+function AttendanceOverridesPanel() {
+  const overrides = useAttendanceOverrides();
+  const { setOverride, clearOverride } = useOohMutations();
+  const [office, setOffice] = useState<"SD" | "OC">("SD");
+  const [repName, setRepName] = useState("");
+
+  const flip = (status: "on" | "off") => {
+    const name = repName.trim();
+    if (!name) {
+      toast.info("Type the rep's name first.");
+      return;
+    }
+    setOverride
+      .mutateAsync({ office, repName: name, status })
+      .then(() => {
+        toast.success(`${name} forced ${status === "on" ? "On" : "Off"} for today (${office}).`);
+        setRepName("");
+      })
+      .catch((e) => toast.error(String(e instanceof Error ? e.message : e)));
+  };
+
+  const rows = overrides.data ?? [];
+
+  return (
+    <ArcadePanel
+      title="Attendance overrides"
+      faction="kombat"
+      info={
+        <span className="text-[10px] text-muted-foreground">today · beats the Monday board</span>
+      }
+      headline={
+        rows.length > 0 ? (
+          <span className="font-display text-xs text-muted-foreground">{rows.length}</span>
+        ) : undefined
+      }
+    >
+      <div className="space-y-3">
+        <p className="text-xs text-muted-foreground">
+          Force a rep On or Off for today. Live issuing and the watchdog read this OVER the Monday
+          attendance board — On also works for a rep the board doesn't list.
+        </p>
+        <div className="flex flex-col gap-2 md:flex-row md:items-center">
+          <div className="flex gap-2">
+            {(["SD", "OC"] as const).map((o) => (
+              <Button
+                key={o}
+                type="button"
+                variant={office === o ? "default" : "outline"}
+                className="min-h-11 flex-1 md:min-h-0 md:flex-none"
+                aria-pressed={office === o}
+                onClick={() => setOffice(o)}
+              >
+                {o}
+              </Button>
+            ))}
+          </div>
+          <Input
+            value={repName}
+            onChange={(e) => setRepName(e.target.value)}
+            placeholder="Rep name (first name is enough)"
+            className="min-h-11 md:min-h-0 md:max-w-60"
+            maxLength={200}
+          />
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              className="min-h-11 flex-1 md:min-h-0"
+              disabled={setOverride.isPending}
+              onClick={() => flip("on")}
+            >
+              {setOverride.isPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <UserCheck className="size-4" />
+              )}
+              On today
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-11 flex-1 md:min-h-0"
+              disabled={setOverride.isPending}
+              onClick={() => flip("off")}
+            >
+              <UserX className="size-4" />
+              Off today
+            </Button>
+          </div>
+        </div>
+        {overrides.data === null ? (
+          <p className="text-sm text-muted-foreground">
+            Overrides not available yet (migration pending).
+          </p>
+        ) : rows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No overrides today — the Monday attendance board decides who's working.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {rows.map((o) => (
+              <div
+                key={o.id}
+                className="flex items-center justify-between gap-2 rounded-lg border border-border/40 bg-surface/50 p-3"
+              >
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <span className="truncate text-sm font-medium text-foreground">{o.rep_name}</span>
+                  <Chip cls="text-muted-foreground border-border">{o.office}</Chip>
+                  <Chip
+                    cls={
+                      o.status === "on"
+                        ? "text-victory border-victory/50"
+                        : "text-destructive border-destructive/50"
+                    }
+                  >
+                    {o.status === "on" ? "Forced On" : "Forced Off"}
+                  </Chip>
+                </div>
+                <Button
+                  variant="ghost"
+                  className="min-h-11 shrink-0 md:min-h-0"
+                  disabled={clearOverride.isPending}
+                  aria-label={`Remove the override for ${o.rep_name}`}
+                  onClick={() =>
+                    clearOverride
+                      .mutateAsync({ id: o.id })
+                      .then(() =>
+                        toast.success(`Override removed — the board decides ${o.rep_name} again.`),
+                      )
+                      .catch((e) => toast.error(String(e instanceof Error ? e.message : e)))
+                  }
+                >
+                  <X className="size-4" /> Remove
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </ArcadePanel>
   );
 }
 
@@ -379,6 +535,8 @@ export function CloseKombatOohTab() {
           </p>
         </div>
       </ArcadePanel>
+
+      <AttendanceOverridesPanel />
 
       <ArcadePanel
         title="Needs review"
