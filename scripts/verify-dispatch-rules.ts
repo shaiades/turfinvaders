@@ -43,6 +43,7 @@ import {
   buildRunningLateText,
   choosePartner,
   isNeverSolo,
+  isAvoidPair,
   issLabelForLead,
   mergePeople,
   mustPair,
@@ -362,6 +363,34 @@ function mkRep(over: Partial<DispatchRep> = {}): DispatchRep {
   expect(
     "Rule 8: a pair-when-possible rep still pairs when someone is free",
     mustPair("Jaxon Heilman", tierCfg) && !isNeverSolo("Jaxon Heilman", tierCfg),
+  );
+  // ENFORCED avoid pairs (owner, 2026-10-08 pm): the $0 pairings can never
+  // form — not via partner choice, not via an Add-Rep add.
+  const avoidCfg = withPairing({ avoidPartners: { daniel: ["Yakup"] } });
+  expect(
+    "Rule 8: avoid pairs are symmetric",
+    isAvoidPair("Daniel Figueiredo", "Yakup Sancakli", avoidCfg) &&
+      isAvoidPair("Yakup Sancakli", "Daniel Figueiredo", avoidCfg),
+  );
+  expectEq(
+    "Rule 8: an avoided partner is never chosen, even as the only free rep",
+    choosePartner({
+      rep: mkRep({ name: "Daniel Figueiredo" }),
+      lead: mkLead(),
+      freeReps: [mkRep({ name: "Yakup Sancakli" })],
+      cfg: avoidCfg,
+    }),
+    null,
+  );
+  expectEq(
+    "Rule 8: a rep is never ADDED to a lead carrying their avoid partner",
+    planIssue({
+      rep: mkRep({ name: "Yakup Sancakli" }),
+      dayLeads: [mkLead({ itemId: "d-lead", reps: ["Daniel Figueiredo"], issLabel: "Add Rep" })],
+      nowWallMinutes: 10 * 60,
+      cfg: avoidCfg,
+    }).action,
+    "none",
   );
 }
 
