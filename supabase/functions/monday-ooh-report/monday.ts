@@ -603,6 +603,10 @@ export type DispatchDayItem = DispatchLead & {
   ol: string | null;
   bo: string | null;
   sale: string | null;
+  // Display texts for the Nightly Approvals full-block view (rule H2).
+  sourceText: string | null;
+  detailsText: string | null;
+  addressText: string | null;
 };
 
 const DISPATCH_DAY_COLS = [
@@ -712,8 +716,155 @@ export async function fetchDispatchDayItems(
       ol: label(cols, BLOCK_COL.ol),
       bo: label(cols, BLOCK_COL.bo),
       sale: label(cols, BLOCK_COL.sale),
+      sourceText: cols[BLOCK_COL.source]?.text?.trim() || null,
+      detailsText: cols[BLOCK_COL.details]?.text ?? null,
+      addressText: cols[BLOCK_COL.location]?.text?.trim() || null,
     };
   });
+}
+
+/** Groups on a board (id + title) — used to find/create the per-office
+ *  Nightly Approvals sections. */
+export async function listBoardGroups(
+  token: string,
+  boardId: string,
+): Promise<Array<{ id: string; title: string }>> {
+  const { data } = await graphql(
+    token,
+    `
+      query ($b: ID!) {
+        boards(ids: [$b]) {
+          groups {
+            id
+            title
+          }
+        }
+      }
+    `,
+    { b: boardId },
+  );
+  const groups =
+    ((data?.boards as Array<{ groups?: Array<{ id?: string; title?: string }> }>) ?? [])[0]
+      ?.groups ?? [];
+  return groups
+    .filter((g) => g.id)
+    .map((g) => ({ id: String(g.id), title: String(g.title ?? "") }));
+}
+
+/** Create a group at the top of a board; returns its id (null on failure). */
+export async function createBoardGroup(
+  token: string,
+  boardId: string,
+  title: string,
+): Promise<string | null> {
+  const { data } = await graphql(
+    token,
+    `
+      mutation ($b: ID!, $t: String!) {
+        create_group(board_id: $b, group_name: $t) {
+          id
+        }
+      }
+    `,
+    { b: boardId, t: title },
+  );
+  const id = (data?.create_group as { id?: string } | undefined)?.id;
+  return id ? String(id) : null;
+}
+
+/** Items of one or more groups with the given columns (text + value). Used to
+ *  upsert the Nightly Approvals rows idempotently. */
+export async function fetchGroupItems(
+  token: string,
+  boardId: string,
+  groupIds: string[],
+  colIds: string[],
+): Promise<Array<{ id: string; name: string; groupId: string; cols: ColMap }>> {
+  const { data } = await graphql(
+    token,
+    `
+      query ($b: ID!, $g: [String], $cols: [String!]) {
+        boards(ids: [$b]) {
+          groups(ids: $g) {
+            id
+            items_page(limit: 500) {
+              items {
+                id
+                name
+                column_values(ids: $cols) {
+                  id
+                  text
+                  value
+                }
+              }
+            }
+          }
+        }
+      }
+    `,
+    { b: boardId, g: groupIds, cols: colIds },
+  );
+  const out: Array<{ id: string; name: string; groupId: string; cols: ColMap }> = [];
+  const groups =
+    ((data?.boards as Array<{
+      groups?: Array<{ id?: string; items_page?: { items?: Array<Record<string, unknown>> } }>;
+    }>) ?? [])[0]?.groups ?? [];
+  for (const g of groups) {
+    for (const it of g.items_page?.items ?? []) {
+      out.push({
+        id: String(it.id),
+        name: String(it.name ?? ""),
+        groupId: String(g.id ?? ""),
+        cols: colMapOf(
+          it.column_values as Array<{ id: string; text: string | null; value: string | null }>,
+        ),
+      });
+    }
+  }
+  return out;
+}
+
+/** One item's selected columns (text + value) — the approvals row a Decision
+ *  webhook points at. */
+export async function fetchItemCols(
+  token: string,
+  itemId: string,
+  colIds: string[],
+): Promise<{ id: string; name: string; boardId: string; groupId: string; cols: ColMap } | null> {
+  const { data } = await graphql(
+    token,
+    `
+      query ($ids: [ID!], $cols: [String!]) {
+        items(ids: $ids) {
+          id
+          name
+          board {
+            id
+          }
+          group {
+            id
+          }
+          column_values(ids: $cols) {
+            id
+            text
+            value
+          }
+        }
+      }
+    `,
+    { ids: [itemId], cols: colIds },
+  );
+  const it = ((data?.items as Array<Record<string, unknown>>) ?? [])[0];
+  if (!it) return null;
+  return {
+    id: String(it.id),
+    name: String(it.name ?? ""),
+    boardId: String((it.board as { id?: string })?.id ?? ""),
+    groupId: String((it.group as { id?: string })?.id ?? ""),
+    cols: colMapOf(
+      it.column_values as Array<{ id: string; text: string | null; value: string | null }>,
+    ),
+  };
 }
 
 /** All active Monday users (id + name) — to resolve a rep name → the user id a
