@@ -230,7 +230,7 @@ serve(async (req) => {
       .maybeSingle();
     const spToken = ((spSettings?.monday_api_token as string | null) ?? "").trim();
     if (!spToken) return ok({ ignored: "no token" });
-    // item_moved_to_board payloads don't carry pulseName — fetch it.
+    // Moved-in payloads don't carry pulseName — fetch it.
     if (!spName) {
       const it = await fetchFormItem(spToken, spItemId).catch(() => null);
       spName = it?.name ?? "";
@@ -315,9 +315,12 @@ serve(async (req) => {
       });
     }
     // Ensure BOTH arrival events: create_item (a card born on SP) AND
-    // item_moved_to_board (the normal case — the block automation MOVES the
-    // Sold card over, which does NOT fire create_item; learned live on the
-    // first Sold, Juarez 2026-10-08). Monday doesn't expose a webhook's URL,
+    // item_moved_to_any_group (the normal case — the block automation MOVES
+    // the Sold card over, which does NOT fire create_item; learned live on
+    // the first Sold, Juarez 2026-10-08. There is no item_moved_to_board in
+    // Monday's enum; a cross-board move lands in a destination group, so the
+    // any-group event fires — within-board drags are harmless no-ops against
+    // the pending lookup). Monday doesn't expose a webhook's URL,
     // so an existing hook of the same event can't be verified as OURS — it's
     // reported and skipped unless force:true.
     const registry = Array.isArray(sRow?.monday_webhooks)
@@ -325,7 +328,7 @@ serve(async (req) => {
       : [];
     const created: Record<string, string> = {};
     const existing: Record<string, string[]> = {};
-    for (const eventType of ["create_item", "item_moved_to_board"]) {
+    for (const eventType of ["create_item", "item_moved_to_any_group"]) {
       const have = hooks.filter((h) => h.event === eventType);
       if (have.length > 0 && body.force !== true) {
         existing[eventType] = have.map((h) => String(h.id));
