@@ -500,10 +500,13 @@ serve(async (req) => {
     if (hookUrl.length > 255) {
       return ok({ ok: false, error: `webhook URL is ${hookUrl.length} chars — Monday caps at 255` });
     }
-    const cfg = JSON.stringify(JSON.stringify({ columnId: APPROVALS_COL.decision }));
+    // change_status_column_value takes NO config — it fires on every status
+    // column, and runApprovalsDecision ignores any column that isn't Decision.
+    // (A columnId config is only valid for change_specific_column_value; passing
+    // it here returns InvalidWebhookConfigException.)
     const createRes = await mondayGraphql(
       adminToken,
-      `mutation { create_webhook (board_id: ${APPROVALS_BOARD_ID}, url: ${JSON.stringify(hookUrl)}, event: change_status_column_value, config: ${cfg}) { id } }`,
+      `mutation { create_webhook (board_id: ${APPROVALS_BOARD_ID}, url: ${JSON.stringify(hookUrl)}, event: change_status_column_value) { id } }`,
     );
     const createdId = (createRes.data?.create_webhook as { id?: string } | undefined)?.id;
     if (createRes.error || !createdId) {
