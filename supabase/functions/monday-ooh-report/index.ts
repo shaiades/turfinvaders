@@ -39,7 +39,6 @@ import {
   fetchPeopleColumnIds,
   findItemOnBoardByName,
   mondayGraphql,
-  postUpdate,
   resolveUserId,
   resolveUserIdByFirstName,
   setColumns,
@@ -78,7 +77,6 @@ import {
   matchWeekday,
   matchWithoutLeadId,
   normName,
-  oohUpdateKey,
   parseOohForm,
   planDisposition,
   planOfficeApptDisposition,
@@ -106,6 +104,8 @@ import {
   withPairing,
 } from "./dispatch.ts";
 import { runWatchdog } from "./watchdog.ts";
+import { runApprovalsDecision, runBuildApprovals } from "./approvals-live.ts";
+import { APPROVALS_BOARD_ID, APPROVALS_COL, type ProposalInput } from "./approvals.ts";
 import {
   enrichHistory,
   fetchAttendanceOverrides,
@@ -128,6 +128,21 @@ const ok = (body: unknown) =>
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 
+/** Deploy-side admin auth: x-admin-key must digest-match the service-role key
+ *  (same scheme the Rule 13 webhook registration shipped with). */
+async function adminKeyOk(req: Request): Promise<boolean> {
+  const digest = async (v: string) => {
+    const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(v));
+    return Array.from(new Uint8Array(d))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  };
+  const adminKey = req.headers.get("x-admin-key") ?? "";
+  const serviceKey = denoEnv?.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  if (!serviceKey || !adminKey) return false;
+  return (await digest(adminKey)) === (await digest(serviceKey));
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -148,7 +163,48 @@ serve(async (req) => {
     const supabase = makeClient(SUPABASE_URL, SERVICE_ROLE);
     try {
       const result = await runWatchdog(supabase);
-      return ok(result);
+      // Rule 13 sweep (belt for the item_moved_to_board webhook's braces):
+      // fill any unfilled SP pending row whose card has already arrived on
+      // Sales Processing — a moved-in card fires no create_item, so without
+      // this a missed/misconfigured event would strand the fill forever.
+      let spSwept = 0;
+      try {
+        const { data: st } = await supabase
+          .from("system_settings")
+          .select("monday_api_token")
+          .maybeSingle();
+        const tok = ((st?.monday_api_token as string | null) ?? "").trim();
+        if (tok) {
+          const { data: pend } = await supabase
+            .from("ooh_sales_processing_pending")
+            .select("form_item_id, customer_name")
+            .is("filled_at", null)
+            .order("created_at", { ascending: false })
+            .limit(20);
+          for (const r of (pend ?? []) as Array<{
+            form_item_id: string;
+            customer_name: string | null;
+          }>) {
+            if (!r.customer_name) continue;
+            const spId = await findItemOnBoardByName(
+              tok,
+              DESTINATION_BOARDS.salesProcessing,
+              r.customer_name,
+            ).catch(() => null);
+            if (!spId) continue;
+            const filled = await fillSalesProcessingForItem(
+              tok,
+              supabase,
+              spId,
+              r.customer_name,
+            ).catch(() => null);
+            if (filled?.filled) spSwept += 1;
+          }
+        }
+      } catch {
+        /* the sweep is best-effort — never fails the watchdog */
+      }
+      return ok({ ...result, spSwept });
     } catch (e) {
       console.error("[ooh watchdog] error", e instanceof Error ? e.message : String(e));
       return ok({ error: e instanceof Error ? e.message : String(e) });
@@ -186,7 +242,7 @@ serve(async (req) => {
       (spBody.event as Record<string, unknown>) ??
       spBody) as Record<string, unknown>;
     const spItemId = String(spEvent.pulseId ?? spEvent.itemId ?? spEvent.pulse_id ?? "");
-    const spName = String(spEvent.pulseName ?? spEvent.itemName ?? "");
+    let spName = String(spEvent.pulseName ?? spEvent.itemName ?? "");
     if (!spItemId || !/^\d+$/.test(spItemId)) return ok({ ignored: "no SP item id" });
     const supabase = makeClient(
       denoEnv?.get("SUPABASE_URL") ?? "",
@@ -198,6 +254,11 @@ serve(async (req) => {
       .maybeSingle();
     const spToken = ((spSettings?.monday_api_token as string | null) ?? "").trim();
     if (!spToken) return ok({ ignored: "no token" });
+    // Moved-in payloads don't carry pulseName — fetch it.
+    if (!spName) {
+      const it = await fetchFormItem(spToken, spItemId).catch(() => null);
+      spName = it?.name ?? "";
+    }
     const res = await fillSalesProcessingForItem(spToken, supabase, spItemId, spName).catch(
       (e) => ({
         filled: false,
@@ -205,6 +266,60 @@ serve(async (req) => {
       }),
     );
     return ok(res);
+  }
+
+  // ── Nightly Approvals: Decision webhook (rules H4/H5, I, J10) ──────────────
+  // Pointed at by the approvals board's Decision-column webhook
+  // (…/monday-ooh-report?task=approvals&secret=…). A manager pressing Approve /
+  // Don't approve / Change / Add rep lands here; nothing on a block item is
+  // ever written except through this path's add-only, re-read-guarded apply.
+  if (url.searchParams.get("task") === "approvals") {
+    const apSecret = denoEnv?.get("MONDAY_OOH_SECRET") ?? denoEnv?.get("MONDAY_WEBHOOK_SECRET");
+    const apProvided = req.headers.get("x-monday-secret") ?? url.searchParams.get("secret");
+    const apEnforce =
+      denoEnv?.get("MONDAY_OOH_ENFORCE_SECRET") === "true" ||
+      denoEnv?.get("MONDAY_WEBHOOK_ENFORCE_SECRET") === "true";
+    if (apSecret && apProvided !== apSecret && apEnforce) {
+      return new Response("unauthorized", { status: 401, headers: corsHeaders });
+    }
+    const apRaw = await req.text();
+    let apBody: Record<string, unknown> = {};
+    try {
+      apBody = apRaw ? JSON.parse(apRaw) : {};
+    } catch {
+      return ok({ ignored: "non-JSON body" });
+    }
+    if (apBody.challenge) {
+      return new Response(JSON.stringify({ challenge: apBody.challenge }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const apEvent = ((apBody.data as Record<string, unknown>)?.event ??
+      (apBody.event as Record<string, unknown>) ??
+      apBody) as Record<string, unknown>;
+    const apItemId = String(apEvent.pulseId ?? apEvent.itemId ?? apEvent.pulse_id ?? "");
+    if (!apItemId || !/^\d+$/.test(apItemId)) return ok({ ignored: "no approvals item id" });
+    const apLabel =
+      ((apEvent.value as Record<string, unknown>)?.label as { text?: string } | undefined)?.text ??
+      (typeof (apEvent.value as Record<string, unknown>)?.label === "string"
+        ? String((apEvent.value as Record<string, unknown>).label)
+        : null) ??
+      (apEvent.textValue != null ? String(apEvent.textValue) : null);
+    const supabase = makeClient(
+      denoEnv?.get("SUPABASE_URL") ?? "",
+      denoEnv?.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+    );
+    const apRes = await runApprovalsDecision(supabase, {
+      itemId: apItemId,
+      columnId: apEvent.columnId != null ? String(apEvent.columnId) : null,
+      label: apLabel,
+      userId: apEvent.userId != null ? String(apEvent.userId) : null,
+    }).catch((e) => ({
+      handled: false,
+      reason: e instanceof Error ? e.message : String(e),
+    }));
+    return ok(apRes);
   }
 
   const raw = await req.text();
@@ -270,17 +385,6 @@ serve(async (req) => {
     );
     if (listRes.error) return ok({ ok: false, error: `webhook list failed: ${listRes.error}` });
     const hooks = (listRes.data?.webhooks ?? []) as Array<{ id: string; event: string }>;
-    // Monday doesn't expose a webhook's URL, so an existing create_item hook
-    // can't be verified as OURS — report it and only create alongside it when
-    // the caller explicitly passes force:true.
-    const existing = hooks.filter((h) => h.event === "create_item");
-    if (existing.length > 0 && body.force !== true) {
-      return ok({
-        ok: true,
-        existing: existing.map((h) => String(h.id)),
-        note: "a create_item webhook already exists on Sales Processing — pass force:true to register ours alongside it",
-      });
-    }
     const hookUrl = `https://xogitpqeuwalerxygvjw.supabase.co/functions/v1/monday-ooh-report?task=sales-processing&secret=${webhookSecret}`;
     if (hookUrl.length > 255) {
       return ok({
@@ -288,9 +392,128 @@ serve(async (req) => {
         error: `webhook URL is ${hookUrl.length} chars — Monday caps at 255`,
       });
     }
+    // Ensure BOTH arrival events: create_item (a card born on SP) AND
+    // item_moved_to_any_group (the normal case — the block automation MOVES
+    // the Sold card over, which does NOT fire create_item; learned live on
+    // the first Sold, Juarez 2026-10-08. There is no item_moved_to_board in
+    // Monday's enum; a cross-board move lands in a destination group, so the
+    // any-group event fires — within-board drags are harmless no-ops against
+    // the pending lookup). Monday doesn't expose a webhook's URL,
+    // so an existing hook of the same event can't be verified as OURS — it's
+    // reported and skipped unless force:true.
+    const registry = Array.isArray(sRow?.monday_webhooks)
+      ? [...(sRow.monday_webhooks as unknown[])]
+      : [];
+    const created: Record<string, string> = {};
+    const existing: Record<string, string[]> = {};
+    for (const eventType of ["create_item", "item_moved_to_any_group"]) {
+      const have = hooks.filter((h) => h.event === eventType);
+      if (have.length > 0 && body.force !== true) {
+        existing[eventType] = have.map((h) => String(h.id));
+        continue;
+      }
+      const createRes = await mondayGraphql(
+        adminToken,
+        `mutation { create_webhook (board_id: ${spBoard}, url: ${JSON.stringify(hookUrl)}, event: ${eventType}) { id } }`,
+      );
+      const createdId = (createRes.data?.create_webhook as { id?: string } | undefined)?.id;
+      if (createRes.error || !createdId) {
+        return ok({
+          ok: false,
+          created,
+          existing,
+          error: `create_webhook(${eventType}) failed: ${createRes.error ?? "no id returned"}`,
+        });
+      }
+      created[eventType] = String(createdId);
+      registry.push({
+        event: eventType,
+        board_id: spBoard,
+        webhook_id: String(createdId),
+        registered_at: new Date().toISOString(),
+        purpose: "rule13-sales-processing-fill",
+      });
+    }
+    if (Object.keys(created).length > 0) {
+      await admin
+        .from("system_settings")
+        .update({ monday_webhooks: registry })
+        .eq("id", (sRow as { id: unknown }).id);
+    }
+    return ok({ ok: true, created, existing });
+  }
+
+  // ── Admin: build/refresh tomorrow's Nightly Approvals full-block view ──────
+  // (rules H1–H3). Writes ONLY the approvals board. Body: { dateISO?,
+  // proposals?: [{ blockItemId, proposedReps?/addReps?, reason }] } — the
+  // nightly planning session passes its proposals here; replace-shaped ones
+  // are converted to add-only (rules I6–I9) before anything is shown.
+  if (body.adminAction === "build_nightly_approvals") {
+    if (!(await adminKeyOk(req))) {
+      return new Response("unauthorized", { status: 401, headers: corsHeaders });
+    }
+    const admin = makeClient(
+      denoEnv?.get("SUPABASE_URL") ?? "",
+      denoEnv?.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+    );
+    const res = await runBuildApprovals(admin, {
+      dateISO: typeof body.dateISO === "string" ? body.dateISO : undefined,
+      proposals: Array.isArray(body.proposals) ? (body.proposals as ProposalInput[]) : [],
+    }).catch((e) => ({ ok: false, reason: e instanceof Error ? e.message : String(e) }));
+    return ok(res);
+  }
+
+  // ── Admin: ensure the approvals board's Decision webhook ───────────────────
+  // Registers change_status_column_value on the Decision column of board
+  // 18433860636 → …?task=approvals&secret=…, exactly like the Rule 13 hook.
+  if (body.adminAction === "ensure_approvals_webhook") {
+    if (!(await adminKeyOk(req))) {
+      return new Response("unauthorized", { status: 401, headers: corsHeaders });
+    }
+    const webhookSecret =
+      denoEnv?.get("MONDAY_OOH_SECRET") ?? denoEnv?.get("MONDAY_WEBHOOK_SECRET") ?? "";
+    if (!webhookSecret) {
+      return ok({
+        ok: false,
+        error: "MONDAY_OOH_SECRET is not set — refusing to register a secretless webhook",
+      });
+    }
+    const admin = makeClient(
+      denoEnv?.get("SUPABASE_URL") ?? "",
+      denoEnv?.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+    );
+    const { data: sRow } = await admin
+      .from("system_settings")
+      .select("id, monday_api_token, monday_webhooks")
+      .limit(1)
+      .maybeSingle();
+    const adminToken = ((sRow?.monday_api_token as string | null) ?? "").trim();
+    if (!adminToken) return ok({ ok: false, error: "no Monday token in system_settings" });
+    const listRes = await mondayGraphql(
+      adminToken,
+      `query { webhooks (board_id: ${APPROVALS_BOARD_ID}) { id event } }`,
+    );
+    if (listRes.error) return ok({ ok: false, error: `webhook list failed: ${listRes.error}` });
+    const hooks = (listRes.data?.webhooks ?? []) as Array<{ id: string; event: string }>;
+    const existing = hooks.filter((h) => h.event === "change_status_column_value");
+    if (existing.length > 0 && body.force !== true) {
+      return ok({
+        ok: true,
+        existing: existing.map((h) => String(h.id)),
+        note: "a change_status_column_value webhook already exists on the approvals board — pass force:true to register ours alongside it",
+      });
+    }
+    const hookUrl = `https://xogitpqeuwalerxygvjw.supabase.co/functions/v1/monday-ooh-report?task=approvals&secret=${webhookSecret}`;
+    if (hookUrl.length > 255) {
+      return ok({
+        ok: false,
+        error: `webhook URL is ${hookUrl.length} chars — Monday caps at 255`,
+      });
+    }
+    const cfg = JSON.stringify(JSON.stringify({ columnId: APPROVALS_COL.decision }));
     const createRes = await mondayGraphql(
       adminToken,
-      `mutation { create_webhook (board_id: ${spBoard}, url: ${JSON.stringify(hookUrl)}, event: create_item) { id } }`,
+      `mutation { create_webhook (board_id: ${APPROVALS_BOARD_ID}, url: ${JSON.stringify(hookUrl)}, event: change_status_column_value, config: ${cfg}) { id } }`,
     );
     const createdId = (createRes.data?.create_webhook as { id?: string } | undefined)?.id;
     if (createRes.error || !createdId) {
@@ -303,11 +526,11 @@ serve(async (req) => {
       ? [...(sRow.monday_webhooks as unknown[])]
       : [];
     registry.push({
-      event: "create_item",
-      board_id: spBoard,
+      event: "change_status_column_value",
+      board_id: APPROVALS_BOARD_ID,
       webhook_id: String(createdId),
       registered_at: new Date().toISOString(),
-      purpose: "rule13-sales-processing-fill",
+      purpose: "nightly-approvals-decision",
     });
     await admin
       .from("system_settings")
@@ -483,7 +706,6 @@ serve(async (req) => {
     // that have no block). The write path rebuilds it once the block is known,
     // so a blank arrival can fall back to the appointment time (Rule 3 / #6).
     const detailsLine = buildDetailsLine(form, formItem.createdAtMs);
-    const formLink = `https://tidal-remodeling.monday.com/boards/${FORM_BOARD_ID}/pulses/${formItemId}`;
     baseRow = buildBaseQueueRow(form, detailsLine, plan, { customerName: formItem.name || null });
 
     // ── Rule 16a: the second partner's copy ─────────────────────────────────
@@ -772,10 +994,12 @@ serve(async (req) => {
       if (unknownSource)
         sourceCodeNote = ` (source "${block.source ?? ""}" unrecognized — set code=1)`;
     }
-    // Details: APPEND, never overwrite (Rule 3).
+    // Details: APPEND, never overwrite (Rule 3). The unknown-source flag rides
+    // the Details line — the update notes are gone (owner ruling, see below).
+    const detailsWithFlags = `${detailsLineForBlock}${sourceCodeNote}`;
     const combinedDetails = block.details?.trim()
-      ? `${block.details.trim()}\n${detailsLineForBlock}`
-      : detailsLineForBlock;
+      ? `${block.details.trim()}\n${detailsWithFlags}`
+      : detailsWithFlags;
     const columnValues: Record<string, unknown> = {
       ...fieldWrites,
       [BLOCK_COL.details]: { text: combinedDetails },
@@ -937,14 +1161,9 @@ serve(async (req) => {
       });
     }
 
-    // Activity-log note on the block item. Keyed by the FORM item id so a
-    // SECOND report on the same lead still posts its note (#7).
-    await postUpdate(
-      token,
-      leadId,
-      `Dispo report from ${form.repName ?? "rep"} at ${laClock(formItem.createdAtMs)} — ${formLink}${sourceCodeNote}`,
-      oohUpdateKey(formItemId),
-    ).catch(() => undefined);
+    // NO Monday update note here — owner ruling (10/6, reaffirmed 10/8 pm):
+    // updates notify reps/managers. Details carries the record; the unknown-
+    // source flag rides the Details line (folded in above).
 
     // SALE → text leadership (Tyler / Shai / Jorge) with a loud banner: the
     // rep(s), what they sold, how much. Best-effort; live mode only. A send
@@ -1606,13 +1825,38 @@ async function runAutoCreate(p: {
     });
   }
 
-  const formLink = `https://tidal-remodeling.monday.com/boards/${FORM_BOARD_ID}/pulses/${p.formItemId}`;
-  await postUpdate(
-    p.token,
-    newId,
-    `Auto-created from OOH report by ${p.form.repName ?? "rep"} at ${laClock(p.formItem.createdAtMs)} — ${formLink}`,
-    oohUpdateKey(`create-${p.formItemId}`),
-  ).catch(() => undefined);
+  // Rule 13: an auto-created sale routes to Sales Processing exactly like a
+  // matched one — stage its deposit / finance / Advantage+ / reloads for the
+  // SP-board webhook to fill (gap caught on the first live auto-created
+  // Upsell, Meyer 2026-10-08: only the matched path staged a pending row).
+  if (p.plan.status?.col === BLOCK_COL.sale) {
+    const spValues = planSalesProcessingWrite(p.form);
+    if (Object.keys(spValues).length > 0) {
+      await p.supabase
+        .from("ooh_sales_processing_pending")
+        .upsert(
+          {
+            form_item_id: p.formItemId,
+            customer_key: customerDayKey(
+              name,
+              p.form.apptDate?.date ?? laDate(p.formItem.createdAtMs),
+              p.form.address,
+            ),
+            customer_name: name,
+            board_id: p.currentBoardId,
+            values: spValues,
+          },
+          { onConflict: "form_item_id" },
+        )
+        .then(
+          () => undefined,
+          () => undefined,
+        );
+    }
+  }
+
+  // NO Monday update note on the created card — owner ruling (10/6,
+  // reaffirmed 10/8 pm): updates notify reps/managers; Details is the record.
 
   // SALE text — the same banner as a matched sale; a no-op for a non-sale result.
   await p.alertSale().catch(() => null);

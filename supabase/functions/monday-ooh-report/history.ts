@@ -126,7 +126,7 @@ export type DispatchDecision = {
  *  time). Logged around EVERY such write the dispatcher makes. */
 export type DispatchWrite = {
   mode: "dry_run" | "live";
-  trigger: "report" | "watchdog" | "late_cover";
+  trigger: "report" | "watchdog" | "late_cover" | "approvals";
   formItemId: string | null;
   boardId: string | null;
   itemId: string;
@@ -136,6 +136,10 @@ export type DispatchWrite = {
   oldValue: string | null;
   newValue: string | null;
   reason: string;
+  /** Who made the decision (rule J10) — 'dispatch' when absent. For an
+   *  approvals-board decision this is the approving manager, e.g.
+   *  "approvals:Tyler Ward". */
+  actor?: string;
 };
 
 /** Append one people6 / status write to the audit table (Rule 21). Best-effort —
@@ -154,7 +158,7 @@ export async function logDispatchWrite(supabase: Supa, w: DispatchWrite): Promis
       old_value: w.oldValue,
       new_value: w.newValue,
       reason: w.reason,
-      actor: "dispatch",
+      actor: w.actor ?? "dispatch",
     });
   } catch (e) {
     console.error("[ooh dispatch write-audit]", e instanceof Error ? e.message : String(e));

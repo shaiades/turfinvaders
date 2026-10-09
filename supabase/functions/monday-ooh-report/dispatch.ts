@@ -76,6 +76,11 @@ export const DISPATCH_CONFIG = {
   /** Preferred (hot) partners per first name, from the pairing analytics — the
    *  pairing picks a free preferred partner first. */
   preferredPartners: {} as Readonly<Record<string, readonly string[]>>,
+  /** AVOID pairs (first name → first names, symmetric), from the pairing
+   *  analytics ($0 pairings like Daniel+Yakup). ENFORCED (owner, 2026-10-08
+   *  pm): never chosen as a partner, and a rep is never ADDED to a lead whose
+   *  current rep they form an avoid pair with. */
+  avoidPartners: {} as Readonly<Record<string, readonly string[]>>,
 } as const;
 
 /** The pairing roster (Rule 8) as the owner stores it in
@@ -85,6 +90,7 @@ export type DispatchPairingOverride = {
   hotReps?: string[];
   neverSolo?: string[];
   preferredPartners?: Record<string, string[]>;
+  avoidPartners?: Record<string, string[]>;
 };
 
 /** Merge a stored pairing roster over the defaults → a cfg the planner accepts. */
@@ -98,6 +104,7 @@ export function withPairing(
     hotReps: override.hotReps ?? base.hotReps,
     neverSolo: override.neverSolo ?? base.neverSolo,
     preferredPartners: override.preferredPartners ?? base.preferredPartners,
+    avoidPartners: override.avoidPartners ?? base.avoidPartners,
   };
 }
 
@@ -338,6 +345,23 @@ export function isNeverSolo(repName: string | null | undefined, cfg = DISPATCH_C
 }
 
 /**
+ * Do these two reps form an AVOID pair ($0 history — e.g. Daniel+Yakup went
+ * 0-for-12)? Symmetric: the roster stores one direction; both are checked.
+ * First-name keys, like every other pairing lookup. Pure.
+ */
+export function isAvoidPair(
+  a: string | null | undefined,
+  b: string | null | undefined,
+  cfg = DISPATCH_CONFIG,
+): boolean {
+  const fa = firstName(a);
+  const fb = firstName(b);
+  if (!fa || !fb || fa === fb) return false;
+  const av = (k: string) => (cfg.avoidPartners[k] ?? []).map((n) => firstName(n));
+  return av(fa).includes(fb) || av(fb).includes(fa);
+}
+
+/**
  * Pick a partner to ADD for a rep who can't go solo (Rule 8 — "meet this by
  * ADDING a second rep, never replacing one"). A free, working, same-office rep,
  * preferring a configured hot partner, then the one nearest the lead; never the
@@ -360,6 +384,9 @@ export function choosePartner(input: {
     if (r.office !== input.rep.office) return false;
     if (excluded.has(normName(r.name))) return false;
     if (onLead.has(normName(r.name))) return false;
+    // ENFORCED avoid pairs (owner, 2026-10-08 pm): an avoided partner is never
+    // chosen — not even by the nearest-free fallback.
+    if (isAvoidPair(input.rep.name, r.name, cfg)) return false;
     return hardRuleCheck(r, input.lead, cfg).ok;
   });
   if (pool.length === 0) return null;
@@ -494,6 +521,18 @@ export function hardRuleCheck(
   // Can-saves only to the designated savers.
   if (lead.isCanSave && !cfg.canSaveReps.map(normName).includes(rn)) {
     return { ok: false, disposition: "skip", reason: "can-save: not a designated saver" };
+  }
+  // ENFORCED avoid pairs: never put this rep on a lead already carrying a rep
+  // they form an avoid pair with (covers Add-Rep adds and partner candidacy).
+  const avoidHit = lead.reps.find(
+    (r) => firstName(r) !== firstName(rep.name) && isAvoidPair(rep.name, r, cfg),
+  );
+  if (avoidHit) {
+    return {
+      ok: false,
+      disposition: "skip",
+      reason: `avoid pair: never ride with ${avoidHit}`,
+    };
   }
   // Job walks go to the original sales rep(s).
   if (lead.isJobWalk) {
