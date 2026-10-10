@@ -104,7 +104,8 @@ function LeadCard({
       />
       {!pill.done && (
         <p className="text-center text-[11px] text-muted-foreground">
-          No answer at the door? Tap Open Dispo → “At the door” — the office calls them, you don’t.
+          No answer at the door? Tap Dispo this lead → “At the door” — the office calls them, you
+          don’t.
         </p>
       )}
     </div>
@@ -150,10 +151,10 @@ export function MyLeads({ displayName }: { displayName: string | null }) {
       }
     >
       <div className="space-y-3">
-        {/* Always available — report a sale you made on your own (self-gen /
-            off-block), even on a day with no issued leads. */}
-        <OohSelfGenButton repName={matcher.matched ?? displayName} className="w-full" />
-
+        {/* Rule O: when the rep HAS a current assignment, "Dispo this lead" (per
+            card) is front and center; "Log a reload" is the always-available
+            secondary action below. When they have NO assignment, the leads grid
+            collapses to the empty state and "Log a reload" is the only entry. */}
         {q.isLoading ? (
           <p className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="size-4 animate-spin" /> Loading your leads…
@@ -163,8 +164,8 @@ export function MyLeads({ displayName }: { displayName: string | null }) {
             <CheckCircle2 className="mx-auto size-6 text-victory" />
             <p className="text-sm text-foreground">No leads assigned to you today.</p>
             <p className="text-xs text-muted-foreground">
-              Your next lead is released the night before — you’ll get a text when it’s yours. Sold
-              one on your own? Use the button above.
+              Your next lead is released the night before — you’ll get a text when it’s yours.
+              Visited an old customer and sold? Log a reload below.
             </p>
           </div>
         ) : (
@@ -179,6 +180,16 @@ export function MyLeads({ displayName }: { displayName: string | null }) {
             ))}
           </div>
         )}
+
+        {/* Always available — a rep visiting a past customer with no active block
+            assignment logs the sale as a reload (rule O). Secondary to the
+            assigned-lead dispo above; the only action when nothing is assigned. */}
+        <div className="space-y-1 border-t border-border/40 pt-3">
+          <OohSelfGenButton repName={matcher.matched ?? displayName} className="w-full" />
+          <p className="text-center text-[11px] text-muted-foreground">
+            Sold at an old customer with no appointment today? Log it here.
+          </p>
+        </div>
       </div>
     </ArcadePanel>
   );
