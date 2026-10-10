@@ -303,6 +303,7 @@ export type DecisionSummary = {
   handled: boolean;
   reason?: string;
   applied?: number;
+  approved?: number;
   skipped?: number;
   rejected?: number;
 };
@@ -328,6 +329,20 @@ type StoredProposal = {
   reason: string | null;
   state: string;
 };
+
+/** Rule M: mark a proposal APPROVED — the gap between a manager's night-time
+ *  Approve and the 8:45 auto-issue block write. No block is touched here. */
+async function markApproved(supabase: Supa, rowId: string, approver: string): Promise<void> {
+  await supabase
+    .from("nightly_approvals")
+    .update({
+      state: "approved",
+      decided_by: approver,
+      decided_at: new Date().toISOString(),
+      result_note: "approved — queued for 8:45 auto-issue",
+    })
+    .eq("id", rowId);
+}
 
 /** Handle a Decision-column change on the approvals board. */
 export async function runApprovalsDecision(
@@ -390,18 +405,18 @@ export async function runApprovalsDecision(
         addNames: p.proposed_add_names ?? [],
       })),
     );
-    let applied = 0;
-    let skipped = 0;
+    // Rule M: Approve queues the rows; the 8:45 auto-issue job does the block
+    // write (no longer applied here on the manager's press).
+    let approved = 0;
     for (const t of targets) {
-      const r = await applyStoredProposal({ supabase, token, users, mode, approver, proposal: t });
-      if (r === "applied") applied++;
-      else skipped++;
+      await markApproved(supabase, t.id, approver);
+      approved++;
     }
     await setColumns(token, APPROVALS_BOARD_ID, row.id, {
       [APPROVALS_COL.decision]: { label: DECISION.pending },
-      [APPROVALS_COL.note]: `Approve all @ ${laClockNow()}: ${applied} applied, ${skipped} skipped`,
+      [APPROVALS_COL.note]: `Approve all @ ${laClockNow()}: ${approved} queued for 8:45 auto-issue`,
     }).catch(() => null);
-    return { handled: true, applied, skipped };
+    return { handled: true, approved };
   }
 
   // ── Single row ──────────────────────────────────────────────────────────────
@@ -449,12 +464,17 @@ export async function runApprovalsDecision(
   if (kind === "approve") {
     if (!stored || stored.state !== "pending") {
       await note(
-        stored ? `Already ${stored.state} — nothing to apply` : `${NO_CHANGE_TEXT} — nothing to apply`,
+        stored
+          ? `Already ${stored.state} — nothing to approve`
+          : `${NO_CHANGE_TEXT} — nothing to approve`,
       );
-      return { handled: true, applied: 0 };
+      return { handled: true, approved: 0 };
     }
-    const r = await applyStoredProposal({ supabase, token, users, mode, approver, proposal: { ...stored, addNames: stored.proposed_add_names ?? [] } });
-    return { handled: true, applied: r === "applied" ? 1 : 0, skipped: r === "applied" ? 0 : 1 };
+    // Rule M: Approve only QUEUES the row (marks it approved); the 8:45
+    // auto-issue job writes it to the block. Nothing on the block is touched here.
+    await markApproved(supabase, stored.id, approver);
+    await note(`Approved by ${approver} @ ${laClockNow()} — queued for 8:45 auto-issue`);
+    return { handled: true, approved: 1 };
   }
 
   // Change / Add rep — a manager-directed ADD (always add-only, rule I8). The
@@ -495,6 +515,76 @@ export async function runApprovalsDecision(
     guard: null, // the manager is acting on the live state, not an old snapshot
   });
   return { handled: true, applied: applyRes === "applied" ? 1 : 0 };
+}
+
+export type AutoIssueSummary = {
+  ran: boolean;
+  reason?: string;
+  applied: number;
+  skipped: number;
+  total: number;
+};
+
+/** Rule M — the 8:45 AM PT auto-issue. Reads every Nightly Approvals row still
+ *  `approved` (approved the night before, not yet issued) and applies it to the
+ *  live block via the same re-read-guarded, add-only, write-locked path the
+ *  manual Approve used to take. Idempotent per row: approved→applied only after
+ *  the block write lands, so a dead-mid-run job leaves the rest `approved` for
+ *  the next run (or a manual ?task=auto-issue&force=true), and applied rows are
+ *  never re-issued (rule M10). Writes still require live_dispatch_mode='live';
+ *  otherwise the approved rows are left untouched (not consumed). */
+export async function runNightlyAutoIssue(
+  supabase: Supa,
+  opts: { force?: boolean } = {},
+): Promise<AutoIssueSummary> {
+  const empty = (ran: boolean, reason: string): AutoIssueSummary => ({
+    ran,
+    reason,
+    applied: 0,
+    skipped: 0,
+    total: 0,
+  });
+  const { data: settings } = await supabase.from("system_settings").select("*").maybeSingle();
+  const enabled = settings?.nightly_auto_issue_enabled === true;
+  if (!opts.force && !enabled) return empty(false, "nightly_auto_issue_enabled is off");
+  const token = ((settings?.monday_api_token as string | null) ?? "").trim();
+  if (!token) return empty(false, "no Monday token");
+  const mode = ((settings?.live_dispatch_mode as string | null) ?? "off") as
+    | "off"
+    | "dry_run"
+    | "live";
+  // The block write is gated on live mode; when not live, leave approved rows
+  // in place rather than consuming them (applyStoredProposal would mark them
+  // skipped). Nothing auto-issues until an owner flips live_dispatch_mode.
+  if (mode !== "live") return empty(false, `live_dispatch_mode=${mode} (not live)`);
+
+  const { data } = await supabase
+    .from("nightly_approvals")
+    .select("*")
+    .eq("state", "approved")
+    .order("created_at", { ascending: true })
+    .limit(500);
+  const rows = (data as StoredProposal[]) ?? [];
+  if (rows.length === 0) return { ran: true, reason: "no approved rows", applied: 0, skipped: 0, total: 0 };
+
+  const users = await fetchMondayUsers(token).catch(
+    () => [] as Array<{ id: string; name: string }>,
+  );
+  let applied = 0;
+  let skipped = 0;
+  for (const stored of rows) {
+    const r = await applyStoredProposal({
+      supabase,
+      token,
+      users,
+      mode,
+      approver: "auto-issue 8:45 (bot)",
+      proposal: { ...stored, addNames: stored.proposed_add_names ?? [] },
+    });
+    if (r === "applied") applied++;
+    else skipped++;
+  }
+  return { ran: true, applied, skipped, total: rows.length };
 }
 
 /** Apply ONE stored proposal: re-read, guard (rule H5), add-only write

@@ -104,7 +104,7 @@ import {
   withPairing,
 } from "./dispatch.ts";
 import { runWatchdog } from "./watchdog.ts";
-import { runApprovalsDecision, runBuildApprovals } from "./approvals-live.ts";
+import { runApprovalsDecision, runBuildApprovals, runNightlyAutoIssue } from "./approvals-live.ts";
 import { APPROVALS_BOARD_ID, APPROVALS_COL, type ProposalInput } from "./approvals.ts";
 import {
   enrichHistory,
@@ -208,6 +208,32 @@ serve(async (req) => {
       return ok({ ...result, spSwept });
     } catch (e) {
       console.error("[ooh watchdog] error", e instanceof Error ? e.message : String(e));
+      return ok({ error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  // ── Nightly auto-issue (scheduled 8:45 AM PT; rule M) ───────────────────────
+  // The pg_cron job run_nightly_auto_issue posts here with the shared notify
+  // secret. Issues every Nightly Approvals row still `approved` to the live block
+  // (same re-read-guarded, add-only, write-locked path as manual Approve).
+  // ?force=true bypasses the enabled flag for a manual / test run (the write is
+  // still gated on live_dispatch_mode='live' inside runNightlyAutoIssue).
+  if (url.searchParams.get("task") === "auto-issue") {
+    const notifySecret = denoEnv?.get("NOTIFY_SECRET");
+    const provided = req.headers.get("x-notify-secret") ?? url.searchParams.get("secret");
+    if (notifySecret && provided !== notifySecret) {
+      return new Response("unauthorized", { status: 401, headers: corsHeaders });
+    }
+    const supabase = makeClient(
+      denoEnv?.get("SUPABASE_URL") ?? "",
+      denoEnv?.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+    );
+    const force = url.searchParams.get("force") === "true";
+    try {
+      const result = await runNightlyAutoIssue(supabase, { force });
+      return ok(result);
+    } catch (e) {
+      console.error("[ooh auto-issue] error", e instanceof Error ? e.message : String(e));
       return ok({ error: e instanceof Error ? e.message : String(e) });
     }
   }
