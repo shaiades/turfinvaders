@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { uploadResumable } from "@/integrations/supabase/resumable-upload";
 import { useAuth } from "@/hooks/useAuth";
 import { ArcadePanel } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
@@ -47,6 +48,15 @@ export type ObjectionAttempt = {
 
 const BUCKET = "objection-attempts";
 const MAX_SECONDS = 90;
+// Max uploaded recording size. 50MB is the Free-plan Storage ceiling; keep in
+// sync with the objection-attempts bucket file_size_limit (migration
+// 20261020120100). A 90s clip at REC_VIDEO_BPS lands ~35MB, safely under it.
+const MAX_ATTEMPT_MB = 50;
+const MAX_ATTEMPT_BYTES = MAX_ATTEMPT_MB * 1024 * 1024;
+// Cap the recording bitrate so a full 90s clip stays under the 50MB ceiling
+// regardless of device defaults: 3 Mbps × 90s ≈ 34MB + audio. Plenty for a
+// selfie-cam pitch review.
+const REC_VIDEO_BPS = 3_000_000;
 
 // New tables aren't in the generated Database types until the migration is
 // applied and types are regenerated — one untyped escape hatch, cast on read.
@@ -236,6 +246,7 @@ function RecordAttemptDialog({
   const [phase, setPhase] = useState<"idle" | "live" | "preview">("idle");
   const [blob, setBlob] = useState<Blob | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  const [uploadPct, setUploadPct] = useState<number | null>(null);
   const { mime, ext } = useMemo(pickMimeType, []);
 
   useEffect(() => {
@@ -268,7 +279,9 @@ function RecordAttemptDialog({
         await videoRef.current.play().catch(() => {});
       }
       chunksRef.current = [];
-      const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+      const recOpts: MediaRecorderOptions = { videoBitsPerSecond: REC_VIDEO_BPS };
+      if (mime) recOpts.mimeType = mime;
+      const rec = new MediaRecorder(stream, recOpts);
       rec.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
@@ -299,11 +312,20 @@ function RecordAttemptDialog({
   const submit = useMutation({
     mutationFn: async () => {
       if (!blob) throw new Error("Nothing recorded yet");
+      if (blob.size > MAX_ATTEMPT_BYTES) {
+        throw new Error(`Recording is too large — keep it under ${MAX_ATTEMPT_MB}MB.`);
+      }
       const path = `${userId}/${crypto.randomUUID()}.${ext}`;
-      const { error: upErr } = await supabase.storage
-        .from(BUCKET)
-        .upload(path, blob, { contentType: blob.type || "video/webm" });
-      if (upErr) throw upErr;
+      // Resumable upload — same path as proof videos; survives a dropped
+      // connection mid-upload instead of restarting from zero.
+      setUploadPct(0);
+      await uploadResumable({
+        bucket: BUCKET,
+        path,
+        file: blob,
+        contentType: blob.type || "video/webm",
+        onProgress: setUploadPct,
+      });
       const { error } = await dojoTable("objection_attempts").insert({
         objection_id: objection.id,
         canvasser_id: userId,
@@ -317,6 +339,7 @@ function RecordAttemptDialog({
       onClose();
     },
     onError: (e: Error) => toast.error(e.message),
+    onSettled: () => setUploadPct(null),
   });
 
   return (
@@ -368,7 +391,11 @@ function RecordAttemptDialog({
                 ) : (
                   <Send className="w-3.5 h-3.5 mr-1.5" />
                 )}
-                {submit.isPending ? "Uploading…" : "Submit for Review"}
+                {submit.isPending
+                  ? uploadPct === null
+                    ? "Uploading…"
+                    : `Uploading… ${uploadPct}%`
+                  : "Submit for Review"}
               </Button>
             </>
           )}

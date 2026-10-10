@@ -13,6 +13,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { uploadResumable } from "@/integrations/supabase/resumable-upload";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { usePurposeProfile } from "@/hooks/usePurposeProfile";
 import { useActivityTests } from "@/hooks/useActivityTests";
@@ -808,6 +809,13 @@ const PROOF_HINTS: Record<ProofCategory, string> = {
   gym_checkin: "Photo at the gym. One a day counts.",
 };
 
+// Max proof upload size. MUST stay in sync with the contest-proofs bucket's
+// file_size_limit (migration 20261020120000) and the project-wide Storage
+// upload limit in the Supabase dashboard, which caps the bucket. 50MB is the
+// Free-plan ceiling; bigger phone videos need trimming (or a plan upgrade).
+const MAX_PROOF_MB = 50;
+const MAX_PROOF_BYTES = MAX_PROOF_MB * 1024 * 1024;
+
 function ProofSheet({
   open,
   onOpenChange,
@@ -826,6 +834,7 @@ function ProofSheet({
   const [customer, setCustomer] = useState("");
   const [satOn, setSatOn] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [uploadPct, setUploadPct] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const myProofs = useQuery({
@@ -849,6 +858,7 @@ function ProofSheet({
     setCustomer("");
     setSatOn("");
     setFile(null);
+    setUploadPct(null);
     if (fileRef.current) fileRef.current.value = "";
   };
 
@@ -862,15 +872,25 @@ function ProofSheet({
       if (category === "referral_sit" && (customer.trim() === "" || satOn === "")) {
         throw new Error("Referral proofs need the customer name and the date they sat.");
       }
-      if (file.size > 200 * 1024 * 1024) throw new Error("Keep uploads under 200MB.");
+      // Cap matches the contest-proofs bucket file_size_limit (keep the two in
+      // sync) so reps get a friendly message here instead of a server 413.
+      if (file.size > MAX_PROOF_BYTES) {
+        throw new Error(`Keep uploads under ${MAX_PROOF_MB}MB.`);
+      }
       const ext = (file.name.split(".").pop() || (file.type.startsWith("video/") ? "mp4" : "jpg"))
         .toLowerCase()
         .replace(/[^a-z0-9]/g, "");
       const path = `${userId}/${crypto.randomUUID()}.${ext}`;
-      const { error: upErr } = await supabase.storage
-        .from("contest-proofs")
-        .upload(path, file, { contentType: file.type || "application/octet-stream" });
-      if (upErr) throw new Error(upErr.message);
+      // Resumable upload — phone videos are large and cellular drops happen;
+      // a single-shot upload() stalls where TUS chunks + resumes.
+      setUploadPct(0);
+      await uploadResumable({
+        bucket: "contest-proofs",
+        path,
+        file,
+        contentType: file.type || "application/octet-stream",
+        onProgress: setUploadPct,
+      });
       const { error } = await supabase.from("contest_proofs").insert({
         rep_id: userId,
         category,
@@ -887,6 +907,7 @@ function ProofSheet({
       reset();
       void qc.invalidateQueries({ queryKey: ["kombat_my_proofs"] });
     },
+    onSettled: () => setUploadPct(null),
   });
 
   return (
@@ -987,7 +1008,11 @@ function ProofSheet({
             disabled={submit.isPending}
             onClick={() => submit.mutate()}
           >
-            {submit.isPending ? "Uploading…" : "Send for approval"}
+            {submit.isPending
+              ? uploadPct === null
+                ? "Uploading…"
+                : `Uploading… ${uploadPct}%`
+              : "Send for approval"}
           </NeonButton>
 
           {(myProofs.data ?? []).length > 0 && (
