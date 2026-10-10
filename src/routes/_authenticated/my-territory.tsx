@@ -1155,10 +1155,12 @@ function ManagerTerritoryView({
               2 km self-cage made cross-county turf hunting impossible. The
               me-dot still renders; recenter still jumps to it. */}
           <NeonMap
-            // Mid-draw the canvas repaints per stroke sample — 2,800 RepCard
-            // history rings under the finger is what crashed iOS Safari.
-            // Live turfs stay for context; the coverage returns on release.
-            territories={drawing ? territories : mapTerritories}
+            // Keep the already-drawn areas on screen while drawing so a new
+            // area isn't laid over an existing one (owner ask 2026-10-09).
+            // NeonMap culls them to the viewport under the drawing finger —
+            // repainting all ~2,800 RepCard rings per stroke sample is what
+            // used to crash iOS Safari, so only the nearby rings render.
+            territories={mapTerritories}
             // Skip the initial fit-all-turfs once a view was already saved
             // AT MOUNT (canvassing round-trip, or yesterday's persisted
             // spot) — frozen so the map's own moves can't retroactively
@@ -1176,6 +1178,18 @@ function ManagerTerritoryView({
             flyTo={flyTo}
             pendingPolygon={pendingPolygon}
             mode={mapMode}
+            // On-map pencil (top of the map rail) to start a new area without
+            // scrolling up to the toolbar; while drawing it cancels, matching
+            // the header's Draw/Cancel button.
+            onToggleDraw={() => {
+              if (drawing) {
+                setDrawing(false);
+                setPendingPolygon(null);
+                setPromoteHistoryId(null);
+              } else {
+                setDrawing(true);
+              }
+            }}
             zipTints={zipZones.tints}
             onZipTap={canAssign ? (zip) => setZipTarget(zip) : undefined}
             onTerritoryClick={
