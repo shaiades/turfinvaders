@@ -914,6 +914,7 @@ function NeonMapInner({
   houseBubbles = false,
   onHouseTap,
   onOpenTurfTools,
+  onToggleDraw,
   zipTints,
   onZipTap,
   crew,
@@ -964,6 +965,12 @@ function NeonMapInner({
    *  2026-09-28, RepCard parity: the tool lives with the other map buttons,
    *  and the header copy is unreachable once the map goes fullscreen). */
   onOpenTurfTools?: () => void;
+  /** Manager territory map: a pencil button at the top of the map rail that
+   *  toggles freehand draw mode (owner ask 2026-10-09: "give me a pencil on
+   *  the map to start a new area" — the header's Draw button is off-screen
+   *  once you scroll to the map / go fullscreen). Highlighted while drawing;
+   *  tapping it then cancels. */
+  onToggleDraw?: () => void;
   /** ZIP → captain tint (color + name pill) for assigned ZIP codes. */
   zipTints?: Record<string, ZipTint>;
   /** Manager assign mode: ZIP polygons become tappable (forces the layer on). */
@@ -1136,18 +1143,52 @@ function NeonMapInner({
   // repaint every second.
   const territoryRender = useMemo(
     () =>
-      territories.map((t) => ({
-        t,
-        positions: t.polygon.map((p) => [p.lat, p.lng] as [number, number]),
-        pathOptions: {
-          color: t.color,
-          weight: 2,
-          fillColor: t.color,
-          ...(t.dashed ? { dashArray: "6 8", fillOpacity: 0.06 } : { fillOpacity: 0.15 }),
-        },
-      })),
+      territories.map((t) => {
+        // bbox rides along so draw-mode viewport culling (below) never has to
+        // re-walk every ring's vertices under the drawing finger.
+        let s = 90,
+          n = -90,
+          w = 180,
+          e = -180;
+        for (const p of t.polygon) {
+          if (p.lat < s) s = p.lat;
+          if (p.lat > n) n = p.lat;
+          if (p.lng < w) w = p.lng;
+          if (p.lng > e) e = p.lng;
+        }
+        return {
+          t,
+          positions: t.polygon.map((p) => [p.lat, p.lng] as [number, number]),
+          bbox: { s, n, w, e },
+          pathOptions: {
+            color: t.color,
+            weight: 2,
+            fillColor: t.color,
+            ...(t.dashed ? { dashArray: "6 8", fillOpacity: 0.06 } : { fillOpacity: 0.15 }),
+          },
+        };
+      }),
     [territories],
   );
+
+  // Keep already-drawn areas visible WHILE drawing so a new area isn't drawn
+  // on top of one (owner ask 2026-10-09). The catch the old code dodged by
+  // hiding them: the freehand stroke shares the territory canvas, so every
+  // pointer sample repaints every ring — all ~2,800 of them crashed iOS
+  // Safari. So instead of hiding the areas, cull them to the viewport: you
+  // draw zoomed in, and only the handful of rings you could actually overlap
+  // need repaint. Full set returns (no cull) whenever not drawing.
+  const renderedTerritories = useMemo(() => {
+    if (!drawingNow || !labelView) return territoryRender;
+    const b = labelView.bounds.pad(0.3);
+    const bn = b.getNorth(),
+      bs = b.getSouth(),
+      be = b.getEast(),
+      bw = b.getWest();
+    return territoryRender.filter(
+      ({ bbox }) => bbox.s <= bn && bbox.n >= bs && bbox.w <= be && bbox.e >= bw,
+    );
+  }, [drawingNow, territoryRender, labelView]);
 
   // Label anchors are memoized against the territory set's identity:
   // labelAnchor runs point-in-polygon + centroid math per ring, this
@@ -1384,7 +1425,7 @@ function NeonMapInner({
           <AttributionPrefixOff />
           <BearingWatcher onBearing={setBearing} />
           {houseBubbles && <ZoomWatcher onZoom={setZoomLevel} />}
-          {hasDashedLabels && <ViewTracker onView={setLabelView} />}
+          {(hasDashedLabels || drawingNow) && <ViewTracker onView={setLabelView} />}
           {onViewChange && <ViewPersistWatcher onChange={onViewChange} />}
           <FlyTo target={flyTo} />
           <ClickCapture onClick={handleClick} />
@@ -1432,7 +1473,7 @@ function NeonMapInner({
             allPoints.length > 0 && !hasFit && <FitBounds points={allPoints} />
           )}
 
-          {territoryRender.map(({ t, positions, pathOptions }) => {
+          {renderedTerritories.map(({ t, positions, pathOptions }) => {
             // Popup mode: click opens the on-map card (below), not the sheet —
             // the card's button opens the sheet. Otherwise keep the plain
             // click→onTerritoryClick used by the canvasser/spectator maps.
@@ -1536,14 +1577,17 @@ function NeonMapInner({
             );
           })}
 
-          {visibleLabels.map((l) => (
-            <Marker
-              key={l.key}
-              position={l.anchor}
-              icon={territoryLabelIcon(l.label, l.color)}
-              interactive={false}
-            />
-          ))}
+          {/* Name pills are hidden mid-draw — the area shapes are what you
+              steer around; their labels would just clutter the stroke. */}
+          {!drawingNow &&
+            visibleLabels.map((l) => (
+              <Marker
+                key={l.key}
+                position={l.anchor}
+                icon={territoryLabelIcon(l.label, l.color)}
+                interactive={false}
+              />
+            ))}
 
           {pendingPolygon && pendingPolygon.length >= 3 && (
             <Polygon
@@ -1769,6 +1813,37 @@ function NeonMapInner({
           ZIP borders toggle + recenter, bottom-right (owner ask 2026-09-28:
           the tools live ABOVE the other map buttons, RepCard-style) */}
         <div className="absolute bottom-16 right-3 z-[1000] flex flex-col items-center gap-2">
+          {/* Draw-a-new-area pencil, top of the rail (above full screen): start
+              a freehand area without scrolling back up to the header toolbar.
+              Stays mounted while drawing so it doubles as the on-map cancel. */}
+          {onToggleDraw && (
+            <button
+              type="button"
+              aria-label={
+                drawingNow
+                  ? "Cancel drawing — stop adding a new area"
+                  : "Draw a new area on the map"
+              }
+              aria-pressed={drawingNow}
+              title={drawingNow ? "Cancel drawing" : "Draw a new area"}
+              onClick={onToggleDraw}
+              className="flex h-11 w-11 items-center justify-center rounded-full border bg-surface/90 backdrop-blur"
+              style={
+                drawingNow
+                  ? {
+                      color: "#39ff14",
+                      borderColor: "#39ff1499",
+                      boxShadow: "0 0 10px -2px #39ff14",
+                    }
+                  : {
+                      color: "var(--neon)",
+                      borderColor: "color-mix(in oklab, var(--neon) 60%, var(--border))",
+                    }
+              }
+            >
+              <Pencil className="h-5 w-5" />
+            </button>
+          )}
           {onOpenTurfTools && !drawingNow && (
             <button
               type="button"
