@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 
 /**
  * Today's block leads for the rep "My Leads" screen. A SCOPED query with its
@@ -30,6 +31,19 @@ const COLS =
   "monday_item_id, board_id, lead_name, address, phone, reps, iss, office_location, card_date, products, sale, pm, rs, ol, bo, source";
 
 export function useMyLeads(dateISO: string, enabled = true) {
+  // Rule E / rule N: the portal must surface an assignment no matter who made it
+  // (office/Claude/dispatch), within one cycle. block_cards is the mirror of
+  // Monday's live people6/status (kept current by the monday-live-dispatch
+  // webhook); a people6 change there fires a postgres_changes event, so subscribe
+  // and refetch the instant the mirror updates — the 60s poll is only the
+  // backstop for a dropped realtime frame. Own channel name (never the shared
+  // "close-kombat-live") so two co-mounted subscribers don't collide.
+  useRealtimeInvalidate({
+    channel: "my-leads-live",
+    tables: ["block_cards"],
+    invalidateKeys: [["my_leads"]],
+    enabled: enabled && !!dateISO,
+  });
   return useQuery({
     queryKey: ["my_leads", dateISO],
     enabled: enabled && !!dateISO,
