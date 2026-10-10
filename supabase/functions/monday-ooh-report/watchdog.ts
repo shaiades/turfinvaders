@@ -66,6 +66,7 @@ import {
 } from "./dispatch.ts";
 import { sendDispatcherIMessage } from "./inkbox.ts";
 import { fetchAttendanceOverrides, logDispatchDecision, logDispatchWrite } from "./history.ts";
+import { acquireAll, recentlyTouched, releaseAll, sleep } from "./locks.ts";
 
 export type WatchdogSummary = {
   ran: boolean;
@@ -363,80 +364,102 @@ async function coverLate(p: {
         resolveUserId(p.users, partner.name) ?? resolveUserIdByFirstName(p.users, partner.name);
   }
 
-  // Rule 1: union existing people6 with the late rep (+ partner) — never remove.
-  const existingIds = await fetchPeopleColumnIds(p.token, p.lead.itemId, BLOCK_COL.reps).catch(
-    () => [] as string[],
-  );
-  const merged = mergePeople(existingIds, [uid, ...(partnerUid ? [partnerUid] : [])]);
-
-  // Append the running-late note to Details (read current, never overwrite).
-  const current = await fetchBlockItem(p.token, p.lead.itemId).catch(() => null);
-  const note = runningLateNote(plan.lateMinutes);
-  const combined = current?.details?.trim() ? `${current.details.trim()}\n${note}` : note;
-  await setColumns(
-    p.token,
-    p.boardId,
-    p.lead.itemId,
-    { [BLOCK_COL.details]: { text: combined } },
-    `ooh-latecover-note-${p.lead.itemId}`,
-  ).catch(() => undefined);
-
-  const r1 = await setPeopleColumn(
-    p.token,
-    p.boardId,
-    p.lead.itemId,
-    BLOCK_COL.reps,
-    merged,
-    `ooh-latecover-people-${p.lead.itemId}`,
-  );
-  if (r1.error)
+  // Rule L: take the write lock before the read-modify-write — serialize this
+  // late-cover against a concurrent report-driven issue on the SAME lead (item:)
+  // or the SAME rep elsewhere (rep:). A conflict means another writer is already
+  // handling it; back off rather than double-issue.
+  const lockHolder = `watchdog:${p.lead.itemId}`;
+  const lockKeys = [`item:${p.lead.itemId}`, `rep:${uid}`, ...(partnerUid ? [`rep:${partnerUid}`] : [])];
+  const lock = await acquireAll(p.supabase, lockKeys, lockHolder);
+  if (!lock.ok)
     return {
       covered: false,
       repName: plan.rep.name,
       driveMinutes: plan.driveMinutes,
-      reason: r1.error,
+      reason: `write lock ${lock.blockedKey} held by another writer (Rule L)`,
     };
-  await logDispatchWrite(p.supabase, {
-    mode: "live",
-    trigger: "late_cover",
-    formItemId: null,
-    boardId: p.boardId,
-    itemId: p.lead.itemId,
-    leadName: p.lead.name,
-    columnId: BLOCK_COL.reps,
-    columnLabel: "Reps",
-    oldValue: existingIds.join(","),
-    newValue: merged.join(","),
-    reason: plan.reason,
-  });
-  const r2 = await setStatus(
-    p.token,
-    p.boardId,
-    p.lead.itemId,
-    BLOCK_COL.iss,
-    LABEL.iss,
-    `ooh-latecover-iss-${p.lead.itemId}`,
-  );
-  if (r2.error)
-    return {
-      covered: false,
-      repName: plan.rep.name,
-      driveMinutes: plan.driveMinutes,
-      reason: r2.error,
-    };
-  await logDispatchWrite(p.supabase, {
-    mode: "live",
-    trigger: "late_cover",
-    formItemId: null,
-    boardId: p.boardId,
-    itemId: p.lead.itemId,
-    leadName: p.lead.name,
-    columnId: BLOCK_COL.iss,
-    columnLabel: "Iss",
-    oldValue: p.lead.issLabel ?? null,
-    newValue: LABEL.iss,
-    reason: plan.reason,
-  });
+  try {
+    // Rule L (15s): if anyone touched people6/Iss here in the last 15s, a second
+    // writer is mid-flight — wait, then re-read (fetchPeopleColumnIds) first.
+    if (await recentlyTouched(p.token, p.boardId, p.lead.itemId, 15)) await sleep(4000);
+
+    // Rule 1: union existing people6 with the late rep (+ partner) — never remove.
+    const existingIds = await fetchPeopleColumnIds(p.token, p.lead.itemId, BLOCK_COL.reps).catch(
+      () => [] as string[],
+    );
+    const merged = mergePeople(existingIds, [uid, ...(partnerUid ? [partnerUid] : [])]);
+
+    // Append the running-late note to Details (read current, never overwrite).
+    const current = await fetchBlockItem(p.token, p.lead.itemId).catch(() => null);
+    const note = runningLateNote(plan.lateMinutes);
+    const combined = current?.details?.trim() ? `${current.details.trim()}\n${note}` : note;
+    await setColumns(
+      p.token,
+      p.boardId,
+      p.lead.itemId,
+      { [BLOCK_COL.details]: { text: combined } },
+      `ooh-latecover-note-${p.lead.itemId}`,
+    ).catch(() => undefined);
+
+    const r1 = await setPeopleColumn(
+      p.token,
+      p.boardId,
+      p.lead.itemId,
+      BLOCK_COL.reps,
+      merged,
+      `ooh-latecover-people-${p.lead.itemId}`,
+    );
+    if (r1.error)
+      return {
+        covered: false,
+        repName: plan.rep.name,
+        driveMinutes: plan.driveMinutes,
+        reason: r1.error,
+      };
+    await logDispatchWrite(p.supabase, {
+      mode: "live",
+      trigger: "late_cover",
+      formItemId: null,
+      boardId: p.boardId,
+      itemId: p.lead.itemId,
+      leadName: p.lead.name,
+      columnId: BLOCK_COL.reps,
+      columnLabel: "Reps",
+      oldValue: existingIds.join(","),
+      newValue: merged.join(","),
+      reason: plan.reason,
+    });
+    const r2 = await setStatus(
+      p.token,
+      p.boardId,
+      p.lead.itemId,
+      BLOCK_COL.iss,
+      LABEL.iss,
+      `ooh-latecover-iss-${p.lead.itemId}`,
+    );
+    if (r2.error)
+      return {
+        covered: false,
+        repName: plan.rep.name,
+        driveMinutes: plan.driveMinutes,
+        reason: r2.error,
+      };
+    await logDispatchWrite(p.supabase, {
+      mode: "live",
+      trigger: "late_cover",
+      formItemId: null,
+      boardId: p.boardId,
+      itemId: p.lead.itemId,
+      leadName: p.lead.name,
+      columnId: BLOCK_COL.iss,
+      columnLabel: "Iss",
+      oldValue: p.lead.issLabel ?? null,
+      newValue: LABEL.iss,
+      reason: plan.reason,
+    });
+  } finally {
+    await releaseAll(p.supabase, lockKeys, lockHolder);
+  }
 
   // Rule 6 text: running late, office please call the customer.
   await sendDispatcherIMessage(

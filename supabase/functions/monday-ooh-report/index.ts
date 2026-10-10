@@ -112,6 +112,7 @@ import {
   logDispatchDecision,
   logDispatchWrite,
 } from "./history.ts";
+import { acquireAll, recentlyTouched, releaseAll, sleep } from "./locks.ts";
 
 const denoEnv = (globalThis as { Deno?: { env: { get(k: string): string | undefined } } }).Deno
   ?.env;
@@ -1542,75 +1543,118 @@ async function runDispatch(p: {
           const partnerUid = partnerName
             ? (resolveUserId(users, partnerName) ?? resolveUserIdByFirstName(users, partnerName))
             : null;
-          // ── Rule 1: people6 is ADDITIVE ──────────────────────────────────
-          // Union the reps already on the lead with the issued rep (+ partner);
-          // never drop anyone a manager put there (the Langley Jaxon+Edward fix).
-          const existingIds = await fetchPeopleColumnIds(
-            p.token,
-            plan.lead.itemId,
-            BLOCK_COL.reps,
-          ).catch(() => [] as string[]);
-          const merged = mergePeople(existingIds, [uid, ...(partnerUid ? [partnerUid] : [])]);
-          const r1 = await setPeopleColumn(
-            p.token,
-            plan.lead.boardId,
-            plan.lead.itemId,
-            BLOCK_COL.reps,
-            merged,
-            `ooh-people-${plan.lead.itemId}`,
-          );
-          if (r1.error) failReason = `people6: ${r1.error}`;
-          else {
-            // Rule 21: audit the people6 write (old → new).
-            await logDispatchWrite(p.supabase, {
+          // ── Rule L: take the write lock before the read-modify-write ───────
+          // Serialize this issue against any concurrent invocation touching the
+          // SAME lead (item:) or trying to issue the SAME rep elsewhere (rep:).
+          // A conflict means another writer is mid-issue — the 10/9 double-issue
+          // (one pair restored onto two leads at once). Back off instead of
+          // writing the pair a second time.
+          const lockHolder = `dispatch:${p.formItemId}:${plan.lead.itemId}`;
+          const lockKeys = [
+            `item:${plan.lead.itemId}`,
+            `rep:${uid}`,
+            ...(partnerUid ? [`rep:${partnerUid}`] : []),
+          ];
+          const lock = await acquireAll(p.supabase, lockKeys, lockHolder);
+          if (!lock.ok) {
+            chosen.delete(plan.lead.itemId);
+            await logDispatchDecision(p.supabase, {
               mode: p.mode,
               trigger: "report",
               formItemId: p.formItemId,
+              repName,
+              office: p.office,
               boardId: plan.lead.boardId,
-              itemId: plan.lead.itemId,
+              leadItemId: plan.lead.itemId,
               leadName: plan.lead.name,
-              columnId: BLOCK_COL.reps,
-              columnLabel: "Reps",
-              oldValue: existingIds.join(","),
-              newValue: merged.join(","),
-              reason: plan.reason,
+              action: "none",
+              score: plan.score,
+              driveMinutes: plan.driveMinutes,
+              strength: plan.strength,
+              reason: `skipped — write lock ${lock.blockedKey} held by another writer, backed off (Rule L)`,
+              issued: false,
             });
-            if (plan.addRep) {
-              // #3 "Add Rep": the people6 ADD above is the whole job — the
-              // lead keeps its current rep AND its status (never pressed).
-              didIssue = true;
-              issued = plan.lead.itemId;
-            } else {
-              // Owner brief Part 4: the rep's OWN job walk is pressed "Office
-              // Appt" (keeps its own flow), everything else "Iss".
-              const issLabel = issLabelForLead(plan.lead);
-              const r2 = await setStatus(
-                p.token,
-                plan.lead.boardId,
-                plan.lead.itemId,
-                BLOCK_COL.iss,
-                issLabel,
-                `ooh-iss-${plan.lead.itemId}`,
-              );
-              if (r2.error) failReason = `Iss: ${r2.error}`;
-              else {
-                await logDispatchWrite(p.supabase, {
-                  mode: p.mode,
-                  trigger: "report",
-                  formItemId: p.formItemId,
-                  boardId: plan.lead.boardId,
-                  itemId: plan.lead.itemId,
-                  leadName: plan.lead.name,
-                  columnId: BLOCK_COL.iss,
-                  columnLabel: "Iss",
-                  oldValue: plan.lead.issLabel ?? null,
-                  newValue: issLabel,
-                  reason: plan.reason,
-                });
+            continue;
+          }
+          try {
+            // Rule L (15s): if anyone touched people6/Iss on this lead in the
+            // last 15s, a second writer is mid-flight — wait, then re-read (the
+            // fetchPeopleColumnIds below is the re-read) before writing.
+            if (await recentlyTouched(p.token, plan.lead.boardId, plan.lead.itemId, 15)) {
+              await sleep(4000);
+            }
+            // ── Rule 1: people6 is ADDITIVE ────────────────────────────────
+            // Union the reps already on the lead with the issued rep (+ partner);
+            // never drop anyone a manager put there (the Langley Jaxon+Edward fix).
+            const existingIds = await fetchPeopleColumnIds(
+              p.token,
+              plan.lead.itemId,
+              BLOCK_COL.reps,
+            ).catch(() => [] as string[]);
+            const merged = mergePeople(existingIds, [uid, ...(partnerUid ? [partnerUid] : [])]);
+            const r1 = await setPeopleColumn(
+              p.token,
+              plan.lead.boardId,
+              plan.lead.itemId,
+              BLOCK_COL.reps,
+              merged,
+              `ooh-people-${plan.lead.itemId}`,
+            );
+            if (r1.error) failReason = `people6: ${r1.error}`;
+            else {
+              // Rule 21: audit the people6 write (old → new).
+              await logDispatchWrite(p.supabase, {
+                mode: p.mode,
+                trigger: "report",
+                formItemId: p.formItemId,
+                boardId: plan.lead.boardId,
+                itemId: plan.lead.itemId,
+                leadName: plan.lead.name,
+                columnId: BLOCK_COL.reps,
+                columnLabel: "Reps",
+                oldValue: existingIds.join(","),
+                newValue: merged.join(","),
+                reason: plan.reason,
+              });
+              if (plan.addRep) {
+                // #3 "Add Rep": the people6 ADD above is the whole job — the
+                // lead keeps its current rep AND its status (never pressed).
                 didIssue = true;
                 issued = plan.lead.itemId;
+              } else {
+                // Owner brief Part 4: the rep's OWN job walk is pressed "Office
+                // Appt" (keeps its own flow), everything else "Iss".
+                const issLabel = issLabelForLead(plan.lead);
+                const r2 = await setStatus(
+                  p.token,
+                  plan.lead.boardId,
+                  plan.lead.itemId,
+                  BLOCK_COL.iss,
+                  issLabel,
+                  `ooh-iss-${plan.lead.itemId}`,
+                );
+                if (r2.error) failReason = `Iss: ${r2.error}`;
+                else {
+                  await logDispatchWrite(p.supabase, {
+                    mode: p.mode,
+                    trigger: "report",
+                    formItemId: p.formItemId,
+                    boardId: plan.lead.boardId,
+                    itemId: plan.lead.itemId,
+                    leadName: plan.lead.name,
+                    columnId: BLOCK_COL.iss,
+                    columnLabel: "Iss",
+                    oldValue: plan.lead.issLabel ?? null,
+                    newValue: issLabel,
+                    reason: plan.reason,
+                  });
+                  didIssue = true;
+                  issued = plan.lead.itemId;
+                }
               }
             }
+          } finally {
+            await releaseAll(p.supabase, lockKeys, lockHolder);
           }
         }
       }

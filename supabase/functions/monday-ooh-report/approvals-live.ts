@@ -53,6 +53,7 @@ import {
   wouldRemoveRep,
 } from "./approvals.ts";
 import { logDispatchWrite } from "./history.ts";
+import { acquireAll, recentlyTouched, releaseAll, sleep } from "./locks.ts";
 
 const BLOCK_PULSE_URL = (boardId: string, itemId: string) =>
   `https://tidal-remodeling.monday.com/boards/${boardId}/pulses/${itemId}`;
@@ -578,84 +579,113 @@ async function applyAddIds(p: {
     return "skipped";
   }
 
-  // Rule H5 — re-read the block item RIGHT BEFORE the write.
-  const block = await fetchBlockItem(token, p.blockItemId).catch(() => null);
-  if (!block) {
-    await note("Block item unreadable — nothing written", APPROVALS_ISSUED.skipped);
-    await markProposal("skipped", "block item unreadable");
+  // Rule L: take the write lock before the re-read-and-write. Serialize against
+  // a concurrent report-driven issue on the SAME lead (item:) or the SAME rep
+  // elsewhere (rep:) — reps are already dispo-ing leftover leads when the 8:45
+  // auto-issue runs. A conflict leaves the row's state UNTOUCHED (so a later run
+  // retries) and reports Held, rather than marking it applied/skipped.
+  const lockHolder = `approvals:${p.approvalsItemId}`;
+  const lockKeys = [`item:${p.blockItemId}`, ...p.addIds.map((id) => `rep:${id}`)];
+  const lock = await acquireAll(supabase, lockKeys, lockHolder);
+  if (!lock.ok) {
+    await note(
+      `Held — write lock ${lock.blockedKey} held by another writer, will retry`,
+      APPROVALS_ISSUED.held,
+    );
     return "skipped";
   }
-  if (p.guard) {
-    const g = applyGuard({
-      snapshot: p.guard,
-      current: {
-        repNames: block.reps,
-        iss: block.iss,
-        pm: block.pm,
-        rs: block.rs,
-        ol: block.ol,
-        bo: block.bo,
-        sale: block.sale,
-      },
-    });
-    if (!g.ok) {
-      await note(g.note, APPROVALS_ISSUED.skipped);
-      await markProposal("skipped", g.note);
+  try {
+    // Rule L (15s): a mid-flight change by a second writer → wait, then re-read.
+    if (p.blockBoardId && (await recentlyTouched(token, p.blockBoardId, p.blockItemId, 15)))
+      await sleep(4000);
+
+    // Rule H5 — re-read the block item RIGHT BEFORE the write.
+    const block = await fetchBlockItem(token, p.blockItemId).catch(() => null);
+    if (!block) {
+      await note("Block item unreadable — nothing written", APPROVALS_ISSUED.skipped);
+      await markProposal("skipped", "block item unreadable");
       return "skipped";
     }
-  }
+    if (p.guard) {
+      const g = applyGuard({
+        snapshot: p.guard,
+        current: {
+          repNames: block.reps,
+          iss: block.iss,
+          pm: block.pm,
+          rs: block.rs,
+          ol: block.ol,
+          bo: block.bo,
+          sale: block.sale,
+        },
+      });
+      if (!g.ok) {
+        await note(g.note, APPROVALS_ISSUED.skipped);
+        await markProposal("skipped", g.note);
+        return "skipped";
+      }
+    }
 
-  if (mode !== "live") {
-    await note(`[${mode.toUpperCase()}] would add — live_dispatch_mode is not live`);
-    await markProposal("skipped", `live_dispatch_mode=${mode}`);
-    return "skipped";
-  }
+    if (mode !== "live") {
+      await note(`[${mode.toUpperCase()}] would add — live_dispatch_mode is not live`);
+      await markProposal("skipped", `live_dispatch_mode=${mode}`);
+      return "skipped";
+    }
 
-  const boardId = p.blockBoardId ?? block.boardId;
-  const currentIds = await fetchPeopleColumnIds(token, p.blockItemId, BLOCK_COL.reps).catch(
-    () => [] as string[],
-  );
-  const nextIds = applyWriteIds(currentIds, p.addIds);
-  // Rules I6/I8 — the final gate: a write may NEVER remove a rep from people6.
-  if (wouldRemoveRep(currentIds, nextIds)) {
-    await note("Refused: write would remove a rep (reps are add-only)", APPROVALS_ISSUED.skipped);
-    await markProposal("skipped", "would remove a rep — refused");
-    return "skipped";
-  }
-  const idToName = new Map(p.users.map((u) => [u.id, u.name]));
-  const oldNames = currentIds.map((id) => idToName.get(id) ?? id).join(", ");
-  const newNames = nextIds.map((id) => idToName.get(id) ?? id).join(", ");
+    const boardId = p.blockBoardId ?? block.boardId;
+    const currentIds = await fetchPeopleColumnIds(token, p.blockItemId, BLOCK_COL.reps).catch(
+      () => [] as string[],
+    );
+    const nextIds = applyWriteIds(currentIds, p.addIds);
+    // Rules I6/I8 — the final gate: a write may NEVER remove a rep from people6.
+    if (wouldRemoveRep(currentIds, nextIds)) {
+      await note(
+        "Refused: write would remove a rep (reps are add-only)",
+        APPROVALS_ISSUED.skipped,
+      );
+      await markProposal("skipped", "would remove a rep — refused");
+      return "skipped";
+    }
+    const idToName = new Map(p.users.map((u) => [u.id, u.name]));
+    const oldNames = currentIds.map((id) => idToName.get(id) ?? id).join(", ");
+    const newNames = nextIds.map((id) => idToName.get(id) ?? id).join(", ");
 
-  const write = await setPeopleColumn(
-    token,
-    boardId,
-    p.blockItemId,
-    BLOCK_COL.reps,
-    nextIds,
-    `approvals-apply-${p.approvalsItemId}`,
-  );
-  if (write.error) {
-    await note(`Write failed: ${write.error}`.slice(0, 200), APPROVALS_ISSUED.skipped);
-    await markProposal("skipped", `write failed: ${write.error}`);
-    return "skipped";
-  }
+    const write = await setPeopleColumn(
+      token,
+      boardId,
+      p.blockItemId,
+      BLOCK_COL.reps,
+      nextIds,
+      `approvals-apply-${p.approvalsItemId}`,
+    );
+    if (write.error) {
+      await note(`Write failed: ${write.error}`.slice(0, 200), APPROVALS_ISSUED.skipped);
+      await markProposal("skipped", `write failed: ${write.error}`);
+      return "skipped";
+    }
 
-  // Rule J10 — who approved, when, old and new values (rule-G audit table).
-  await logDispatchWrite(supabase, {
-    mode: "live",
-    trigger: "approvals",
-    formItemId: null,
-    boardId,
-    itemId: p.blockItemId,
-    leadName: block.name,
-    columnId: BLOCK_COL.reps,
-    columnLabel: "Reps",
-    oldValue: oldNames,
-    newValue: newNames,
-    reason: `approved by ${approver}: ${p.reason}`,
-    actor: `approvals:${approver}`,
-  });
-  await note(`Applied by ${approver} @ ${laClockNow()} — Reps: ${newNames}`, APPROVALS_ISSUED.applied);
-  await markProposal("applied", `people6: ${oldNames || "nobody"} → ${newNames}`);
-  return "applied";
+    // Rule J10 — who approved, when, old and new values (rule-G audit table).
+    await logDispatchWrite(supabase, {
+      mode: "live",
+      trigger: "approvals",
+      formItemId: null,
+      boardId,
+      itemId: p.blockItemId,
+      leadName: block.name,
+      columnId: BLOCK_COL.reps,
+      columnLabel: "Reps",
+      oldValue: oldNames,
+      newValue: newNames,
+      reason: `approved by ${approver}: ${p.reason}`,
+      actor: `approvals:${approver}`,
+    });
+    await note(
+      `Applied by ${approver} @ ${laClockNow()} — Reps: ${newNames}`,
+      APPROVALS_ISSUED.applied,
+    );
+    await markProposal("applied", `people6: ${oldNames || "nobody"} → ${newNames}`);
+    return "applied";
+  } finally {
+    await releaseAll(supabase, lockKeys, lockHolder);
+  }
 }
