@@ -811,8 +811,9 @@ const PROOF_HINTS: Record<ProofCategory, string> = {
 
 // Max proof upload size. MUST stay in sync with the contest-proofs bucket's
 // file_size_limit (migration 20261020120000) and the project-wide Storage
-// upload limit in the Supabase dashboard, which caps the bucket.
-const MAX_PROOF_MB = 500;
+// upload limit in the Supabase dashboard, which caps the bucket. 50MB is the
+// Free-plan ceiling; bigger phone videos need trimming (or a plan upgrade).
+const MAX_PROOF_MB = 50;
 const MAX_PROOF_BYTES = MAX_PROOF_MB * 1024 * 1024;
 
 function ProofSheet({

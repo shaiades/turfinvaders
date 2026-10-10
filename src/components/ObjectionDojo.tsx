@@ -48,11 +48,15 @@ export type ObjectionAttempt = {
 
 const BUCKET = "objection-attempts";
 const MAX_SECONDS = 90;
-// Safety cap for the uploaded recording. A 90s clip is far smaller, but a
-// high-bitrate device could surprise us; keep this in sync with the
-// objection-attempts bucket file_size_limit (migration 20261020120100).
-const MAX_ATTEMPT_MB = 200;
+// Max uploaded recording size. 50MB is the Free-plan Storage ceiling; keep in
+// sync with the objection-attempts bucket file_size_limit (migration
+// 20261020120100). A 90s clip at REC_VIDEO_BPS lands ~35MB, safely under it.
+const MAX_ATTEMPT_MB = 50;
 const MAX_ATTEMPT_BYTES = MAX_ATTEMPT_MB * 1024 * 1024;
+// Cap the recording bitrate so a full 90s clip stays under the 50MB ceiling
+// regardless of device defaults: 3 Mbps × 90s ≈ 34MB + audio. Plenty for a
+// selfie-cam pitch review.
+const REC_VIDEO_BPS = 3_000_000;
 
 // New tables aren't in the generated Database types until the migration is
 // applied and types are regenerated — one untyped escape hatch, cast on read.
@@ -275,7 +279,9 @@ function RecordAttemptDialog({
         await videoRef.current.play().catch(() => {});
       }
       chunksRef.current = [];
-      const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+      const recOpts: MediaRecorderOptions = { videoBitsPerSecond: REC_VIDEO_BPS };
+      if (mime) recOpts.mimeType = mime;
+      const rec = new MediaRecorder(stream, recOpts);
       rec.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
