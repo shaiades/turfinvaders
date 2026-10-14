@@ -39,6 +39,22 @@
     {
       "path": "/api/internal/refresh-action-plans",
       "schedule": "0 2 * * 1"
+    },
+    {
+      "path": "/api/internal/reconcile-block-cards",
+      "schedule": "0 15 * * *"
+    },
+    {
+      "path": "/api/internal/reconcile-block-cards",
+      "schedule": "0 18 * * *"
+    },
+    {
+      "path": "/api/internal/reconcile-block-cards",
+      "schedule": "0 21 * * *"
+    },
+    {
+      "path": "/api/internal/reconcile-block-cards",
+      "schedule": "0 0 * * *"
     }
   ]
 }

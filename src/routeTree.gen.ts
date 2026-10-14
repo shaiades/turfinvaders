@@ -9,43 +9,48 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as LeadSubmittedRouteImport } from './routes/lead-submitted'
-import { Route as AuthRouteImport } from './routes/auth'
-import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as AuthWelcomeRouteImport } from './routes/auth_.welcome'
-import { Route as AuthCallbackRouteImport } from './routes/auth_.callback'
-import { Route as AuthenticatedUsersRouteImport } from './routes/_authenticated/users'
-import { Route as AuthenticatedReportsRouteImport } from './routes/_authenticated/reports'
-import { Route as AuthenticatedPlaybookRouteImport } from './routes/_authenticated/playbook'
-import { Route as AuthenticatedMyTerritoryRouteImport } from './routes/_authenticated/my-territory'
-import { Route as AuthenticatedMissionRouteImport } from './routes/_authenticated/mission'
-import { Route as AuthenticatedLogRouteImport } from './routes/_authenticated/log'
-import { Route as AuthenticatedLearnRouteImport } from './routes/_authenticated/learn'
-import { Route as AuthenticatedLeaderboardRouteImport } from './routes/_authenticated/leaderboard'
-import { Route as AuthenticatedGodModeRouteImport } from './routes/_authenticated/god-mode'
-import { Route as AuthenticatedFieldRouteImport } from './routes/_authenticated/field'
-import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
-import { Route as AuthenticatedDailyWrapRouteImport } from './routes/_authenticated/daily-wrap'
-import { Route as AuthenticatedCrewMapRouteImport } from './routes/_authenticated/crew-map'
-import { Route as AuthenticatedConfirmationDeskRouteImport } from './routes/_authenticated/confirmation-desk'
-import { Route as AuthenticatedCloseKombatRouteImport } from './routes/_authenticated/close-kombat'
+import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
+import { Route as AuthRouteImport } from './routes/auth'
+import { Route as LeadSubmittedRouteImport } from './routes/lead-submitted'
 import { Route as AuthenticatedActionPlansRouteImport } from './routes/_authenticated/action-plans'
-import { Route as AuthenticatedTeamsIndexRouteImport } from './routes/_authenticated/teams.index'
-import { Route as AuthenticatedPurposeLeadershipIndexRouteImport } from './routes/_authenticated/purpose-leadership.index'
-import { Route as AuthenticatedMyPurposeIndexRouteImport } from './routes/_authenticated/my-purpose.index'
-import { Route as ApiInternalRotateBoardsRouteImport } from './routes/api/internal/rotate-boards'
-import { Route as ApiInternalRefreshActionPlansRouteImport } from './routes/api/internal/refresh-action-plans'
-import { Route as ApiInternalGodDigestRouteImport } from './routes/api/internal/god-digest'
-import { Route as AuthenticatedTeamsTeamIdRouteImport } from './routes/_authenticated/teams.$teamId'
-import { Route as AuthenticatedPurposeLeadershipUserIdRouteImport } from './routes/_authenticated/purpose-leadership.$userId'
-import { Route as AuthenticatedMyPurposeWorkshopRouteImport } from './routes/_authenticated/my-purpose.workshop'
+import { Route as AuthenticatedCloseKombatRouteImport } from './routes/_authenticated/close-kombat'
+import { Route as AuthenticatedConfirmationDeskRouteImport } from './routes/_authenticated/confirmation-desk'
+import { Route as AuthenticatedCrewMapRouteImport } from './routes/_authenticated/crew-map'
+import { Route as AuthenticatedDailyWrapRouteImport } from './routes/_authenticated/daily-wrap'
+import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
+import { Route as AuthenticatedFieldRouteImport } from './routes/_authenticated/field'
+import { Route as AuthenticatedGodModeRouteImport } from './routes/_authenticated/god-mode'
+import { Route as AuthenticatedLeaderboardRouteImport } from './routes/_authenticated/leaderboard'
+import { Route as AuthenticatedLearnRouteImport } from './routes/_authenticated/learn'
+import { Route as AuthenticatedLogRouteImport } from './routes/_authenticated/log'
+import { Route as AuthenticatedMissionRouteImport } from './routes/_authenticated/mission'
+import { Route as AuthenticatedMyTerritoryRouteImport } from './routes/_authenticated/my-territory'
+import { Route as AuthenticatedPlaybookRouteImport } from './routes/_authenticated/playbook'
+import { Route as AuthenticatedReportsRouteImport } from './routes/_authenticated/reports'
+import { Route as AuthenticatedUsersRouteImport } from './routes/_authenticated/users'
+import { Route as AuthCallbackRouteImport } from './routes/auth_.callback'
+import { Route as AuthWelcomeRouteImport } from './routes/auth_.welcome'
 import { Route as AuthenticatedCanvassersCanvasserIdRouteImport } from './routes/_authenticated/canvassers.$canvasserId'
+import { Route as AuthenticatedMyPurposeIndexRouteImport } from './routes/_authenticated/my-purpose.index'
+import { Route as AuthenticatedMyPurposeWorkshopRouteImport } from './routes/_authenticated/my-purpose.workshop'
+import { Route as AuthenticatedPurposeLeadershipIndexRouteImport } from './routes/_authenticated/purpose-leadership.index'
+import { Route as AuthenticatedPurposeLeadershipUserIdRouteImport } from './routes/_authenticated/purpose-leadership.$userId'
+import { Route as AuthenticatedTeamsIndexRouteImport } from './routes/_authenticated/teams.index'
+import { Route as AuthenticatedTeamsTeamIdRouteImport } from './routes/_authenticated/teams.$teamId'
+import { Route as ApiInternalGodDigestRouteImport } from './routes/api/internal/god-digest'
+import { Route as ApiInternalReconcileBlockCardsRouteImport } from './routes/api/internal/reconcile-block-cards'
+import { Route as ApiInternalRefreshActionPlansRouteImport } from './routes/api/internal/refresh-action-plans'
+import { Route as ApiInternalRotateBoardsRouteImport } from './routes/api/internal/rotate-boards'
 import { Route as AuthenticatedCanvassersCanvasserIdFieldRouteImport } from './routes/_authenticated/canvassers.$canvasserId.field'
 
-const LeadSubmittedRoute = LeadSubmittedRouteImport.update({
-  id: '/lead-submitted',
-  path: '/lead-submitted',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
+  id: '/_authenticated',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthRoute = AuthRouteImport.update({
@@ -53,96 +58,15 @@ const AuthRoute = AuthRouteImport.update({
   path: '/auth',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
-  id: '/_authenticated',
+const LeadSubmittedRoute = LeadSubmittedRouteImport.update({
+  id: '/lead-submitted',
+  path: '/lead-submitted',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AuthWelcomeRoute = AuthWelcomeRouteImport.update({
-  id: '/auth_/welcome',
-  path: '/auth/welcome',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AuthCallbackRoute = AuthCallbackRouteImport.update({
-  id: '/auth_/callback',
-  path: '/auth/callback',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AuthenticatedUsersRoute = AuthenticatedUsersRouteImport.update({
-  id: '/users',
-  path: '/users',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
-const AuthenticatedReportsRoute = AuthenticatedReportsRouteImport.update({
-  id: '/reports',
-  path: '/reports',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
-const AuthenticatedPlaybookRoute = AuthenticatedPlaybookRouteImport.update({
-  id: '/playbook',
-  path: '/playbook',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
-const AuthenticatedMyTerritoryRoute =
-  AuthenticatedMyTerritoryRouteImport.update({
-    id: '/my-territory',
-    path: '/my-territory',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
-const AuthenticatedMissionRoute = AuthenticatedMissionRouteImport.update({
-  id: '/mission',
-  path: '/mission',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
-const AuthenticatedLogRoute = AuthenticatedLogRouteImport.update({
-  id: '/log',
-  path: '/log',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
-const AuthenticatedLearnRoute = AuthenticatedLearnRouteImport.update({
-  id: '/learn',
-  path: '/learn',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
-const AuthenticatedLeaderboardRoute =
-  AuthenticatedLeaderboardRouteImport.update({
-    id: '/leaderboard',
-    path: '/leaderboard',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
-const AuthenticatedGodModeRoute = AuthenticatedGodModeRouteImport.update({
-  id: '/god-mode',
-  path: '/god-mode',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
-const AuthenticatedFieldRoute = AuthenticatedFieldRouteImport.update({
-  id: '/field',
-  path: '/field',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
-const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
-  id: '/dashboard',
-  path: '/dashboard',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
-const AuthenticatedDailyWrapRoute = AuthenticatedDailyWrapRouteImport.update({
-  id: '/daily-wrap',
-  path: '/daily-wrap',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
-const AuthenticatedCrewMapRoute = AuthenticatedCrewMapRouteImport.update({
-  id: '/crew-map',
-  path: '/crew-map',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
-const AuthenticatedConfirmationDeskRoute =
-  AuthenticatedConfirmationDeskRouteImport.update({
-    id: '/confirmation-desk',
-    path: '/confirmation-desk',
+const AuthenticatedActionPlansRoute =
+  AuthenticatedActionPlansRouteImport.update({
+    id: '/action-plans',
+    path: '/action-plans',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedCloseKombatRoute =
@@ -151,21 +75,93 @@ const AuthenticatedCloseKombatRoute =
     path: '/close-kombat',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
-const AuthenticatedActionPlansRoute =
-  AuthenticatedActionPlansRouteImport.update({
-    id: '/action-plans',
-    path: '/action-plans',
+const AuthenticatedConfirmationDeskRoute =
+  AuthenticatedConfirmationDeskRouteImport.update({
+    id: '/confirmation-desk',
+    path: '/confirmation-desk',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
-const AuthenticatedTeamsIndexRoute = AuthenticatedTeamsIndexRouteImport.update({
-  id: '/teams/',
-  path: '/teams/',
+const AuthenticatedCrewMapRoute = AuthenticatedCrewMapRouteImport.update({
+  id: '/crew-map',
+  path: '/crew-map',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const AuthenticatedPurposeLeadershipIndexRoute =
-  AuthenticatedPurposeLeadershipIndexRouteImport.update({
-    id: '/purpose-leadership/',
-    path: '/purpose-leadership/',
+const AuthenticatedDailyWrapRoute = AuthenticatedDailyWrapRouteImport.update({
+  id: '/daily-wrap',
+  path: '/daily-wrap',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedFieldRoute = AuthenticatedFieldRouteImport.update({
+  id: '/field',
+  path: '/field',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedGodModeRoute = AuthenticatedGodModeRouteImport.update({
+  id: '/god-mode',
+  path: '/god-mode',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedLeaderboardRoute =
+  AuthenticatedLeaderboardRouteImport.update({
+    id: '/leaderboard',
+    path: '/leaderboard',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedLearnRoute = AuthenticatedLearnRouteImport.update({
+  id: '/learn',
+  path: '/learn',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedLogRoute = AuthenticatedLogRouteImport.update({
+  id: '/log',
+  path: '/log',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedMissionRoute = AuthenticatedMissionRouteImport.update({
+  id: '/mission',
+  path: '/mission',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedMyTerritoryRoute =
+  AuthenticatedMyTerritoryRouteImport.update({
+    id: '/my-territory',
+    path: '/my-territory',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedPlaybookRoute = AuthenticatedPlaybookRouteImport.update({
+  id: '/playbook',
+  path: '/playbook',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedReportsRoute = AuthenticatedReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedUsersRoute = AuthenticatedUsersRouteImport.update({
+  id: '/users',
+  path: '/users',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthCallbackRoute = AuthCallbackRouteImport.update({
+  id: '/auth_/callback',
+  path: '/auth/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthWelcomeRoute = AuthWelcomeRouteImport.update({
+  id: '/auth_/welcome',
+  path: '/auth/welcome',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedCanvassersCanvasserIdRoute =
+  AuthenticatedCanvassersCanvasserIdRouteImport.update({
+    id: '/canvassers/$canvasserId',
+    path: '/canvassers/$canvasserId',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedMyPurposeIndexRoute =
@@ -174,26 +170,16 @@ const AuthenticatedMyPurposeIndexRoute =
     path: '/my-purpose/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
-const ApiInternalRotateBoardsRoute = ApiInternalRotateBoardsRouteImport.update({
-  id: '/api/internal/rotate-boards',
-  path: '/api/internal/rotate-boards',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiInternalRefreshActionPlansRoute =
-  ApiInternalRefreshActionPlansRouteImport.update({
-    id: '/api/internal/refresh-action-plans',
-    path: '/api/internal/refresh-action-plans',
-    getParentRoute: () => rootRouteImport,
+const AuthenticatedMyPurposeWorkshopRoute =
+  AuthenticatedMyPurposeWorkshopRouteImport.update({
+    id: '/my-purpose/workshop',
+    path: '/my-purpose/workshop',
+    getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
-const ApiInternalGodDigestRoute = ApiInternalGodDigestRouteImport.update({
-  id: '/api/internal/god-digest',
-  path: '/api/internal/god-digest',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AuthenticatedTeamsTeamIdRoute =
-  AuthenticatedTeamsTeamIdRouteImport.update({
-    id: '/teams/$teamId',
-    path: '/teams/$teamId',
+const AuthenticatedPurposeLeadershipIndexRoute =
+  AuthenticatedPurposeLeadershipIndexRouteImport.update({
+    id: '/purpose-leadership/',
+    path: '/purpose-leadership/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedPurposeLeadershipUserIdRoute =
@@ -202,18 +188,39 @@ const AuthenticatedPurposeLeadershipUserIdRoute =
     path: '/purpose-leadership/$userId',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
-const AuthenticatedMyPurposeWorkshopRoute =
-  AuthenticatedMyPurposeWorkshopRouteImport.update({
-    id: '/my-purpose/workshop',
-    path: '/my-purpose/workshop',
+const AuthenticatedTeamsIndexRoute = AuthenticatedTeamsIndexRouteImport.update({
+  id: '/teams/',
+  path: '/teams/',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedTeamsTeamIdRoute =
+  AuthenticatedTeamsTeamIdRouteImport.update({
+    id: '/teams/$teamId',
+    path: '/teams/$teamId',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
-const AuthenticatedCanvassersCanvasserIdRoute =
-  AuthenticatedCanvassersCanvasserIdRouteImport.update({
-    id: '/canvassers/$canvasserId',
-    path: '/canvassers/$canvasserId',
-    getParentRoute: () => AuthenticatedRouteRoute,
+const ApiInternalGodDigestRoute = ApiInternalGodDigestRouteImport.update({
+  id: '/api/internal/god-digest',
+  path: '/api/internal/god-digest',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiInternalReconcileBlockCardsRoute =
+  ApiInternalReconcileBlockCardsRouteImport.update({
+    id: '/api/internal/reconcile-block-cards',
+    path: '/api/internal/reconcile-block-cards',
+    getParentRoute: () => rootRouteImport,
   } as any)
+const ApiInternalRefreshActionPlansRoute =
+  ApiInternalRefreshActionPlansRouteImport.update({
+    id: '/api/internal/refresh-action-plans',
+    path: '/api/internal/refresh-action-plans',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiInternalRotateBoardsRoute = ApiInternalRotateBoardsRouteImport.update({
+  id: '/api/internal/rotate-boards',
+  path: '/api/internal/rotate-boards',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthenticatedCanvassersCanvasserIdFieldRoute =
   AuthenticatedCanvassersCanvasserIdFieldRouteImport.update({
     id: '/field',
@@ -248,6 +255,7 @@ export interface FileRoutesByFullPath {
   '/purpose-leadership/$userId': typeof AuthenticatedPurposeLeadershipUserIdRoute
   '/teams/$teamId': typeof AuthenticatedTeamsTeamIdRoute
   '/api/internal/god-digest': typeof ApiInternalGodDigestRoute
+  '/api/internal/reconcile-block-cards': typeof ApiInternalReconcileBlockCardsRoute
   '/api/internal/refresh-action-plans': typeof ApiInternalRefreshActionPlansRoute
   '/api/internal/rotate-boards': typeof ApiInternalRotateBoardsRoute
   '/my-purpose/': typeof AuthenticatedMyPurposeIndexRoute
@@ -282,6 +290,7 @@ export interface FileRoutesByTo {
   '/purpose-leadership/$userId': typeof AuthenticatedPurposeLeadershipUserIdRoute
   '/teams/$teamId': typeof AuthenticatedTeamsTeamIdRoute
   '/api/internal/god-digest': typeof ApiInternalGodDigestRoute
+  '/api/internal/reconcile-block-cards': typeof ApiInternalReconcileBlockCardsRoute
   '/api/internal/refresh-action-plans': typeof ApiInternalRefreshActionPlansRoute
   '/api/internal/rotate-boards': typeof ApiInternalRotateBoardsRoute
   '/my-purpose': typeof AuthenticatedMyPurposeIndexRoute
@@ -318,6 +327,7 @@ export interface FileRoutesById {
   '/_authenticated/purpose-leadership/$userId': typeof AuthenticatedPurposeLeadershipUserIdRoute
   '/_authenticated/teams/$teamId': typeof AuthenticatedTeamsTeamIdRoute
   '/api/internal/god-digest': typeof ApiInternalGodDigestRoute
+  '/api/internal/reconcile-block-cards': typeof ApiInternalReconcileBlockCardsRoute
   '/api/internal/refresh-action-plans': typeof ApiInternalRefreshActionPlansRoute
   '/api/internal/rotate-boards': typeof ApiInternalRotateBoardsRoute
   '/_authenticated/my-purpose/': typeof AuthenticatedMyPurposeIndexRoute
@@ -354,6 +364,7 @@ export interface FileRouteTypes {
     | '/purpose-leadership/$userId'
     | '/teams/$teamId'
     | '/api/internal/god-digest'
+    | '/api/internal/reconcile-block-cards'
     | '/api/internal/refresh-action-plans'
     | '/api/internal/rotate-boards'
     | '/my-purpose/'
@@ -388,6 +399,7 @@ export interface FileRouteTypes {
     | '/purpose-leadership/$userId'
     | '/teams/$teamId'
     | '/api/internal/god-digest'
+    | '/api/internal/reconcile-block-cards'
     | '/api/internal/refresh-action-plans'
     | '/api/internal/rotate-boards'
     | '/my-purpose'
@@ -423,6 +435,7 @@ export interface FileRouteTypes {
     | '/_authenticated/purpose-leadership/$userId'
     | '/_authenticated/teams/$teamId'
     | '/api/internal/god-digest'
+    | '/api/internal/reconcile-block-cards'
     | '/api/internal/refresh-action-plans'
     | '/api/internal/rotate-boards'
     | '/_authenticated/my-purpose/'
@@ -439,24 +452,18 @@ export interface RootRouteChildren {
   AuthCallbackRoute: typeof AuthCallbackRoute
   AuthWelcomeRoute: typeof AuthWelcomeRoute
   ApiInternalGodDigestRoute: typeof ApiInternalGodDigestRoute
+  ApiInternalReconcileBlockCardsRoute: typeof ApiInternalReconcileBlockCardsRoute
   ApiInternalRefreshActionPlansRoute: typeof ApiInternalRefreshActionPlansRoute
   ApiInternalRotateBoardsRoute: typeof ApiInternalRotateBoardsRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/lead-submitted': {
-      id: '/lead-submitted'
-      path: '/lead-submitted'
-      fullPath: '/lead-submitted'
-      preLoaderRoute: typeof LeadSubmittedRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/auth': {
-      id: '/auth'
-      path: '/auth'
-      fullPath: '/auth'
-      preLoaderRoute: typeof AuthRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated': {
@@ -466,123 +473,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/auth': {
+      id: '/auth'
+      path: '/auth'
+      fullPath: '/auth'
+      preLoaderRoute: typeof AuthRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/auth_/welcome': {
-      id: '/auth_/welcome'
-      path: '/auth/welcome'
-      fullPath: '/auth/welcome'
-      preLoaderRoute: typeof AuthWelcomeRouteImport
+    '/lead-submitted': {
+      id: '/lead-submitted'
+      path: '/lead-submitted'
+      fullPath: '/lead-submitted'
+      preLoaderRoute: typeof LeadSubmittedRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/auth_/callback': {
-      id: '/auth_/callback'
-      path: '/auth/callback'
-      fullPath: '/auth/callback'
-      preLoaderRoute: typeof AuthCallbackRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/_authenticated/users': {
-      id: '/_authenticated/users'
-      path: '/users'
-      fullPath: '/users'
-      preLoaderRoute: typeof AuthenticatedUsersRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/reports': {
-      id: '/_authenticated/reports'
-      path: '/reports'
-      fullPath: '/reports'
-      preLoaderRoute: typeof AuthenticatedReportsRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/playbook': {
-      id: '/_authenticated/playbook'
-      path: '/playbook'
-      fullPath: '/playbook'
-      preLoaderRoute: typeof AuthenticatedPlaybookRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/my-territory': {
-      id: '/_authenticated/my-territory'
-      path: '/my-territory'
-      fullPath: '/my-territory'
-      preLoaderRoute: typeof AuthenticatedMyTerritoryRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/mission': {
-      id: '/_authenticated/mission'
-      path: '/mission'
-      fullPath: '/mission'
-      preLoaderRoute: typeof AuthenticatedMissionRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/log': {
-      id: '/_authenticated/log'
-      path: '/log'
-      fullPath: '/log'
-      preLoaderRoute: typeof AuthenticatedLogRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/learn': {
-      id: '/_authenticated/learn'
-      path: '/learn'
-      fullPath: '/learn'
-      preLoaderRoute: typeof AuthenticatedLearnRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/leaderboard': {
-      id: '/_authenticated/leaderboard'
-      path: '/leaderboard'
-      fullPath: '/leaderboard'
-      preLoaderRoute: typeof AuthenticatedLeaderboardRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/god-mode': {
-      id: '/_authenticated/god-mode'
-      path: '/god-mode'
-      fullPath: '/god-mode'
-      preLoaderRoute: typeof AuthenticatedGodModeRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/field': {
-      id: '/_authenticated/field'
-      path: '/field'
-      fullPath: '/field'
-      preLoaderRoute: typeof AuthenticatedFieldRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/dashboard': {
-      id: '/_authenticated/dashboard'
-      path: '/dashboard'
-      fullPath: '/dashboard'
-      preLoaderRoute: typeof AuthenticatedDashboardRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/daily-wrap': {
-      id: '/_authenticated/daily-wrap'
-      path: '/daily-wrap'
-      fullPath: '/daily-wrap'
-      preLoaderRoute: typeof AuthenticatedDailyWrapRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/crew-map': {
-      id: '/_authenticated/crew-map'
-      path: '/crew-map'
-      fullPath: '/crew-map'
-      preLoaderRoute: typeof AuthenticatedCrewMapRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/confirmation-desk': {
-      id: '/_authenticated/confirmation-desk'
-      path: '/confirmation-desk'
-      fullPath: '/confirmation-desk'
-      preLoaderRoute: typeof AuthenticatedConfirmationDeskRouteImport
+    '/_authenticated/action-plans': {
+      id: '/_authenticated/action-plans'
+      path: '/action-plans'
+      fullPath: '/action-plans'
+      preLoaderRoute: typeof AuthenticatedActionPlansRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/close-kombat': {
@@ -592,25 +501,123 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedCloseKombatRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/action-plans': {
-      id: '/_authenticated/action-plans'
-      path: '/action-plans'
-      fullPath: '/action-plans'
-      preLoaderRoute: typeof AuthenticatedActionPlansRouteImport
+    '/_authenticated/confirmation-desk': {
+      id: '/_authenticated/confirmation-desk'
+      path: '/confirmation-desk'
+      fullPath: '/confirmation-desk'
+      preLoaderRoute: typeof AuthenticatedConfirmationDeskRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/teams/': {
-      id: '/_authenticated/teams/'
-      path: '/teams'
-      fullPath: '/teams/'
-      preLoaderRoute: typeof AuthenticatedTeamsIndexRouteImport
+    '/_authenticated/crew-map': {
+      id: '/_authenticated/crew-map'
+      path: '/crew-map'
+      fullPath: '/crew-map'
+      preLoaderRoute: typeof AuthenticatedCrewMapRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/purpose-leadership/': {
-      id: '/_authenticated/purpose-leadership/'
-      path: '/purpose-leadership'
-      fullPath: '/purpose-leadership/'
-      preLoaderRoute: typeof AuthenticatedPurposeLeadershipIndexRouteImport
+    '/_authenticated/daily-wrap': {
+      id: '/_authenticated/daily-wrap'
+      path: '/daily-wrap'
+      fullPath: '/daily-wrap'
+      preLoaderRoute: typeof AuthenticatedDailyWrapRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/dashboard': {
+      id: '/_authenticated/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof AuthenticatedDashboardRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/field': {
+      id: '/_authenticated/field'
+      path: '/field'
+      fullPath: '/field'
+      preLoaderRoute: typeof AuthenticatedFieldRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/god-mode': {
+      id: '/_authenticated/god-mode'
+      path: '/god-mode'
+      fullPath: '/god-mode'
+      preLoaderRoute: typeof AuthenticatedGodModeRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/leaderboard': {
+      id: '/_authenticated/leaderboard'
+      path: '/leaderboard'
+      fullPath: '/leaderboard'
+      preLoaderRoute: typeof AuthenticatedLeaderboardRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/learn': {
+      id: '/_authenticated/learn'
+      path: '/learn'
+      fullPath: '/learn'
+      preLoaderRoute: typeof AuthenticatedLearnRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/log': {
+      id: '/_authenticated/log'
+      path: '/log'
+      fullPath: '/log'
+      preLoaderRoute: typeof AuthenticatedLogRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/mission': {
+      id: '/_authenticated/mission'
+      path: '/mission'
+      fullPath: '/mission'
+      preLoaderRoute: typeof AuthenticatedMissionRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/my-territory': {
+      id: '/_authenticated/my-territory'
+      path: '/my-territory'
+      fullPath: '/my-territory'
+      preLoaderRoute: typeof AuthenticatedMyTerritoryRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/playbook': {
+      id: '/_authenticated/playbook'
+      path: '/playbook'
+      fullPath: '/playbook'
+      preLoaderRoute: typeof AuthenticatedPlaybookRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/reports': {
+      id: '/_authenticated/reports'
+      path: '/reports'
+      fullPath: '/reports'
+      preLoaderRoute: typeof AuthenticatedReportsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/users': {
+      id: '/_authenticated/users'
+      path: '/users'
+      fullPath: '/users'
+      preLoaderRoute: typeof AuthenticatedUsersRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/auth_/callback': {
+      id: '/auth_/callback'
+      path: '/auth/callback'
+      fullPath: '/auth/callback'
+      preLoaderRoute: typeof AuthCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth_/welcome': {
+      id: '/auth_/welcome'
+      path: '/auth/welcome'
+      fullPath: '/auth/welcome'
+      preLoaderRoute: typeof AuthWelcomeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/canvassers/$canvasserId': {
+      id: '/_authenticated/canvassers/$canvasserId'
+      path: '/canvassers/$canvasserId'
+      fullPath: '/canvassers/$canvasserId'
+      preLoaderRoute: typeof AuthenticatedCanvassersCanvasserIdRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/my-purpose/': {
@@ -620,32 +627,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedMyPurposeIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/api/internal/rotate-boards': {
-      id: '/api/internal/rotate-boards'
-      path: '/api/internal/rotate-boards'
-      fullPath: '/api/internal/rotate-boards'
-      preLoaderRoute: typeof ApiInternalRotateBoardsRouteImport
-      parentRoute: typeof rootRouteImport
+    '/_authenticated/my-purpose/workshop': {
+      id: '/_authenticated/my-purpose/workshop'
+      path: '/my-purpose/workshop'
+      fullPath: '/my-purpose/workshop'
+      preLoaderRoute: typeof AuthenticatedMyPurposeWorkshopRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/api/internal/refresh-action-plans': {
-      id: '/api/internal/refresh-action-plans'
-      path: '/api/internal/refresh-action-plans'
-      fullPath: '/api/internal/refresh-action-plans'
-      preLoaderRoute: typeof ApiInternalRefreshActionPlansRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/internal/god-digest': {
-      id: '/api/internal/god-digest'
-      path: '/api/internal/god-digest'
-      fullPath: '/api/internal/god-digest'
-      preLoaderRoute: typeof ApiInternalGodDigestRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/_authenticated/teams/$teamId': {
-      id: '/_authenticated/teams/$teamId'
-      path: '/teams/$teamId'
-      fullPath: '/teams/$teamId'
-      preLoaderRoute: typeof AuthenticatedTeamsTeamIdRouteImport
+    '/_authenticated/purpose-leadership/': {
+      id: '/_authenticated/purpose-leadership/'
+      path: '/purpose-leadership'
+      fullPath: '/purpose-leadership/'
+      preLoaderRoute: typeof AuthenticatedPurposeLeadershipIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/purpose-leadership/$userId': {
@@ -655,19 +648,47 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedPurposeLeadershipUserIdRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/my-purpose/workshop': {
-      id: '/_authenticated/my-purpose/workshop'
-      path: '/my-purpose/workshop'
-      fullPath: '/my-purpose/workshop'
-      preLoaderRoute: typeof AuthenticatedMyPurposeWorkshopRouteImport
+    '/_authenticated/teams/': {
+      id: '/_authenticated/teams/'
+      path: '/teams'
+      fullPath: '/teams/'
+      preLoaderRoute: typeof AuthenticatedTeamsIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/canvassers/$canvasserId': {
-      id: '/_authenticated/canvassers/$canvasserId'
-      path: '/canvassers/$canvasserId'
-      fullPath: '/canvassers/$canvasserId'
-      preLoaderRoute: typeof AuthenticatedCanvassersCanvasserIdRouteImport
+    '/_authenticated/teams/$teamId': {
+      id: '/_authenticated/teams/$teamId'
+      path: '/teams/$teamId'
+      fullPath: '/teams/$teamId'
+      preLoaderRoute: typeof AuthenticatedTeamsTeamIdRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/api/internal/god-digest': {
+      id: '/api/internal/god-digest'
+      path: '/api/internal/god-digest'
+      fullPath: '/api/internal/god-digest'
+      preLoaderRoute: typeof ApiInternalGodDigestRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/internal/reconcile-block-cards': {
+      id: '/api/internal/reconcile-block-cards'
+      path: '/api/internal/reconcile-block-cards'
+      fullPath: '/api/internal/reconcile-block-cards'
+      preLoaderRoute: typeof ApiInternalReconcileBlockCardsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/internal/refresh-action-plans': {
+      id: '/api/internal/refresh-action-plans'
+      path: '/api/internal/refresh-action-plans'
+      fullPath: '/api/internal/refresh-action-plans'
+      preLoaderRoute: typeof ApiInternalRefreshActionPlansRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/internal/rotate-boards': {
+      id: '/api/internal/rotate-boards'
+      path: '/api/internal/rotate-boards'
+      fullPath: '/api/internal/rotate-boards'
+      preLoaderRoute: typeof ApiInternalRotateBoardsRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/_authenticated/canvassers/$canvasserId/field': {
       id: '/_authenticated/canvassers/$canvasserId/field'
@@ -760,6 +781,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthCallbackRoute: AuthCallbackRoute,
   AuthWelcomeRoute: AuthWelcomeRoute,
   ApiInternalGodDigestRoute: ApiInternalGodDigestRoute,
+  ApiInternalReconcileBlockCardsRoute: ApiInternalReconcileBlockCardsRoute,
   ApiInternalRefreshActionPlansRoute: ApiInternalRefreshActionPlansRoute,
   ApiInternalRotateBoardsRoute: ApiInternalRotateBoardsRoute,
 }
