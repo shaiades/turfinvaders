@@ -22,6 +22,7 @@ const ROLES = [
   "owner",
   "office_staff",
   "captain",
+  "hr",
   "bookkeeper",
   "sales_rep",
   "confirmer",

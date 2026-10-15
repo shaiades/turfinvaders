@@ -14,6 +14,7 @@ export const APP_ROLES = [
   "owner",
   "office_staff",
   "captain",
+  "hr",
   "bookkeeper",
   "sales_rep",
   "confirmer",
@@ -41,6 +42,21 @@ export const MANAGER_ROLES: readonly AppRole[] = ["owner", "captain", "office_st
 export function isManagerRole(role: AppRole | string | null | undefined): boolean {
   if (!role) return false;
   return (MANAGER_ROLES as readonly string[]).includes(role);
+}
+
+/** Time & attendance ADMIN tier (owner ask 2026-10-15, for Zuleyma — HR):
+ *  everyone who runs the timesheet editor at full power — edit/approve
+ *  punches, resolve meal/rest states, record absences of any kind on any
+ *  date, grant passes. HR is deliberately absent from MANAGER_ROLES,
+ *  ADMIN_ROLES, PAYROLL_READ_ROLES and MANAGER_GRANTABLE_ROLES: no fleet
+ *  ops, no settings, no payroll dollars, and the role is owner-granted
+ *  only (same doctrine as bookkeeper). Mirrors public.is_time_admin() in
+ *  SQL — change the two together. */
+export const TIME_ADMIN_ROLES: readonly AppRole[] = ["owner", "office_staff", "hr"] as const;
+
+export function isTimeAdminRole(role: AppRole | string | null | undefined): boolean {
+  if (!role) return false;
+  return (TIME_ADMIN_ROLES as readonly string[]).includes(role);
 }
 
 /** Payroll/time READ tier: the Admin pair plus the bookkeeper (Mary —
@@ -178,6 +194,7 @@ export const ROLE_LABEL: Record<AppRole, string> = {
   owner: "Owner",
   office_staff: "Manager",
   captain: "Captain",
+  hr: "HR",
   bookkeeper: "Bookkeeper",
   sales_rep: "Sales Rep",
   confirmer: "Confirmer",
@@ -188,6 +205,7 @@ export const ROLE_TONE: Record<AppRole, string> = {
   owner: "text-victory border-victory/40",
   office_staff: "text-accent border-accent/40",
   captain: "text-neon border-neon/40",
+  hr: "text-turf-pink border-turf-pink/40",
   bookkeeper: "text-victory/70 border-victory/30",
   sales_rep: "text-warning border-warning/40",
   confirmer: "text-turf-cyan border-turf-cyan/40",

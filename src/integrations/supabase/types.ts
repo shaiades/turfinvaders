@@ -3072,6 +3072,7 @@ export type Database = {
         | "sales_rep"
         | "confirmer"
         | "bookkeeper"
+        | "hr"
       canvasser_status:
         | "active"
         | "suspended"
@@ -3222,6 +3223,7 @@ export const Constants = {
         "sales_rep",
         "confirmer",
         "bookkeeper",
+        "hr",
       ],
       canvasser_status: [
         "active",

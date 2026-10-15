@@ -131,7 +131,7 @@ Deno.serve(async (req) => {
 
   const [{ data: worker }, { data: roleRows }] = await Promise.all([
     admin.from("profiles").select("display_name, team_id").eq("id", user_id).maybeSingle(),
-    admin.from("user_roles").select("user_id, role").in("role", ["owner", "office_staff", "captain"]),
+    admin.from("user_roles").select("user_id, role").in("role", ["owner", "office_staff", "hr", "captain"]),
   ]);
 
   const captainIds = (roleRows ?? []).filter((r) => r.role === "captain").map((r) => r.user_id);

@@ -13,6 +13,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useAuth } from "@/hooks/useAuth";
+import { PAYROLL_READ_ROLES } from "@/lib/role-policy";
 import { PayrollLedger } from "@/components/PayrollLedger";
 import { ReportViewer } from "@/components/ReportViewer";
 import { supabase } from "@/integrations/supabase/client";
@@ -70,6 +72,12 @@ export function ReportsConsole({
   tab: ReportsTab;
   onTabChange: (t: ReportsTab) => void;
 }) {
+  // HR reads attendance, never dollars: the Payroll tab/card hide for roles
+  // outside the payroll-read tier (RLS + the paycheck server fns enforce the
+  // same boundary regardless of what renders).
+  const { role } = useAuth();
+  const payrollAccess = !!role && (PAYROLL_READ_ROLES as readonly string[]).includes(role);
+  const effectiveTab: ReportsTab = payrollAccess ? tab : "exports";
   const today = laTodayISO();
   // Payroll: default to the last 4 completed weeks.
   const [payrollFrom, setPayrollFrom] = useState(() => addDaysISO(laWeekStartISO(), -28));
@@ -189,14 +197,19 @@ export function ReportsConsole({
         <h1 className="font-display text-xl md:text-2xl text-neon mt-1">Reports</h1>
       </div>
 
-      <Tabs value={tab} onValueChange={(v) => onTabChange(v as ReportsTab)}>
+      <Tabs value={effectiveTab} onValueChange={(v) => onTabChange(v as ReportsTab)}>
         <TabsList>
           <TabsTrigger value="exports" className="font-display text-[10px] uppercase tracking-widest">
             Exports
           </TabsTrigger>
-          <TabsTrigger value="payroll" className="font-display text-[10px] uppercase tracking-widest">
-            Payroll
-          </TabsTrigger>
+          {payrollAccess && (
+            <TabsTrigger
+              value="payroll"
+              className="font-display text-[10px] uppercase tracking-widest"
+            >
+              Payroll
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="exports" className="mt-4 space-y-4">
@@ -257,26 +270,35 @@ export function ReportsConsole({
           )}
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <ArcadeCard className="p-5 space-y-3">
-              <div className="flex items-center gap-2">
-                <FileSpreadsheet className="w-4 h-4 text-victory" />
-                <span className="font-display text-xs uppercase tracking-widest">Payroll — weekly</span>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                One row per person per week. Approved weeks export the FROZEN run (what was paid,
-                clawbacks included); other weeks the live pay engine. Dates snap to their Monday.
-              </p>
-              <RangeInputs from={payrollFrom} to={payrollTo} setFrom={setPayrollFrom} setTo={setPayrollTo} />
-              {reportButtons(
-                "Payroll — weekly",
-                `payroll-weeks-${weekStartOfISO(payrollFrom)}-to-${weekStartOfISO(payrollTo)}${filterSlug}.csv`,
-                () =>
-                  buildPayrollRangeTable(
-                    weekStartsInRange(weekStartOfISO(payrollFrom), weekStartOfISO(payrollTo)),
-                    exportFilter,
-                  ),
-              )}
-            </ArcadeCard>
+            {payrollAccess && (
+              <ArcadeCard className="p-5 space-y-3">
+                <div className="flex items-center gap-2">
+                  <FileSpreadsheet className="w-4 h-4 text-victory" />
+                  <span className="font-display text-xs uppercase tracking-widest">
+                    Payroll — weekly
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  One row per person per week. Approved weeks export the FROZEN run (what was paid,
+                  clawbacks included); other weeks the live pay engine. Dates snap to their Monday.
+                </p>
+                <RangeInputs
+                  from={payrollFrom}
+                  to={payrollTo}
+                  setFrom={setPayrollFrom}
+                  setTo={setPayrollTo}
+                />
+                {reportButtons(
+                  "Payroll — weekly",
+                  `payroll-weeks-${weekStartOfISO(payrollFrom)}-to-${weekStartOfISO(payrollTo)}${filterSlug}.csv`,
+                  () =>
+                    buildPayrollRangeTable(
+                      weekStartsInRange(weekStartOfISO(payrollFrom), weekStartOfISO(payrollTo)),
+                      exportFilter,
+                    ),
+                )}
+              </ArcadeCard>
+            )}
 
             <ArcadeCard className="p-5 space-y-3">
               <div className="flex items-center gap-2">
@@ -330,11 +352,13 @@ export function ReportsConsole({
           </div>
         </TabsContent>
 
-        <TabsContent value="payroll" className="mt-4">
-          {/* Read-only for the bookkeeper: run operations render for the
-              Admin tier only (and RLS backstops regardless). */}
-          <PayrollLedger />
-        </TabsContent>
+        {payrollAccess && (
+          <TabsContent value="payroll" className="mt-4">
+            {/* Read-only for the bookkeeper: run operations render for the
+                Admin tier only (and RLS backstops regardless). */}
+            <PayrollLedger />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

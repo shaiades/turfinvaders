@@ -130,6 +130,8 @@ function Dashboard() {
   // Bookkeeper's home is the Reports console — never the canvasser Mission
   // the unknown-role fallthrough below would hand her.
   if (role === "bookkeeper") return <Navigate to="/reports" search={{ tab: "exports" }} replace />;
+  // HR's home is the full timesheet/attendance editor (owner ask 2026-10-15).
+  if (role === "hr") return <HrDashboard />;
   if (role === "captain")
     return <CaptainDashboard teamId={teamId} visibility={!!settings?.global_visibility} />;
   return user?.id ? (
@@ -292,6 +294,30 @@ function VisibilityChip({ on }: { on: boolean }) {
     >
       Global Vis · {on ? "ON" : "OFF"}
     </span>
+  );
+}
+
+/* ============ HR ============ */
+/** HR (Zuleyma): the whole time & attendance surface — the review queue,
+ *  day-off queue, timesheet editor with the range views, the Absence and
+ *  Passes dialogs — plus push alerts for flagged punches and day-off
+ *  requests. No fleet ops, no settings, no payroll dollars (the server
+ *  enforces all three regardless of what renders). Deep links from
+ *  elsewhere (?week=&person=) land the same way they do for Admins. */
+function HrDashboard() {
+  const { week, person } = Route.useSearch();
+  return (
+    <div className="space-y-4 md:space-y-6">
+      <h1 className="font-display text-lg md:text-2xl text-foreground">TIME &amp; ATTENDANCE</h1>
+      <PushAlertsCard
+        title="Alerts on this device"
+        description="One switch: flagged punches and day-off requests ping you here once it's on."
+      />
+      <TimesheetEditor
+        key={`${week ?? ""}|${person ?? ""}`}
+        initial={week || person ? { week, person } : undefined}
+      />
+    </div>
   );
 }
 
