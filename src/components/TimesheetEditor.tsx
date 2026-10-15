@@ -29,7 +29,6 @@ import {
   KeyRound,
   Square,
 } from "lucide-react";
-import { useWeekSelector } from "@/hooks/useWeekSelector";
 import { AdminAbsenceDialog } from "@/components/AdminAbsenceDialog";
 import { TimeClockReviewQueue } from "@/components/TimeClockReviewQueue";
 import { TimeClockBackfill } from "@/components/TimeClockBackfill";
@@ -40,8 +39,38 @@ import { DayOffQueue } from "@/components/DayOffQueue";
 import { DayOffWeekStrip } from "@/components/DayOffWeekStrip";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
-import { laTimeHM, laWallFromISO, laWallToUtcISO } from "@/lib/dates";
+import {
+  addDaysISO,
+  dateFromISO,
+  laTimeHM,
+  laTodayISO,
+  laWallFromISO,
+  laWallToUtcISO,
+  laWeekStartISO,
+  monthStartISO,
+  nextMonthStartISO,
+  toISODate,
+  weekStartOfISO,
+} from "@/lib/dates";
+import { splitWeekHours } from "@/lib/pay";
 import { invalidatePunchCaches } from "@/lib/time-clock-keys";
+
+/** The admin range: a day, a Mon–Sun workweek (the payroll unit), a
+ *  calendar month, or anything custom. Data is always FETCHED padded to
+ *  full workweeks so the CA overtime split (daily 8/12, weekly 40, 7th
+ *  day — per Mon–Sun workweek) is computed on complete weeks, whatever
+ *  slice is displayed. */
+type RangeMode = "day" | "week" | "month" | "custom";
+
+const RANGE_MODES: Array<{ mode: RangeMode; label: string }> = [
+  { mode: "day", label: "Day" },
+  { mode: "week", label: "Week" },
+  { mode: "month", label: "Month" },
+  { mode: "custom", label: "Custom" },
+];
+
+/** Mon=0 … Sun=6 slot for an ISO date (UTC-noon trick: no TZ drift). */
+const weekSlotOf = (iso: string) => (new Date(`${iso}T12:00:00Z`).getUTCDay() + 6) % 7;
 
 // Weeks anchor to the LA Monday (midnight PT reset). Every editable field is
 // a PACIFIC wall time (owner directive 2026-07-20) — the old helpers here
@@ -66,7 +95,7 @@ type Entry = {
   rest_break_status: string;
   meal_periods: Meal[];
 };
-type Profile = { id: string; display_name: string };
+type Profile = { id: string; display_name: string; is_active?: boolean; is_placeholder?: boolean };
 
 /** The lunch a row shows and edits: the earliest still-open or real-length
  *  meal. admin_set_meal always rewrites the earliest row and collapses any
@@ -259,18 +288,24 @@ function EntryFlags({ e }: { e: Entry }) {
 
 /** Admin: the whole crew. Captains mount it with scope={{teamId}} — their
  *  van only, no Passes (a manager power); the adjust RPCs enforce the same
- *  team boundary (and never-self) server-side. */
-export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
+ *  team boundary (and never-self) server-side. `initial` is the deep-link
+ *  arm (payroll ledger → "view in timesheets"): open on a week + person. */
+export function TimesheetEditor({
+  scope,
+  initial,
+}: {
+  scope?: { teamId: string };
+  initial?: { week?: string; person?: string };
+}) {
   const qc = useQueryClient();
-  const {
-    weekStart,
-    weekEnd,
-    weekStartISO: start,
-    weekEndISO: end,
-    shiftWeek,
-    goToWeek,
-  } = useWeekSelector({ endOffsetDays: 6 });
-  const [filterUser, setFilterUser] = useState<string>("");
+  const [mode, setMode] = useState<RangeMode>("week");
+  // The anchor date the day/week/month ranges derive from.
+  const [anchor, setAnchor] = useState<string>(() =>
+    initial?.week ? weekStartOfISO(initial.week) : laWeekStartISO(),
+  );
+  const [customFrom, setCustomFrom] = useState(() => addDaysISO(laTodayISO(), -13));
+  const [customTo, setCustomTo] = useState(laTodayISO);
+  const [filterUser, setFilterUser] = useState<string>(initial?.person ?? "");
   const [needsReviewOnly, setNeedsReviewOnly] = useState(false);
   const [addEntryOpen, setAddEntryOpen] = useState(false);
   const [addEntryUserId, setAddEntryUserId] = useState<string | null>(null);
@@ -302,10 +337,50 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
     >
   >({});
 
+  // The displayed range…
+  const { start, end } = useMemo(() => {
+    if (mode === "day") return { start: anchor, end: anchor };
+    if (mode === "week") {
+      const s = weekStartOfISO(anchor);
+      return { start: s, end: addDaysISO(s, 6) };
+    }
+    if (mode === "month") {
+      const s = monthStartISO(anchor);
+      return { start: s, end: addDaysISO(nextMonthStartISO(s), -1) };
+    }
+    return customFrom <= customTo
+      ? { start: customFrom, end: customTo }
+      : { start: customTo, end: customFrom };
+  }, [mode, anchor, customFrom, customTo]);
+  // …and the full Mon–Sun workweeks that cover it (OT math needs whole weeks).
+  const padStart = weekStartOfISO(start);
+  const padEnd = addDaysISO(weekStartOfISO(end), 6);
+
+  const shiftRange = (delta: 1 | -1) => {
+    if (mode === "day") setAnchor((a) => addDaysISO(a, delta));
+    else if (mode === "week") setAnchor((a) => addDaysISO(weekStartOfISO(a), delta * 7));
+    else if (mode === "month") {
+      setAnchor((a) => {
+        const s = monthStartISO(a);
+        return delta === 1 ? nextMonthStartISO(s) : monthStartISO(addDaysISO(s, -1));
+      });
+    }
+  };
+
+  const rangeLabel = useMemo(() => {
+    const d = (iso: string, opts: Intl.DateTimeFormatOptions) =>
+      dateFromISO(iso).toLocaleDateString(undefined, opts);
+    if (mode === "day") return d(start, { weekday: "short", month: "short", day: "numeric" });
+    if (mode === "month") return d(start, { month: "long", year: "numeric" });
+    return `${d(start, { month: "short", day: "numeric" })} – ${d(end, { month: "short", day: "numeric", year: "numeric" })}`;
+  }, [mode, start, end]);
+
   const { data, isLoading } = useQuery({
-    queryKey: ["timesheets", start, end, scope?.teamId ?? "all"],
+    queryKey: ["timesheets", padStart, padEnd, scope?.teamId ?? "all"],
     queryFn: async () => {
-      let profilesQ = supabase.from("profiles").select("id, display_name");
+      let profilesQ = supabase
+        .from("profiles")
+        .select("id, display_name, is_active, is_placeholder");
       if (scope) profilesQ = profilesQ.eq("team_id", scope.teamId);
       const profilesRes = await profilesQ;
       if (profilesRes.error) throw profilesRes.error;
@@ -316,8 +391,8 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
         .select(
           "id, user_id, clock_in, clock_out, log_date, billable_hours, entry_source, needs_correction, meal_status, second_meal_status, rest_break_status, meal_periods (id, meal_start, meal_end)",
         )
-        .gte("log_date", start)
-        .lte("log_date", end)
+        .gte("log_date", padStart)
+        .lte("log_date", padEnd)
         .is("voided_at", null)
         .order("log_date", { ascending: false })
         .order("clock_in", { ascending: false });
@@ -340,10 +415,17 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
     [data?.profiles],
   );
 
-  // Worker sign-off per person for this week. Errors read as "not deployed
-  // yet" (the attestation table ships with migration 20261002130000) — the
-  // chips simply don't render until it lands.
+  // Pickers (backfill, passes, absence) offer ACTIVE people only; the full
+  // list stays for naming archived people's historical rows.
+  const pickerProfiles = useMemo(
+    () => (data?.profiles ?? []).filter((p) => p.is_active !== false && !p.is_placeholder),
+    [data?.profiles],
+  );
+
+  // Worker sign-off per person — a WEEKLY concept, queried (and shown) only
+  // when the range is one workweek. Errors read as "not deployed yet".
   const attestQ = useQuery({
+    enabled: mode === "week",
     queryKey: ["week-attestations", start],
     queryFn: async () => {
       const { data: rows, error } = await supabase
@@ -357,7 +439,8 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
   });
 
   const visibleEntries = useMemo(() => {
-    let list = data?.entries ?? [];
+    // The fetch is padded to full workweeks; the table shows the range.
+    let list = (data?.entries ?? []).filter((e) => e.log_date >= start && e.log_date <= end);
     if (needsReviewOnly) {
       list = list.filter(
         (e) =>
@@ -373,14 +456,47 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
       const n = profileById.get(e.user_id)?.display_name?.toLowerCase() ?? "";
       return n.includes(q);
     });
-  }, [data?.entries, filterUser, needsReviewOnly, profileById]);
+  }, [data?.entries, start, end, filterUser, needsReviewOnly, profileById]);
 
+  // Range hours per person — the number the header shows, summed over the
+  // DISPLAYED days only.
   const totalsByUser = useMemo(() => {
     const m = new Map<string, number>();
     for (const e of data?.entries ?? []) {
+      if (e.log_date < start || e.log_date > end) continue;
       m.set(e.user_id, (m.get(e.user_id) ?? 0) + Number(e.billable_hours ?? 0));
     }
     return m;
+  }, [data?.entries, start, end]);
+
+  // CA overtime split per person, computed per Mon–Sun workweek on the
+  // PADDED data (daily 8/12, weekly 40, 7th-day — splitWeekHours mirrors
+  // calc_weekly_paycheck; verify:overtime keeps them in step). For the week
+  // range this is exact; for month/custom it sums every workweek the range
+  // touches, which can include a few adjacent padded days.
+  const splitByUser = useMemo(() => {
+    const dayHours = new Map<string, Map<string, number[]>>(); // user → week → Mon..Sun
+    for (const e of data?.entries ?? []) {
+      if (!e.clock_out) continue;
+      const wk = weekStartOfISO(e.log_date);
+      const byWeek = dayHours.get(e.user_id) ?? new Map<string, number[]>();
+      const days = byWeek.get(wk) ?? [0, 0, 0, 0, 0, 0, 0];
+      days[weekSlotOf(e.log_date)] += Number(e.billable_hours ?? 0);
+      byWeek.set(wk, days);
+      dayHours.set(e.user_id, byWeek);
+    }
+    const out = new Map<string, { reg: number; ot: number; dt: number }>();
+    for (const [userId, byWeek] of dayHours) {
+      const sum = { reg: 0, ot: 0, dt: 0 };
+      for (const days of byWeek.values()) {
+        const s = splitWeekHours(days);
+        sum.reg += s.reg;
+        sum.ot += s.ot;
+        sum.dt += s.dt;
+      }
+      out.set(userId, sum);
+    }
+    return out;
   }, [data?.entries]);
 
   // All history edits flow through the reasoned RPCs: the database rejects a
@@ -574,7 +690,13 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
     setReasonReq(null);
   }
 
-  const weekLabel = `${weekStart.toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${weekEnd.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
+  /** "12.0 reg · 3.5 OT · 1.0 DT" — exact for a week; for month/custom it
+   *  covers every workweek the range touches (how payroll will pay them). */
+  const splitLabel = (s: { reg: number; ot: number; dt: number } | null) => {
+    if (!s || mode === "day") return null;
+    if (s.ot + s.dt <= 0) return null;
+    return `${s.reg.toFixed(1)} reg · ${s.ot.toFixed(1)} OT${s.dt > 0 ? ` · ${s.dt.toFixed(1)} DT` : ""}`;
+  };
 
   // One handler for every editable field (mobile/desktop × clock/lunch).
   const editField = (
@@ -628,23 +750,35 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
             (dayTotals.get(r.e.log_date) ?? 0) + Number(r.e.billable_hours ?? 0),
           );
         }
-        const weekTotal = totalsByUser.get(userId) ?? 0;
+        const rangeTotal = totalsByUser.get(userId) ?? 0;
         return {
           userId,
           name: list[0].name,
           list,
-          weekTotal,
+          rangeTotal,
+          split: splitByUser.get(userId) ?? null,
           otDay: [...dayTotals.values()].some((h) => h > 8),
-          over40: weekTotal > 40,
+          over40: mode === "week" && rangeTotal > 40,
           reviewCount: list.filter((r) => r.e.needs_correction).length,
           mealCount: list.filter((r) => MEAL_ATTENTION[r.e.meal_status]).length,
           restCount: list.filter((r) => r.e.clock_out && REST_ATTENTION[r.e.rest_break_status])
             .length,
-          attestation: attestQ.data ? (attestQ.data.get(userId) ?? null) : undefined,
+          attestation:
+            mode === "week" && attestQ.data ? (attestQ.data.get(userId) ?? null) : undefined,
         };
       })
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [rows, totalsByUser, attestQ.data]);
+  }, [rows, totalsByUser, splitByUser, mode, attestQ.data]);
+
+  const grand = useMemo(
+    () => ({
+      people: groups.length,
+      hours: groups.reduce((s, g) => s + g.rangeTotal, 0),
+      ot: groups.reduce((s, g) => s + (g.split?.ot ?? 0), 0),
+      dt: groups.reduce((s, g) => s + (g.split?.dt ?? 0), 0),
+    }),
+    [groups],
+  );
 
   const groupHeaderChips = (g: (typeof groups)[number]) => (
     <span className="inline-flex flex-wrap items-center gap-1">
@@ -682,7 +816,7 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
       <Button
         size="sm"
         variant="ghost"
-        className="h-7 px-2 text-[9px] font-display uppercase tracking-widest text-muted-foreground"
+        className="min-h-11 md:min-h-7 md:h-7 px-2 text-[9px] font-display uppercase tracking-widest text-muted-foreground"
         onClick={() => {
           setAddEntryUserId(g.userId);
           setAddEntryOpen(true);
@@ -694,9 +828,9 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
       <Button
         size="sm"
         variant="ghost"
-        className="h-7 px-2 text-[9px] font-display uppercase tracking-widest text-muted-foreground"
+        className="min-h-11 md:min-h-7 md:h-7 px-2 text-[9px] font-display uppercase tracking-widest text-muted-foreground"
         onClick={() =>
-          setAuditFor({ ids: g.list.map((r) => r.e.id), title: `${g.name} · week history` })
+          setAuditFor({ ids: g.list.map((r) => r.e.id), title: `${g.name} · range history` })
         }
       >
         <History className="w-3 h-3 mr-1" />
@@ -707,9 +841,18 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
 
   return (
     <div className="space-y-4">
-      {/* Flagged punches — approve here, or fix the row below. Captains see
-          their own van's queue; admins see everyone. */}
-      {!scope && <TimeClockReviewQueue />}
+      {/* Flagged punches — approve here, Locate jumps to the editable row
+          below. Captains see their own van's queue; admins see everyone. */}
+      {!scope && (
+        <TimeClockReviewQueue
+          onLocate={(row) => {
+            setMode("week");
+            setAnchor(weekStartOfISO(row.log_date));
+            setFilterUser(row.name);
+            setNeedsReviewOnly(false);
+          }}
+        />
+      )}
       {/* Pending day-off requests, all vans (captains review theirs on
           Command). Silent when empty or pre-deploy. */}
       {!scope && <DayOffQueue />}
@@ -746,7 +889,7 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
                   </DialogDescription>
                 </DialogHeader>
                 <TimeClockBackfill
-                  profiles={data?.profiles ?? []}
+                  profiles={pickerProfiles}
                   initialUserId={addEntryUserId ?? undefined}
                   onDone={() => setAddEntryOpen(false)}
                 />
@@ -773,10 +916,7 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
                     It lands approved; the person gets a notification.
                   </DialogDescription>
                 </DialogHeader>
-                <AdminAbsenceDialog
-                  profiles={data?.profiles ?? []}
-                  onDone={() => setAbsenceOpen(false)}
-                />
+                <AdminAbsenceDialog profiles={pickerProfiles} onDone={() => setAbsenceOpen(false)} />
               </DialogContent>
             </Dialog>
             {!scope && (
@@ -800,7 +940,7 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
                       Pre-approve one day's early clock-in or late finish so it never flags.
                     </DialogDescription>
                   </DialogHeader>
-                  <TimeClockExceptions profiles={data?.profiles ?? []} />
+                  <TimeClockExceptions profiles={pickerProfiles} />
                 </DialogContent>
               </Dialog>
             )}
@@ -808,49 +948,86 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
         }
       >
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => shiftWeek(-1)}>
-              <ChevronLeft className="w-4 h-4" />
-            </Button>
-            <Popover open={weekPickerOpen} onOpenChange={setWeekPickerOpen}>
-              <PopoverTrigger asChild>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex rounded border border-border overflow-hidden">
+              {RANGE_MODES.map((m) => (
                 <button
+                  key={m.mode}
                   type="button"
-                  className="font-display text-sm text-neon px-2 tabular-nums min-h-11 md:min-h-8 hover:underline"
-                  title="Jump to a week"
+                  onClick={() => setMode(m.mode)}
+                  className={cn(
+                    "min-h-11 md:min-h-8 px-2.5 text-[10px] font-display uppercase tracking-widest transition-colors",
+                    mode === m.mode
+                      ? "bg-neon/15 text-neon"
+                      : "text-muted-foreground hover:bg-surface-elevated",
+                  )}
                 >
-                  {weekLabel}
+                  {m.label}
                 </button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                  mode="single"
-                  selected={weekStart}
-                  onSelect={(d) => {
-                    if (d) {
-                      goToWeek(d);
-                      setWeekPickerOpen(false);
-                    }
-                  }}
-                  initialFocus
-                  className="p-3 pointer-events-auto"
+              ))}
+            </div>
+            {mode === "custom" ? (
+              <div className="flex items-center gap-1.5">
+                <Input
+                  type="date"
+                  value={customFrom}
+                  onChange={(e) => setCustomFrom(e.target.value)}
+                  className="w-[150px] text-base md:text-xs"
                 />
-              </PopoverContent>
-            </Popover>
-            <Button variant="outline" size="sm" onClick={() => shiftWeek(1)}>
-              <ChevronRight className="w-4 h-4" />
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => goToWeek()}>
-              This Week
-            </Button>
+                <span className="text-muted-foreground text-xs">–</span>
+                <Input
+                  type="date"
+                  value={customTo}
+                  onChange={(e) => setCustomTo(e.target.value)}
+                  className="w-[150px] text-base md:text-xs"
+                />
+              </div>
+            ) : (
+              <>
+                <Button variant="outline" size="sm" onClick={() => shiftRange(-1)}>
+                  <ChevronLeft className="w-4 h-4" />
+                </Button>
+                <Popover open={weekPickerOpen} onOpenChange={setWeekPickerOpen}>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className="font-display text-sm text-neon px-2 tabular-nums min-h-11 md:min-h-8 hover:underline"
+                      title="Jump to a date"
+                    >
+                      {rangeLabel}
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={dateFromISO(anchor)}
+                      onSelect={(d) => {
+                        if (d) {
+                          setAnchor(toISODate(d));
+                          setWeekPickerOpen(false);
+                        }
+                      }}
+                      initialFocus
+                      className="p-3 pointer-events-auto"
+                    />
+                  </PopoverContent>
+                </Popover>
+                <Button variant="outline" size="sm" onClick={() => shiftRange(1)}>
+                  <ChevronRight className="w-4 h-4" />
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => setAnchor(laTodayISO())}>
+                  {mode === "day" ? "Today" : mode === "week" ? "This Week" : "This Month"}
+                </Button>
+              </>
+            )}
           </div>
           <div className="flex items-center gap-3">
-            <label className="flex items-center gap-1.5 text-[10px] font-display uppercase tracking-widest text-muted-foreground cursor-pointer">
+            <label className="flex items-center gap-1.5 min-h-11 md:min-h-0 text-[10px] font-display uppercase tracking-widest text-muted-foreground cursor-pointer">
               <input
                 type="checkbox"
                 checked={needsReviewOnly}
                 onChange={(e) => setNeedsReviewOnly(e.target.checked)}
-                className="accent-[var(--warning)]"
+                className="accent-[var(--warning)] w-4 h-4"
               />
               Needs review
             </label>
@@ -872,15 +1049,29 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
         </div>
 
         {/* Approved absences this week — a missing timesheet day with a chip
-            here is excused, not a no-show. */}
-        <DayOffWeekStrip weekStartISO={start} teamId={scope?.teamId} />
+            here is excused, not a no-show. (Weekly strip: week range only.) */}
+        {mode === "week" && <DayOffWeekStrip weekStartISO={start} teamId={scope?.teamId} />}
+
+        {groups.length > 0 && (
+          <div className="mt-3 text-[10px] font-display uppercase tracking-widest text-muted-foreground tabular-nums">
+            {grand.people} player{grand.people === 1 ? "" : "s"} ·{" "}
+            <span className="text-victory">{grand.hours.toFixed(2)}h</span>
+            {grand.ot + grand.dt > 0 && (
+              <>
+                {" "}
+                · <span className="text-neon">{grand.ot.toFixed(1)}h OT</span>
+                {grand.dt > 0 && <> · {grand.dt.toFixed(1)}h DT</>}
+              </>
+            )}
+          </div>
+        )}
 
         {isLoading ? (
           <div className="text-sm text-muted-foreground">Loading time entries…</div>
         ) : visibleEntries.length === 0 ? (
           <div className="text-sm text-muted-foreground py-8 text-center">
             <Clock className="w-6 h-6 mx-auto mb-2 opacity-40" />
-            No time entries for this week.
+            No time entries in this range.
           </div>
         ) : (
           <>
@@ -891,8 +1082,16 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
                     <div className="min-w-0">
                       <span className="font-display text-sm">{g.name}</span>
                       <span className="ml-2 font-display text-xs text-victory tabular-nums">
-                        {g.weekTotal.toFixed(2)}h
+                        {g.rangeTotal.toFixed(2)}h
                       </span>
+                      {splitLabel(g.split) && (
+                        <span
+                          className="ml-2 text-[9px] text-muted-foreground tabular-nums"
+                          title="CA overtime is computed per Mon–Sun workweek; month/custom ranges count every workweek they touch."
+                        >
+                          {splitLabel(g.split)}
+                        </span>
+                      )}
                       <div className="mt-0.5">{groupHeaderChips(g)}</div>
                     </div>
                     {groupHeaderActions(g)}
@@ -960,7 +1159,7 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
                             type="button"
                             disabled={saveMut.isPending}
                             onClick={() => clockOutNow(e)}
-                            className="inline-flex items-center gap-1 normal-case tracking-normal text-victory animate-pulse hover:animate-none hover:underline disabled:opacity-50"
+                            className="inline-flex min-h-11 md:min-h-0 items-center gap-1 normal-case tracking-normal text-victory animate-pulse hover:animate-none hover:underline disabled:opacity-50"
                           >
                             <Square className="w-2.5 h-2.5" />
                             live — tap to clock out
@@ -1002,7 +1201,7 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
                     <th className="text-left py-2 pr-3">Lunch In</th>
                     <th className="text-left py-2 pr-3">Clock Out</th>
                     <th className="text-right py-2 pr-3">Billable</th>
-                    <th className="text-right py-2 pr-3">Week Total</th>
+                    <th className="text-right py-2 pr-3">Range Total</th>
                     <th className="text-right py-2 pr-1">Actions</th>
                   </tr>
                 </thead>
@@ -1015,8 +1214,16 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
                             <span className="inline-flex items-center gap-2">
                               <span className="font-display text-xs">{g.name}</span>
                               <span className="font-display text-[11px] text-victory tabular-nums">
-                                {g.weekTotal.toFixed(2)}h
+                                {g.rangeTotal.toFixed(2)}h
                               </span>
+                              {splitLabel(g.split) && (
+                                <span
+                                  className="text-[9px] text-muted-foreground tabular-nums"
+                                  title="CA overtime is computed per Mon–Sun workweek; month/custom ranges count every workweek they touch."
+                                >
+                                  {splitLabel(g.split)}
+                                </span>
+                              )}
                               {groupHeaderChips(g)}
                             </span>
                             {groupHeaderActions(g)}

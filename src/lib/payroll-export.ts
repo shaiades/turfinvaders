@@ -67,7 +67,16 @@ export function weekStartsInRange(fromWeekISO: string, toWeekISO: string): strin
   return out;
 }
 
-export async function buildPayrollRangeCsvLines(weekStarts: string[]): Promise<string[]> {
+/** Optional person/van narrowing for the exports: a set of user ids, or
+ *  undefined for everyone. (Resolved from the Reports console's pickers.) */
+export type ExportFilter = string[] | undefined;
+
+const inFilter = (filter: ExportFilter, id: string) => !filter || filter.includes(id);
+
+export async function buildPayrollRangeCsvLines(
+  weekStarts: string[],
+  filter?: ExportFilter,
+): Promise<string[]> {
   const lines = [PAYROLL_RANGE_HEADERS.join(",")];
 
   const [profilesRes, teamsRes, balancesRes] = await Promise.all([
@@ -118,6 +127,7 @@ export async function buildPayrollRangeCsvLines(weekStarts: string[]): Promise<s
         .order("display_name");
       if (error) throw error;
       for (const l of rows ?? []) {
+        if (!inFilter(filter, l.canvasser_id)) continue;
         const ex = (l.exceptions ?? {}) as Record<string, unknown>;
         const snap = (l.snapshot ?? {}) as Record<string, unknown>;
         lines.push(
@@ -162,7 +172,7 @@ export async function buildPayrollRangeCsvLines(weekStarts: string[]): Promise<s
 
     const results = await fetchWeeklyPaychecksChunked(
       weekStart,
-      profiles.map((p) => p.id),
+      profiles.map((p) => p.id).filter((id) => inFilter(filter, id)),
     );
     const paid = results
       .filter((r) => r.paycheck && (num(r.paycheck.hours) > 0 || num(r.paycheck.total_pay) > 0))
@@ -229,6 +239,7 @@ export const PUNCH_DETAIL_HEADERS = [
   "Meal Status",
   "2nd Meal Status",
   "Rest Breaks",
+  "Meal Windows (PT)",
   "Entry Source",
   "Flags",
   "Needs Review",
@@ -239,11 +250,12 @@ export const PUNCH_DETAIL_HEADERS = [
 export async function buildPunchDetailCsvLines(
   startISO: string,
   endISO: string,
+  filter?: ExportFilter,
 ): Promise<string[]> {
   const lines = [PUNCH_DETAIL_HEADERS.join(",")];
   const PAGE = 1000;
   for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabase
+    let q = supabase
       .from("timesheet_day_detail")
       .select("*")
       .gte("log_date", startISO)
@@ -251,6 +263,8 @@ export async function buildPunchDetailCsvLines(
       .order("log_date", { ascending: true })
       .order("display_name", { ascending: true })
       .range(from, from + PAGE - 1);
+    if (filter) q = q.in("user_id", filter);
+    const { data, error } = await q;
     if (error) {
       throw new Error(
         /timesheet_day_detail/.test(error.message)
@@ -275,6 +289,7 @@ export async function buildPunchDetailCsvLines(
           r.meal_status ?? "",
           r.second_meal_status ?? "",
           r.rest_break_status ?? "",
+          (r as Record<string, unknown>).meal_windows ?? "",
           r.entry_source ?? "",
           (r.flag_reasons ?? []).join("; "),
           r.needs_correction ? "yes" : "",
@@ -304,7 +319,11 @@ export const ABSENCE_HEADERS = [
   "Deny Note",
 ];
 
-export async function buildAbsenceCsvLines(startISO: string, endISO: string): Promise<string[]> {
+export async function buildAbsenceCsvLines(
+  startISO: string,
+  endISO: string,
+  filter?: ExportFilter,
+): Promise<string[]> {
   const lines = [ABSENCE_HEADERS.join(",")];
   const names = new Map<string, string>();
   {
@@ -312,13 +331,15 @@ export async function buildAbsenceCsvLines(startISO: string, endISO: string): Pr
     for (const p of data ?? []) names.set(p.id, p.display_name ?? p.id);
   }
   const nameOf = (id: string | null) => (id ? (names.get(id) ?? id) : "");
-  const { data, error } = await supabase
+  let q = supabase
     .from("day_off_requests")
     .select("*")
     .gte("absence_date", startISO)
     .lte("absence_date", endISO)
     .order("absence_date", { ascending: true })
     .limit(5000);
+  if (filter) q = q.in("user_id", filter);
+  const { data, error } = await q;
   if (error) {
     throw new Error(
       /day_off_requests/.test(error.message)
@@ -361,6 +382,12 @@ export const AUDIT_LOG_HEADERS = [
   "New Clock Out (PT)",
   "Old Meal Status",
   "New Meal Status",
+  // meal_insert / meal_update rows carry meal punches, not clock punches —
+  // without these columns those audit rows exported as blanks.
+  "Old Meal Start (PT)",
+  "Old Meal End (PT)",
+  "New Meal Start (PT)",
+  "New Meal End (PT)",
 ];
 
 export async function buildAuditCsvLines(startISO: string, endISO: string): Promise<string[]> {
@@ -404,6 +431,10 @@ export async function buildAuditCsvLines(startISO: string, endISO: string): Prom
           t(newRow.clock_out),
           String(oldRow.meal_status ?? ""),
           String(newRow.meal_status ?? ""),
+          t(oldRow.meal_start),
+          t(oldRow.meal_end),
+          t(newRow.meal_start),
+          t(newRow.meal_end),
         ]
           .map(csvCell)
           .join(","),

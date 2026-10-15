@@ -2851,6 +2851,7 @@ export type Database = {
           meal_count: number | null
           meal_minutes: number | null
           meal_status: string | null
+          meal_windows: string | null
           needs_correction: boolean | null
           rest_break_status: string | null
           reviewed_at: string | null

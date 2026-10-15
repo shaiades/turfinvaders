@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { format } from "date-fns";
 import { CalendarIcon, Download, Lock, FileCheck2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
@@ -977,6 +978,15 @@ export function PayrollLedger() {
                   <div className="flex flex-wrap items-center gap-1.5">
                     <RankPill rank={r.rank} />
                     {r.team && <TeamBadge name={r.team.name} color={r.team.color} />}
+                    {isAdminRole(role) && (
+                      <Link
+                        to="/dashboard"
+                        search={{ tab: "timesheets", week: startStr, person: r.name }}
+                        className="min-h-11 inline-flex items-center text-[9px] font-display uppercase tracking-widest text-muted-foreground hover:text-neon hover:underline"
+                      >
+                        timesheets →
+                      </Link>
+                    )}
                   </div>
                   <PayLockBadge status={r.payLock} />
                   <MobileStatGrid cols={3}>
@@ -1067,6 +1077,16 @@ export function PayrollLedger() {
                       <td className="py-2.5 pr-3 font-medium">
                         {r.name}
                         <LedgerAttestChip status={attestFor(r.id)} />
+                        {isAdminRole(role) && (
+                          <Link
+                            to="/dashboard"
+                            search={{ tab: "timesheets", week: startStr, person: r.name }}
+                            title={`Open ${r.name}'s punches for this week in Timesheets`}
+                            className="ml-2 align-middle text-[9px] font-display uppercase tracking-widest text-muted-foreground hover:text-neon hover:underline"
+                          >
+                            timesheets →
+                          </Link>
+                        )}
                         <ExceptionChips ex={r.exceptions} />
                       </td>
                       <td className="py-2.5 pr-3">
@@ -1243,31 +1263,14 @@ function MonthlyVolumeBonusPanel({ monthStart }: { monthStart: string }) {
       ) : rows.length === 0 ? (
         <div className="text-sm text-muted-foreground">No confirmed sale volume this month.</div>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border">
-                <th className="text-left py-2 pr-3">Agent</th>
-                <th className="text-right py-2 pr-3">Month Volume ($)</th>
-                <th className="text-right py-2 pr-3">Progress to Next $1,500</th>
-                <th className="text-right py-2 pr-1">Volume Bonus ($)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr
-                  key={r.id}
-                  className="border-b border-border/40 transition-colors duration-200 hover:bg-surface-elevated"
-                >
-                  <td className="py-2.5 pr-3 font-medium">{r.name}</td>
-                  <td className="py-2.5 pr-3 text-right font-display text-victory">
-                    {r.error ? "—" : `$${r.volume.toFixed(2)}`}
-                  </td>
-                  <td className="py-2.5 pr-3 text-right text-xs text-muted-foreground">
-                    {r.error ? "—" : `$${(100000 - (r.volume % 100000)).toFixed(0)} to go`}
-                  </td>
-                  <td className="py-2.5 pr-1 text-right font-display">
-                    {r.error ? (
+        <>
+          <MobileCardList>
+            {rows.map((r) => (
+              <MobileCard key={r.id}>
+                <MobileCardHeader
+                  left={r.name}
+                  right={
+                    r.error ? (
                       <span className="text-destructive text-xs" title={r.error}>
                         ERROR
                       </span>
@@ -1275,13 +1278,62 @@ function MonthlyVolumeBonusPanel({ monthStart }: { monthStart: string }) {
                       <span className="text-victory">${r.bonus.toFixed(2)}</span>
                     ) : (
                       <span className="text-muted-foreground">$0.00</span>
-                    )}
-                  </td>
+                    )
+                  }
+                />
+                <div className="text-xs text-muted-foreground tabular-nums">
+                  {r.error ? (
+                    "volume —"
+                  ) : (
+                    <>
+                      ${r.volume.toFixed(2)} volume ·{" "}
+                      ${(100000 - (r.volume % 100000)).toFixed(0)} to the next $1,500
+                    </>
+                  )}
+                </div>
+              </MobileCard>
+            ))}
+          </MobileCardList>
+          <div className="hidden md:block overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border">
+                  <th className="text-left py-2 pr-3">Agent</th>
+                  <th className="text-right py-2 pr-3">Month Volume ($)</th>
+                  <th className="text-right py-2 pr-3">Progress to Next $1,500</th>
+                  <th className="text-right py-2 pr-1">Volume Bonus ($)</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr
+                    key={r.id}
+                    className="border-b border-border/40 transition-colors duration-200 hover:bg-surface-elevated"
+                  >
+                    <td className="py-2.5 pr-3 font-medium">{r.name}</td>
+                    <td className="py-2.5 pr-3 text-right font-display text-victory">
+                      {r.error ? "—" : `$${r.volume.toFixed(2)}`}
+                    </td>
+                    <td className="py-2.5 pr-3 text-right text-xs text-muted-foreground">
+                      {r.error ? "—" : `$${(100000 - (r.volume % 100000)).toFixed(0)} to go`}
+                    </td>
+                    <td className="py-2.5 pr-1 text-right font-display">
+                      {r.error ? (
+                        <span className="text-destructive text-xs" title={r.error}>
+                          ERROR
+                        </span>
+                      ) : r.bonus > 0 ? (
+                        <span className="text-victory">${r.bonus.toFixed(2)}</span>
+                      ) : (
+                        <span className="text-muted-foreground">$0.00</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </ArcadePanel>
   );

@@ -1,12 +1,20 @@
-import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CalendarOff, Download, FileClock, FileSpreadsheet, ScrollText } from "lucide-react";
 import { ArcadeCard } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PayrollLedger } from "@/components/PayrollLedger";
+import { supabase } from "@/integrations/supabase/client";
 import { downloadCsvFile } from "@/lib/csv";
 import {
   buildAbsenceCsvLines,
@@ -14,6 +22,7 @@ import {
   buildPayrollRangeCsvLines,
   buildPunchDetailCsvLines,
   weekStartsInRange,
+  type ExportFilter,
 } from "@/lib/payroll-export";
 import { addDaysISO, laMonthStartISO, laTodayISO, laWeekStartISO, weekStartOfISO } from "@/lib/dates";
 
@@ -69,6 +78,44 @@ export function ReportsConsole({
   const [auditTo, setAuditTo] = useState(today);
   const [absFrom, setAbsFrom] = useState(laMonthStartISO);
   const [absTo, setAbsTo] = useState(today);
+  // Who the payroll / punch / absence exports cover: everyone (default), a
+  // van, or one person. The audit export stays unfiltered — it is the
+  // tamper-evident record, exported whole.
+  const [personId, setPersonId] = useState("all");
+  const [teamFilterId, setTeamFilterId] = useState("all");
+
+  const roster = useQuery({
+    queryKey: ["reports-roster"],
+    queryFn: async () => {
+      const [profilesRes, teamsRes] = await Promise.all([
+        supabase.from("profiles").select("id, display_name, team_id").order("display_name"),
+        supabase.from("teams").select("id, name").order("name"),
+      ]);
+      if (profilesRes.error) throw profilesRes.error;
+      if (teamsRes.error) throw teamsRes.error;
+      return { profiles: profilesRes.data ?? [], teams: teamsRes.data ?? [] };
+    },
+  });
+
+  const exportFilter: ExportFilter = useMemo(() => {
+    if (personId !== "all") return [personId];
+    if (teamFilterId !== "all") {
+      return (roster.data?.profiles ?? [])
+        .filter((p) => p.team_id === teamFilterId)
+        .map((p) => p.id);
+    }
+    return undefined;
+  }, [personId, teamFilterId, roster.data?.profiles]);
+  const filterSlug =
+    personId !== "all"
+      ? `-${(roster.data?.profiles.find((p) => p.id === personId)?.display_name ?? "person")
+          .replace(/[^a-z0-9]+/gi, "-")
+          .toLowerCase()}`
+      : teamFilterId !== "all"
+        ? `-${(roster.data?.teams.find((t) => t.id === teamFilterId)?.name ?? "van")
+            .replace(/[^a-z0-9]+/gi, "-")
+            .toLowerCase()}`
+        : "";
 
   const exportMut = useMutation({
     mutationFn: async ({
@@ -110,7 +157,51 @@ export function ReportsConsole({
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="exports" className="mt-4">
+        <TabsContent value="exports" className="mt-4 space-y-4">
+          <ArcadeCard className="p-4 flex flex-wrap items-end gap-3">
+            <label className="block space-y-1 w-full sm:w-56">
+              <span className={FIELD_LABEL}>Van filter</span>
+              <Select
+                value={teamFilterId}
+                onValueChange={(v) => {
+                  setTeamFilterId(v);
+                  setPersonId("all");
+                }}
+              >
+                <SelectTrigger className="text-base md:text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="z-[10000]">
+                  <SelectItem value="all">All vans</SelectItem>
+                  {(roster.data?.teams ?? []).map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+            <label className="block space-y-1 w-full sm:w-56">
+              <span className={FIELD_LABEL}>Person filter</span>
+              <Select value={personId} onValueChange={setPersonId}>
+                <SelectTrigger className="text-base md:text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="z-[10000] max-h-72">
+                  <SelectItem value="all">Everyone</SelectItem>
+                  {(roster.data?.profiles ?? []).map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.display_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+            <div className="text-[10px] text-muted-foreground pb-2">
+              Applies to the payroll, punch-detail and absence exports. The audit log always exports
+              whole.
+            </div>
+          </ArcadeCard>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <ArcadeCard className="p-5 space-y-3">
               <div className="flex items-center gap-2">
@@ -127,10 +218,11 @@ export function ReportsConsole({
                 onClick={() =>
                   exportMut.mutate({
                     kind: "payroll",
-                    filename: `payroll-weeks-${weekStartOfISO(payrollFrom)}-to-${weekStartOfISO(payrollTo)}.csv`,
+                    filename: `payroll-weeks-${weekStartOfISO(payrollFrom)}-to-${weekStartOfISO(payrollTo)}${filterSlug}.csv`,
                     build: () =>
                       buildPayrollRangeCsvLines(
                         weekStartsInRange(weekStartOfISO(payrollFrom), weekStartOfISO(payrollTo)),
+                        exportFilter,
                       ),
                   })
                 }
@@ -159,8 +251,8 @@ export function ReportsConsole({
                 onClick={() =>
                   exportMut.mutate({
                     kind: "punch",
-                    filename: `time-records-${punchFrom}-to-${punchTo}.csv`,
-                    build: () => buildPunchDetailCsvLines(punchFrom, punchTo),
+                    filename: `time-records-${punchFrom}-to-${punchTo}${filterSlug}.csv`,
+                    build: () => buildPunchDetailCsvLines(punchFrom, punchTo, exportFilter),
                   })
                 }
                 className="w-full min-h-11 md:min-h-9 bg-victory text-background hover:bg-victory/90 font-display text-[10px] uppercase tracking-widest"
@@ -211,8 +303,8 @@ export function ReportsConsole({
                 onClick={() =>
                   exportMut.mutate({
                     kind: "absence",
-                    filename: `absences-${absFrom}-to-${absTo}.csv`,
-                    build: () => buildAbsenceCsvLines(absFrom, absTo),
+                    filename: `absences-${absFrom}-to-${absTo}${filterSlug}.csv`,
+                    build: () => buildAbsenceCsvLines(absFrom, absTo, exportFilter),
                   })
                 }
                 className="w-full min-h-11 md:min-h-9 bg-victory text-background hover:bg-victory/90 font-display text-[10px] uppercase tracking-widest"

@@ -21,8 +21,14 @@ function fmtDuration(ms: number) {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
 }
 
+// Punch times read in PACIFIC — log_date, flags and payroll all live on LA
+// days, so the clock card must agree with them wherever the phone roams.
 const fmtClock = (iso: string) =>
-  new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  new Date(iso).toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "America/Los_Angeles",
+  });
 
 // Shift log_date is the LA calendar day of the instant (never viewer-local).
 const isoDateLocal = (d: Date) => laDateISO(d);
