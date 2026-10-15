@@ -1896,6 +1896,8 @@ export type Database = {
           rest_premium_count: number
           rest_premium_pay: number
           run_id: string
+          sick_hours: number
+          sick_pay: number
           sit_bonus: number
           snapshot: Json
           total_pay: number
@@ -1922,6 +1924,8 @@ export type Database = {
           rest_premium_count?: number
           rest_premium_pay?: number
           run_id: string
+          sick_hours?: number
+          sick_pay?: number
           sit_bonus?: number
           snapshot?: Json
           total_pay?: number
@@ -1948,6 +1952,8 @@ export type Database = {
           rest_premium_count?: number
           rest_premium_pay?: number
           run_id?: string
+          sick_hours?: number
+          sick_pay?: number
           sit_bonus?: number
           snapshot?: Json
           total_pay?: number
@@ -2181,6 +2187,7 @@ export type Database = {
           deny_reason: string | null
           id: string
           kind: string
+          paid_hours: number | null
           reason: string | null
           requested_by: string
           reviewed_at: string | null
@@ -2196,6 +2203,7 @@ export type Database = {
           deny_reason?: string | null
           id?: string
           kind: string
+          paid_hours?: number | null
           reason?: string | null
           requested_by: string
           reviewed_at?: string | null
@@ -2211,12 +2219,52 @@ export type Database = {
           deny_reason?: string | null
           id?: string
           kind?: string
+          paid_hours?: number | null
           reason?: string | null
           requested_by?: string
           reviewed_at?: string | null
           reviewed_by?: string | null
           status?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      sick_leave_ledger: {
+        Row: {
+          absence_id: string | null
+          created_at: string
+          created_by: string | null
+          entry_date: string
+          hours: number
+          id: number
+          kind: string
+          note: string | null
+          user_id: string
+          week_start: string | null
+        }
+        Insert: {
+          absence_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          entry_date: string
+          hours: number
+          id?: never
+          kind: string
+          note?: string | null
+          user_id: string
+          week_start?: string | null
+        }
+        Update: {
+          absence_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          entry_date?: string
+          hours?: number
+          id?: never
+          kind?: string
+          note?: string | null
+          user_id?: string
+          week_start?: string | null
         }
         Relationships: []
       }
@@ -2778,6 +2826,16 @@ export type Database = {
         }
         Relationships: []
       }
+      sick_leave_balances: {
+        Row: {
+          accrued_hours: number | null
+          balance_hours: number | null
+          used_hours: number | null
+          used_this_year: number | null
+          user_id: string | null
+        }
+        Relationships: []
+      }
       timesheet_day_detail: {
         Row: {
           billable_hours: number | null
@@ -2916,6 +2974,8 @@ export type Database = {
           rest_premium_pay: number
           sale_price_total: number
           sales: number
+          sick_hours: number
+          sick_pay: number
           sit_bonus: number
           sits: number
           total_pay: number

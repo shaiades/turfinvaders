@@ -270,6 +270,8 @@ export type PaycheckRow = {
   meal_premium_pay: number;
   rest_premium_count: number;
   rest_premium_pay: number;
+  sick_hours: number;
+  sick_pay: number;
   commission_rate: number;
   commission: number;
   sit_bonus: number;

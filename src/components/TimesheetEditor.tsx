@@ -24,11 +24,13 @@ import {
   Trash2,
   AlertTriangle,
   Utensils,
+  CalendarOff,
   CalendarPlus,
   KeyRound,
   Square,
 } from "lucide-react";
 import { useWeekSelector } from "@/hooks/useWeekSelector";
+import { AdminAbsenceDialog } from "@/components/AdminAbsenceDialog";
 import { TimeClockReviewQueue } from "@/components/TimeClockReviewQueue";
 import { TimeClockBackfill } from "@/components/TimeClockBackfill";
 import { TimeClockExceptions } from "@/components/TimeClockExceptions";
@@ -273,6 +275,7 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
   const [addEntryOpen, setAddEntryOpen] = useState(false);
   const [addEntryUserId, setAddEntryUserId] = useState<string | null>(null);
   const [passesOpen, setPassesOpen] = useState(false);
+  const [absenceOpen, setAbsenceOpen] = useState(false);
   const [weekPickerOpen, setWeekPickerOpen] = useState(false);
   const [auditFor, setAuditFor] = useState<{ ids: string[]; title: string } | null>(null);
   // The entry whose meal/rest attestation a manager is resolving.
@@ -746,6 +749,33 @@ export function TimesheetEditor({ scope }: { scope?: { teamId: string } }) {
                   profiles={data?.profiles ?? []}
                   initialUserId={addEntryUserId ?? undefined}
                   onDone={() => setAddEntryOpen(false)}
+                />
+              </DialogContent>
+            </Dialog>
+            <Dialog open={absenceOpen} onOpenChange={setAbsenceOpen}>
+              <DialogTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="font-display text-[10px] tracking-widest uppercase"
+                >
+                  <CalendarOff className="w-3.5 h-3.5 mr-1.5" />
+                  Absence
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-lg">
+                <DialogHeader>
+                  <DialogTitle className="font-display uppercase tracking-widest text-sm">
+                    Mark an absence
+                  </DialogTitle>
+                  <DialogDescription>
+                    Sick / excused / unexcused / no-show — any date or range, past days included.
+                    It lands approved; the person gets a notification.
+                  </DialogDescription>
+                </DialogHeader>
+                <AdminAbsenceDialog
+                  profiles={data?.profiles ?? []}
+                  onDone={() => setAbsenceOpen(false)}
                 />
               </DialogContent>
             </Dialog>

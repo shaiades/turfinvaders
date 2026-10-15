@@ -20,7 +20,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { addDaysISO, laTodayISO } from "@/lib/dates";
-import { KIND_LABEL, useDayOffMutations, useMyDayOff, type DayOffKind } from "@/hooks/useDayOff";
+import {
+  KIND_LABEL,
+  useDayOffMutations,
+  useMyDayOff,
+  useMySickBalance,
+  type DayOffKind,
+} from "@/hooks/useDayOff";
 
 const STATUS_TONE: Record<string, string> = {
   pending: "text-warning border-warning/40",
@@ -33,6 +39,7 @@ const STATUS_TONE: Record<string, string> = {
 export function DayOffRequestCard({ userId }: { userId: string }) {
   const today = laTodayISO();
   const myRows = useMyDayOff(userId, addDaysISO(today, -14));
+  const sickBalance = useMySickBalance(userId);
   const { submit, cancel } = useDayOffMutations();
   const [open, setOpen] = useState(false);
   const [date, setDate] = useState(() => addDaysISO(today, 1));
@@ -45,6 +52,17 @@ export function DayOffRequestCard({ userId }: { userId: string }) {
   return (
     <ArcadePanel title="Days Off">
       <div className="space-y-3">
+        {sickBalance.data != null && (
+          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+            Paid sick leave:{" "}
+            <span className="text-victory tabular-nums">
+              {Number(sickBalance.data.balance_hours ?? 0).toFixed(1)}h
+            </span>{" "}
+            available
+            <span className="mx-1">·</span>
+            {Number(sickBalance.data.used_this_year ?? 0).toFixed(1)}h used this year
+          </div>
+        )}
         {upcoming.length > 0 && (
           <div className="space-y-1.5">
             {upcoming.map((r) => (

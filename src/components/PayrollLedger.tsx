@@ -148,6 +148,7 @@ function ExceptionChips({ ex }: { ex: Record<string, unknown> | null | undefined
   if (n("meal_pending") > 0) chips.push(`${n("meal_pending")} meal ?`);
   if (n("meal_unrecorded") > 0) chips.push(`${n("meal_unrecorded")} lunch times`);
   if (n("rest_pending") > 0) chips.push(`${n("rest_pending")} breaks ?`);
+  if (n("sick_days") > 0) chips.push(`${n("sick_days")} sick paid`);
   if (ex["below_min_wage"] === true) chips.push("below min wage");
   if (chips.length === 0) return null;
   return (
@@ -460,6 +461,8 @@ export function PayrollLedger() {
           mealPremiumCount: Number(pc?.meal_premium_count ?? 0),
           restPremium,
           restPremiumCount: Number(pc?.rest_premium_count ?? 0),
+          sickHours: Number(pc?.sick_hours ?? 0),
+          sickPay: Number(pc?.sick_pay ?? 0),
           premiums: otPremium + mealPremium + restPremium,
           exceptions: (pc?.exceptions ?? null) as Record<string, unknown> | null,
           commission: Number(pc?.commission ?? 0),
@@ -515,6 +518,9 @@ export function PayrollLedger() {
     "Meal Premium Pay",
     "Rest Premium Days",
     "Rest Premium Pay",
+    "Sick Hours",
+    "Sick Pay",
+    "Sick Balance",
     "Total Sales Volume ($)",
     "Commission Rate",
     "Commission Earned ($)",
@@ -557,6 +563,9 @@ export function PayrollLedger() {
           Number(l.meal_premium_pay).toFixed(2),
           Number(l.rest_premium_count ?? 0),
           Number(l.rest_premium_pay ?? 0).toFixed(2),
+          Number(l.sick_hours ?? 0).toFixed(2),
+          Number(l.sick_pay ?? 0).toFixed(2),
+          ex["sick_balance"] != null ? Number(ex["sick_balance"]).toFixed(2) : "",
           "",
           "",
           Number(l.commission).toFixed(2),
@@ -566,13 +575,34 @@ export function PayrollLedger() {
           Number(l.total_pay).toFixed(2),
           String(ex["attestation"] ?? ""),
           Object.keys(ex)
-            .filter((k) => k !== "attestation" && (Number(ex[k]) > 0 || ex[k] === true))
+            .filter(
+              (k) =>
+                k !== "attestation" &&
+                k !== "sick_balance" &&
+                (Number(ex[k]) > 0 || ex[k] === true),
+            )
             .join("; "),
         ];
         lines.push(cells.map(csvCell).join(","));
       }
       downloadCsv(lines, true);
       return;
+    }
+
+    // Live export: balances come from the view (frozen runs carry them in
+    // exceptions.sick_balance instead).
+    const balances = new Map<string, number>();
+    {
+      const { data: balRows } = await supabase
+        .from("sick_leave_balances")
+        .select("user_id, balance_hours")
+        .in(
+          "user_id",
+          rows.map((r) => r.id),
+        );
+      for (const b of balRows ?? []) {
+        if (b.user_id) balances.set(b.user_id, Number(b.balance_hours ?? 0));
+      }
     }
 
     const lines = [CSV_HEADERS.join(",")];
@@ -593,6 +623,9 @@ export function PayrollLedger() {
         r.mealPremium.toFixed(2),
         r.restPremiumCount,
         r.restPremium.toFixed(2),
+        r.sickHours.toFixed(2),
+        r.sickPay.toFixed(2),
+        balances.has(r.id) ? balances.get(r.id)!.toFixed(2) : "",
         r.sale_amount.toFixed(2),
         `${(r.commRate * 100).toFixed(0)}%`,
         r.commission.toFixed(2),
@@ -966,6 +999,7 @@ export function PayrollLedger() {
                               : r.hoursSource === "clocked"
                                 ? "clocked"
                                 : "no time clocked"}
+                            {r.sickHours > 0 && ` · +${r.sickHours.toFixed(1)}h sick`}
                           </div>
                         </>
                       }
@@ -1063,6 +1097,8 @@ export function PayrollLedger() {
                             : r.hoursSource === "clocked"
                               ? "clocked"
                               : "no time clocked"}
+                          {r.sickHours > 0 &&
+                            ` · +${r.sickHours.toFixed(1)}h sick ($${r.sickPay.toFixed(0)})`}
                         </div>
                       </td>
                       <td className="py-2.5 pr-3 text-right font-display text-victory">

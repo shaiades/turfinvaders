@@ -1861,10 +1861,16 @@ function DispatchRow({
         )}
         {excused && clockState !== "on" && (
           <span
-            title={`Approved ${excused.replace("_", "-")} today`}
-            className="shrink-0 text-[8px] font-display uppercase tracking-widest text-victory border border-victory/40 rounded px-1"
+            title={`Recorded ${excused.replace("_", "-")} today`}
+            className={`shrink-0 text-[8px] font-display uppercase tracking-widest border rounded px-1 ${
+              excused === "no_show" || excused === "unexcused"
+                ? "text-destructive border-destructive/40"
+                : excused === "sick"
+                  ? "text-warning border-warning/40"
+                  : "text-victory border-victory/40"
+            }`}
           >
-            excused
+            {excused.replace("_", "-")}
           </span>
         )}
         {r.g.role !== "canvasser" && !r.g.former && (

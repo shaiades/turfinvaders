@@ -34,6 +34,9 @@ export const PAYROLL_RANGE_HEADERS = [
   "Meal Premium Pay",
   "Rest Premium Days",
   "Rest Premium Pay",
+  "Sick Hours",
+  "Sick Pay",
+  "Sick Balance",
   "Total Sales Volume ($)",
   "Commission Rate",
   "Commission Earned ($)",
@@ -48,7 +51,13 @@ export const PAYROLL_RANGE_HEADERS = [
 
 const exceptionsSummary = (ex: Record<string, unknown> | null | undefined) =>
   Object.keys(ex ?? {})
-    .filter((k) => k !== "attestation" && (Number((ex as Record<string, unknown>)[k]) > 0 || (ex as Record<string, unknown>)[k] === true))
+    .filter(
+      (k) =>
+        k !== "attestation" &&
+        k !== "sick_balance" &&
+        (Number((ex as Record<string, unknown>)[k]) > 0 ||
+          (ex as Record<string, unknown>)[k] === true),
+    )
     .join("; ");
 
 /** Monday-anchored list of week starts, inclusive. */
@@ -61,12 +70,19 @@ export function weekStartsInRange(fromWeekISO: string, toWeekISO: string): strin
 export async function buildPayrollRangeCsvLines(weekStarts: string[]): Promise<string[]> {
   const lines = [PAYROLL_RANGE_HEADERS.join(",")];
 
-  const [profilesRes, teamsRes] = await Promise.all([
+  const [profilesRes, teamsRes, balancesRes] = await Promise.all([
     supabase.from("profiles").select("id, display_name, team_id"),
     supabase.from("teams").select("id, name"),
+    // Live-week lines report the CURRENT balance; approved weeks use the
+    // balance frozen into exceptions.sick_balance instead. Errors read as
+    // "not deployed yet" — the column simply exports blank.
+    supabase.from("sick_leave_balances").select("user_id, balance_hours"),
   ]);
   if (profilesRes.error) throw profilesRes.error;
   if (teamsRes.error) throw teamsRes.error;
+  const sickBalance = new Map(
+    (balancesRes.data ?? []).map((b) => [b.user_id, Number(b.balance_hours ?? 0)]),
+  );
   const profiles = profilesRes.data ?? [];
   const teamName = new Map((teamsRes.data ?? []).map((t) => [t.id, t.name]));
   const profById = new Map(profiles.map((p) => [p.id, p]));
@@ -123,6 +139,9 @@ export async function buildPayrollRangeCsvLines(weekStarts: string[]): Promise<s
             num(l.meal_premium_pay).toFixed(2),
             num((l as Record<string, unknown>).rest_premium_count),
             num((l as Record<string, unknown>).rest_premium_pay).toFixed(2),
+            num((l as Record<string, unknown>).sick_hours).toFixed(2),
+            num((l as Record<string, unknown>).sick_pay).toFixed(2),
+            ex.sick_balance != null ? num(ex.sick_balance).toFixed(2) : "",
             num(snap.sale_price_total).toFixed(2),
             snap.commission_rate != null ? `${(num(snap.commission_rate) * 100).toFixed(0)}%` : "",
             num(l.commission).toFixed(2),
@@ -173,6 +192,9 @@ export async function buildPayrollRangeCsvLines(weekStarts: string[]): Promise<s
           num(pc.meal_premium_pay).toFixed(2),
           pc.rest_premium_count ?? 0,
           num(pc.rest_premium_pay).toFixed(2),
+          num(pc.sick_hours).toFixed(2),
+          num(pc.sick_pay).toFixed(2),
+          sickBalance.has(r.canvasser_id) ? sickBalance.get(r.canvasser_id)!.toFixed(2) : "",
           num(pc.sale_price_total).toFixed(2),
           `${(num(pc.commission_rate) * 100).toFixed(0)}%`,
           num(pc.commission).toFixed(2),
@@ -274,6 +296,7 @@ export const ABSENCE_HEADERS = [
   "Name",
   "Kind",
   "Status",
+  "Paid Sick Hours",
   "Note",
   "Requested By",
   "Reviewed By",
@@ -311,6 +334,7 @@ export async function buildAbsenceCsvLines(startISO: string, endISO: string): Pr
         nameOf(r.user_id),
         r.kind,
         r.status,
+        r.paid_hours != null ? num(r.paid_hours).toFixed(2) : "",
         r.reason ?? "",
         nameOf(r.requested_by),
         nameOf(r.reviewed_by),
