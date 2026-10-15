@@ -84,7 +84,7 @@ export function AddPlayerDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initialVanId]);
 
-  const destinationName = vanId ? (vans.find((v) => v.id === vanId)?.name ?? "Van") : "Free Agents";
+  const destinationName = vanId ? (vans.find((v) => v.id === vanId)?.name ?? "Van") : "The Bench";
   const safeRole: AppRole = creatable.includes(role) ? role : "canvasser";
 
   const create = useMutation({
@@ -215,7 +215,7 @@ export function AddPlayerDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="free">Free Agents (assign later)</SelectItem>
+                <SelectItem value="free">The Bench (assign later)</SelectItem>
                 {vans.map((v) => (
                   <SelectItem key={v.id} value={v.id}>
                     <span className="inline-flex items-center gap-2">

@@ -189,7 +189,7 @@ function UsersPage() {
             return false;
           const roles = rolesByUser.get(p.id) ?? [];
           // Waiting on a role, or activated but still vanless (owners/reps
-          // never need vans — Free Agents pen rule).
+          // never need vans — The Bench pen rule).
           if (roles.length === 0) return true;
           const r = primaryRole(roles as AppRole[]);
           return !p.team_id && r !== "owner" && r !== "sales_rep" && r !== "office_staff";
@@ -360,7 +360,7 @@ function UsersPage() {
                       <SelectValue placeholder="Assign Van…" />
                     </SelectTrigger>
                     <SelectContent className="bg-background border-[color:var(--neon-blue)]/50">
-                      <SelectItem value="free">Free Agents</SelectItem>
+                      <SelectItem value="free">The Bench</SelectItem>
                       {vans.map((v) => (
                         <SelectItem key={v.id} value={v.id}>
                           <span className="inline-flex items-center gap-2">
@@ -507,7 +507,7 @@ function UsersPage() {
                           className="w-2 h-2 rounded-full"
                           style={{ background: van?.color ?? "#555" }}
                         />
-                        <span className="max-w-[90px] truncate">{van?.name ?? "Free Agent"}</span>
+                        <span className="max-w-[90px] truncate">{van?.name ?? "The Bench"}</span>
                       </span>
                     )}
                     <ChevronRight className="w-4 h-4 shrink-0 text-muted-foreground" />

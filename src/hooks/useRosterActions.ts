@@ -11,13 +11,13 @@ export const ROSTER_KEYS = [
   ["manage_users"],
 ];
 
-/** Move people to a van or to Free Agents (null). `ids` is the flat profile-id
+/** Move people to a van or to The Bench (null). `ids` is the flat profile-id
  *  list (a person's same-name duplicates ride together); `count` is how many
  *  PEOPLE that represents — pass it >1 for a bulk move so the toast counts
  *  humans, not profile rows. Assigning to a van cascades the van's office
  *  onto each person. Every move also PINS the person (van_locked_at) so the
  *  Monday webhook's Van sync can't bounce them back — including moves to
- *  Free Agents, so a deliberate benching sticks too. The guard trigger
+ *  The Bench, so a deliberate benching sticks too. The guard trigger
  *  re-stamps now()/auth.uid() server-side, so the ISO value here is just a
  *  non-null signal. */
 export function useMoveAgents(vans: VanLite[]) {
@@ -53,7 +53,7 @@ export function useMoveAgents(vans: VanLite[]) {
     },
     onSuccess: (res, vars) => {
       const van = vars.vanId ? vans.find((v) => v.id === vars.vanId) : null;
-      const dest = van ? van.name : "Free Agents";
+      const dest = van ? van.name : "The Bench";
       toast.success(
         (vars.count ?? 1) > 1
           ? `${vars.count} players → ${dest} — pinned`

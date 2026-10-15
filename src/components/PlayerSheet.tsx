@@ -298,7 +298,7 @@ export function PlayerSheet({
                   <SelectValue placeholder="Assign Van…" />
                 </SelectTrigger>
                 <SelectContent className="z-[10000]">
-                  <SelectItem value="free">Free Agents</SelectItem>
+                  <SelectItem value="free">The Bench</SelectItem>
                   {vans.map((v) => (
                     <SelectItem key={v.id} value={v.id}>
                       <span className="inline-flex items-center gap-2">
@@ -494,7 +494,7 @@ export function PlayerSheet({
                         className="w-2 h-2 rounded-full"
                         style={{ background: mVan?.color ?? "#555" }}
                       />
-                      {mVan?.name ?? "Free Agent"}
+                      {mVan?.name ?? "The Bench"}
                     </span>
                     {isAdminActor && g.canModify && (
                       <button
