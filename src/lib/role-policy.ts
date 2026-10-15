@@ -59,16 +59,30 @@ export function isTimeAdminRole(role: AppRole | string | null | undefined): bool
   return (TIME_ADMIN_ROLES as readonly string[]).includes(role);
 }
 
-/** Payroll/time READ tier: the Admin pair plus the bookkeeper (Mary —
- *  owner decision 2026-10-01). Read-everything, write-NOTHING: bookkeeper
- *  is deliberately absent from MANAGER_ROLES, ADMIN_ROLES, and
- *  MANAGER_GRANTABLE_ROLES (owner grants it; Managers cannot). Gates the
- *  /reports route and the paycheck server fns' read-everyone branch. */
+/** Payroll/time READ tier: the Admin pair, the bookkeeper (Mary — owner
+ *  decision 2026-10-01), and HR (Zuleyma — owner decision 2026-10-15:
+ *  "can Zuleyma also approve payroll runs?"). Bookkeeper reads and writes
+ *  NOTHING; HR also runs the draft→approve workflow (PAYROLL_RUN_ROLES).
+ *  Both are deliberately absent from MANAGER_ROLES, ADMIN_ROLES, and
+ *  MANAGER_GRANTABLE_ROLES (owner grants them; Managers cannot). Gates the
+ *  /reports payroll surfaces and the paycheck server fns' read-everyone
+ *  branch. */
 export const PAYROLL_READ_ROLES: readonly AppRole[] = [
   "owner",
   "office_staff",
+  "hr",
   "bookkeeper",
 ] as const;
+
+/** Who may CREATE and APPROVE payroll runs (the draft→freeze workflow).
+ *  Reopening an approved run stays OWNER-only — it unlocks paid wage
+ *  history. Mirrors create_payroll_run / approve_payroll_run in SQL. */
+export const PAYROLL_RUN_ROLES: readonly AppRole[] = ["owner", "office_staff", "hr"] as const;
+
+export function isPayrollRunRole(role: AppRole | string | null | undefined): boolean {
+  if (!role) return false;
+  return (PAYROLL_RUN_ROLES as readonly string[]).includes(role);
+}
 
 /** Admin tier: owner and office_staff ONLY — captains are deliberately
  *  excluded. Gates the owner dashboard, the confirmation desk, and
