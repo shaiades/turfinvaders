@@ -4,15 +4,26 @@ import { csvCell } from "@/lib/csv";
 import { addDaysISO, laDateTimeLabel, laMidnightUtcISO } from "@/lib/dates";
 
 /**
- * The accountant's export builders (Reports console). Every builder returns
- * CSV lines (header first), all cells injection-guarded, all timestamps
- * Pacific. Doctrine:
- *   · APPROVED weeks export the FROZEN payroll_run_lines (what was actually
- *     paid, clawbacks included); unapproved weeks export the live engine.
- *   · The punch-detail export is the CA-required time record (LC 1174):
+ * The accountant's report builders (Reports console). Every builder returns
+ * a ReportTable — the on-screen viewer renders it directly, and the CSV
+ * wrappers serialize the same rows (cells injection-guarded), so what you
+ * see IS what downloads. All timestamps Pacific. Doctrine:
+ *   · APPROVED weeks report the FROZEN payroll_run_lines (what was actually
+ *     paid, clawbacks included); unapproved weeks the live engine.
+ *   · The punch-detail report is the CA-required time record (LC 1174):
  *     per person per day, exact in/out and meal times, voids included and
  *     marked — never silently dropped.
  */
+
+/** One report, ready for the screen or a CSV: headers + stringified rows. */
+export type ReportTable = { headers: string[]; rows: string[][] };
+
+export const reportTableToCsvLines = (t: ReportTable): string[] => [
+  t.headers.join(","),
+  ...t.rows.map((r) => r.map(csvCell).join(",")),
+];
+
+const cells = (vals: unknown[]): string[] => vals.map((v) => String(v ?? ""));
 
 const num = (v: unknown) => Number(v ?? 0);
 
@@ -77,7 +88,14 @@ export async function buildPayrollRangeCsvLines(
   weekStarts: string[],
   filter?: ExportFilter,
 ): Promise<string[]> {
-  const lines = [PAYROLL_RANGE_HEADERS.join(",")];
+  return reportTableToCsvLines(await buildPayrollRangeTable(weekStarts, filter));
+}
+
+export async function buildPayrollRangeTable(
+  weekStarts: string[],
+  filter?: ExportFilter,
+): Promise<ReportTable> {
+  const rows: string[][] = [];
 
   const [profilesRes, teamsRes, balancesRes] = await Promise.all([
     supabase.from("profiles").select("id, display_name, team_id"),
@@ -120,18 +138,18 @@ export async function buildPayrollRangeCsvLines(
       .maybeSingle();
 
     if (run?.status === "approved") {
-      const { data: rows, error } = await supabase
+      const { data: lineRows, error } = await supabase
         .from("payroll_run_lines")
         .select("*")
         .eq("run_id", run.id)
         .order("display_name");
       if (error) throw error;
-      for (const l of rows ?? []) {
+      for (const l of lineRows ?? []) {
         if (!inFilter(filter, l.canvasser_id)) continue;
         const ex = (l.exceptions ?? {}) as Record<string, unknown>;
         const snap = (l.snapshot ?? {}) as Record<string, unknown>;
-        lines.push(
-          [
+        rows.push(
+          cells([
             weekStart,
             l.canvasser_id,
             l.display_name,
@@ -162,9 +180,7 @@ export async function buildPayrollRangeCsvLines(
             "approved run (frozen)",
             String(ex.attestation ?? attest.get(l.canvasser_id) ?? ""),
             exceptionsSummary(ex),
-          ]
-            .map(csvCell)
-            .join(","),
+          ]),
         );
       }
       continue;
@@ -183,8 +199,8 @@ export async function buildPayrollRangeCsvLines(
       );
     for (const r of paid) {
       const pc = r.paycheck!;
-      lines.push(
-        [
+      rows.push(
+        cells([
           weekStart,
           r.canvasser_id,
           profById.get(r.canvasser_id)?.display_name ?? r.canvasser_id,
@@ -215,13 +231,11 @@ export async function buildPayrollRangeCsvLines(
           "live engine (no approved run)",
           attest.get(r.canvasser_id) ?? "",
           exceptionsSummary(pc.exceptions as Record<string, unknown> | null),
-        ]
-          .map(csvCell)
-          .join(","),
+        ]),
       );
     }
   }
-  return lines;
+  return { headers: PAYROLL_RANGE_HEADERS, rows };
 }
 
 export const PUNCH_DETAIL_HEADERS = [
@@ -252,7 +266,15 @@ export async function buildPunchDetailCsvLines(
   endISO: string,
   filter?: ExportFilter,
 ): Promise<string[]> {
-  const lines = [PUNCH_DETAIL_HEADERS.join(",")];
+  return reportTableToCsvLines(await buildPunchDetailTable(startISO, endISO, filter));
+}
+
+export async function buildPunchDetailTable(
+  startISO: string,
+  endISO: string,
+  filter?: ExportFilter,
+): Promise<ReportTable> {
+  const rows: string[][] = [];
   const PAGE = 1000;
   for (let from = 0; ; from += PAGE) {
     let q = supabase
@@ -273,8 +295,8 @@ export async function buildPunchDetailCsvLines(
       );
     }
     for (const r of data ?? []) {
-      lines.push(
-        [
+      rows.push(
+        cells([
           r.log_date ?? "",
           r.user_id ?? "",
           r.display_name ?? "",
@@ -295,14 +317,12 @@ export async function buildPunchDetailCsvLines(
           r.needs_correction ? "yes" : "",
           r.voided_at ? "VOIDED" : "",
           r.void_reason ?? "",
-        ]
-          .map(csvCell)
-          .join(","),
+        ]),
       );
     }
     if ((data ?? []).length < PAGE) break;
   }
-  return lines;
+  return { headers: PUNCH_DETAIL_HEADERS, rows };
 }
 
 export const ABSENCE_HEADERS = [
@@ -324,7 +344,15 @@ export async function buildAbsenceCsvLines(
   endISO: string,
   filter?: ExportFilter,
 ): Promise<string[]> {
-  const lines = [ABSENCE_HEADERS.join(",")];
+  return reportTableToCsvLines(await buildAbsenceTable(startISO, endISO, filter));
+}
+
+export async function buildAbsenceTable(
+  startISO: string,
+  endISO: string,
+  filter?: ExportFilter,
+): Promise<ReportTable> {
+  const rows: string[][] = [];
   const names = new Map<string, string>();
   {
     const { data } = await supabase.from("profiles").select("id, display_name");
@@ -348,8 +376,8 @@ export async function buildAbsenceCsvLines(
     );
   }
   for (const r of data ?? []) {
-    lines.push(
-      [
+    rows.push(
+      cells([
         r.absence_date,
         r.user_id,
         nameOf(r.user_id),
@@ -361,12 +389,10 @@ export async function buildAbsenceCsvLines(
         nameOf(r.reviewed_by),
         r.reviewed_at ? laDateTimeLabel(r.reviewed_at) : "",
         r.deny_reason ?? "",
-      ]
-        .map(csvCell)
-        .join(","),
+      ]),
     );
   }
-  return lines;
+  return { headers: ABSENCE_HEADERS, rows };
 }
 
 export const AUDIT_LOG_HEADERS = [
@@ -391,7 +417,11 @@ export const AUDIT_LOG_HEADERS = [
 ];
 
 export async function buildAuditCsvLines(startISO: string, endISO: string): Promise<string[]> {
-  const lines = [AUDIT_LOG_HEADERS.join(",")];
+  return reportTableToCsvLines(await buildAuditTable(startISO, endISO));
+}
+
+export async function buildAuditTable(startISO: string, endISO: string): Promise<ReportTable> {
+  const rows: string[][] = [];
   const names = new Map<string, string>();
   {
     const { data } = await supabase.from("profiles").select("id, display_name");
@@ -417,8 +447,8 @@ export async function buildAuditCsvLines(startISO: string, endISO: string): Prom
     for (const r of data ?? []) {
       const oldRow = (r.old_row ?? {}) as Record<string, unknown>;
       const newRow = (r.new_row ?? {}) as Record<string, unknown>;
-      lines.push(
-        [
+      rows.push(
+        cells([
           laDateTimeLabel(r.happened_at),
           r.action,
           r.actor ? nameOf(r.actor) : "System (auto)",
@@ -435,12 +465,10 @@ export async function buildAuditCsvLines(startISO: string, endISO: string): Prom
           t(oldRow.meal_end),
           t(newRow.meal_start),
           t(newRow.meal_end),
-        ]
-          .map(csvCell)
-          .join(","),
+        ]),
       );
     }
     if ((data ?? []).length < PAGE) break;
   }
-  return lines;
+  return { headers: AUDIT_LOG_HEADERS, rows };
 }
