@@ -359,6 +359,15 @@ export function AppShell({ children }: { children: ReactNode }) {
         { to: "/reports", search: { tab: "payroll" }, label: "Payroll", icon: DollarSign },
       ];
     }
+    if (role === "hr") {
+      // HR's two-tab app (owner ask 2026-10-15, Zuleyma): the full
+      // timesheet/attendance editor on /dashboard, and the Reports console
+      // (payroll tab hides itself for HR — attendance, never dollars).
+      return [
+        { to: "/dashboard", label: "Timesheets", icon: LayoutDashboard },
+        { to: "/reports", search: { tab: "exports" }, label: "Reports", icon: FileSpreadsheet },
+      ];
+    }
     if (role === "captain") {
       // Captains knock doors too (owner request 2026-09-09), so they get the
       // FULL canvasser toolkit + their leadership privileges: Mission (/mission,

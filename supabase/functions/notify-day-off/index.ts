@@ -21,6 +21,7 @@ const KIND_LABEL: Record<string, string> = {
   sick: "sick day",
   no_show: "no-show",
   excused: "excused absence",
+  unexcused: "unexcused absence",
   other: "absence",
 };
 
@@ -124,7 +125,7 @@ Deno.serve(async (req) => {
     const { data: roleRows } = await admin
       .from("user_roles")
       .select("user_id, role")
-      .in("role", ["owner", "office_staff", "captain"]);
+      .in("role", ["owner", "office_staff", "hr", "captain"]);
     const captainIds = (roleRows ?? []).filter((r) => r.role === "captain").map((r) => r.user_id);
     let teamCaptains: string[] = [];
     if (captainIds.length > 0 && worker?.team_id) {
