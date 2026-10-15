@@ -8,6 +8,7 @@ const KIND_TONE: Record<DayOffKind, string> = {
   sick: "text-warning border-warning/40",
   no_show: "text-destructive border-destructive/40",
   excused: "text-victory border-victory/40",
+  unexcused: "text-destructive border-destructive/40",
   other: "text-muted-foreground border-border",
 };
 

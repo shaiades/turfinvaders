@@ -32,6 +32,11 @@ export const PAYROLL_RANGE_HEADERS = [
   "OT Premium Pay",
   "Meal Premium Days",
   "Meal Premium Pay",
+  "Rest Premium Days",
+  "Rest Premium Pay",
+  "Sick Hours",
+  "Sick Pay",
+  "Sick Balance",
   "Total Sales Volume ($)",
   "Commission Rate",
   "Commission Earned ($)",
@@ -46,7 +51,13 @@ export const PAYROLL_RANGE_HEADERS = [
 
 const exceptionsSummary = (ex: Record<string, unknown> | null | undefined) =>
   Object.keys(ex ?? {})
-    .filter((k) => k !== "attestation" && (Number((ex as Record<string, unknown>)[k]) > 0 || (ex as Record<string, unknown>)[k] === true))
+    .filter(
+      (k) =>
+        k !== "attestation" &&
+        k !== "sick_balance" &&
+        (Number((ex as Record<string, unknown>)[k]) > 0 ||
+          (ex as Record<string, unknown>)[k] === true),
+    )
     .join("; ");
 
 /** Monday-anchored list of week starts, inclusive. */
@@ -56,15 +67,31 @@ export function weekStartsInRange(fromWeekISO: string, toWeekISO: string): strin
   return out;
 }
 
-export async function buildPayrollRangeCsvLines(weekStarts: string[]): Promise<string[]> {
+/** Optional person/van narrowing for the exports: a set of user ids, or
+ *  undefined for everyone. (Resolved from the Reports console's pickers.) */
+export type ExportFilter = string[] | undefined;
+
+const inFilter = (filter: ExportFilter, id: string) => !filter || filter.includes(id);
+
+export async function buildPayrollRangeCsvLines(
+  weekStarts: string[],
+  filter?: ExportFilter,
+): Promise<string[]> {
   const lines = [PAYROLL_RANGE_HEADERS.join(",")];
 
-  const [profilesRes, teamsRes] = await Promise.all([
+  const [profilesRes, teamsRes, balancesRes] = await Promise.all([
     supabase.from("profiles").select("id, display_name, team_id"),
     supabase.from("teams").select("id, name"),
+    // Live-week lines report the CURRENT balance; approved weeks use the
+    // balance frozen into exceptions.sick_balance instead. Errors read as
+    // "not deployed yet" — the column simply exports blank.
+    supabase.from("sick_leave_balances").select("user_id, balance_hours"),
   ]);
   if (profilesRes.error) throw profilesRes.error;
   if (teamsRes.error) throw teamsRes.error;
+  const sickBalance = new Map(
+    (balancesRes.data ?? []).map((b) => [b.user_id, Number(b.balance_hours ?? 0)]),
+  );
   const profiles = profilesRes.data ?? [];
   const teamName = new Map((teamsRes.data ?? []).map((t) => [t.id, t.name]));
   const profById = new Map(profiles.map((p) => [p.id, p]));
@@ -100,6 +127,7 @@ export async function buildPayrollRangeCsvLines(weekStarts: string[]): Promise<s
         .order("display_name");
       if (error) throw error;
       for (const l of rows ?? []) {
+        if (!inFilter(filter, l.canvasser_id)) continue;
         const ex = (l.exceptions ?? {}) as Record<string, unknown>;
         const snap = (l.snapshot ?? {}) as Record<string, unknown>;
         lines.push(
@@ -119,6 +147,11 @@ export async function buildPayrollRangeCsvLines(weekStarts: string[]): Promise<s
             num(l.ot_premium_pay).toFixed(2),
             l.meal_premium_count,
             num(l.meal_premium_pay).toFixed(2),
+            num((l as Record<string, unknown>).rest_premium_count),
+            num((l as Record<string, unknown>).rest_premium_pay).toFixed(2),
+            num((l as Record<string, unknown>).sick_hours).toFixed(2),
+            num((l as Record<string, unknown>).sick_pay).toFixed(2),
+            ex.sick_balance != null ? num(ex.sick_balance).toFixed(2) : "",
             num(snap.sale_price_total).toFixed(2),
             snap.commission_rate != null ? `${(num(snap.commission_rate) * 100).toFixed(0)}%` : "",
             num(l.commission).toFixed(2),
@@ -139,7 +172,7 @@ export async function buildPayrollRangeCsvLines(weekStarts: string[]): Promise<s
 
     const results = await fetchWeeklyPaychecksChunked(
       weekStart,
-      profiles.map((p) => p.id),
+      profiles.map((p) => p.id).filter((id) => inFilter(filter, id)),
     );
     const paid = results
       .filter((r) => r.paycheck && (num(r.paycheck.hours) > 0 || num(r.paycheck.total_pay) > 0))
@@ -167,6 +200,11 @@ export async function buildPayrollRangeCsvLines(weekStarts: string[]): Promise<s
           num(pc.ot_premium_pay).toFixed(2),
           pc.meal_premium_count ?? 0,
           num(pc.meal_premium_pay).toFixed(2),
+          pc.rest_premium_count ?? 0,
+          num(pc.rest_premium_pay).toFixed(2),
+          num(pc.sick_hours).toFixed(2),
+          num(pc.sick_pay).toFixed(2),
+          sickBalance.has(r.canvasser_id) ? sickBalance.get(r.canvasser_id)!.toFixed(2) : "",
           num(pc.sale_price_total).toFixed(2),
           `${(num(pc.commission_rate) * 100).toFixed(0)}%`,
           num(pc.commission).toFixed(2),
@@ -200,6 +238,8 @@ export const PUNCH_DETAIL_HEADERS = [
   "Billable Hours",
   "Meal Status",
   "2nd Meal Status",
+  "Rest Breaks",
+  "Meal Windows (PT)",
   "Entry Source",
   "Flags",
   "Needs Review",
@@ -210,11 +250,12 @@ export const PUNCH_DETAIL_HEADERS = [
 export async function buildPunchDetailCsvLines(
   startISO: string,
   endISO: string,
+  filter?: ExportFilter,
 ): Promise<string[]> {
   const lines = [PUNCH_DETAIL_HEADERS.join(",")];
   const PAGE = 1000;
   for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabase
+    let q = supabase
       .from("timesheet_day_detail")
       .select("*")
       .gte("log_date", startISO)
@@ -222,6 +263,8 @@ export async function buildPunchDetailCsvLines(
       .order("log_date", { ascending: true })
       .order("display_name", { ascending: true })
       .range(from, from + PAGE - 1);
+    if (filter) q = q.in("user_id", filter);
+    const { data, error } = await q;
     if (error) {
       throw new Error(
         /timesheet_day_detail/.test(error.message)
@@ -245,6 +288,8 @@ export async function buildPunchDetailCsvLines(
           num(r.billable_hours).toFixed(2),
           r.meal_status ?? "",
           r.second_meal_status ?? "",
+          r.rest_break_status ?? "",
+          (r as Record<string, unknown>).meal_windows ?? "",
           r.entry_source ?? "",
           (r.flag_reasons ?? []).join("; "),
           r.needs_correction ? "yes" : "",
@@ -266,6 +311,7 @@ export const ABSENCE_HEADERS = [
   "Name",
   "Kind",
   "Status",
+  "Paid Sick Hours",
   "Note",
   "Requested By",
   "Reviewed By",
@@ -273,7 +319,11 @@ export const ABSENCE_HEADERS = [
   "Deny Note",
 ];
 
-export async function buildAbsenceCsvLines(startISO: string, endISO: string): Promise<string[]> {
+export async function buildAbsenceCsvLines(
+  startISO: string,
+  endISO: string,
+  filter?: ExportFilter,
+): Promise<string[]> {
   const lines = [ABSENCE_HEADERS.join(",")];
   const names = new Map<string, string>();
   {
@@ -281,13 +331,15 @@ export async function buildAbsenceCsvLines(startISO: string, endISO: string): Pr
     for (const p of data ?? []) names.set(p.id, p.display_name ?? p.id);
   }
   const nameOf = (id: string | null) => (id ? (names.get(id) ?? id) : "");
-  const { data, error } = await supabase
+  let q = supabase
     .from("day_off_requests")
     .select("*")
     .gte("absence_date", startISO)
     .lte("absence_date", endISO)
     .order("absence_date", { ascending: true })
     .limit(5000);
+  if (filter) q = q.in("user_id", filter);
+  const { data, error } = await q;
   if (error) {
     throw new Error(
       /day_off_requests/.test(error.message)
@@ -303,6 +355,7 @@ export async function buildAbsenceCsvLines(startISO: string, endISO: string): Pr
         nameOf(r.user_id),
         r.kind,
         r.status,
+        r.paid_hours != null ? num(r.paid_hours).toFixed(2) : "",
         r.reason ?? "",
         nameOf(r.requested_by),
         nameOf(r.reviewed_by),
@@ -329,6 +382,12 @@ export const AUDIT_LOG_HEADERS = [
   "New Clock Out (PT)",
   "Old Meal Status",
   "New Meal Status",
+  // meal_insert / meal_update rows carry meal punches, not clock punches —
+  // without these columns those audit rows exported as blanks.
+  "Old Meal Start (PT)",
+  "Old Meal End (PT)",
+  "New Meal Start (PT)",
+  "New Meal End (PT)",
 ];
 
 export async function buildAuditCsvLines(startISO: string, endISO: string): Promise<string[]> {
@@ -372,6 +431,10 @@ export async function buildAuditCsvLines(startISO: string, endISO: string): Prom
           t(newRow.clock_out),
           String(oldRow.meal_status ?? ""),
           String(newRow.meal_status ?? ""),
+          t(oldRow.meal_start),
+          t(oldRow.meal_end),
+          t(newRow.meal_start),
+          t(newRow.meal_end),
         ]
           .map(csvCell)
           .join(","),

@@ -1893,7 +1893,11 @@ export type Database = {
           rank: string | null
           reg_hours: number
           regular_rate: number
+          rest_premium_count: number
+          rest_premium_pay: number
           run_id: string
+          sick_hours: number
+          sick_pay: number
           sit_bonus: number
           snapshot: Json
           total_pay: number
@@ -1917,7 +1921,11 @@ export type Database = {
           rank?: string | null
           reg_hours?: number
           regular_rate?: number
+          rest_premium_count?: number
+          rest_premium_pay?: number
           run_id: string
+          sick_hours?: number
+          sick_pay?: number
           sit_bonus?: number
           snapshot?: Json
           total_pay?: number
@@ -1941,7 +1949,11 @@ export type Database = {
           rank?: string | null
           reg_hours?: number
           regular_rate?: number
+          rest_premium_count?: number
+          rest_premium_pay?: number
           run_id?: string
+          sick_hours?: number
+          sick_pay?: number
           sit_bonus?: number
           snapshot?: Json
           total_pay?: number
@@ -2079,6 +2091,7 @@ export type Database = {
           log_date: string
           meal_status: string
           needs_correction: boolean
+          rest_break_status: string
           reviewed_at: string | null
           reviewed_by: string | null
           second_meal_status: string
@@ -2099,6 +2112,7 @@ export type Database = {
           log_date?: string
           meal_status?: string
           needs_correction?: boolean
+          rest_break_status?: string
           reviewed_at?: string | null
           reviewed_by?: string | null
           second_meal_status?: string
@@ -2119,6 +2133,7 @@ export type Database = {
           log_date?: string
           meal_status?: string
           needs_correction?: boolean
+          rest_break_status?: string
           reviewed_at?: string | null
           reviewed_by?: string | null
           second_meal_status?: string
@@ -2172,6 +2187,7 @@ export type Database = {
           deny_reason: string | null
           id: string
           kind: string
+          paid_hours: number | null
           reason: string | null
           requested_by: string
           reviewed_at: string | null
@@ -2187,6 +2203,7 @@ export type Database = {
           deny_reason?: string | null
           id?: string
           kind: string
+          paid_hours?: number | null
           reason?: string | null
           requested_by: string
           reviewed_at?: string | null
@@ -2202,12 +2219,52 @@ export type Database = {
           deny_reason?: string | null
           id?: string
           kind?: string
+          paid_hours?: number | null
           reason?: string | null
           requested_by?: string
           reviewed_at?: string | null
           reviewed_by?: string | null
           status?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      sick_leave_ledger: {
+        Row: {
+          absence_id: string | null
+          created_at: string
+          created_by: string | null
+          entry_date: string
+          hours: number
+          id: number
+          kind: string
+          note: string | null
+          user_id: string
+          week_start: string | null
+        }
+        Insert: {
+          absence_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          entry_date: string
+          hours: number
+          id?: never
+          kind: string
+          note?: string | null
+          user_id: string
+          week_start?: string | null
+        }
+        Update: {
+          absence_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          entry_date?: string
+          hours?: number
+          id?: never
+          kind?: string
+          note?: string | null
+          user_id?: string
+          week_start?: string | null
         }
         Relationships: []
       }
@@ -2769,6 +2826,16 @@ export type Database = {
         }
         Relationships: []
       }
+      sick_leave_balances: {
+        Row: {
+          accrued_hours: number | null
+          balance_hours: number | null
+          used_hours: number | null
+          used_this_year: number | null
+          user_id: string | null
+        }
+        Relationships: []
+      }
       timesheet_day_detail: {
         Row: {
           billable_hours: number | null
@@ -2784,7 +2851,9 @@ export type Database = {
           meal_count: number | null
           meal_minutes: number | null
           meal_status: string | null
+          meal_windows: string | null
           needs_correction: boolean | null
+          rest_break_status: string | null
           reviewed_at: string | null
           reviewed_by: string | null
           second_meal_status: string | null
@@ -2839,6 +2908,19 @@ export type Database = {
         Args: { _week_start: string; _confirm: boolean; _note?: string | null }
         Returns: string
       }
+      attest_shift: {
+        Args: { _entry_id: string; _meal?: string | null; _rest?: string | null }
+        Returns: undefined
+      }
+      admin_set_shift_status: {
+        Args: {
+          _entry_id: string
+          _meal: string | null
+          _rest: string | null
+          _reason: string
+        }
+        Returns: undefined
+      }
       submit_day_off: {
         Args: { _user_id: string; _dates: string[]; _kind: string; _reason?: string | null }
         Returns: Json
@@ -2889,8 +2971,12 @@ export type Database = {
           rank: string
           reg_hours: number
           regular_rate: number
+          rest_premium_count: number
+          rest_premium_pay: number
           sale_price_total: number
           sales: number
+          sick_hours: number
+          sick_pay: number
           sit_bonus: number
           sits: number
           total_pay: number

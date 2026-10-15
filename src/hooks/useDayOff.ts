@@ -9,7 +9,7 @@ import { invalidatePunchCaches } from "@/lib/time-clock-keys";
  * nothing — the whole feature ships dark until the SQL lands.
  */
 
-export type DayOffKind = "day_off" | "sick" | "no_show" | "excused" | "other";
+export type DayOffKind = "day_off" | "sick" | "no_show" | "excused" | "unexcused" | "other";
 export type DayOffStatus = "pending" | "approved" | "denied" | "cancelled";
 
 export type DayOffRow = {
@@ -31,6 +31,7 @@ export const KIND_LABEL: Record<DayOffKind, string> = {
   sick: "Sick",
   no_show: "No-show",
   excused: "Excused",
+  unexcused: "Unexcused",
   other: "Other",
 };
 
@@ -39,6 +40,24 @@ export type SubmitDayOffResult = {
   skipped: number;
   results: Array<{ date: string; status: "ok" | "skipped" | "error"; code?: string }>;
 };
+
+/** My paid-sick-leave balance (sick_leave_balances view, migration
+ *  20261023120000). null = not deployed yet or no ledger rows — render
+ *  nothing in both cases. */
+export function useMySickBalance(userId: string) {
+  return useQuery({
+    queryKey: ["day-off", "sick-balance", userId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("sick_leave_balances")
+        .select("balance_hours, used_this_year")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (error) return null;
+      return data;
+    },
+  });
+}
 
 /** My own upcoming + recent rows (self RLS). null = table not deployed. */
 export function useMyDayOff(userId: string, sinceISO: string) {

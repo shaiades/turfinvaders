@@ -1,12 +1,13 @@
-// Web Push: lunch warning to the van captain (owner ask 2026-10-01 —
-// "nobody works through lunch"). The send_lunch_warnings cron calls this
-// (via pg_net, x-notify-secret) when a crew member passes 4¼ hours on the
-// clock with no real lunch punched — while a compliant 30-minute meal can
-// still START before the end of their 5th hour.
+// Web Push: lunch warning (owner ask 2026-10-01 — "nobody works through
+// lunch"). The send_lunch_warnings cron calls this (via pg_net,
+// x-notify-secret) when a crew member passes 4¼ hours on the clock with no
+// real lunch punched — while a compliant 30-minute meal can still START
+// before the end of their 5th hour.
 //
-// Audience: captains on the worker's own van. Deployed with
-// --no-verify-jwt; the shared-secret header is the auth. Secrets:
-// VAPID_KEYS_JSON, NOTIFY_SECRET (same pair as the other notify fns).
+// Audience: the WORKER themselves (CA phase 1 — the lunch is theirs to
+// take) plus the captains on their van. Deployed with --no-verify-jwt; the
+// shared-secret header is the auth. Secrets: VAPID_KEYS_JSON,
+// NOTIFY_SECRET (same pair as the other notify fns).
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import * as webpush from "jsr:@negrel/webpush@0.5.0";
@@ -85,36 +86,54 @@ Deno.serve(async (req) => {
     .select("display_name, team_id")
     .eq("id", user_id)
     .maybeSingle();
-  if (!worker?.team_id) return json({ sent: 0, pruned: 0, failed: 0 });
-
-  // Captains on the worker's van.
-  const { data: captainRoles } = await admin
-    .from("user_roles")
-    .select("user_id")
-    .eq("role", "captain");
-  const captainIds = (captainRoles ?? []).map((r) => r.user_id);
-  if (captainIds.length === 0) return json({ sent: 0, pruned: 0, failed: 0 });
-  const { data: capProfiles } = await admin
-    .from("profiles")
-    .select("id, team_id")
-    .in("id", captainIds);
-  const targets = (capProfiles ?? [])
-    .filter((p) => p.team_id === worker.team_id && p.id !== user_id)
-    .map((p) => p.id);
-  if (targets.length === 0) return json({ sent: 0, pruned: 0, failed: 0 });
-
-  const { data: subs } = await admin
-    .from("push_subscriptions")
-    .select("endpoint, p256dh, auth")
-    .in("user_id", targets);
 
   const h = Math.floor(worked_minutes / 60);
   const m = worked_minutes % 60;
-  const result = await sendToSubs(subs ?? [], {
-    title: "Lunch warning",
-    body: `${worker.display_name ?? "A crew member"} is at ${h}h${String(m).padStart(2, "0")} with no lunch — start their 30 min before hour 5.`,
+  const hm = `${h}h${String(m).padStart(2, "0")}`;
+
+  // The worker first: the lunch is theirs to take.
+  const { data: workerSubs } = await admin
+    .from("push_subscriptions")
+    .select("endpoint, p256dh, auth")
+    .eq("user_id", user_id);
+  const workerResult = await sendToSubs(workerSubs ?? [], {
+    title: "Lunch time",
+    body: `You're at ${hm} with no lunch — start your 30-minute lunch before hour 5.`,
     url: "/dashboard",
     tag: `lunch-${time_entry_id}`,
   });
-  return json(result);
+
+  // Then the captains on the worker's van (when they have one).
+  let capResult = { sent: 0, pruned: 0, failed: 0 };
+  if (worker?.team_id) {
+    const { data: captainRoles } = await admin
+      .from("user_roles")
+      .select("user_id")
+      .eq("role", "captain");
+    const captainIds = (captainRoles ?? []).map((r) => r.user_id);
+    const { data: capProfiles } = captainIds.length
+      ? await admin.from("profiles").select("id, team_id").in("id", captainIds)
+      : { data: [] as { id: string; team_id: string | null }[] };
+    const targets = (capProfiles ?? [])
+      .filter((p) => p.team_id === worker.team_id && p.id !== user_id)
+      .map((p) => p.id);
+    if (targets.length > 0) {
+      const { data: subs } = await admin
+        .from("push_subscriptions")
+        .select("endpoint, p256dh, auth")
+        .in("user_id", targets);
+      capResult = await sendToSubs(subs ?? [], {
+        title: "Lunch warning",
+        body: `${worker.display_name ?? "A crew member"} is at ${hm} with no lunch — start their 30 min before hour 5.`,
+        url: "/dashboard",
+        tag: `lunch-${time_entry_id}`,
+      });
+    }
+  }
+
+  return json({
+    sent: workerResult.sent + capResult.sent,
+    pruned: workerResult.pruned + capResult.pruned,
+    failed: workerResult.failed + capResult.failed,
+  });
 });

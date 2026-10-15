@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { format } from "date-fns";
 import { CalendarIcon, Download, Lock, FileCheck2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
@@ -147,6 +148,8 @@ function ExceptionChips({ ex }: { ex: Record<string, unknown> | null | undefined
   if (n("needs_correction") > 0) chips.push(`${n("needs_correction")} needs review`);
   if (n("meal_pending") > 0) chips.push(`${n("meal_pending")} meal ?`);
   if (n("meal_unrecorded") > 0) chips.push(`${n("meal_unrecorded")} lunch times`);
+  if (n("rest_pending") > 0) chips.push(`${n("rest_pending")} breaks ?`);
+  if (n("sick_days") > 0) chips.push(`${n("sick_days")} sick paid`);
   if (ex["below_min_wage"] === true) chips.push("below min wage");
   if (chips.length === 0) return null;
   return (
@@ -438,6 +441,7 @@ export function PayrollLedger() {
         const monster = Number(pc?.monster_bonus ?? 0);
         const otPremium = Number(pc?.ot_premium_pay ?? 0);
         const mealPremium = Number(pc?.meal_premium_pay ?? 0);
+        const restPremium = Number(pc?.rest_premium_pay ?? 0);
         return {
           id: cid,
           name: profile?.display_name ?? "Unknown",
@@ -456,7 +460,11 @@ export function PayrollLedger() {
           otPremium,
           mealPremium,
           mealPremiumCount: Number(pc?.meal_premium_count ?? 0),
-          premiums: otPremium + mealPremium,
+          restPremium,
+          restPremiumCount: Number(pc?.rest_premium_count ?? 0),
+          sickHours: Number(pc?.sick_hours ?? 0),
+          sickPay: Number(pc?.sick_pay ?? 0),
+          premiums: otPremium + mealPremium + restPremium,
           exceptions: (pc?.exceptions ?? null) as Record<string, unknown> | null,
           commission: Number(pc?.commission ?? 0),
           sitBonus,
@@ -509,6 +517,11 @@ export function PayrollLedger() {
     "OT Premium Pay",
     "Meal Premium Days",
     "Meal Premium Pay",
+    "Rest Premium Days",
+    "Rest Premium Pay",
+    "Sick Hours",
+    "Sick Pay",
+    "Sick Balance",
     "Total Sales Volume ($)",
     "Commission Rate",
     "Commission Earned ($)",
@@ -549,6 +562,11 @@ export function PayrollLedger() {
           Number(l.ot_premium_pay).toFixed(2),
           l.meal_premium_count,
           Number(l.meal_premium_pay).toFixed(2),
+          Number(l.rest_premium_count ?? 0),
+          Number(l.rest_premium_pay ?? 0).toFixed(2),
+          Number(l.sick_hours ?? 0).toFixed(2),
+          Number(l.sick_pay ?? 0).toFixed(2),
+          ex["sick_balance"] != null ? Number(ex["sick_balance"]).toFixed(2) : "",
           "",
           "",
           Number(l.commission).toFixed(2),
@@ -558,13 +576,34 @@ export function PayrollLedger() {
           Number(l.total_pay).toFixed(2),
           String(ex["attestation"] ?? ""),
           Object.keys(ex)
-            .filter((k) => k !== "attestation" && (Number(ex[k]) > 0 || ex[k] === true))
+            .filter(
+              (k) =>
+                k !== "attestation" &&
+                k !== "sick_balance" &&
+                (Number(ex[k]) > 0 || ex[k] === true),
+            )
             .join("; "),
         ];
         lines.push(cells.map(csvCell).join(","));
       }
       downloadCsv(lines, true);
       return;
+    }
+
+    // Live export: balances come from the view (frozen runs carry them in
+    // exceptions.sick_balance instead).
+    const balances = new Map<string, number>();
+    {
+      const { data: balRows } = await supabase
+        .from("sick_leave_balances")
+        .select("user_id, balance_hours")
+        .in(
+          "user_id",
+          rows.map((r) => r.id),
+        );
+      for (const b of balRows ?? []) {
+        if (b.user_id) balances.set(b.user_id, Number(b.balance_hours ?? 0));
+      }
     }
 
     const lines = [CSV_HEADERS.join(",")];
@@ -583,6 +622,11 @@ export function PayrollLedger() {
         r.otPremium.toFixed(2),
         r.mealPremiumCount,
         r.mealPremium.toFixed(2),
+        r.restPremiumCount,
+        r.restPremium.toFixed(2),
+        r.sickHours.toFixed(2),
+        r.sickPay.toFixed(2),
+        balances.has(r.id) ? balances.get(r.id)!.toFixed(2) : "",
         r.sale_amount.toFixed(2),
         `${(r.commRate * 100).toFixed(0)}%`,
         r.commission.toFixed(2),
@@ -611,7 +655,8 @@ export function PayrollLedger() {
           <div className="text-xs text-muted-foreground mt-1">
             Official pay engine · Clocked time only (punched lunches deducted, Sundays paid when
             worked) · CA overtime: daily 8/12, weekly 40, 7th-day, on the blended regular rate ·
-            Meal premiums auto-added · Hourly tier by points · Commission by Sale Price
+            Meal &amp; rest-break premiums auto-added · Hourly tier by points · Commission by Sale
+            Price
           </div>
           {office !== "All" && (
             <div className="mt-3 text-[10px] font-display uppercase tracking-widest text-neon">
@@ -933,6 +978,15 @@ export function PayrollLedger() {
                   <div className="flex flex-wrap items-center gap-1.5">
                     <RankPill rank={r.rank} />
                     {r.team && <TeamBadge name={r.team.name} color={r.team.color} />}
+                    {isAdminRole(role) && (
+                      <Link
+                        to="/dashboard"
+                        search={{ tab: "timesheets", week: startStr, person: r.name }}
+                        className="min-h-11 inline-flex items-center text-[9px] font-display uppercase tracking-widest text-muted-foreground hover:text-neon hover:underline"
+                      >
+                        timesheets →
+                      </Link>
+                    )}
                   </div>
                   <PayLockBadge status={r.payLock} />
                   <MobileStatGrid cols={3}>
@@ -955,6 +1009,7 @@ export function PayrollLedger() {
                               : r.hoursSource === "clocked"
                                 ? "clocked"
                                 : "no time clocked"}
+                            {r.sickHours > 0 && ` · +${r.sickHours.toFixed(1)}h sick`}
                           </div>
                         </>
                       }
@@ -1022,6 +1077,16 @@ export function PayrollLedger() {
                       <td className="py-2.5 pr-3 font-medium">
                         {r.name}
                         <LedgerAttestChip status={attestFor(r.id)} />
+                        {isAdminRole(role) && (
+                          <Link
+                            to="/dashboard"
+                            search={{ tab: "timesheets", week: startStr, person: r.name }}
+                            title={`Open ${r.name}'s punches for this week in Timesheets`}
+                            className="ml-2 align-middle text-[9px] font-display uppercase tracking-widest text-muted-foreground hover:text-neon hover:underline"
+                          >
+                            timesheets →
+                          </Link>
+                        )}
                         <ExceptionChips ex={r.exceptions} />
                       </td>
                       <td className="py-2.5 pr-3">
@@ -1052,6 +1117,8 @@ export function PayrollLedger() {
                             : r.hoursSource === "clocked"
                               ? "clocked"
                               : "no time clocked"}
+                          {r.sickHours > 0 &&
+                            ` · +${r.sickHours.toFixed(1)}h sick ($${r.sickPay.toFixed(0)})`}
                         </div>
                       </td>
                       <td className="py-2.5 pr-3 text-right font-display text-victory">
@@ -1069,9 +1136,13 @@ export function PayrollLedger() {
                         </div>
                         {r.premiums > 0 && (
                           <div className="text-[9px] text-muted-foreground whitespace-nowrap">
-                            {r.otPremium > 0 && `OT $${r.otPremium.toFixed(0)}`}
-                            {r.otPremium > 0 && r.mealPremium > 0 && " · "}
-                            {r.mealPremium > 0 && `meal ×${r.mealPremiumCount}`}
+                            {[
+                              r.otPremium > 0 ? `OT $${r.otPremium.toFixed(0)}` : null,
+                              r.mealPremium > 0 ? `meal ×${r.mealPremiumCount}` : null,
+                              r.restPremium > 0 ? `rest ×${r.restPremiumCount}` : null,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
                           </div>
                         )}
                       </td>
@@ -1192,31 +1263,14 @@ function MonthlyVolumeBonusPanel({ monthStart }: { monthStart: string }) {
       ) : rows.length === 0 ? (
         <div className="text-sm text-muted-foreground">No confirmed sale volume this month.</div>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border">
-                <th className="text-left py-2 pr-3">Agent</th>
-                <th className="text-right py-2 pr-3">Month Volume ($)</th>
-                <th className="text-right py-2 pr-3">Progress to Next $1,500</th>
-                <th className="text-right py-2 pr-1">Volume Bonus ($)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr
-                  key={r.id}
-                  className="border-b border-border/40 transition-colors duration-200 hover:bg-surface-elevated"
-                >
-                  <td className="py-2.5 pr-3 font-medium">{r.name}</td>
-                  <td className="py-2.5 pr-3 text-right font-display text-victory">
-                    {r.error ? "—" : `$${r.volume.toFixed(2)}`}
-                  </td>
-                  <td className="py-2.5 pr-3 text-right text-xs text-muted-foreground">
-                    {r.error ? "—" : `$${(100000 - (r.volume % 100000)).toFixed(0)} to go`}
-                  </td>
-                  <td className="py-2.5 pr-1 text-right font-display">
-                    {r.error ? (
+        <>
+          <MobileCardList>
+            {rows.map((r) => (
+              <MobileCard key={r.id}>
+                <MobileCardHeader
+                  left={r.name}
+                  right={
+                    r.error ? (
                       <span className="text-destructive text-xs" title={r.error}>
                         ERROR
                       </span>
@@ -1224,13 +1278,62 @@ function MonthlyVolumeBonusPanel({ monthStart }: { monthStart: string }) {
                       <span className="text-victory">${r.bonus.toFixed(2)}</span>
                     ) : (
                       <span className="text-muted-foreground">$0.00</span>
-                    )}
-                  </td>
+                    )
+                  }
+                />
+                <div className="text-xs text-muted-foreground tabular-nums">
+                  {r.error ? (
+                    "volume —"
+                  ) : (
+                    <>
+                      ${r.volume.toFixed(2)} volume ·{" "}
+                      ${(100000 - (r.volume % 100000)).toFixed(0)} to the next $1,500
+                    </>
+                  )}
+                </div>
+              </MobileCard>
+            ))}
+          </MobileCardList>
+          <div className="hidden md:block overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-[10px] font-display uppercase tracking-widest text-muted-foreground border-b border-border">
+                  <th className="text-left py-2 pr-3">Agent</th>
+                  <th className="text-right py-2 pr-3">Month Volume ($)</th>
+                  <th className="text-right py-2 pr-3">Progress to Next $1,500</th>
+                  <th className="text-right py-2 pr-1">Volume Bonus ($)</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr
+                    key={r.id}
+                    className="border-b border-border/40 transition-colors duration-200 hover:bg-surface-elevated"
+                  >
+                    <td className="py-2.5 pr-3 font-medium">{r.name}</td>
+                    <td className="py-2.5 pr-3 text-right font-display text-victory">
+                      {r.error ? "—" : `$${r.volume.toFixed(2)}`}
+                    </td>
+                    <td className="py-2.5 pr-3 text-right text-xs text-muted-foreground">
+                      {r.error ? "—" : `$${(100000 - (r.volume % 100000)).toFixed(0)} to go`}
+                    </td>
+                    <td className="py-2.5 pr-1 text-right font-display">
+                      {r.error ? (
+                        <span className="text-destructive text-xs" title={r.error}>
+                          ERROR
+                        </span>
+                      ) : r.bonus > 0 ? (
+                        <span className="text-victory">${r.bonus.toFixed(2)}</span>
+                      ) : (
+                        <span className="text-muted-foreground">$0.00</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </ArcadePanel>
   );

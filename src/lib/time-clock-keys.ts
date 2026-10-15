@@ -13,6 +13,7 @@ const PUNCH_CACHE_PREFIXES: QueryKey[] = [
   ["time-clock-today"],
   ["time-clock-meals"],
   ["time-clock-flagged"],
+  ["time-clock-pending-attest"],
   ["time-review-queue"],
   ["timesheets"],
   ["payroll-ledger"],

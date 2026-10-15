@@ -27,10 +27,18 @@ export const HOURLY_BASE = 18;
 export const HOURLY_MID = 30;
 export const HOURLY_TOP = 35;
 
-/** CA LC 512: a shift over this many hours owes a SECOND 30-min meal
- *  period (starting before the end of the 10th hour). Mirrors the compute
- *  trigger's second_meal_status rule. */
+/** CA LC 512: a WORKDAY over this many hours owes a SECOND 30-min meal
+ *  period (starting before the end of the 10th hour of work). Mirrors the
+ *  compute trigger's second_meal_status rule (v8: per workday, all of the
+ *  day's shifts pooled). */
 export const SECOND_MEAL_AFTER_HOURS = 10;
+
+/** CA Wage Order 4: paid 10-minute rest breaks are owed from 3.5 worked
+ *  hours in the day (one per 4 hours or major fraction). There is no rest
+ *  punch — the worker attests at clock-out; a 'missed' day pays one rest
+ *  premium hour at the regular rate (additive to the meal premium, max one
+ *  of each per day). Mirrors compute v8's rest_break_status rule. */
+export const REST_BREAK_REQUIRED_AFTER_HOURS = 3.5;
 
 export const COMMISSION_BASE = 0.01;
 export const COMMISSION_TOP = 0.02;

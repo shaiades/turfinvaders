@@ -69,12 +69,22 @@ const isOwnerTab = (t: unknown): t is OwnerTab => (OWNER_TABS as readonly unknow
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — Turf Invaders" }] }),
-  validateSearch: (s: Record<string, unknown>): { tab: DashboardTab } => {
+  validateSearch: (
+    s: Record<string, unknown>,
+  ): { tab: DashboardTab; week?: string; person?: string } => {
     // Legacy bookmarks: the old Fleet tab AND the old Executive Dashboard tab
     // both merged into Fleet Dispatch (2026-08-04).
     const t = s.tab === "fleet" || s.tab === "executive" ? "dispatch" : s.tab;
+    // Timesheets deep link (payroll ledger → "timesheets"): open on a week
+    // and/or a person's name filter. One-shot — tab switches drop them.
+    const week =
+      typeof s.week === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s.week) ? s.week : undefined;
+    const person =
+      typeof s.person === "string" && s.person.trim() ? s.person.slice(0, 80) : undefined;
     return {
       tab: isOwnerTab(t) || isCanvasserTab(t) ? t : "dispatch",
+      ...(week ? { week } : {}),
+      ...(person ? { person } : {}),
     };
   },
   component: Dashboard,
@@ -289,7 +299,7 @@ function VisibilityChip({ on }: { on: boolean }) {
 function OwnerDashboard({ visibility }: { visibility: boolean }) {
   const [importOpen, setImportOpen] = useState(false);
   const [arenaOpen, setArenaOpen] = useState(false);
-  const { tab: rawTab } = Route.useSearch();
+  const { tab: rawTab, week, person } = Route.useSearch();
   const navigate = Route.useNavigate();
   // Canvasser deep links (?tab=plan|log|stats) land on Fleet Dispatch here.
   const tab: OwnerTab = isOwnerTab(rawTab) ? rawTab : "dispatch";
@@ -367,7 +377,12 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
           <FleetDispatch />
         </TabsContent>
         <TabsContent value="timesheets" className="mt-0">
-          <TimesheetEditor />
+          {/* Keyed so a payroll "timesheets" deep link re-applies even when
+              the tab is already mounted. */}
+          <TimesheetEditor
+            key={`${week ?? ""}|${person ?? ""}`}
+            initial={week || person ? { week, person } : undefined}
+          />
         </TabsContent>
         <TabsContent value="payroll" className="mt-0">
           <PayrollLedger />

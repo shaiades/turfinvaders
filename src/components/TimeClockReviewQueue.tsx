@@ -5,7 +5,7 @@ import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { ArcadePanel } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { BellRing, Check } from "lucide-react";
+import { BellRing, Check, Crosshair } from "lucide-react";
 
 /** Why an entry is in the queue → the chip a reviewer reads. Flags accumulate
  *  as history; the live meal_status decides whether a meal chip still shows. */
@@ -15,6 +15,9 @@ const FLAG_LABEL: Record<string, string> = {
   very_long_shift: "over 12h",
   missed_meal: "worked through lunch · premium",
   unrecorded_lunch: "lunch times needed",
+  missed_second_meal: "missed 2nd meal (>10h) · premium",
+  missed_rest_break: "missed rest break · premium",
+  captain_edit: "captain edit",
 };
 
 type QueueRow = {
@@ -25,19 +28,34 @@ type QueueRow = {
   clock_out: string | null;
   billable_hours: number;
   entry_source: string;
+  needs_correction: boolean;
   meal_status: string;
   flag_reasons: string[];
 };
 
+// Punch times read in PACIFIC everywhere admins review them — the device's
+// timezone silently shifted punches for anyone off-LA.
 const fmtClock = (iso: string) =>
-  new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  new Date(iso).toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "America/Los_Angeles",
+  });
 
 /** Flagged-entry review queue ("the notification"): every entry whose punches
  *  look wrong sits here until a captain/manager approves it or fixes it in
- *  the timesheet editor. Realtime: a flagged punch anywhere appears within a
- *  breath, no reload. Captains see (and approve for) their own van only —
- *  the approve RPC enforces the same rule server-side. */
-export function TimeClockReviewQueue({ teamId }: { teamId?: string | null }) {
+ *  the timesheet editor — plus pending-lunch shifts (crew/manager closes the
+ *  worker hasn't answered yet), because those silently block the payroll
+ *  freeze. Realtime; captains see (and approve for) their own van only —
+ *  the approve RPC enforces the same rule server-side. `onLocate` jumps the
+ *  editor to the entry's week + person. */
+export function TimeClockReviewQueue({
+  teamId,
+  onLocate,
+}: {
+  teamId?: string | null;
+  onLocate?: (row: { log_date: string; name: string }) => void;
+}) {
   const qc = useQueryClient();
 
   const queueQuery = useQuery({
@@ -56,12 +74,12 @@ export function TimeClockReviewQueue({ teamId }: { teamId?: string | null }) {
       let q = supabase
         .from("time_entries")
         .select(
-          "id, user_id, log_date, clock_in, clock_out, billable_hours, entry_source, meal_status, flag_reasons",
+          "id, user_id, log_date, clock_in, clock_out, billable_hours, entry_source, needs_correction, meal_status, flag_reasons",
         )
-        .eq("needs_correction", true)
+        .or("needs_correction.eq.true,and(meal_status.eq.pending,clock_out.not.is.null)")
         .is("voided_at", null)
         .order("clock_in", { ascending: false })
-        .limit(30);
+        .limit(100);
       if (memberIds) q = q.in("user_id", memberIds);
       const { data, error } = await q;
       if (error) throw error;
@@ -118,6 +136,7 @@ export function TimeClockReviewQueue({ teamId }: { teamId?: string | null }) {
         .map((f) => FLAG_LABEL[f] ?? f);
       if (r.entry_source === "auto_closed") chips.unshift("auto-closed");
       if (!r.clock_out) chips.push("still on the clock");
+      if (r.meal_status === "pending") chips.push("lunch ? · blocks payroll");
       return chips;
     },
     [],
@@ -159,20 +178,43 @@ export function TimeClockReviewQueue({ teamId }: { teamId?: string | null }) {
                 ))}
               </div>
             </div>
-            <Button
-              size="sm"
-              disabled={approve.isPending}
-              onClick={() => approve.mutate(r.id)}
-              className="bg-victory text-background hover:bg-victory/90 font-display text-[10px] uppercase tracking-widest"
-            >
-              <Check className="w-3.5 h-3.5 mr-1" />
-              Approve
-            </Button>
+            <div className="flex items-center gap-1.5">
+              {onLocate && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    onLocate({ log_date: r.log_date, name: names.get(r.user_id) ?? "" })
+                  }
+                  title="Jump to this entry in the timesheet below"
+                  className="font-display text-[10px] uppercase tracking-widest"
+                >
+                  <Crosshair className="w-3.5 h-3.5 mr-1" />
+                  Locate
+                </Button>
+              )}
+              {r.needs_correction ? (
+                <Button
+                  size="sm"
+                  disabled={approve.isPending}
+                  onClick={() => approve.mutate(r.id)}
+                  className="bg-victory text-background hover:bg-victory/90 font-display text-[10px] uppercase tracking-widest"
+                >
+                  <Check className="w-3.5 h-3.5 mr-1" />
+                  Approve
+                </Button>
+              ) : (
+                <span className="text-[9px] font-display uppercase tracking-widest text-muted-foreground">
+                  resolve below
+                </span>
+              )}
+            </div>
           </div>
         ))}
         <div className="text-[10px] text-muted-foreground uppercase tracking-widest">
           Approve = the punches are legit as recorded. To change times instead, fix the entry in
-          Timesheets — that resolves it too. Unresolved entries block the week's payroll freeze.
+          Timesheets — that resolves it too. "Lunch ?" rows need Resolve (or real lunch times) on
+          the row, not Approve. Unresolved entries block the week's payroll freeze.
         </div>
       </div>
     </ArcadePanel>

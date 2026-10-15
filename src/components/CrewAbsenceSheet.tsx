@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { CalendarOff, Stethoscope, UserX } from "lucide-react";
+import { CalendarOff, CircleSlash, Stethoscope, UserX } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -13,10 +13,11 @@ import { laTodayISO } from "@/lib/dates";
 import { useDayOffMutations, type DayOffKind } from "@/hooks/useDayOff";
 
 /**
- * Captain quick-mark for an off-clock crew member: Sick / No-show / Excused
- * for TODAY. These are records, not requests — the RPC auto-approves a
- * captain's entry for someone on their van (never for themself) and the
- * worker gets a push so nothing lands behind their back.
+ * Captain quick-mark for an off-clock crew member: Sick / No-show /
+ * Unexcused / Excused for TODAY. These are records, not requests — the RPC
+ * auto-approves a captain's entry for someone on their van (never for
+ * themself) and the worker gets a push so nothing lands behind their back.
+ * A 'sick' mark draws paid sick leave automatically (balance permitting).
  */
 export function CrewAbsenceSheet({
   open,
@@ -60,8 +61,9 @@ export function CrewAbsenceSheet({
             Mark {member?.name ?? ""} absent · today
           </SheetTitle>
           <SheetDescription>
-            This is a record, not a request — it applies immediately, shows as EXCUSED on
-            dispatch, and {member?.name ?? "they"} gets a notification.
+            This is a record, not a request — it applies immediately, shows on dispatch with its
+            kind, and {member?.name ?? "they"} gets a notification. Sick days draw paid sick leave
+            when the balance covers it.
           </SheetDescription>
         </SheetHeader>
         <div className="mt-4 space-y-3 pb-6">
@@ -86,6 +88,14 @@ export function CrewAbsenceSheet({
           >
             <UserX className="w-4 h-4" />
             No-show
+          </button>
+          <button
+            disabled={submit.isPending}
+            onClick={() => mark("unexcused")}
+            className={`${btn} border-destructive/50 text-destructive hover:bg-destructive/10`}
+          >
+            <CircleSlash className="w-4 h-4" />
+            Unexcused
           </button>
           <button
             disabled={submit.isPending}
