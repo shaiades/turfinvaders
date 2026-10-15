@@ -37,7 +37,7 @@ import { cn } from "@/lib/utils";
 import { addDaysISO, laDateISO, laMidnightUtcISO, monthStartISO, nextMonthStartISO } from "@/lib/dates";
 import { useWeekSelector } from "@/hooks/useWeekSelector";
 import { csvCell } from "@/lib/csv";
-import { isAdminRole } from "@/lib/role-policy";
+import { isAdminRole, isPayrollRunRole } from "@/lib/role-policy";
 
 type LogRow = {
   canvasser_id: string;
@@ -764,9 +764,10 @@ export function PayrollLedger() {
               Reopen run
             </Button>
           )}
-          {/* Run operations are Admin-tier; the bookkeeper mounts this
-              ledger read-only on /reports (RLS enforces it regardless). */}
-          {isAdminRole(role) && run?.status !== "approved" && (
+          {/* Run operations: the Admin tier + HR (owner decision 2026-10-15);
+              the bookkeeper mounts this ledger read-only on /reports (the
+              RPCs enforce the same lists regardless). */}
+          {isPayrollRunRole(role) && run?.status !== "approved" && (
             <Button
               size="sm"
               variant="outline"
@@ -777,7 +778,7 @@ export function PayrollLedger() {
               {run?.status === "draft" ? "Re-create draft" : "Create draft run"}
             </Button>
           )}
-          {isAdminRole(role) && run?.status === "draft" && (
+          {isPayrollRunRole(role) && run?.status === "draft" && (
             <Button
               size="sm"
               disabled={approveRun.isPending}

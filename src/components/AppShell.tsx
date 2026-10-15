@@ -360,12 +360,14 @@ export function AppShell({ children }: { children: ReactNode }) {
       ];
     }
     if (role === "hr") {
-      // HR's two-tab app (owner ask 2026-10-15, Zuleyma): the full
-      // timesheet/attendance editor on /dashboard, and the Reports console
-      // (payroll tab hides itself for HR — attendance, never dollars).
+      // HR's three-tab app (owner asks 2026-10-15, Zuleyma): the full
+      // timesheet/attendance editor on /dashboard, the Reports console, and
+      // the Payroll ledger with run powers (create/approve — reopen stays
+      // owner-only).
       return [
         { to: "/dashboard", label: "Timesheets", icon: LayoutDashboard },
         { to: "/reports", search: { tab: "exports" }, label: "Reports", icon: FileSpreadsheet },
+        { to: "/reports", search: { tab: "payroll" }, label: "Payroll", icon: DollarSign },
       ];
     }
     if (role === "captain") {
