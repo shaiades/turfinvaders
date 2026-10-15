@@ -411,7 +411,7 @@
   will-change: transform, box-shadow;
 }
 
-/* Free Agents panel — pulsing neon-orange border to demand attention */
+/* The Bench panel — pulsing neon-orange border to demand attention */
 @keyframes free-agents-pulse {
   0%,
   100% {

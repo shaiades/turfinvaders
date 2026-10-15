@@ -118,7 +118,7 @@ export function VansPanel({
       await deleteVanFn({ data: { id } });
     },
     onSuccess: () => {
-      toast.success("Van deleted — members moved to Free Agents");
+      toast.success("Van deleted — members moved to The Bench");
       invalidate();
     },
     onError: (e: Error) => toast.error(e.message ?? "Failed to delete van"),
@@ -306,7 +306,7 @@ export function VansPanel({
                   onClick={() => {
                     if (
                       confirm(
-                        `Delete van "${v.name}"? Members move to Free Agents. Vans with production history can't be deleted — rename them instead.`,
+                        `Delete van "${v.name}"? Members move to The Bench. Vans with production history can't be deleted — rename them instead.`,
                       )
                     ) {
                       removeVan.mutate(v.id);
