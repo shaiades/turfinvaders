@@ -45,7 +45,7 @@ import { isLeadSourceName } from "@/lib/lead-sources";
 import { useAuth } from "@/hooks/useAuth";
 import { useMoveAgents, useSetVanLock } from "@/hooks/useRosterActions";
 import { isAdminRole, isManagerRole } from "@/lib/roles";
-import { canManageTarget } from "@/lib/role-policy";
+import { canManageTarget, isVanExemptRole } from "@/lib/role-policy";
 import { normalizeName } from "@/lib/utils";
 import { DEFAULT_OFFICE, OFFICE_LOCATIONS } from "@/lib/offices";
 import type { RosterProfile, Van } from "@/components/FleetDispatch";
@@ -180,12 +180,13 @@ export function FleetDispatchManage({
   const captains = profiles.filter((p) =>
     (rolesByUser.get(p.id) ?? []).some((r) => r === "captain" || isAdminRole(r)),
   );
-  // Sales reps never need vans (owner, 2026-08-04) — The Bench pen is
-  // for canvassers/captains awaiting assignment only.
+  // Office roles never need vans (VAN_EXEMPT_ROLES — owner, 2026-08-04 and
+  // 2026-10-15) — The Bench pen is for canvassers/captains awaiting
+  // assignment only.
   const unassigned = profiles.filter((p) => {
     if (p.team_id) return false;
     const roles = rolesByUser.get(p.id) ?? [];
-    return !roles.includes("owner") && !roles.includes("sales_rep");
+    return !roles.some((r) => isVanExemptRole(r));
   });
 
   const vanOptions = vans.map((v) => ({ id: v.id, name: v.name, color: v.color ?? "#888" }));

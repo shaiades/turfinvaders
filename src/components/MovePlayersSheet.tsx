@@ -20,7 +20,7 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import { useDispatchRoster, useDispatchVans, type Van } from "@/hooks/useFleetRoster";
 import { useMoveAgents, useSetVanLock } from "@/hooks/useRosterActions";
-import { canManageTarget } from "@/lib/role-policy";
+import { canManageTarget, isVanExemptRole } from "@/lib/role-policy";
 import { normalizeName } from "@/lib/utils";
 import { isLeadSourceKey } from "@/lib/lead-sources";
 import { DEFAULT_OFFICE, OFFICE_LOCATIONS } from "@/lib/offices";
@@ -121,9 +121,9 @@ export function MovePlayersSheet({
         movable.find((m) => m.team_id) ??
         movable[0];
       const vanId = vanRep.team_id;
-      // The Bench pen rule: unassigned owners/sales reps never need a van;
-      // anyone already ON a van stays listed so they can be moved off.
-      if (!vanId && (roles.has("owner") || roles.has("sales_rep"))) continue;
+      // The Bench pen rule: office roles (VAN_EXEMPT_ROLES) never need a
+      // van; anyone already ON a van stays listed so they can be moved off.
+      if (!vanId && [...roles].some((r) => isVanExemptRole(r))) continue;
       const van = vanId ? vanById.get(vanId) : null;
       out.push({
         key,

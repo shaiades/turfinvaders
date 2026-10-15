@@ -36,6 +36,7 @@ import {
   isAdminRole,
   ROLE_LABEL,
   ROLE_TONE,
+  vanlessLabel,
   type AppRole,
 } from "@/lib/role-policy";
 import type { RosterProfile, Van } from "@/hooks/useFleetRoster";
@@ -494,7 +495,7 @@ export function PlayerSheet({
                         className="w-2 h-2 rounded-full"
                         style={{ background: mVan?.color ?? "#555" }}
                       />
-                      {mVan?.name ?? "The Bench"}
+                      {mVan?.name ?? vanlessLabel(g.primary)}
                     </span>
                     {isAdminActor && g.canModify && (
                       <button

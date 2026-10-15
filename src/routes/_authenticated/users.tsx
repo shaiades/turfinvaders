@@ -39,6 +39,8 @@ import {
   requireRoleBeforeLoad,
   ROLE_LABEL,
   ROLE_TONE,
+  isVanExemptRole,
+  vanlessLabel,
   type AppRole,
 } from "@/lib/roles";
 import { isLeadSourceKey } from "@/lib/lead-sources";
@@ -188,11 +190,11 @@ function UsersPage() {
           if (!p.created_at || now - new Date(p.created_at).getTime() > NEW_DAYS * 86400_000)
             return false;
           const roles = rolesByUser.get(p.id) ?? [];
-          // Waiting on a role, or activated but still vanless (owners/reps
-          // never need vans — The Bench pen rule).
+          // Waiting on a role, or activated but still vanless (office roles
+          // never need vans — VAN_EXEMPT_ROLES).
           if (roles.length === 0) return true;
           const r = primaryRole(roles as AppRole[]);
-          return !p.team_id && r !== "owner" && r !== "sales_rep" && r !== "office_staff";
+          return !p.team_id && !isVanExemptRole(r);
         })
         .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? "")),
     [profiles, rolesByUser, now],
@@ -507,7 +509,9 @@ function UsersPage() {
                           className="w-2 h-2 rounded-full"
                           style={{ background: van?.color ?? "#555" }}
                         />
-                        <span className="max-w-[90px] truncate">{van?.name ?? "The Bench"}</span>
+                        <span className="max-w-[90px] truncate">
+                          {van?.name ?? vanlessLabel(g.primary)}
+                        </span>
                       </span>
                     )}
                     <ChevronRight className="w-4 h-4 shrink-0 text-muted-foreground" />
