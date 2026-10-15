@@ -13,6 +13,7 @@ import { LiveLeadCounter } from "@/components/LiveLeadCounter";
 import { QueryStateCard } from "@/components/QueryStateCard";
 import { Button } from "@/components/ui/button";
 import type { CanvasserStatsData } from "@/hooks/useCanvasserStats";
+import { CoachingPanel } from "@/components/CoachingCard";
 import { Filter, Gauge } from "lucide-react";
 
 /**
@@ -35,6 +36,9 @@ export function CanvasserStats({
   const { week } = stats;
   return (
     <div className="space-y-6">
+      {/* 14-day coaching flag vs the team + the coach's notes on you —
+          read-only here; captains/office write from your profile page. */}
+      <CoachingPanel canvasserId={userId} canWrite={false} />
       <ConversionFunnelPanel stats={stats} onOpenPlan={onEditGoal} />
       <DoorResultsPanel userId={userId} />
       <BigStat

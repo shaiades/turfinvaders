@@ -155,7 +155,9 @@ export function useArcadeLadder(range: RangeKey): ArcadeLadder {
     const rows: LadderRow[] = [];
     for (const id of ids) {
       const r = prod.results?.[id];
-      const pts = prod.points?.[id] ?? 0;
+      // Dojo bonus points ride only here (the arcade): Fleet Dispatch, the
+      // HUD tier hint and the pay engine all read base production points.
+      const pts = (prod.points?.[id] ?? 0) + (prod.dojoPts?.[id] ?? 0);
       const vol = prod.volume?.[id] ?? 0;
       const lds = r?.lds ?? 0;
       const cxl = prod.cancels?.[id] ?? 0;

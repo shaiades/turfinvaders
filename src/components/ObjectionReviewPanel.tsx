@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { ArcadePanel } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
@@ -16,12 +18,15 @@ import { toast } from "sonner";
 import { Check, Eye, Plus, X } from "lucide-react";
 
 /**
- * Objection Dojo review queue — lives on the Confirmation Desk beside the
- * lead queue, same approve/deny rhythm. Owners + Managers only (the desk
- * route is already admin-gated; RLS enforces it again server-side).
+ * Objection Dojo review queue — on the Confirmation Desk beside the lead
+ * queue, and (variant="captain", owner decision 2026-10-15) on the Captain
+ * Dashboard scoped to their OWN van: the captain SELECT policy only returns
+ * their crew's pending rows, and review runs through the
+ * review_objection_attempt RPC (compare-and-swap + the 3/week point cap +
+ * the Street Feed shout) — server-enforced either way.
  * Renders nothing until the Dojo migration has been applied.
  */
-export function ObjectionReviewPanel() {
+export function ObjectionReviewPanel({ variant = "desk" }: { variant?: "desk" | "captain" }) {
   const { user } = useAuth();
   const qc = useQueryClient();
   const objections = useObjections();
@@ -50,19 +55,50 @@ export function ObjectionReviewPanel() {
       id: string;
       status: "approved" | "denied";
       deny_reason?: string;
-    }) => {
-      const { error } = await dojoTable("objection_attempts")
+    }): Promise<{ points_awarded?: number; capped?: boolean; reason?: string }> => {
+      // review_objection_attempt: compare-and-swap, weekly point cap, feed
+      // shout — the only review door captains have (RLS blocks their direct
+      // UPDATE on purpose).
+      const { data, error } = await (supabase as unknown as SupabaseClient).rpc(
+        "review_objection_attempt",
+        {
+          _attempt_id: vars.id,
+          _status: vars.status,
+          _deny_reason: vars.deny_reason ?? null,
+        },
+      );
+      if (!error) return (data ?? {}) as { points_awarded?: number; capped?: boolean };
+      // Fail-open until the Dojo v2 migration lands (the app ships via
+      // Lovable before hand-applied SQL): admins fall back to the legacy
+      // direct update, which their old RLS policy still allows.
+      if (!/review_objection_attempt/i.test(error.message)) throw error;
+      const { error: updErr } = await (supabase as unknown as SupabaseClient)
+        .from("objection_attempts")
         .update({
           status: vars.status,
           deny_reason: vars.deny_reason ?? null,
           reviewed_by: user?.id,
           reviewed_at: new Date().toISOString(),
-        } as never)
-        .eq("id", vars.id);
-      if (error) throw error;
+        })
+        .eq("id", vars.id)
+        .eq("status", "pending");
+      if (updErr) throw updErr;
+      return {};
     },
-    onSuccess: (_d, vars) => {
-      toast.success(vars.status === "approved" ? "Attempt is live!" : "Attempt denied");
+    onSuccess: (res, vars) => {
+      if (res.reason?.startsWith("already_")) {
+        toast.info("Someone beat you to it — this attempt was already reviewed");
+      } else if (vars.status === "approved") {
+        toast.success(
+          res.capped
+            ? "Attempt is live! (weekly point cap hit — 0 pts this time)"
+            : res.points_awarded != null
+              ? "Attempt is live! +1 arcade point"
+              : "Attempt is live!",
+        );
+      } else {
+        toast.success("Attempt denied");
+      }
       setDenyFor(null);
       setDenyReason("");
       qc.invalidateQueries({ queryKey: ["objection_attempts"] });
@@ -78,7 +114,7 @@ export function ObjectionReviewPanel() {
   return (
     <div className="space-y-8">
       <ArcadePanel
-        title="Objection Dojo · Review"
+        title={variant === "captain" ? "Dojo · Your Van's Takes" : "Objection Dojo · Review"}
         action={
           <span className="text-[10px] font-display uppercase tracking-widest text-warning">
             {pending.data?.length ?? 0} waiting
@@ -89,7 +125,9 @@ export function ObjectionReviewPanel() {
           <div className="text-sm text-muted-foreground">Loading…</div>
         ) : (pending.data ?? []).length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No attempts waiting. Approved answers go live in the Learn tab instantly.
+            {variant === "captain"
+              ? "No takes from your van waiting. Approved drills go live in Learn and score +1 pt (max 3/wk)."
+              : "No attempts waiting. Approved answers go live in the Learn tab instantly."}
           </p>
         ) : (
           <ul className="divide-y divide-border">
@@ -177,7 +215,8 @@ export function ObjectionReviewPanel() {
         )}
       </ArcadePanel>
 
-      <AddObjectionCard />
+      {/* Adding objections stays an Admin move — captains only review. */}
+      {variant === "desk" && <AddObjectionCard />}
     </div>
   );
 }

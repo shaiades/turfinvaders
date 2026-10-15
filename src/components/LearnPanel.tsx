@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useSearch } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ArcadePanel } from "@/components/arcade";
 import { Input } from "@/components/ui/input";
@@ -58,6 +59,9 @@ function useTranscripts() {
 
 export function LearnPanel() {
   const { role } = useAuth();
+  // ?drill=<objection> — the Active Run rebuttal card's deep link into the
+  // Dojo card for that objection.
+  const { drill } = useSearch({ from: "/_authenticated/learn" });
   const transcripts = useTranscripts();
   const [query, setQuery] = useState("");
   const [player, setPlayer] = useState<{ video: TrainingVideo; start: number } | null>(null);
@@ -258,7 +262,7 @@ export function LearnPanel() {
       )}
 
       <div data-tour="learn-dojo">
-        <ObjectionDojo />
+        <ObjectionDojo drillKey={drill} />
       </div>
     </div>
   );
