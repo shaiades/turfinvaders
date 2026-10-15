@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CalendarOff, Download, FileClock, FileSpreadsheet, ScrollText } from "lucide-react";
+import { CalendarOff, Download, Eye, FileClock, FileSpreadsheet, ScrollText } from "lucide-react";
 import { ArcadeCard } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,15 +14,18 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PayrollLedger } from "@/components/PayrollLedger";
+import { ReportViewer } from "@/components/ReportViewer";
 import { supabase } from "@/integrations/supabase/client";
 import { downloadCsvFile } from "@/lib/csv";
 import {
-  buildAbsenceCsvLines,
-  buildAuditCsvLines,
-  buildPayrollRangeCsvLines,
-  buildPunchDetailCsvLines,
+  buildAbsenceTable,
+  buildAuditTable,
+  buildPayrollRangeTable,
+  buildPunchDetailTable,
+  reportTableToCsvLines,
   weekStartsInRange,
   type ExportFilter,
+  type ReportTable,
 } from "@/lib/payroll-export";
 import { addDaysISO, laMonthStartISO, laTodayISO, laWeekStartISO, weekStartOfISO } from "@/lib/dates";
 
@@ -117,26 +120,65 @@ export function ReportsConsole({
             .toLowerCase()}`
         : "";
 
-  const exportMut = useMutation({
+  // One builder serves both verbs: View renders the table on screen,
+  // Export downloads the identical rows as CSV.
+  const [preview, setPreview] = useState<{
+    title: string;
+    filename: string;
+    table: ReportTable;
+  } | null>(null);
+
+  const reportMut = useMutation({
     mutationFn: async ({
-      kind,
+      action,
+      title,
       build,
       filename,
     }: {
-      kind: string;
-      build: () => Promise<string[]>;
+      action: "view" | "export";
+      title: string;
+      build: () => Promise<ReportTable>;
       filename: string;
     }) => {
-      const lines = await build();
-      if (lines.length <= 1) throw new Error("Nothing in that range.");
-      downloadCsvFile(filename, lines);
-      return { kind, rows: lines.length - 1 };
+      const table = await build();
+      if (table.rows.length === 0) throw new Error("Nothing in that range.");
+      return { action, title, filename, table };
     },
-    onSuccess: ({ rows }) => toast.success(`Export ready — ${rows.toLocaleString()} rows`),
-    onError: (e: Error) => toast.error("Export failed", { description: e.message }),
+    onSuccess: ({ action, title, filename, table }) => {
+      if (action === "export") {
+        downloadCsvFile(filename, reportTableToCsvLines(table));
+        toast.success(`Export ready — ${table.rows.length.toLocaleString()} rows`);
+      } else {
+        setPreview({ title, filename, table });
+      }
+    },
+    onError: (e: Error) => toast.error("Couldn't build that report", { description: e.message }),
   });
 
-  const running = exportMut.isPending;
+  const running = reportMut.isPending;
+
+  /** The View + Export button pair every report card ends with. */
+  const reportButtons = (title: string, filename: string, build: () => Promise<ReportTable>) => (
+    <div className="flex flex-col sm:flex-row gap-2">
+      <Button
+        disabled={running}
+        onClick={() => reportMut.mutate({ action: "view", title, filename, build })}
+        className="flex-1 min-h-11 md:min-h-9 bg-victory text-background hover:bg-victory/90 font-display text-[10px] uppercase tracking-widest"
+      >
+        <Eye className="w-3.5 h-3.5 mr-1.5" />
+        View on screen
+      </Button>
+      <Button
+        disabled={running}
+        variant="outline"
+        onClick={() => reportMut.mutate({ action: "export", title, filename, build })}
+        className="flex-1 min-h-11 md:min-h-9 font-display text-[10px] uppercase tracking-widest"
+      >
+        <Download className="w-3.5 h-3.5 mr-1.5" />
+        CSV
+      </Button>
+    </div>
+  );
 
   return (
     <div className="space-y-6">
@@ -198,10 +240,22 @@ export function ReportsConsole({
               </Select>
             </label>
             <div className="text-[10px] text-muted-foreground pb-2">
-              Applies to the payroll, punch-detail and absence exports. The audit log always exports
+              Applies to the payroll, punch-detail and absence reports. The audit log always runs
               whole.
             </div>
           </ArcadeCard>
+
+          {preview && (
+            <ReportViewer
+              title={preview.title}
+              table={preview.table}
+              onDownload={() =>
+                downloadCsvFile(preview.filename, reportTableToCsvLines(preview.table))
+              }
+              onClose={() => setPreview(null)}
+            />
+          )}
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <ArcadeCard className="p-5 space-y-3">
               <div className="flex items-center gap-2">
@@ -213,24 +267,15 @@ export function ReportsConsole({
                 clawbacks included); other weeks the live pay engine. Dates snap to their Monday.
               </p>
               <RangeInputs from={payrollFrom} to={payrollTo} setFrom={setPayrollFrom} setTo={setPayrollTo} />
-              <Button
-                disabled={running}
-                onClick={() =>
-                  exportMut.mutate({
-                    kind: "payroll",
-                    filename: `payroll-weeks-${weekStartOfISO(payrollFrom)}-to-${weekStartOfISO(payrollTo)}${filterSlug}.csv`,
-                    build: () =>
-                      buildPayrollRangeCsvLines(
-                        weekStartsInRange(weekStartOfISO(payrollFrom), weekStartOfISO(payrollTo)),
-                        exportFilter,
-                      ),
-                  })
-                }
-                className="w-full min-h-11 md:min-h-9 bg-victory text-background hover:bg-victory/90 font-display text-[10px] uppercase tracking-widest"
-              >
-                <Download className="w-3.5 h-3.5 mr-1.5" />
-                Export payroll CSV
-              </Button>
+              {reportButtons(
+                "Payroll — weekly",
+                `payroll-weeks-${weekStartOfISO(payrollFrom)}-to-${weekStartOfISO(payrollTo)}${filterSlug}.csv`,
+                () =>
+                  buildPayrollRangeTable(
+                    weekStartsInRange(weekStartOfISO(payrollFrom), weekStartOfISO(payrollTo)),
+                    exportFilter,
+                  ),
+              )}
             </ArcadeCard>
 
             <ArcadeCard className="p-5 space-y-3">
@@ -246,20 +291,11 @@ export function ReportsConsole({
                 record California requires — keep exports at least 4 years.
               </p>
               <RangeInputs from={punchFrom} to={punchTo} setFrom={setPunchFrom} setTo={setPunchTo} />
-              <Button
-                disabled={running}
-                onClick={() =>
-                  exportMut.mutate({
-                    kind: "punch",
-                    filename: `time-records-${punchFrom}-to-${punchTo}${filterSlug}.csv`,
-                    build: () => buildPunchDetailCsvLines(punchFrom, punchTo, exportFilter),
-                  })
-                }
-                className="w-full min-h-11 md:min-h-9 bg-victory text-background hover:bg-victory/90 font-display text-[10px] uppercase tracking-widest"
-              >
-                <Download className="w-3.5 h-3.5 mr-1.5" />
-                Export time records CSV
-              </Button>
+              {reportButtons(
+                "Punch detail",
+                `time-records-${punchFrom}-to-${punchTo}${filterSlug}.csv`,
+                () => buildPunchDetailTable(punchFrom, punchTo, exportFilter),
+              )}
             </ArcadeCard>
 
             <ArcadeCard className="p-5 space-y-3">
@@ -272,20 +308,9 @@ export function ReportsConsole({
                 Append-only — nothing can be erased from it.
               </p>
               <RangeInputs from={auditFrom} to={auditTo} setFrom={setAuditFrom} setTo={setAuditTo} />
-              <Button
-                disabled={running}
-                onClick={() =>
-                  exportMut.mutate({
-                    kind: "audit",
-                    filename: `time-audit-${auditFrom}-to-${auditTo}.csv`,
-                    build: () => buildAuditCsvLines(auditFrom, auditTo),
-                  })
-                }
-                className="w-full min-h-11 md:min-h-9 bg-victory text-background hover:bg-victory/90 font-display text-[10px] uppercase tracking-widest"
-              >
-                <Download className="w-3.5 h-3.5 mr-1.5" />
-                Export audit CSV
-              </Button>
+              {reportButtons("Audit log", `time-audit-${auditFrom}-to-${auditTo}.csv`, () =>
+                buildAuditTable(auditFrom, auditTo),
+              )}
             </ArcadeCard>
 
             <ArcadeCard className="p-5 space-y-3">
@@ -298,20 +323,9 @@ export function ReportsConsole({
                 who entered and who approved each one.
               </p>
               <RangeInputs from={absFrom} to={absTo} setFrom={setAbsFrom} setTo={setAbsTo} />
-              <Button
-                disabled={running}
-                onClick={() =>
-                  exportMut.mutate({
-                    kind: "absence",
-                    filename: `absences-${absFrom}-to-${absTo}${filterSlug}.csv`,
-                    build: () => buildAbsenceCsvLines(absFrom, absTo, exportFilter),
-                  })
-                }
-                className="w-full min-h-11 md:min-h-9 bg-victory text-background hover:bg-victory/90 font-display text-[10px] uppercase tracking-widest"
-              >
-                <Download className="w-3.5 h-3.5 mr-1.5" />
-                Export absences CSV
-              </Button>
+              {reportButtons("Absences", `absences-${absFrom}-to-${absTo}${filterSlug}.csv`, () =>
+                buildAbsenceTable(absFrom, absTo, exportFilter),
+              )}
             </ArcadeCard>
           </div>
         </TabsContent>
