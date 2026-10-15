@@ -24,7 +24,7 @@ import { KeyRound, UserPlus } from "lucide-react";
 import { addTeamMember, createCanvasser } from "@/lib/users.functions";
 import { ROSTER_KEYS } from "@/hooks/useRosterActions";
 import { DEFAULT_OFFICE, OFFICE_LOCATIONS, type OfficeLocation } from "@/lib/offices";
-import { creatableRolesFor, ROLE_LABEL, type AppRole } from "@/lib/role-policy";
+import { creatableRolesFor, isVanExemptRole, ROLE_LABEL, type AppRole } from "@/lib/role-policy";
 import { useAuth } from "@/hooks/useAuth";
 
 type VanLite = { id: string; name: string; color?: string | null; office_location?: string | null };
@@ -84,8 +84,14 @@ export function AddPlayerDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initialVanId]);
 
-  const destinationName = vanId ? (vans.find((v) => v.id === vanId)?.name ?? "Van") : "Free Agents";
   const safeRole: AppRole = creatable.includes(role) ? role : "canvasser";
+  // Office roles (HR, Bookkeeper, Sales Rep, Owner, Manager) never ride a
+  // van — vanless, they land in "the office", never on The Bench.
+  const destinationName = vanId
+    ? (vans.find((v) => v.id === vanId)?.name ?? "Van")
+    : isVanExemptRole(safeRole)
+      ? "the office"
+      : "The Bench";
 
   const create = useMutation({
     mutationFn: async () => {
@@ -215,7 +221,9 @@ export function AddPlayerDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="free">Free Agents (assign later)</SelectItem>
+                <SelectItem value="free">
+                  {isVanExemptRole(safeRole) ? "No van — office role" : "The Bench (assign later)"}
+                </SelectItem>
                 {vans.map((v) => (
                   <SelectItem key={v.id} value={v.id}>
                     <span className="inline-flex items-center gap-2">

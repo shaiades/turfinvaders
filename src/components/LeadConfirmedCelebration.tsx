@@ -20,7 +20,7 @@ import { CONFETTI_COLORS } from "@/components/tutorial/CanvasserTutorial";
  *
  * Guards: 5-minute occurred_at fence (backfills/CSV imports) + a
  * sessionStorage seen-ring (realtime reconnect replays). Known accepted
- * gap, same as the hype ticker: team-less Free Agents get no event (the
+ * gap, same as the hype ticker: benched (team-less) players get no event (the
  * trigger's team_id IS NOT NULL guard).
  *
  * Preview: `?lead_confirm_demo=1` fires the visual once, zero DB traffic

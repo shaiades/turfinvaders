@@ -20,7 +20,7 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import { useDispatchRoster, useDispatchVans, type Van } from "@/hooks/useFleetRoster";
 import { useMoveAgents, useSetVanLock } from "@/hooks/useRosterActions";
-import { canManageTarget } from "@/lib/role-policy";
+import { canManageTarget, isVanExemptRole } from "@/lib/role-policy";
 import { normalizeName } from "@/lib/utils";
 import { isLeadSourceKey } from "@/lib/lead-sources";
 import { DEFAULT_OFFICE, OFFICE_LOCATIONS } from "@/lib/offices";
@@ -121,9 +121,9 @@ export function MovePlayersSheet({
         movable.find((m) => m.team_id) ??
         movable[0];
       const vanId = vanRep.team_id;
-      // Free Agents pen rule: unassigned owners/sales reps never need a van;
-      // anyone already ON a van stays listed so they can be moved off.
-      if (!vanId && (roles.has("owner") || roles.has("sales_rep"))) continue;
+      // The Bench pen rule: office roles (VAN_EXEMPT_ROLES) never need a
+      // van; anyone already ON a van stays listed so they can be moved off.
+      if (!vanId && [...roles].some((r) => isVanExemptRole(r))) continue;
       const van = vanId ? vanById.get(vanId) : null;
       out.push({
         key,
@@ -279,7 +279,7 @@ export function MovePlayersSheet({
                     className="text-[10px] font-display uppercase tracking-widest flex items-center gap-2"
                     style={{ color: "var(--neon-orange)" }}
                   >
-                    ⚠ Free Agents · Needs Van
+                    ⚠ The Bench · Needs Van
                     <span className="text-muted-foreground">{freeAgents.length}</span>
                   </h3>
                   {freeAgents.map((g) => (
@@ -357,7 +357,7 @@ export function MovePlayersSheet({
                 {/* z-[10000]: the sheet is z-[9999]; a stock z-50 menu would
                     render invisibly behind it. */}
                 <SelectContent className="z-[10000] bg-background border-[color:var(--neon-blue)]/50">
-                  <SelectItem value="free">Free Agents</SelectItem>
+                  <SelectItem value="free">The Bench</SelectItem>
                   {orderedVans.map((v) => (
                     <SelectItem key={v.id} value={v.id}>
                       <span className="inline-flex items-center gap-2">
@@ -438,7 +438,7 @@ function GroupRow({
       </span>
       <span className="shrink-0 flex items-center gap-1.5 text-[10px] font-display uppercase tracking-wider text-muted-foreground">
         <span className="w-2 h-2 rounded-full" style={{ background: van?.color ?? "#888" }} />
-        {van?.name ?? "Free Agent"}
+        {van?.name ?? "The Bench"}
       </span>
     </button>
   );

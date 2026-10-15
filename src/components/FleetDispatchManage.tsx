@@ -45,14 +45,14 @@ import { isLeadSourceName } from "@/lib/lead-sources";
 import { useAuth } from "@/hooks/useAuth";
 import { useMoveAgents, useSetVanLock } from "@/hooks/useRosterActions";
 import { isAdminRole, isManagerRole } from "@/lib/roles";
-import { canManageTarget } from "@/lib/role-policy";
+import { canManageTarget, isVanExemptRole } from "@/lib/role-policy";
 import { normalizeName } from "@/lib/utils";
 import { DEFAULT_OFFICE, OFFICE_LOCATIONS } from "@/lib/offices";
 import type { RosterProfile, Van } from "@/components/FleetDispatch";
 
 /**
  * The Manage Fleet section of the Fleet Dispatch board — per-van rosters,
- * free agents, and the archive, primarily for CAPTAINS (Owners/Managers have
+ * the bench, and the archive, primarily for CAPTAINS (Owners/Managers have
  * the full Manage Players page; a pointer card sends them there). Van
  * create/edit/delete moved to Manage Players' Vans panel (2026-09-16).
  * Receives all data as props from the board's queries (one roster fetch
@@ -180,12 +180,13 @@ export function FleetDispatchManage({
   const captains = profiles.filter((p) =>
     (rolesByUser.get(p.id) ?? []).some((r) => r === "captain" || isAdminRole(r)),
   );
-  // Sales reps never need vans (owner, 2026-08-04) — the Free Agents pen is
-  // for canvassers/captains awaiting assignment only.
+  // Office roles never need vans (VAN_EXEMPT_ROLES — owner, 2026-08-04 and
+  // 2026-10-15) — The Bench pen is for canvassers/captains awaiting
+  // assignment only.
   const unassigned = profiles.filter((p) => {
     if (p.team_id) return false;
     const roles = rolesByUser.get(p.id) ?? [];
-    return !roles.includes("owner") && !roles.includes("sales_rep");
+    return !roles.some((r) => isVanExemptRole(r));
   });
 
   const vanOptions = vans.map((v) => ({ id: v.id, name: v.name, color: v.color ?? "#888" }));
@@ -421,7 +422,7 @@ export function FleetDispatchManage({
           ))}
         </div>
 
-        {/* Free Agents holding pen */}
+        {/* The Bench holding pen */}
         <div className="free-agents-panel bg-surface p-4 space-y-3">
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <div className="flex items-center gap-2">
@@ -429,7 +430,7 @@ export function FleetDispatchManage({
                 className="font-display uppercase tracking-widest text-sm"
                 style={{ color: "var(--neon-orange)" }}
               >
-                ⚠ Free Agents (Needs Van)
+                ⚠ The Bench (Needs Van)
               </h3>
               <span
                 className="text-[10px] font-display px-2 py-0.5 rounded-full"
@@ -552,7 +553,7 @@ export function FleetDispatchManage({
           <p className="text-[10px] text-muted-foreground">
             {canManage
               ? "Tap Move on a row — or Move Players to search and place several at once. Moves here pin players (🔒) so Monday can't override them; new Monday.com agents still land here automatically until their first in-app move."
-              : "Free Agents auto-populate from Monday.com webhooks."}
+              : "The Bench auto-populates from Monday.com webhooks."}
           </p>
         </div>
       </div>
@@ -578,7 +579,7 @@ export function FleetDispatchManage({
             </DialogTitle>
             <DialogDescription>
               Canvassers auto-archived after 14 days of inactivity. Historical data is preserved.
-              Reactivate to bring them back to Free Agents.
+              Reactivate to bring them back to The Bench.
             </DialogDescription>
           </DialogHeader>
           <div className="max-h-[420px] overflow-y-auto space-y-1.5 py-2">
@@ -765,7 +766,7 @@ function RosterRow({
             <SelectItem value="current" disabled>
               {currentVanId ? "Move to…" : "Assign Van…"}
             </SelectItem>
-            {currentVanId && <SelectItem value="free">Free Agents</SelectItem>}
+            {currentVanId && <SelectItem value="free">The Bench</SelectItem>}
             {vans.map((v) => (
               <SelectItem key={v.id} value={v.id} disabled={v.id === currentVanId}>
                 <span className="inline-flex items-center gap-2">

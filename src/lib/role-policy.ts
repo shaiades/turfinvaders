@@ -59,6 +59,32 @@ export function isTimeAdminRole(role: AppRole | string | null | undefined): bool
   return (TIME_ADMIN_ROLES as readonly string[]).includes(role);
 }
 
+/** Roles that never ride a van (owner clarification 2026-10-15: "HR, or
+ *  Accounting or sales never go in the van — that does not apply to them").
+ *  These people are OFFICE, not Bench: they never appear in The Bench /
+ *  Needs-Van pens, and vanless they read "Office" instead of "The Bench".
+ *  Confirmers are deliberately absent — they collapse to the canvasser
+ *  experience (privilegeRole) and ride like one. Extends the older inline
+ *  owner/sales_rep exemptions (owner decisions 2026-08-04, 2026-09-16). */
+export const VAN_EXEMPT_ROLES: readonly AppRole[] = [
+  "owner",
+  "office_staff",
+  "hr",
+  "bookkeeper",
+  "sales_rep",
+] as const;
+
+export function isVanExemptRole(role: AppRole | string | null | undefined): boolean {
+  if (!role) return false;
+  return (VAN_EXEMPT_ROLES as readonly string[]).includes(role);
+}
+
+/** The vanless label: an office role reads "Office", everyone else is on
+ *  The Bench awaiting a van. */
+export function vanlessLabel(role: AppRole | string | null | undefined): string {
+  return isVanExemptRole(role) ? "Office" : "The Bench";
+}
+
 /** Payroll/time READ tier: the Admin pair, the bookkeeper (Mary — owner
  *  decision 2026-10-01), and HR (Zuleyma — owner decision 2026-10-15:
  *  "can Zuleyma also approve payroll runs?"). Bookkeeper reads and writes

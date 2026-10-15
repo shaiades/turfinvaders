@@ -1697,7 +1697,7 @@ function RowDivider() {
 
 /** Per-row roster controls shown to manager-tier viewers on both the
  *  dashboard board and the leaderboard. currentVanId null = the row sits in
- *  the unassigned pen (the menu reads "Assign Van…" and hides Free Agents). */
+ *  the unassigned pen (the menu reads "Assign Van…" and hides The Bench). */
 type RowManage = {
   vans: Van[];
   currentVanId: string | null;
@@ -1913,7 +1913,7 @@ function DispatchRow({
               <SelectItem value="current" disabled>
                 {manage.currentVanId ? "Move to…" : "Assign Van…"}
               </SelectItem>
-              {manage.currentVanId && <SelectItem value="free">Free Agents</SelectItem>}
+              {manage.currentVanId && <SelectItem value="free">The Bench</SelectItem>}
               {manage.vans.map((vn) => (
                 <SelectItem key={vn.id} value={vn.id} disabled={vn.id === manage.currentVanId}>
                   <span className="inline-flex items-center gap-2">
@@ -2311,7 +2311,7 @@ function DispatchFleet({
       })}
 
       {looseActive.length > 0 && (
-        // No Free Agents pen — van membership auto-syncs from Monday's Van
+        // No The Bench pen — van membership auto-syncs from Monday's Van
         // column for unpinned players (an in-app move pins them, van_locked_at).
         // What remains here are lead sources (referral, Self Gen…) and the
         // rare unassigned rep, shown only when they have numbers in range so
