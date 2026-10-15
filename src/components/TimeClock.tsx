@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Clock, Play, Square, Utensils, AlertTriangle } from "lucide-react";
+import { Clock, Coffee, Play, Square, Utensils, AlertTriangle } from "lucide-react";
 import { addDaysISO, fmtWallTime, laDateISO, laTodayISO } from "@/lib/dates";
 import { toast } from "sonner";
 import { rewardToast } from "@/lib/reward-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useOpenShift, useTodayShifts } from "@/hooks/useTimeClockSelf";
 import { invalidatePunchCaches } from "@/lib/time-clock-keys";
+import { REST_BREAK_REQUIRED_AFTER_HOURS } from "@/lib/pay";
 
 import { ArcadePanel } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
@@ -26,9 +27,13 @@ const fmtClock = (iso: string) =>
 // Shift log_date is the LA calendar day of the instant (never viewer-local).
 const isoDateLocal = (d: Date) => laDateISO(d);
 
-/** A shift owes a meal once it passes 5 worked hours (CA Wage Order 4). */
+/** A WORKDAY owes a meal once it passes 5 worked hours (CA Wage Order 4) —
+ *  compute v8 pools every shift on the LA day, so the client check does too. */
 const MEAL_REQUIRED_AFTER_HOURS = 5;
 const MEAL_MIN_MINUTES = 30;
+
+type MealAttest = "missed" | "unrecorded" | null;
+type RestAttest = "ok" | "missed" | null;
 
 type MealRow = {
   id: string;
@@ -40,8 +45,10 @@ type MealRow = {
 export function TimeClock({ userId }: { userId: string }) {
   const qc = useQueryClient();
   const [now, setNow] = useState(() => Date.now());
-  // Clock-out intercepts into the meal attestation when the shift owes one.
-  const [attesting, setAttesting] = useState(false);
+  // Clock-out intercepts into the attestations the day owes: the meal
+  // question first (>5h, no compliant lunch), then the rest-break question
+  // (≥3.5h). null = not attesting; meal undefined = meal question pending.
+  const [attesting, setAttesting] = useState<null | { meal?: MealAttest }>(null);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -94,6 +101,52 @@ export function TimeClock({ userId }: { userId: string }) {
   });
 
   const { data: todayEntries } = useTodayShifts(userId);
+
+  // Closed shifts still owing the worker's own answer (crew bulk punches,
+  // auto-closes, manager-created days): lunch pending or rest pending.
+  // attest_shift resolves them; the window matches the RPC's 14 days.
+  const { data: pendingAttest } = useQuery({
+    queryKey: ["time-clock-pending-attest", userId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("time_entries")
+        .select("id, log_date, clock_in, clock_out, billable_hours, meal_status, rest_break_status")
+        .eq("user_id", userId)
+        .is("voided_at", null)
+        .not("clock_out", "is", null)
+        .or("meal_status.eq.pending,rest_break_status.eq.pending")
+        .gte("log_date", addDaysISO(laTodayISO(), -14))
+        .order("log_date", { ascending: false })
+        .limit(5);
+      if (error) return [];
+      return data ?? [];
+    },
+  });
+
+  const attestShift = useMutation({
+    mutationFn: async (vars: {
+      id: string;
+      meal?: "missed" | "unrecorded";
+      rest?: "ok" | "missed";
+    }) => {
+      const { error } = await supabase.rpc("attest_shift", {
+        _entry_id: vars.id,
+        _meal: vars.meal ?? null,
+        _rest: vars.rest ?? null,
+      });
+      if (error) throw error;
+      return vars;
+    },
+    onSuccess: (vars) => {
+      if (vars.meal === "missed" || vars.rest === "missed") {
+        toast.warning("Recorded — a premium hour is added to that week's pay");
+      } else {
+        toast.success("Recorded — thanks");
+      }
+      invalidatePunchCaches(qc);
+    },
+    onError: (e: Error) => toast.error("Couldn't record that", { description: e.message }),
+  });
 
   // Recent auto-closes awaiting a human: the worker should see (and dispute)
   // a fabricated end time, not discover it on payday.
@@ -207,30 +260,41 @@ export function TimeClock({ userId }: { userId: string }) {
   });
 
   const clockOut = useMutation({
-    mutationFn: async (attestation: "missed" | "unrecorded" | null) => {
+    mutationFn: async ({ meal, rest }: { meal: MealAttest; rest: RestAttest }) => {
       if (!openEntry) throw new Error("No open shift to clock out of");
       if (openMeal) throw new Error("End your lunch before clocking out");
-      const patch: { clock_out: string; meal_status?: "missed" | "unrecorded" } = {
-        clock_out: new Date().toISOString(),
-      };
-      if (attestation) patch.meal_status = attestation;
+      const patch: {
+        clock_out: string;
+        meal_status?: "missed" | "unrecorded";
+        rest_break_status?: "ok" | "missed";
+      } = { clock_out: new Date().toISOString() };
+      if (meal) patch.meal_status = meal;
+      if (rest) patch.rest_break_status = rest;
       const { error } = await supabase.from("time_entries").update(patch).eq("id", openEntry.id);
       if (error) throw error;
-      return attestation;
+      return { meal, rest };
     },
-    onSuccess: (attestation) => {
-      if (attestation === "missed") {
+    onSuccess: ({ meal, rest }) => {
+      if (meal === "missed" && rest === "missed") {
+        toast.warning("Clocked out — missed meal and rest break recorded", {
+          description: "Two premium hours are added to this week's pay.",
+        });
+      } else if (meal === "missed") {
         toast.warning("Clocked out — missed meal recorded", {
           description: "A meal premium hour is added to this week's pay.",
         });
-      } else if (attestation === "unrecorded") {
+      } else if (rest === "missed") {
+        toast.warning("Clocked out — missed rest break recorded", {
+          description: "A rest premium hour is added to this week's pay.",
+        });
+      } else if (meal === "unrecorded") {
         toast.success("Clocked out", {
           description: "Your manager will enter the lunch times you took.",
         });
       } else {
         toast.success("Clocked out");
       }
-      setAttesting(false);
+      setAttesting(null);
       invalidatePunchCaches(qc);
     },
     onError: (e: Error) => toast.error(e.message),
@@ -242,7 +306,6 @@ export function TimeClock({ userId }: { userId: string }) {
     if (!openEntry) return 0;
     return now - new Date(openEntry.clock_in).getTime();
   }, [openEntry, now]);
-  const shiftHours = liveMs / 3_600_000;
   const lunchMs = openMeal ? now - new Date(openMeal.meal_start).getTime() : 0;
 
   const todayHours = useMemo(
@@ -250,15 +313,35 @@ export function TimeClock({ userId }: { userId: string }) {
     [todayEntries],
   );
 
+  // On-the-clock hours for the whole LA day (open shift counted live) — the
+  // basis compute v8 uses for the meal and rest-break duties.
+  const dayRawHours = useMemo(
+    () =>
+      (todayEntries ?? []).reduce((s, r) => {
+        const end = r.clock_out ? new Date(r.clock_out).getTime() : now;
+        return s + Math.max(0, end - new Date(r.clock_in).getTime()) / 3_600_000;
+      }, 0),
+    [todayEntries, now],
+  );
+
   const isSunday = new Date(`${laTodayISO()}T12:00:00Z`).getUTCDay() === 0;
 
-  // Clock Out: shifts past the meal threshold with no recorded 30-min meal
-  // must attest before closing — that attestation is what replaced the old
-  // blanket lunch deduction.
-  const needsAttestation = shiftHours > MEAL_REQUIRED_AFTER_HOURS && !hasCompliantMeal;
+  // Clock Out attestations: a day past the meal threshold with no recorded
+  // 30-min meal answers the lunch question; a day of 3.5+ hours answers the
+  // rest-break question (CA Wage Order 4 — the server stores both).
+  const needsMealAttestation = dayRawHours > MEAL_REQUIRED_AFTER_HOURS && !hasCompliantMeal;
+  const needsRestAttestation = dayRawHours >= REST_BREAK_REQUIRED_AFTER_HOURS;
   const handleClockOutTap = () => {
-    if (needsAttestation) setAttesting(true);
-    else clockOut.mutate(null);
+    if (needsMealAttestation) setAttesting({});
+    else if (needsRestAttestation) setAttesting({ meal: null });
+    else clockOut.mutate({ meal: null, rest: null });
+  };
+  const answerMeal = (meal: MealAttest) => {
+    if (needsRestAttestation) setAttesting({ meal });
+    else clockOut.mutate({ meal, rest: null });
+  };
+  const answerRest = (rest: RestAttest) => {
+    clockOut.mutate({ meal: attesting?.meal ?? null, rest });
   };
 
   return (
@@ -273,6 +356,62 @@ export function TimeClock({ userId }: { userId: string }) {
               {e.log_date}: closed at{" "}
               <span className="text-foreground">{e.clock_out ? fmtClock(e.clock_out) : "—"}</span>{" "}
               automatically. Wrong? Tell your manager — they can fix it.
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Shifts someone else closed (crew punch, auto-close, backfill) still
+          owe the worker's own lunch/break answer — the attest_shift backstop. */}
+      {(pendingAttest?.length ?? 0) > 0 && (
+        <div className="mb-4 rounded-lg border border-neon/40 bg-neon/5 p-3 space-y-3">
+          <div className="flex items-center gap-2 text-neon text-[10px] font-display uppercase tracking-widest">
+            <Coffee className="w-3.5 h-3.5" /> Quick check — lunch &amp; breaks
+          </div>
+          {pendingAttest!.map((e) => (
+            <div key={e.id} className="space-y-1.5">
+              <div className="text-xs text-muted-foreground">
+                {e.log_date} · {fmtClock(e.clock_in)}
+                {" → "}
+                {e.clock_out ? fmtClock(e.clock_out) : "—"} ·{" "}
+                {Number(e.billable_hours ?? 0).toFixed(2)}h
+              </div>
+              {e.meal_status === "pending" && (
+                <div className="flex flex-col sm:flex-row gap-1.5">
+                  <button
+                    disabled={attestShift.isPending}
+                    onClick={() => attestShift.mutate({ id: e.id, meal: "missed" })}
+                    className="min-h-11 md:min-h-8 flex-1 rounded border border-warning/50 text-warning text-[10px] font-display uppercase tracking-widest px-2 hover:bg-warning/10 disabled:opacity-50"
+                  >
+                    Worked through lunch
+                  </button>
+                  <button
+                    disabled={attestShift.isPending}
+                    onClick={() => attestShift.mutate({ id: e.id, meal: "unrecorded" })}
+                    className="min-h-11 md:min-h-8 flex-1 rounded border border-border text-muted-foreground text-[10px] font-display uppercase tracking-widest px-2 hover:bg-surface-elevated disabled:opacity-50"
+                  >
+                    Took lunch — manager enters times
+                  </button>
+                </div>
+              )}
+              {e.rest_break_status === "pending" && (
+                <div className="flex flex-col sm:flex-row gap-1.5">
+                  <button
+                    disabled={attestShift.isPending}
+                    onClick={() => attestShift.mutate({ id: e.id, rest: "ok" })}
+                    className="min-h-11 md:min-h-8 flex-1 rounded border border-victory/50 text-victory text-[10px] font-display uppercase tracking-widest px-2 hover:bg-victory/10 disabled:opacity-50"
+                  >
+                    Got my 10-min breaks
+                  </button>
+                  <button
+                    disabled={attestShift.isPending}
+                    onClick={() => attestShift.mutate({ id: e.id, rest: "missed" })}
+                    className="min-h-11 md:min-h-8 flex-1 rounded border border-warning/50 text-warning text-[10px] font-display uppercase tracking-widest px-2 hover:bg-warning/10 disabled:opacity-50"
+                  >
+                    Missed a break
+                  </button>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -340,34 +479,71 @@ export function TimeClock({ userId }: { userId: string }) {
             </Button>
           </div>
         ) : openPending ? null : attesting ? (
-          <div className="w-full max-w-md rounded-lg border border-warning/50 bg-warning/10 p-4 space-y-3">
-            <div className="text-sm text-foreground text-center">
-              This shift ran past {MEAL_REQUIRED_AFTER_HOURS} hours and no 30-minute lunch was
-              punched. What happened?
+          attesting.meal === undefined ? (
+            <div className="w-full max-w-md rounded-lg border border-warning/50 bg-warning/10 p-4 space-y-3">
+              <div className="text-sm text-foreground text-center">
+                Today ran past {MEAL_REQUIRED_AFTER_HOURS} hours and no 30-minute lunch was punched.
+                What happened?
+              </div>
+              <button
+                onClick={() => answerMeal("missed")}
+                disabled={clockOut.isPending}
+                className="arcade-btn-3d w-full px-4 py-3 font-display text-xs uppercase tracking-widest"
+                style={{ ["--btn-color" as string]: "var(--warning)", ["--btn-fg" as string]: "#1a1205" }}
+              >
+                I worked through lunch
+              </button>
+              <button
+                onClick={() => answerMeal("unrecorded")}
+                disabled={clockOut.isPending}
+                className="arcade-btn-3d w-full px-4 py-3 font-display text-xs uppercase tracking-widest"
+                style={{ ["--btn-color" as string]: "var(--surface-elevated)", ["--btn-fg" as string]: "var(--foreground)" }}
+              >
+                I took lunch but didn't punch it
+              </button>
+              <button
+                onClick={() => setAttesting(null)}
+                className="w-full min-h-11 inline-flex items-center justify-center text-[10px] uppercase tracking-widest text-muted-foreground"
+              >
+                Cancel — stay clocked in
+              </button>
             </div>
-            <button
-              onClick={() => clockOut.mutate("missed")}
-              disabled={clockOut.isPending}
-              className="arcade-btn-3d w-full px-4 py-3 font-display text-xs uppercase tracking-widest"
-              style={{ ["--btn-color" as string]: "var(--warning)", ["--btn-fg" as string]: "#1a1205" }}
-            >
-              I worked through lunch
-            </button>
-            <button
-              onClick={() => clockOut.mutate("unrecorded")}
-              disabled={clockOut.isPending}
-              className="arcade-btn-3d w-full px-4 py-3 font-display text-xs uppercase tracking-widest"
-              style={{ ["--btn-color" as string]: "var(--surface-elevated)", ["--btn-fg" as string]: "var(--foreground)" }}
-            >
-              I took lunch but didn't punch it
-            </button>
-            <button
-              onClick={() => setAttesting(false)}
-              className="w-full min-h-11 inline-flex items-center justify-center text-[10px] uppercase tracking-widest text-muted-foreground"
-            >
-              Cancel — stay clocked in
-            </button>
-          </div>
+          ) : (
+            <div className="w-full max-w-md rounded-lg border border-warning/50 bg-warning/10 p-4 space-y-3">
+              <div className="text-sm text-foreground text-center">
+                Did you get your paid 10-minute rest breaks today? (One per 4 hours worked — they're
+                on the clock.)
+              </div>
+              <button
+                onClick={() => answerRest("ok")}
+                disabled={clockOut.isPending}
+                className="arcade-btn-3d w-full px-4 py-3 font-display text-xs uppercase tracking-widest"
+                style={{
+                  ["--btn-color" as string]: "var(--victory)",
+                  ["--btn-fg" as string]: "#06110a",
+                }}
+              >
+                Yes — I got my breaks
+              </button>
+              <button
+                onClick={() => answerRest("missed")}
+                disabled={clockOut.isPending}
+                className="arcade-btn-3d w-full px-4 py-3 font-display text-xs uppercase tracking-widest"
+                style={{
+                  ["--btn-color" as string]: "var(--warning)",
+                  ["--btn-fg" as string]: "#1a1205",
+                }}
+              >
+                No — I missed a break
+              </button>
+              <button
+                onClick={() => setAttesting(null)}
+                className="w-full min-h-11 inline-flex items-center justify-center text-[10px] uppercase tracking-widest text-muted-foreground"
+              >
+                Cancel — stay clocked in
+              </button>
+            </div>
+          )
         ) : isClockedIn ? (
           <div className="flex flex-col sm:flex-row items-stretch gap-3 w-full sm:w-auto">
             {openMeal ? (

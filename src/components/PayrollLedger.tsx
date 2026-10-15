@@ -147,6 +147,7 @@ function ExceptionChips({ ex }: { ex: Record<string, unknown> | null | undefined
   if (n("needs_correction") > 0) chips.push(`${n("needs_correction")} needs review`);
   if (n("meal_pending") > 0) chips.push(`${n("meal_pending")} meal ?`);
   if (n("meal_unrecorded") > 0) chips.push(`${n("meal_unrecorded")} lunch times`);
+  if (n("rest_pending") > 0) chips.push(`${n("rest_pending")} breaks ?`);
   if (ex["below_min_wage"] === true) chips.push("below min wage");
   if (chips.length === 0) return null;
   return (
@@ -438,6 +439,7 @@ export function PayrollLedger() {
         const monster = Number(pc?.monster_bonus ?? 0);
         const otPremium = Number(pc?.ot_premium_pay ?? 0);
         const mealPremium = Number(pc?.meal_premium_pay ?? 0);
+        const restPremium = Number(pc?.rest_premium_pay ?? 0);
         return {
           id: cid,
           name: profile?.display_name ?? "Unknown",
@@ -456,7 +458,9 @@ export function PayrollLedger() {
           otPremium,
           mealPremium,
           mealPremiumCount: Number(pc?.meal_premium_count ?? 0),
-          premiums: otPremium + mealPremium,
+          restPremium,
+          restPremiumCount: Number(pc?.rest_premium_count ?? 0),
+          premiums: otPremium + mealPremium + restPremium,
           exceptions: (pc?.exceptions ?? null) as Record<string, unknown> | null,
           commission: Number(pc?.commission ?? 0),
           sitBonus,
@@ -509,6 +513,8 @@ export function PayrollLedger() {
     "OT Premium Pay",
     "Meal Premium Days",
     "Meal Premium Pay",
+    "Rest Premium Days",
+    "Rest Premium Pay",
     "Total Sales Volume ($)",
     "Commission Rate",
     "Commission Earned ($)",
@@ -549,6 +555,8 @@ export function PayrollLedger() {
           Number(l.ot_premium_pay).toFixed(2),
           l.meal_premium_count,
           Number(l.meal_premium_pay).toFixed(2),
+          Number(l.rest_premium_count ?? 0),
+          Number(l.rest_premium_pay ?? 0).toFixed(2),
           "",
           "",
           Number(l.commission).toFixed(2),
@@ -583,6 +591,8 @@ export function PayrollLedger() {
         r.otPremium.toFixed(2),
         r.mealPremiumCount,
         r.mealPremium.toFixed(2),
+        r.restPremiumCount,
+        r.restPremium.toFixed(2),
         r.sale_amount.toFixed(2),
         `${(r.commRate * 100).toFixed(0)}%`,
         r.commission.toFixed(2),
@@ -611,7 +621,8 @@ export function PayrollLedger() {
           <div className="text-xs text-muted-foreground mt-1">
             Official pay engine · Clocked time only (punched lunches deducted, Sundays paid when
             worked) · CA overtime: daily 8/12, weekly 40, 7th-day, on the blended regular rate ·
-            Meal premiums auto-added · Hourly tier by points · Commission by Sale Price
+            Meal &amp; rest-break premiums auto-added · Hourly tier by points · Commission by Sale
+            Price
           </div>
           {office !== "All" && (
             <div className="mt-3 text-[10px] font-display uppercase tracking-widest text-neon">
@@ -1069,9 +1080,13 @@ export function PayrollLedger() {
                         </div>
                         {r.premiums > 0 && (
                           <div className="text-[9px] text-muted-foreground whitespace-nowrap">
-                            {r.otPremium > 0 && `OT $${r.otPremium.toFixed(0)}`}
-                            {r.otPremium > 0 && r.mealPremium > 0 && " · "}
-                            {r.mealPremium > 0 && `meal ×${r.mealPremiumCount}`}
+                            {[
+                              r.otPremium > 0 ? `OT $${r.otPremium.toFixed(0)}` : null,
+                              r.mealPremium > 0 ? `meal ×${r.mealPremiumCount}` : null,
+                              r.restPremium > 0 ? `rest ×${r.restPremiumCount}` : null,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
                           </div>
                         )}
                       </td>

@@ -15,6 +15,9 @@ const FLAG_LABEL: Record<string, string> = {
   very_long_shift: "over 12h",
   missed_meal: "worked through lunch · premium",
   unrecorded_lunch: "lunch times needed",
+  missed_second_meal: "missed 2nd meal (>10h) · premium",
+  missed_rest_break: "missed rest break · premium",
+  captain_edit: "captain edit",
 };
 
 type QueueRow = {

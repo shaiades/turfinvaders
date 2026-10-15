@@ -326,7 +326,7 @@ export function VanClockConsole({ teamId }: { teamId: string }) {
               {confirming === "end_lunch" &&
                 "Ends lunch for everyone below — they're back on the clock as of right now."}
               {confirming === "clock_out" &&
-                "Ends the shift for everyone below as of right now. Anyone still on lunch has it ended at the same moment; shifts past 5 hours with no 30-minute lunch get flagged for review."}{" "}
+                "Ends the shift for everyone below as of right now. Anyone still on lunch has it ended at the same moment. Each person confirms their own lunch and rest breaks next time they open the app — days over 5 hours with no 30-minute lunch get flagged for review."}{" "}
               Their phones update within a minute.
             </DialogDescription>
           </DialogHeader>

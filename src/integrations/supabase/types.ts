@@ -1893,6 +1893,8 @@ export type Database = {
           rank: string | null
           reg_hours: number
           regular_rate: number
+          rest_premium_count: number
+          rest_premium_pay: number
           run_id: string
           sit_bonus: number
           snapshot: Json
@@ -1917,6 +1919,8 @@ export type Database = {
           rank?: string | null
           reg_hours?: number
           regular_rate?: number
+          rest_premium_count?: number
+          rest_premium_pay?: number
           run_id: string
           sit_bonus?: number
           snapshot?: Json
@@ -1941,6 +1945,8 @@ export type Database = {
           rank?: string | null
           reg_hours?: number
           regular_rate?: number
+          rest_premium_count?: number
+          rest_premium_pay?: number
           run_id?: string
           sit_bonus?: number
           snapshot?: Json
@@ -2079,6 +2085,7 @@ export type Database = {
           log_date: string
           meal_status: string
           needs_correction: boolean
+          rest_break_status: string
           reviewed_at: string | null
           reviewed_by: string | null
           second_meal_status: string
@@ -2099,6 +2106,7 @@ export type Database = {
           log_date?: string
           meal_status?: string
           needs_correction?: boolean
+          rest_break_status?: string
           reviewed_at?: string | null
           reviewed_by?: string | null
           second_meal_status?: string
@@ -2119,6 +2127,7 @@ export type Database = {
           log_date?: string
           meal_status?: string
           needs_correction?: boolean
+          rest_break_status?: string
           reviewed_at?: string | null
           reviewed_by?: string | null
           second_meal_status?: string
@@ -2785,6 +2794,7 @@ export type Database = {
           meal_minutes: number | null
           meal_status: string | null
           needs_correction: boolean | null
+          rest_break_status: string | null
           reviewed_at: string | null
           reviewed_by: string | null
           second_meal_status: string | null
@@ -2839,6 +2849,19 @@ export type Database = {
         Args: { _week_start: string; _confirm: boolean; _note?: string | null }
         Returns: string
       }
+      attest_shift: {
+        Args: { _entry_id: string; _meal?: string | null; _rest?: string | null }
+        Returns: undefined
+      }
+      admin_set_shift_status: {
+        Args: {
+          _entry_id: string
+          _meal: string | null
+          _rest: string | null
+          _reason: string
+        }
+        Returns: undefined
+      }
       submit_day_off: {
         Args: { _user_id: string; _dates: string[]; _kind: string; _reason?: string | null }
         Returns: Json
@@ -2889,6 +2912,8 @@ export type Database = {
           rank: string
           reg_hours: number
           regular_rate: number
+          rest_premium_count: number
+          rest_premium_pay: number
           sale_price_total: number
           sales: number
           sit_bonus: number

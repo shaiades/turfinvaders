@@ -20,6 +20,9 @@ const FLAG_LABEL: Record<string, string> = {
   very_long_shift: "over 12h",
   missed_meal: "worked through lunch",
   unrecorded_lunch: "lunch times needed",
+  missed_second_meal: "missed 2nd meal (>10h)",
+  missed_rest_break: "missed rest break",
+  captain_edit: "captain edit",
 };
 
 const admin = createClient(
