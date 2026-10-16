@@ -7,16 +7,18 @@ import { useAuth } from "@/hooks/useAuth";
  * Pending Objection Dojo submissions awaiting review — the in-app companion
  * to the notify-dojo push (which only reaches devices that enabled alerts).
  * Powers the count badge on the Desk nav item so Owners/Managers see work
- * waiting even with push off. Admin tier only; everyone else gets 0 without
- * firing a query. Counts head-only and tolerates the table not existing yet
- * (migration-not-applied fallback used across the Dojo).
+ * waiting even with push off. Captains count too since Dojo v2 (they review
+ * their own van) — RLS scopes their count to their crew's rows, so the same
+ * head-only query serves both tiers. Everyone else gets 0 without firing a
+ * query. Tolerates the table not existing yet (migration-not-applied
+ * fallback used across the Dojo).
  */
 export function usePendingDojoCount(): number {
   const { realRole } = useAuth();
-  const enabled = isAdminRole(realRole);
+  const enabled = isAdminRole(realRole) || realRole === "captain";
   const { data } = useQuery({
     enabled,
-    queryKey: ["dojo_pending_count"],
+    queryKey: ["dojo_pending_count", realRole],
     refetchInterval: 60_000,
     queryFn: async () => {
       const { count, error } = await dojoTable("objection_attempts")

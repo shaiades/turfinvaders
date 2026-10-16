@@ -44,6 +44,7 @@ import { TimeClock } from "@/components/TimeClock";
 import { TimeClockReviewQueue } from "@/components/TimeClockReviewQueue";
 import { VanClockConsole } from "@/components/VanClockConsole";
 import { DayOffQueue } from "@/components/DayOffQueue";
+import { ObjectionReviewPanel } from "@/components/ObjectionReviewPanel";
 import { CaptainVanWarsCard } from "@/components/CaptainVanWarsCard";
 import { ShoutoutComposer } from "@/components/ShoutoutComposer";
 import { BountyComposer } from "@/components/BountyComposer";
@@ -601,6 +602,10 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
       {/* Crew day-off requests awaiting this captain (approve/deny with a
           note; the RPC blocks self-review). Silent when empty. */}
       <DayOffQueue teamId={teamId} />
+      {/* Dojo takes from THIS van awaiting review (owner decision 2026-10-15:
+          captains coach their own crew). RLS scopes the queue to the van;
+          the review RPC enforces same-team + no self-review server-side. */}
+      <ObjectionReviewPanel variant="captain" />
       {/* Crew time corrections — the same audited editor the office uses,
           scoped to this van (own team only, never the captain's own entries;
           the RPCs enforce both). Collapsed: edits are the exception. */}

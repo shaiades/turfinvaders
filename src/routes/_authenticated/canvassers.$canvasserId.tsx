@@ -26,6 +26,7 @@ import {
   funnelStages,
   type PinRowLite,
 } from "@/components/ConversionPanels";
+import { CoachingFlagChip, CoachingPanel } from "@/components/CoachingCard";
 import { Lock, EyeOff } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/canvassers/$canvasserId")({
@@ -280,6 +281,8 @@ function CanvasserProfile() {
             {(profileQuery.data?.display_name ?? "PLAYER").toUpperCase()}
           </h1>
           {team && <TeamBadge name={team.name} color={team.color ?? "#10b981"} />}
+          {/* 14-day coaching flag — the move, next to the name (Phase 2 §4) */}
+          <CoachingFlagChip canvasserId={canvasserId} />
           {(isManagerRole(role) || isSelf) && (
             <Link
               to="/canvassers/$canvasserId/field"
@@ -467,11 +470,20 @@ function CanvasserProfile() {
                 {pinsQuery.isPending ? (
                   <div className="text-sm text-muted-foreground">Loading pins…</div>
                 ) : pinsQuery.isError ? (
-                  <div className="text-sm text-muted-foreground">Couldn't load pins for this range.</div>
+                  <div className="text-sm text-muted-foreground">
+                    Couldn't load pins for this range.
+                  </div>
                 ) : (
                   <DoorResultsGrid pins={pinsQuery.data ?? []} />
                 )}
               </ArcadePanel>
+              {/* Coaching flag detail + ride-along pairing + note log.
+                  canReadLogs ⇒ self, captain, or office; only the latter two
+                  write (RLS re-checks van membership server-side). */}
+              <CoachingPanel
+                canvasserId={canvasserId}
+                canWrite={!isSelf && (isAdminRole(role) || role === "captain")}
+              />
             </>
           ) : !canReadLogs ? (
             <ArcadePanel title="Conversion Funnel">

@@ -6,6 +6,10 @@ import { LearnPanel } from "@/components/LearnPanel";
 // now — the old redirect into Mission's Learn tab is gone along with that tab.
 export const Route = createFileRoute("/_authenticated/learn")({
   head: () => ({ meta: [{ title: "Learn — Turf Invaders" }] }),
+  // ?drill=<objection label> deep-links the Dojo card for that objection —
+  // the Active Run rebuttal card's "Drill this" (Phase 2 §2).
+  validateSearch: (s: Record<string, unknown>): { drill?: string } =>
+    typeof s.drill === "string" && s.drill ? { drill: s.drill } : {},
   component: LearnPage,
 });
 

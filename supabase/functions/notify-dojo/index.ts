@@ -105,21 +105,67 @@ Deno.serve(async (req) => {
       .from("user_roles")
       .select("user_id")
       .in("role", ["owner", "office_staff"]);
-    const targets = [...new Set((roleRows ?? []).map((r: { user_id: string }) => r.user_id))]
-      .filter((id) => id !== canvasser_id);
-    if (targets.length === 0) return json({ sent: 0, pruned: 0, failed: 0, matched: 0 });
+    // Dojo v2 (2026-10-15): the submitter's own captain reviews their van's
+    // takes, so they get the submission push too — same team, captain role.
+    const captainIds: string[] = [];
+    try {
+      const { data: submitter } = await admin
+        .from("profiles")
+        .select("team_id")
+        .eq("id", canvasser_id)
+        .maybeSingle();
+      if (submitter?.team_id) {
+        const { data: captains } = await admin
+          .from("user_roles")
+          .select("user_id")
+          .eq("role", "captain");
+        const ids = (captains ?? []).map((r: { user_id: string }) => r.user_id);
+        if (ids.length > 0) {
+          const { data: captainProfiles } = await admin
+            .from("profiles")
+            .select("id")
+            .eq("team_id", submitter.team_id)
+            .in("id", ids);
+          for (const p of captainProfiles ?? []) captainIds.push(p.id as string);
+        }
+      }
+    } catch (_) {
+      /* captain lookup is additive — never block the admin push */
+    }
+    const adminTargets = [
+      ...new Set((roleRows ?? []).map((r: { user_id: string }) => r.user_id)),
+    ].filter((id) => id !== canvasser_id);
+    // Captains land on their dashboard queue (the Desk route bounces them).
+    const captainTargets = [...new Set(captainIds)].filter(
+      (id) => id !== canvasser_id && !adminTargets.includes(id),
+    );
+    const matched = adminTargets.length + captainTargets.length;
+    if (matched === 0) return json({ sent: 0, pruned: 0, failed: 0, matched: 0 });
 
-    const { data: subs } = await admin
-      .from("push_subscriptions")
-      .select("endpoint, p256dh, auth")
-      .in("user_id", targets);
-    const result = await sendToSubs(subs ?? [], {
+    const payloadFor = (url: string) => ({
       title: "🥋 Dojo submission — review needed",
       body: `${name} took on ${title}`,
-      url: "/confirmation-desk",
+      url,
       tag: `dojo-sub-${attempt_id}`, // one attempt collapses to one notification
     });
-    return json({ ...result, matched: targets.length });
+    let sent = 0,
+      pruned = 0,
+      failed = 0;
+    for (const [targets, url] of [
+      [adminTargets, "/confirmation-desk"],
+      [captainTargets, "/dashboard"],
+    ] as const) {
+      if (targets.length === 0) continue;
+      const { data: subs } = await admin
+        .from("push_subscriptions")
+        .select("endpoint, p256dh, auth")
+        .in("user_id", targets);
+      const r = await sendToSubs(subs ?? [], payloadFor(url));
+      sent += r.sent;
+      pruned += r.pruned;
+      failed += r.failed;
+    }
+    return json({ sent, pruned, failed, matched });
   }
 
   // Outcome → only the submitter's own devices.

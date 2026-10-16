@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { uploadResumable } from "@/integrations/supabase/resumable-upload";
 import { useAuth } from "@/hooks/useAuth";
+import { rebuttalFor } from "@/data/door-script";
+import { isAdminRole } from "@/lib/roles";
 import { ArcadePanel } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,19 +15,23 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Eye, Loader2, Send, Square, Video } from "lucide-react";
+import { Clapperboard, Eye, Loader2, Play, Send, Square, Video } from "lucide-react";
 
 /**
- * Objection Dojo (owner request 2026-08-14): record yourself handling the
- * classic objections; a Manager or Owner approves before an attempt goes
- * live for the whole company to watch. Recordings live in the PRIVATE
- * objection-attempts storage bucket (playback via short-lived signed URLs);
- * rows in objection_attempts carry the pending → approved | denied state.
+ * Objection Dojo (owner request 2026-08-14; v2 in the 2026-10-15 conversion
+ * audit): drill the SAME six objections canvassers tag at the door
+ * (src/lib/objections.ts). Each card shows the Empathy → Clarification →
+ * Realignment comeback (copy from src/data/door-script.ts via door_key —
+ * never duplicated here), a slot for Shai's model take (coach-videos
+ * bucket), and the recorder. A Manager, Owner, or the player's own Captain
+ * approves before an attempt goes live; an approved drill earns 1 arcade
+ * point (cap 3/week — stamped server-side by review_objection_attempt) and
+ * hits the Street Feed. Recordings live in the PRIVATE objection-attempts
+ * bucket (playback via short-lived signed URLs).
  *
- * The objections/objection_attempts tables arrive via the hand-applied
- * migration 20260815010000_objection_dojo.sql — until the owner runs it,
- * the queries fail and this section renders a quiet "not unlocked yet"
- * card instead of erroring the page.
+ * The tables arrive via hand-applied migrations (20260815010000 +
+ * 20261028120000) — until the owner runs them, the queries fail and this
+ * section renders a quiet "not unlocked yet" card instead of erroring.
  */
 
 export type Objection = {
@@ -34,6 +40,10 @@ export type Objection = {
   prompt: string | null;
   sort: number;
   active: boolean;
+  /** DOOR_OBJECTIONS label this card drills (null on legacy/custom rows). */
+  door_key?: string | null;
+  /** Shai's model take in the coach-videos bucket. */
+  model_video_path?: string | null;
 };
 
 export type ObjectionAttempt = {
@@ -47,6 +57,7 @@ export type ObjectionAttempt = {
 };
 
 const BUCKET = "objection-attempts";
+const COACH_BUCKET = "coach-videos";
 const MAX_SECONDS = 90;
 // Max uploaded recording size. 50MB is the Free-plan Storage ceiling; keep in
 // sync with the objection-attempts bucket file_size_limit (migration
@@ -62,6 +73,12 @@ const REC_VIDEO_BPS = 3_000_000;
 // applied and types are regenerated — one untyped escape hatch, cast on read.
 export const dojoTable = (name: string) =>
   (supabase as unknown as { from: (t: string) => ReturnType<typeof supabase.from> }).from(name);
+
+// Fully untyped builder (useBounties' rawTable pattern) for writes whose
+// columns postdate the generated types — dojoTable's cast narrows .eq
+// filters to `never` there.
+const rawTable = (name: string) =>
+  (supabase as unknown as import("@supabase/supabase-js").SupabaseClient).from(name);
 
 export function useObjections() {
   return useQuery({
@@ -79,8 +96,9 @@ export function useObjections() {
   });
 }
 
-export function ObjectionDojo() {
-  const { user } = useAuth();
+export function ObjectionDojo({ drillKey }: { drillKey?: string }) {
+  const { user, realRole } = useAuth();
+  const isAdmin = isAdminRole(realRole);
   const objections = useObjections();
 
   // RLS scopes this to: approved rows + the caller's own (+ everything for
@@ -101,6 +119,35 @@ export function ObjectionDojo() {
   const [recordFor, setRecordFor] = useState<Objection | null>(null);
   const [watchFor, setWatchFor] = useState<Objection | null>(null);
   const [mineFor, setMineFor] = useState<Objection | null>(null);
+  // Shai's model take, playing inline on the card.
+  const [modelPlaying, setModelPlaying] = useState<{ id: string; url: string } | null>(null);
+  // Owner/office: record or replace the model take for a card.
+  const [recordModelFor, setRecordModelFor] = useState<Objection | null>(null);
+
+  // "Drill this" deep link from the Active Run rebuttal card: scroll the
+  // matching objection into view and ring it for a beat.
+  const drillRef = useRef<HTMLDivElement | null>(null);
+  const [drillFlash, setDrillFlash] = useState(!!drillKey);
+  useEffect(() => {
+    if (!drillKey || !objections.isSuccess) return;
+    drillRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setDrillFlash(true);
+    const t = setTimeout(() => setDrillFlash(false), 2600);
+    return () => clearTimeout(t);
+  }, [drillKey, objections.isSuccess]);
+
+  async function playModel(o: Objection) {
+    if (!o.model_video_path) return;
+    try {
+      const { data, error } = await supabase.storage
+        .from(COACH_BUCKET)
+        .createSignedUrl(o.model_video_path, 3600);
+      if (error || !data?.signedUrl) throw error ?? new Error("Couldn't open the video");
+      setModelPlaying({ id: o.id, url: data.signedUrl });
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  }
 
   if (objections.isError) {
     return (
@@ -126,8 +173,9 @@ export function ObjectionDojo() {
           Objection Dojo
         </h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          Record yourself handling these objections. Watch how others crush it. Submissions go live
-          once a Manager or Owner approves them.
+          The six objections you actually hear at the door. Drill the comeback, record your take,
+          watch how others crush it. Your Captain, a Manager, or the Owner approves — an approved
+          drill is +1 arcade point (max 3 a week) and hits the Street Feed.
         </p>
       </div>
 
@@ -142,22 +190,68 @@ export function ObjectionDojo() {
             const minePending = mine.filter((a) => a.status === "pending").length;
             const mineApproved = mine.filter((a) => a.status === "approved").length;
             const mineDenied = mine.filter((a) => a.status === "denied").length;
+            const rebuttal = rebuttalFor(o.door_key ?? o.title);
+            const isDrill = !!drillKey && (o.door_key ?? o.title) === drillKey;
             return (
               <div
                 key={o.id}
-                className="relative overflow-hidden rounded-lg border border-[color-mix(in_oklab,var(--accent)_35%,var(--border))] bg-[color-mix(in_oklab,var(--accent)_5%,var(--surface))] p-5"
+                ref={isDrill ? drillRef : undefined}
+                className={`relative overflow-hidden rounded-lg border bg-[color-mix(in_oklab,var(--accent)_5%,var(--surface))] p-5 transition-shadow ${
+                  isDrill && drillFlash
+                    ? "border-neon shadow-[0_0_24px_-6px_var(--neon)]"
+                    : "border-[color-mix(in_oklab,var(--accent)_35%,var(--border))]"
+                }`}
               >
                 <div className="flex items-start justify-between gap-3 flex-wrap">
                   <div className="min-w-0">
-                    <div className="font-display text-base text-foreground">{o.title}</div>
-                    {o.prompt && <p className="mt-1 text-xs text-muted-foreground">{o.prompt}</p>}
+                    <div className="font-display text-base text-foreground">“{o.title}”</div>
+                    {/* The comeback — Empathy → Clarification → Realignment,
+                        straight from src/data/door-script.ts */}
+                    {rebuttal ? (
+                      <div className="mt-2 space-y-1 text-sm leading-snug">
+                        <p>
+                          <span className="font-display text-[9px] uppercase tracking-widest text-muted-foreground">
+                            Empathy ·{" "}
+                          </span>
+                          {rebuttal.empathy}
+                        </p>
+                        <p>
+                          <span className="font-display text-[9px] uppercase tracking-widest text-muted-foreground">
+                            Clarify ·{" "}
+                          </span>
+                          {rebuttal.clarification}
+                        </p>
+                        <p className="text-neon">
+                          <span className="font-display text-[9px] uppercase tracking-widest text-muted-foreground">
+                            Realign ·{" "}
+                          </span>
+                          {rebuttal.realignment}
+                        </p>
+                      </div>
+                    ) : (
+                      o.prompt && <p className="mt-1 text-xs text-muted-foreground">{o.prompt}</p>
+                    )}
                   </div>
                   <span className="shrink-0 text-[10px] font-display uppercase tracking-widest text-muted-foreground border border-border rounded-full px-2.5 py-1">
                     <Eye className="inline w-3 h-3 mr-1 -mt-0.5" />
                     {approved.length} live
                   </span>
                 </div>
+                {modelPlaying?.id === o.id && (
+                  <video
+                    src={modelPlaying.url}
+                    controls
+                    autoPlay
+                    playsInline
+                    className="mt-3 w-full rounded-lg border border-border bg-black aspect-video object-contain"
+                  />
+                )}
                 <div className="mt-4 flex items-center gap-2 flex-wrap">
+                  {o.model_video_path && (
+                    <Button variant="outline" onClick={() => playModel(o)}>
+                      <Play className="w-3.5 h-3.5 mr-1.5" /> Shai's take
+                    </Button>
+                  )}
                   <Button onClick={() => setRecordFor(o)}>
                     <Video className="w-3.5 h-3.5 mr-1.5" /> Record Attempt
                   </Button>
@@ -168,6 +262,12 @@ export function ObjectionDojo() {
                   >
                     <Eye className="w-3.5 h-3.5 mr-1.5" /> Watch
                   </Button>
+                  {isAdmin && (
+                    <Button variant="ghost" onClick={() => setRecordModelFor(o)}>
+                      <Clapperboard className="w-3.5 h-3.5 mr-1.5" />
+                      {o.model_video_path ? "Redo model take" : "Add model take"}
+                    </Button>
+                  )}
                   {mine.length > 0 && (
                     <button
                       type="button"
@@ -198,6 +298,14 @@ export function ObjectionDojo() {
           objection={recordFor}
           userId={user.id}
           onClose={() => setRecordFor(null)}
+        />
+      )}
+      {recordModelFor && user && (
+        <RecordAttemptDialog
+          objection={recordModelFor}
+          userId={user.id}
+          mode="model"
+          onClose={() => setRecordModelFor(null)}
         />
       )}
       {watchFor && (
@@ -232,10 +340,15 @@ function pickMimeType(): { mime: string; ext: string } {
 function RecordAttemptDialog({
   objection,
   userId,
+  mode = "attempt",
   onClose,
 }: {
   objection: Objection;
   userId: string;
+  /** "attempt" = a player's take for review; "model" = Shai's reference take
+   *  (owner/office only — storage RLS enforces), saved straight onto the
+   *  objection card, no review. */
+  mode?: "attempt" | "model";
   onClose: () => void;
 }) {
   const qc = useQueryClient();
@@ -315,10 +428,27 @@ function RecordAttemptDialog({
       if (blob.size > MAX_ATTEMPT_BYTES) {
         throw new Error(`Recording is too large — keep it under ${MAX_ATTEMPT_MB}MB.`);
       }
-      const path = `${userId}/${crypto.randomUUID()}.${ext}`;
       // Resumable upload — same path as proof videos; survives a dropped
       // connection mid-upload instead of restarting from zero.
       setUploadPct(0);
+      if (mode === "model") {
+        // Timestamped path so a redo never fights the old file's cache; the
+        // pointer on the objection row decides which one plays.
+        const path = `models/${objection.id}-${Date.now()}.${ext}`;
+        await uploadResumable({
+          bucket: COACH_BUCKET,
+          path,
+          file: blob,
+          contentType: blob.type || "video/webm",
+          onProgress: setUploadPct,
+        });
+        const { error } = await rawTable("objections")
+          .update({ model_video_path: path })
+          .eq("id", objection.id);
+        if (error) throw error;
+        return;
+      }
+      const path = `${userId}/${crypto.randomUUID()}.${ext}`;
       await uploadResumable({
         bucket: BUCKET,
         path,
@@ -334,8 +464,13 @@ function RecordAttemptDialog({
       if (error) throw error;
     },
     onSuccess: () => {
-      toast.success("Attempt submitted — a Manager or Owner will review it");
-      qc.invalidateQueries({ queryKey: ["objection_attempts"] });
+      if (mode === "model") {
+        toast.success("Model take saved — it's live on the card");
+        qc.invalidateQueries({ queryKey: ["objections"] });
+      } else {
+        toast.success("Attempt submitted — your Captain, a Manager, or the Owner will review it");
+        qc.invalidateQueries({ queryKey: ["objection_attempts"] });
+      }
       onClose();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -347,10 +482,13 @@ function RecordAttemptDialog({
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle className="font-display uppercase tracking-widest text-sm">
-            Record Attempt · {objection.title}
+            {mode === "model" ? "Model Take" : "Record Attempt"} · {objection.title}
           </DialogTitle>
           <DialogDescription>
-            {objection.prompt ?? "Show how you'd handle it at the door."} Max {MAX_SECONDS} seconds.
+            {mode === "model"
+              ? "The reference take the whole field studies on this card."
+              : (objection.prompt ?? "Show how you'd handle it at the door.")}{" "}
+            Max {MAX_SECONDS} seconds.
           </DialogDescription>
         </DialogHeader>
 
@@ -395,7 +533,9 @@ function RecordAttemptDialog({
                   ? uploadPct === null
                     ? "Uploading…"
                     : `Uploading… ${uploadPct}%`
-                  : "Submit for Review"}
+                  : mode === "model"
+                    ? "Save Model Take"
+                    : "Submit for Review"}
               </Button>
             </>
           )}

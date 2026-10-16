@@ -26,6 +26,8 @@ import type { MapDataStatus } from "@/lib/map-status";
 import { PinActionSheet } from "@/components/PinActionSheet";
 import { HouseResultSheet } from "@/components/HouseResultSheet";
 import { FieldStandingsSheet } from "@/components/FieldStandingsSheet";
+import { DoorScriptSheet } from "@/components/DoorScriptSheet";
+import { RebuttalCard } from "@/components/RebuttalCard";
 import { prefetchTurfHouses, type OsmHouse } from "@/components/HouseBubbles";
 import { ArcadePanel } from "@/components/arcade";
 import { toast } from "sonner";
@@ -39,6 +41,7 @@ import {
   ThumbsDown,
   KeyRound,
   Clock3,
+  ScrollText,
   Trophy,
   Users,
   Zap,
@@ -205,6 +208,11 @@ export function ActiveRun({
   const [leadAddress, setLeadAddress] = useState<string | null>(null);
   const [houseTarget, setHouseTarget] = useState<OsmHouse | null>(null);
   const [standingsOpen, setStandingsOpen] = useState(false);
+  // The door script, one tap from the map (Phase 2 §1).
+  const [scriptOpen, setScriptOpen] = useState(false);
+  // 3-second rebuttal card after a tagged objection (Phase 2 §2). seq bumps
+  // per showing so a repeat of the same objection re-arms the timer.
+  const [rebuttal, setRebuttal] = useState<{ seq: number; objection: string } | null>(null);
 
   // Piggy bank: projected dollars per knock. ?piggy_demo=1 fakes knocks
   // locally and never touches real state; parsed after mount because this
@@ -356,9 +364,7 @@ export function ActiveRun({
   // weak cellular. Only the settled "no turf assigned" state keeps its
   // panel — that's product truth with its own copy, not a network moment.
   const mapGate: "empty" | "ready" =
-    !isCaptain && turfsQuery.isSuccess && (turfsQuery.data ?? []).length === 0
-      ? "empty"
-      : "ready";
+    !isCaptain && turfsQuery.isSuccess && (turfsQuery.data ?? []).length === 0 ? "empty" : "ready";
   const turfDataStatus: MapDataStatus = {
     // isPending (first load, no cached rows) — a background refetch never
     // flashes the pill.
@@ -547,6 +553,29 @@ export function ActiveRun({
                     <Trophy className="h-5 w-5" />
                   </button>
 
+                  {/* The Script — Shai's door script, one tap, stacked above
+                      the trophy on the left rail (Phase 2 §1) */}
+                  <button
+                    type="button"
+                    data-tour="field-script"
+                    aria-label="Open the door script"
+                    onClick={() => setScriptOpen(true)}
+                    className="absolute bottom-[7.5rem] left-3 z-[1000] flex h-11 w-11 items-center justify-center rounded-full border border-neon/60 bg-surface/90 backdrop-blur text-neon"
+                  >
+                    <ScrollText className="h-5 w-5" />
+                  </button>
+
+                  {/* Rebuttal flash after a tagged objection — reads on the
+                      walk to the next door, survives map fullscreen */}
+                  {rebuttal && (
+                    <RebuttalCard
+                      key={rebuttal.seq}
+                      seq={rebuttal.seq}
+                      objection={rebuttal.objection}
+                      onDone={() => setRebuttal(null)}
+                    />
+                  )}
+
                   {/* Armed-result switcher pinned to the map — the ONE picker
                     (the old page's duplicate grid is gone with the merge) */}
                   <div
@@ -701,6 +730,7 @@ export function ActiveRun({
         objectionsEnabled={objectionsEnabled}
         onDrop={(h, pin_type, objection) => {
           pins.guardedMapDrop({ lat: h.lat, lng: h.lng }, pin_type, objection);
+          if (objection) setRebuttal((r) => ({ seq: (r?.seq ?? 0) + 1, objection }));
           // A lead IS the Monday form — the pin marks the house, the form
           // submits the lead (one flow, owner directive 2026-09-10). The
           // house's address rides along (header + form prefill); the OSM
@@ -712,6 +742,7 @@ export function ActiveRun({
         }}
         onSwitch={(pinId, pin_type, objection) => {
           pins.updatePin.mutate({ id: pinId, pin_type, objection });
+          if (objection) setRebuttal((r) => ({ seq: (r?.seq ?? 0) + 1, objection }));
           // Switching a result TO lead is submitting a lead — same one flow
           // as the tile's drop path above; without this the switch minted a
           // lead pin with no Monday lead behind it.
@@ -724,6 +755,9 @@ export function ActiveRun({
 
       {/* SALE / DK / PTT / CL% standings + Stats Key */}
       <FieldStandingsSheet open={standingsOpen} onOpenChange={setStandingsOpen} />
+
+      {/* Shai's door script — 6-step stepper (src/data/door-script.ts) */}
+      <DoorScriptSheet open={scriptOpen} onOpenChange={setScriptOpen} />
 
       {/* Pin corrections: tap a pin → switch result / delete (same-day only) */}
       <PinActionSheet

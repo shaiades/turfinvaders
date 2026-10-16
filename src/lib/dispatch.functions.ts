@@ -139,6 +139,9 @@ export async function computeDispatchProduction(data: DispatchWindow) {
 
     const points: Record<string, number> = {};
     const results: Record<string, DispatchResults> = {};
+    // Days with door work in the window (distinct log_date with doors > 0)
+    // — the denominator for the coaching flag's doors/day (Phase 2 §4).
+    const activeDaySets: Record<string, Set<string>> = {};
     // Van-at-the-time attribution for people no longer on a roster: the
     // latest daily_logs.team_id snapshot in the log window per canvasser
     // (leads snapshot fills in below for confirm-only weeks). The board
@@ -179,6 +182,9 @@ export async function computeDispatchProduction(data: DispatchWindow) {
         snapshotDate[l.canvasser_id] = l.log_date;
       }
       const office = l.office_location ?? DEFAULT_OFFICE;
+      if ((l.doors_knocked ?? 0) > 0 && l.log_date) {
+        (activeDaySets[l.canvasser_id] ??= new Set()).add(l.log_date);
+      }
       const pts = weeklyPoints(l.demos_sits ?? 0, l.sales ?? 0);
       if (pts > 0) {
         points[l.canvasser_id] = (points[l.canvasser_id] ?? 0) + pts;
@@ -359,6 +365,41 @@ export async function computeDispatchProduction(data: DispatchWindow) {
       }
     }
 
+    // Dojo points (Phase 2 §3): approved drills stamped with points by
+    // review_objection_attempt (1/drill, 3/week cap enforced at review time)
+    // — the arcade ladder adds them to pts; pay never sees them. FAIL-SOFT:
+    // before the Dojo v2 migration lands, the column doesn't exist and the
+    // board must not care.
+    const dojoPts: Record<string, number> = {};
+    try {
+      const attemptRows = await pageAll<{
+        id: string;
+        canvasser_id: string | null;
+        points_awarded: number | null;
+      }>(
+        (from, to) =>
+          supabaseAdmin
+            .from("objection_attempts" as never)
+            .select("id, canvasser_id, points_awarded")
+            .eq("status", "approved")
+            .gt("points_awarded", 0)
+            .gte("reviewed_at", data.vol_start)
+            .lt("reviewed_at", data.vol_end)
+            .order("id", { ascending: true })
+            .range(from, to) as never,
+        (r) => String(r.id),
+      );
+      for (const a of attemptRows) {
+        if (!a.canvasser_id) continue;
+        dojoPts[a.canvasser_id] = (dojoPts[a.canvasser_id] ?? 0) + Number(a.points_awarded ?? 0);
+      }
+    } catch {
+      /* the Dojo bonus layer must never break the board */
+    }
+
+    const activeDays: Record<string, number> = {};
+    for (const [cid, days] of Object.entries(activeDaySets)) activeDays[cid] = days.size;
+
     return {
       points,
       volume,
@@ -374,6 +415,8 @@ export async function computeDispatchProduction(data: DispatchWindow) {
       funnelSits,
       funnelLeads,
       bountyPts,
+      dojoPts,
+      activeDays,
     };
   }
 }
