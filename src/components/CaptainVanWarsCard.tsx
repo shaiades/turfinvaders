@@ -46,10 +46,10 @@ export function CaptainVanWarsCard({ teamId }: { teamId: string | null }) {
         <div className="flex items-center gap-5">
           <div className="text-right">
             <div style={{ fontFamily: GTA, fontSize: 28, lineHeight: 1, color }}>
-              {Math.round(crew.war)}
+              {crew.war.toFixed(1)}
             </div>
             <div className="font-display text-[8px] uppercase tracking-[0.2em] text-muted-foreground">
-              War / head
+              Leads / knocker
             </div>
           </div>
           <div className="text-right">
@@ -62,7 +62,7 @@ export function CaptainVanWarsCard({ teamId }: { teamId: string | null }) {
                 <div
                   style={{ fontFamily: GTA, fontSize: 20, lineHeight: 1, color: "var(--warning)" }}
                 >
-                  {Math.round(gap)}
+                  {gap.toFixed(1)}
                 </div>
                 <div className="font-display text-[8px] uppercase tracking-[0.2em] text-muted-foreground">
                   to #1
@@ -74,8 +74,8 @@ export function CaptainVanWarsCard({ teamId }: { teamId: string | null }) {
       </div>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-3">
         <span className="font-display text-[10px] uppercase tracking-wide text-muted-foreground">
-          {crew.pts} pts · {crew.knockers} {crew.knockers === 1 ? "knocker" : "knockers"} ·{" "}
-          <span style={{ color: CASH }}>{crew.vol > 0 ? fmtCash(crew.vol) : "desk"}</span>
+          {crew.lds} lds · {crew.knockers} {crew.knockers === 1 ? "knocker" : "knockers"} ·{" "}
+          <span style={{ color: CASH }}>{fmtCash(crew.vol)}</span>
         </span>
         <Link
           to="/leaderboard"

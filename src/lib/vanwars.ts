@@ -1,69 +1,39 @@
-// Van Wars scoring — the pure shaping for the weekly street race. A van's WAR
-// SCORE is points per active knocker by default (config-switchable to a plain
-// total), so a small crew can out-run a big one. Points mirror the pay engine's
-// weeklyPoints (a pitch-miss sit = 1, a sale = 2); the owner can retune the
-// per-sit / per-sale weights and the per-head/total mode in the vanwars_config
-// table without a deploy. Ties break on sit rate. Pure + unit-tested
+// Van Wars scoring — the pure shaping for the weekly street race (reworked in
+// the 2026-10-15 conversion audit: the race now pays the behavior we want
+// more of). A van's WAR SCORE is LEADS SET per ACTIVE KNOCKER — someone who
+// logged doors that week — with total leads as the tiebreak, so a small crew
+// that converts out-runs a big crew that coasts. The Confirmation/office crew
+// and the no-van "Unassigned" bucket never race, and a crew needs
+// MIN_CREW_TO_RANK active knockers to hold a rank (smaller crews still show,
+// greyed, so nobody's work disappears). Pure + unit-tested
 // (scripts/verify-vanwars.ts, `npm run verify:vanwars`).
 
 import { sitRate, type SitRate } from "@/lib/canvasserPay";
 
-export type VanWarsMode = "per_head" | "total";
+/** Crews below this many active knockers show but can't rank or win. */
+export const MIN_CREW_TO_RANK = 3;
 
-export type VanWarsConfig = {
-  mode: VanWarsMode;
-  /** Points for a pitch-miss sit (default 1). */
-  sitWeight: number;
-  /** Points a sale is worth in total, inclusive of its sit (default 2). */
-  saleWeight: number;
-};
+/** A knocker is ACTIVE in the race when they logged door work in range. */
+export const isActiveKnocker = (drs: number): boolean => drs > 0;
 
-export const DEFAULT_VANWARS_CONFIG: VanWarsConfig = {
-  mode: "per_head",
-  sitWeight: 1,
-  saleWeight: 2,
-};
-
-/**
- * War points for one knocker from their range points + sales. `pts` is
- * weeklyPoints = demos_sits + sales (demos_sits already counts the sold sit, so
- * a sale is sit+sale = 2), and `sal` is the sale count. Therefore non-sale sits
- * = pts − 2·sal, and war = sitWeight·(pts − 2·sal) + saleWeight·sal. With the
- * (1, 2) defaults this is exactly `pts`, so "same as now" holds until the owner
- * retunes the weights. pts − 2·sal can never go negative (every sale is a sit,
- * so demos_sits ≥ sales ⇒ pts ≥ 2·sal).
- */
-export function warPointsFor(
-  pts: number,
-  sal: number,
-  cfg: VanWarsConfig = DEFAULT_VANWARS_CONFIG,
-): number {
-  const nonSaleSits = Math.max(0, pts - 2 * sal);
-  return cfg.sitWeight * nonSaleSits + cfg.saleWeight * sal;
-}
-
-/** Coerce a raw vanwars_config row (any/missing shape) to a safe config. */
-export function resolveVanWarsConfig(row: unknown): VanWarsConfig {
-  const r = (row ?? {}) as Record<string, unknown>;
-  const mode: VanWarsMode = r.mode === "total" ? "total" : "per_head";
-  const sw = Number(r.sit_weight);
-  const lw = Number(r.sale_weight);
-  return {
-    mode,
-    sitWeight: Number.isFinite(sw) && sw > 0 ? sw : 1,
-    saleWeight: Number.isFinite(lw) && lw > 0 ? lw : 2,
-  };
-}
+/** Crews that never race: the office/Confirmation desk. */
+export const isDeskCrew = (teamName: string | null | undefined): boolean =>
+  /confirm/i.test(teamName ?? "");
 
 /** One knocker's contribution to their van's war score. */
 export type VanWarRowInput = {
-  /** Team identity — the grouping key. */
+  /** Team identity — the grouping key. null = no van ("Unassigned"): excluded. */
   teamId: string | null;
   /** Crew display name: the captain's name, falling back to the team name. */
   label: string;
+  /** The raw team name — the desk-crew (Confirmation) exclusion keys on it. */
+  teamName: string | null;
   teamColor: string | null;
+  /** Leads SET in range (generation-day axis) — the scoring metric. */
+  ld: number;
+  /** Doors knocked in range — the active-knocker gate. */
+  drs: number;
   pts: number;
-  sal: number;
   vol: number;
   /** Funnel sits (closer-outcome) and the leads they were set over. */
   sitSits: number;
@@ -75,35 +45,39 @@ export type VanWarStanding = {
   teamId: string | null;
   name: string;
   color: string;
-  /** The ranking score: per-head (default) or total war points. */
+  /** The ranking score: leads set per active knocker. */
   war: number;
-  /** Total war points across the crew (always the sum, for display). */
-  warTotal: number;
-  /** Active knockers on the crew in range (the per-head divisor). */
+  /** Total leads set across the crew (the tiebreak + the display total). */
+  lds: number;
+  /** ACTIVE knockers (logged doors in range) — the per-head divisor. */
   knockers: number;
-  /** Total weekly points. */
+  /** False while the crew is under MIN_CREW_TO_RANK active knockers — shown
+   *  but unranked, and never crowned. */
+  ranked: boolean;
+  /** Total weekly points (display only — the race scores leads). */
   pts: number;
   /** Credited sale volume, net of cancels. */
   vol: number;
-  /** Crew funnel sit rate + grade (the tiebreak + the badge). */
+  /** Crew funnel sit rate + grade (the health badge). */
   sit: SitRate;
 };
 
 /**
- * Roll knocker rows up into ranked crew standings for the week's race. War
- * score per the config mode; ties broken by sit rate, then total points, then
- * dollars. Every row that reaches here is an active knocker (the ladder only
- * emits rows with production), so `knockers` is the row count per crew.
+ * Roll knocker rows up into ranked crew standings for the week's race.
+ * War = leads set ÷ active knockers; ties break on total leads, then funnel
+ * sit rate, then points, then dollars. Unassigned (no team) and the
+ * Confirmation desk are dropped before grouping; crews under MIN_CREW_TO_RANK
+ * active knockers sort after every ranked crew. Leads from a crew's inactive
+ * members (no doors logged) still count toward the crew total — only the
+ * divisor is active-gated, so parking riders on the bench can't juice a
+ * per-head score.
  */
-export function buildVanWarStandings(
-  rows: readonly VanWarRowInput[],
-  cfg: VanWarsConfig = DEFAULT_VANWARS_CONFIG,
-): VanWarStanding[] {
+export function buildVanWarStandings(rows: readonly VanWarRowInput[]): VanWarStanding[] {
   type Acc = {
     teamId: string | null;
     name: string;
     color: string;
-    warTotal: number;
+    lds: number;
     knockers: number;
     pts: number;
     vol: number;
@@ -112,20 +86,22 @@ export function buildVanWarStandings(
   };
   const map = new Map<string, Acc>();
   for (const r of rows) {
-    const key = r.teamId ?? r.label;
+    if (r.teamId === null) continue; // no van — the Unassigned bucket never races
+    if (isDeskCrew(r.teamName)) continue; // Confirmation/office desk never races
+    const key = r.teamId;
     const v: Acc = map.get(key) ?? {
       teamId: r.teamId,
       name: r.label,
       color: r.teamColor ?? "#8a8f99",
-      warTotal: 0,
+      lds: 0,
       knockers: 0,
       pts: 0,
       vol: 0,
       sits: 0,
       leads: 0,
     };
-    v.warTotal += warPointsFor(r.pts, r.sal, cfg);
-    v.knockers += 1;
+    v.lds += r.ld;
+    if (isActiveKnocker(r.drs)) v.knockers += 1;
     v.pts += r.pts;
     v.vol += r.vol;
     v.sits += r.sitSits;
@@ -137,15 +113,21 @@ export function buildVanWarStandings(
       teamId: v.teamId,
       name: v.name,
       color: v.color,
-      war: cfg.mode === "per_head" ? (v.knockers > 0 ? v.warTotal / v.knockers : 0) : v.warTotal,
-      warTotal: v.warTotal,
+      war: v.knockers > 0 ? v.lds / v.knockers : 0,
+      lds: v.lds,
       knockers: v.knockers,
+      ranked: v.knockers >= MIN_CREW_TO_RANK,
       pts: v.pts,
       vol: v.vol,
       sit: sitRate(v.sits, v.leads),
     }))
     .sort(
       (a, b) =>
-        b.war - a.war || (b.sit.rate ?? 0) - (a.sit.rate ?? 0) || b.pts - a.pts || b.vol - a.vol,
+        Number(b.ranked) - Number(a.ranked) ||
+        b.war - a.war ||
+        b.lds - a.lds ||
+        (b.sit.rate ?? 0) - (a.sit.rate ?? 0) ||
+        b.pts - a.pts ||
+        b.vol - a.vol,
     );
 }

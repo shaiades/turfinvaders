@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { ArcadeCard, ArcadeSkeleton } from "@/components/arcade";
 import { RepAvatar } from "@/components/RepAvatar";
-import { useRepCartoons, cartoonFor, type RepCartoon } from "@/hooks/useRepCartoons";
+import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
 import { BossMeter } from "@/components/BossMeter";
 import { VanWarsRace } from "@/components/VanWarsRace";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
@@ -11,10 +11,9 @@ import { captureMorningRank } from "@/hooks/useWrapData";
 import { haptic } from "@/lib/arcade-fx";
 import { BOSS_HP } from "@/lib/canvasserPay";
 
-/** No fighter art on file → the leaderboard shows a grey "Photo needed"
- *  silhouette (owner 2026-10-06). A still-generating cartoon reads the same for
- *  the brief window before it lands — acceptable; the nudge is gentle. */
-const noCartoonArt = (c: RepCartoon | undefined): boolean => !(c?.portrait || c?.full);
+/** What the board ranks (and leads each row) with: points, the Month "Bonus
+ *  Race" $, or Today's leads-set count. */
+type Metric = "pts" | "vol" | "lds";
 
 /**
  * The canvasser-facing arcade high-score hall: a top-3 PODIUM over a ranked
@@ -56,10 +55,15 @@ export function CanvasserLeaderboard() {
   // Race" (the old Bonus tab, folded in 2026-10-05). Harmless off Month.
   const [monthMode, setMonthMode] = useState<"pts" | "bonus">("pts");
   const moneyMode = tab === "month" && monthMode === "bonus";
+  // Today is the setter's board: leads set today, then conversations, then
+  // doors (the ladder hook already ranks the day range that way — points
+  // credit sits to the APPOINTMENT day, which zeroed out hot setters).
+  const metric: Metric = moneyMode ? "vol" : tab === "day" ? "lds" : "pts";
   const range: RangeKey = tab;
   const { rows: ptsRows, self, loading } = useArcadeLadder(range);
 
-  // The $ "Bonus Race" ranks by money (the $100K race); every other view by points.
+  // The $ "Bonus Race" ranks by money (the $100K race); every other view keeps
+  // the ladder's own order (points, or leads-set on Today).
   const rows = useMemo(() => {
     if (!moneyMode) return ptsRows;
     return [...ptsRows].sort((a, b) => b.vol - a.vol || b.pts - a.pts);
@@ -247,7 +251,7 @@ export function CanvasserLeaderboard() {
                 rows={podium}
                 selfId={selfId}
                 cartoons={cartoons}
-                money={moneyMode}
+                metric={metric}
                 reduced={reduced}
               />
 
@@ -256,7 +260,11 @@ export function CanvasserLeaderboard() {
                 <section>
                   <header className="flex items-center justify-between border-b border-border px-4 py-3">
                     <h2 className="font-display text-xs uppercase tracking-widest text-neon">
-                      {moneyMode ? "Bonus Race · $" : "High Scores · Pts"}
+                      {metric === "vol"
+                        ? "Bonus Race · $"
+                        : metric === "lds"
+                          ? "Leads Set Today"
+                          : "High Scores · Pts"}
                     </h2>
                     <span className="font-display text-[10px] uppercase tracking-widest text-muted-foreground">
                       {rows.length} on the board
@@ -271,7 +279,7 @@ export function CanvasserLeaderboard() {
                         self={r.id === selfId}
                         cartoons={cartoons}
                         flash={flash[r.id]}
-                        money={moneyMode}
+                        metric={metric}
                         reduced={reduced}
                       />
                     ))}
@@ -282,11 +290,16 @@ export function CanvasserLeaderboard() {
               {/* Next to pass */}
               {self && self.ahead && (
                 <p className="text-center font-display text-[11px] uppercase tracking-widest text-[var(--warning)]">
-                  {moneyMode
-                    ? `${fmtVol(Math.max(0, self.gapVol))} to pass ${firstName(self.ahead.name)} for #${self.rank - 1}`
-                    : self.gapPts > 0
-                      ? `${self.gapPts} pt${self.gapPts === 1 ? "" : "s"} to pass ${firstName(self.ahead.name)} for #${self.rank - 1}`
-                      : `${fmtVol(Math.max(0, self.gapVol))} to pass ${firstName(self.ahead.name)} for #${self.rank - 1}`}
+                  {metric === "lds"
+                    ? (() => {
+                        const gapLds = Math.max(1, self.ahead.ld - self.row.ld + 1);
+                        return `${gapLds} lead${gapLds === 1 ? "" : "s"} to pass ${firstName(self.ahead.name)} for #${self.rank - 1}`;
+                      })()
+                    : metric === "vol"
+                      ? `${fmtVol(Math.max(0, self.gapVol))} to pass ${firstName(self.ahead.name)} for #${self.rank - 1}`
+                      : self.gapPts > 0
+                        ? `${self.gapPts} pt${self.gapPts === 1 ? "" : "s"} to pass ${firstName(self.ahead.name)} for #${self.rank - 1}`
+                        : `${fmtVol(Math.max(0, self.gapVol))} to pass ${firstName(self.ahead.name)} for #${self.rank - 1}`}
                 </p>
               )}
               {self && self.rank === 1 && (
@@ -307,14 +320,14 @@ function Podium({
   rows,
   selfId,
   cartoons,
-  money,
+  metric,
   reduced,
 }: {
   rows: LadderRow[];
   selfId: string | undefined;
   cartoons: Map<string, { name: string; portrait: string | null; full: string | null }> | undefined;
-  /** Show credited $ instead of points (the Month "Bonus Race" view). */
-  money: boolean;
+  /** The hero number: points, Bonus-Race $, or Today's leads set. */
+  metric: Metric;
   reduced: boolean;
 }) {
   // Visual order: #2 left, #1 center (tallest), #3 right.
@@ -344,10 +357,11 @@ function Podium({
                   p === 1 && !reduced ? "podium-glow" : ""
                 }`}
               >
+                {/* No cartoon art → RepAvatar's own initials circle (no more
+                    blank "photo needed" silhouettes on the podium). */}
                 <RepAvatar
                   name={r.name}
                   cartoon={cartoonFor(cartoons, r.name)}
-                  missing={noCartoonArt(cartoonFor(cartoons, r.name))}
                   variant="full"
                   fit="contain"
                   className={p === 1 ? "h-16 w-16" : "h-12 w-12"}
@@ -360,15 +374,22 @@ function Podium({
                 {firstName(r.name)}
               </span>
               <span className="font-display text-[11px] tabular-nums text-victory">
-                {money ? fmtVol(r.vol) : `${r.pts} pts`}
+                {metric === "vol"
+                  ? fmtVol(r.vol)
+                  : metric === "lds"
+                    ? `${r.ld} ld${r.ld === 1 ? "" : "s"}`
+                    : `${r.pts} pts`}
               </span>
-              {/* The two non-ranking metrics ride under the hero number so the
+              {/* The non-ranking metrics ride under the hero number so the
                   top spots show the money and leads the moment they land. A $0 /
                   0-lead part drops out so a fresh podium stays clean. */}
               {(() => {
-                const parts = money
-                  ? [`${r.pts} pts`, r.lds > 0 ? `${r.lds} lds` : null]
-                  : [r.vol > 0 ? fmtVol(r.vol) : null, r.lds > 0 ? `${r.lds} lds` : null];
+                const parts =
+                  metric === "vol"
+                    ? [`${r.pts} pts`, r.lds > 0 ? `${r.lds} lds` : null]
+                    : metric === "lds"
+                      ? [r.tlk > 0 ? `${r.tlk} tlk` : null, r.drs > 0 ? `${r.drs} drs` : null]
+                      : [r.vol > 0 ? fmtVol(r.vol) : null, r.lds > 0 ? `${r.lds} lds` : null];
                 const text = parts.filter(Boolean).join(" · ");
                 return text ? (
                   <span className="font-display text-[10px] tabular-nums text-muted-foreground">
@@ -396,7 +417,7 @@ function ScoreRow({
   self,
   cartoons,
   flash,
-  money,
+  metric,
   reduced,
 }: {
   r: LadderRow;
@@ -404,8 +425,8 @@ function ScoreRow({
   self: boolean;
   cartoons: Map<string, { name: string; portrait: string | null; full: string | null }> | undefined;
   flash: "up" | "down" | "coin" | undefined;
-  /** Show credited $ instead of points (the Month "Bonus Race" view). */
-  money: boolean;
+  /** The leading number: points, Bonus-Race $, or Today's leads set. */
+  metric: Metric;
   reduced: boolean;
 }) {
   const bonuses = bonusCount(r.vol);
@@ -428,21 +449,17 @@ function ScoreRow({
               style={{ background: r.teamColor, boxShadow: `0 0 6px ${r.teamColor}` }}
             />
           )}
+          {/* No cartoon art → RepAvatar's initials circle (the "Photo needed"
+              tag is gone — the board is for scores, not chores). */}
           <RepAvatar
             name={r.name}
             cartoon={cartoonFor(cartoons, r.name)}
-            missing={noCartoonArt(cartoonFor(cartoons, r.name))}
             className="h-8 w-8"
             textClassName="text-[10px]"
             ring={self}
           />
           <span className={`truncate text-sm ${self ? "font-medium text-neon" : ""}`}>
             {r.name}
-            {noCartoonArt(cartoonFor(cartoons, r.name)) && (
-              <span className="ml-1.5 align-middle font-display text-[8px] uppercase tracking-widest text-muted-foreground/60">
-                Photo needed
-              </span>
-            )}
             {self && (
               <span className="ml-1.5 font-display text-[9px] uppercase tracking-widest text-neon/80">
                 you
@@ -456,16 +473,29 @@ function ScoreRow({
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2 font-display text-[11px] uppercase tracking-wider tabular-nums">
-          {/* Points · $ · leads side by side on every tab — the old board's
-              "PTS → $ → LEADS" line, restored. The ranking metric leads (Bonus
-              Race leads with $, every other view with pts); a landed sale glows
-              victory-green and leads glow hot-pink, each muted at 0. */}
-          {money ? (
+          {/* The ranking metric leads the line (Today leads-set, Bonus Race $,
+              points everywhere else); the others ride along — the old board's
+              "PTS → $ → LEADS" principle. A landed sale glows victory-green
+              and leads glow hot-pink, each muted at 0. */}
+          {metric === "vol" ? (
             <>
               <span className={r.vol > 0 ? "text-victory" : "text-muted-foreground/50"}>
                 {fmtVol(r.vol)}
               </span>
               <span className="text-muted-foreground">{r.pts} pts</span>
+              <span className={r.lds > 0 ? "text-neon" : "text-muted-foreground/40"}>
+                {r.lds} lds
+              </span>
+            </>
+          ) : metric === "lds" ? (
+            <>
+              <span className={r.ld > 0 ? "text-neon" : "text-muted-foreground/40"}>
+                {r.ld} ld{r.ld === 1 ? "" : "s"}
+              </span>
+              <span className="text-muted-foreground">{r.pts} pts</span>
+              <span className={r.vol > 0 ? "text-victory" : "text-muted-foreground/40"}>
+                {fmtVol(r.vol)}
+              </span>
             </>
           ) : (
             <>
@@ -473,11 +503,11 @@ function ScoreRow({
               <span className={r.vol > 0 ? "text-victory" : "text-muted-foreground/40"}>
                 {fmtVol(r.vol)}
               </span>
+              <span className={r.lds > 0 ? "text-neon" : "text-muted-foreground/40"}>
+                {r.lds} lds
+              </span>
             </>
           )}
-          <span className={r.lds > 0 ? "text-neon" : "text-muted-foreground/40"}>
-            {r.lds} lds
-          </span>
           {bonuses > 0 && (
             <span className="text-[var(--kombat-gold)]" title={`${bonuses} × $1,500 bonus`}>
               🪙×{bonuses}

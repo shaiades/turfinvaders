@@ -744,6 +744,60 @@
 .turf-popup .nm-pop-btn-danger:hover {
   background: color-mix(in oklab, var(--destructive) 24%, transparent);
 }
+.turf-popup .nm-pop-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* Hold-for-address popup (NeonMap long-press → HouseAddressPopup). The copy
+   button is a field control used mid-shift, so it keeps the 44px touch
+   floor; the coords row is a quiet secondary copy target. */
+.addr-popup .nm-pop-btn {
+  min-height: 44px;
+  margin-top: 8px;
+}
+.addr-popup .nm-pop-coords {
+  margin-top: 4px;
+  width: 100%;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.addr-popup .nm-pop-coords:active {
+  color: var(--foreground);
+}
+
+/* The held pin: Apple-style drop-in; glow matches the other map markers. */
+.neon-held-pin svg {
+  filter: drop-shadow(0 0 8px #ff2d55aa) drop-shadow(0 2px 3px rgba(0, 0, 0, 0.5));
+  animation: nm-pin-drop 0.25s ease-out;
+  transform-origin: 50% 95%;
+}
+@keyframes nm-pin-drop {
+  from {
+    transform: translateY(-12px) scale(0.7);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+/* iOS: a long press must feed the hold-for-address gesture, never the
+   system image callout over a map tile. */
+.leaflet-container {
+  -webkit-touch-callout: none;
+}
 
 /* Map attribution: NeonMap drops Leaflet's branding prefix (owner ask
    2026-09-12); the tile terms still require "© Esri", so it stays — as a
