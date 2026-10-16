@@ -84,7 +84,7 @@ export function WeekAttestationCard({ userId }: { userId: string }) {
       const { error } = await supabase.rpc("attest_week", {
         _week_start: wkStart,
         _confirm: confirm,
-        _note: note ?? null,
+        _note: note,
       });
       if (error) throw error;
     },
@@ -151,7 +151,10 @@ export function WeekAttestationCard({ userId }: { userId: string }) {
             onClick={() => attest.mutate({ confirm: true })}
             disabled={attest.isPending}
             className="arcade-btn-3d flex-1 px-4 py-3 font-display text-xs uppercase tracking-widest"
-            style={{ ["--btn-color" as string]: "var(--victory)", ["--btn-fg" as string]: "#06110a" }}
+            style={{
+              ["--btn-color" as string]: "var(--victory)",
+              ["--btn-fg" as string]: "#06110a",
+            }}
           >
             These hours are right
           </button>

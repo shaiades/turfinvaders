@@ -496,13 +496,14 @@ function DojoApprovedLine({ wkStart }: { wkStart: string }) {
   const { data } = useQuery({
     queryKey: ["daily_wrap", "dojo", wkStart],
     queryFn: async () => {
-      const { data: attempts, error } = await rawTable("objection_attempts")
+      // Typed read since the 2026-10-16 types regen — no more raw cast.
+      const { data: attempts, error } = await supabase
+        .from("objection_attempts")
         .select("canvasser_id, created_at")
         .eq("status", "approved")
         .gte("created_at", `${wkStart}T00:00:00Z`);
       if (error) throw error;
-      const rows = (attempts ?? []) as Array<{ canvasser_id: string }>;
-      const ids = [...new Set(rows.map((a) => a.canvasser_id))];
+      const ids = [...new Set((attempts ?? []).map((a) => a.canvasser_id))];
       if (ids.length === 0) return [];
       const { data: profs } = await supabase
         .from("profiles")
@@ -537,13 +538,15 @@ function GratitudeWall() {
   const { data } = useQuery({
     queryKey: ["daily_wrap", "gratitude", day],
     queryFn: async () => {
-      const { data: entries, error } = await rawTable("gratitude_entries")
+      // Typed read since the 2026-10-16 types regen — no more raw cast.
+      const { data: entries, error } = await supabase
+        .from("gratitude_entries")
         .select("user_id, text")
         .eq("entry_date", day)
         .order("created_at", { ascending: true })
         .limit(40);
       if (error) throw error;
-      const rows = (entries ?? []) as Array<{ user_id: string; text: string }>;
+      const rows = entries ?? [];
       if (rows.length === 0) return [];
       const ids = [...new Set(rows.map((r) => r.user_id))];
       const { data: profs } = await supabase

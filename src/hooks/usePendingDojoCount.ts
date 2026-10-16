@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { dojoTable } from "@/components/ObjectionDojo";
+import { supabase } from "@/integrations/supabase/client";
 import { isAdminRole } from "@/lib/role-policy";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -21,7 +21,9 @@ export function usePendingDojoCount(): number {
     queryKey: ["dojo_pending_count", realRole],
     refetchInterval: 60_000,
     queryFn: async () => {
-      const { count, error } = await dojoTable("objection_attempts")
+      // Typed read since the 2026-10-16 types regen.
+      const { count, error } = await supabase
+        .from("objection_attempts")
         .select("id", { count: "exact", head: true })
         .eq("status", "pending");
       if (error) return 0;

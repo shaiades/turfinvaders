@@ -137,8 +137,10 @@ export function TimeClock({ userId }: { userId: string }) {
     }) => {
       const { error } = await supabase.rpc("attest_shift", {
         _entry_id: vars.id,
-        _meal: vars.meal ?? null,
-        _rest: vars.rest ?? null,
+        // Optional RPC args (DEFAULT NULL): omit instead of passing null —
+        // the regenerated types type them string | undefined.
+        _meal: vars.meal,
+        _rest: vars.rest,
       });
       if (error) throw error;
       return vars;
@@ -178,10 +180,15 @@ export function TimeClock({ userId }: { userId: string }) {
   const openMeal = (openMeals ?? []).find((m) => !m.meal_end) ?? null;
   const recordedMealMinutes = (openMeals ?? [])
     .filter((m) => m.meal_end)
-    .reduce((s, m) => s + (new Date(m.meal_end!).getTime() - new Date(m.meal_start).getTime()) / 60000, 0);
+    .reduce(
+      (s, m) => s + (new Date(m.meal_end!).getTime() - new Date(m.meal_start).getTime()) / 60000,
+      0,
+    );
   const hasCompliantMeal = (openMeals ?? []).some(
-    (m) => m.meal_end &&
-      (new Date(m.meal_end).getTime() - new Date(m.meal_start).getTime()) / 60000 >= MEAL_MIN_MINUTES,
+    (m) =>
+      m.meal_end &&
+      (new Date(m.meal_end).getTime() - new Date(m.meal_start).getTime()) / 60000 >=
+        MEAL_MIN_MINUTES,
   );
 
   const clockIn = useMutation({
@@ -495,7 +502,10 @@ export function TimeClock({ userId }: { userId: string }) {
                 onClick={() => answerMeal("missed")}
                 disabled={clockOut.isPending}
                 className="arcade-btn-3d w-full px-4 py-3 font-display text-xs uppercase tracking-widest"
-                style={{ ["--btn-color" as string]: "var(--warning)", ["--btn-fg" as string]: "#1a1205" }}
+                style={{
+                  ["--btn-color" as string]: "var(--warning)",
+                  ["--btn-fg" as string]: "#1a1205",
+                }}
               >
                 I worked through lunch
               </button>
@@ -503,7 +513,10 @@ export function TimeClock({ userId }: { userId: string }) {
                 onClick={() => answerMeal("unrecorded")}
                 disabled={clockOut.isPending}
                 className="arcade-btn-3d w-full px-4 py-3 font-display text-xs uppercase tracking-widest"
-                style={{ ["--btn-color" as string]: "var(--surface-elevated)", ["--btn-fg" as string]: "var(--foreground)" }}
+                style={{
+                  ["--btn-color" as string]: "var(--surface-elevated)",
+                  ["--btn-fg" as string]: "var(--foreground)",
+                }}
               >
                 I took lunch but didn't punch it
               </button>
@@ -557,7 +570,10 @@ export function TimeClock({ userId }: { userId: string }) {
                 onClick={() => lunchEnd.mutate()}
                 disabled={lunchEnd.isPending}
                 className="arcade-btn-3d px-8 py-4 font-display text-sm uppercase tracking-widest flex items-center justify-center gap-2"
-                style={{ ["--btn-color" as string]: "var(--warning)", ["--btn-fg" as string]: "#1a1205" }}
+                style={{
+                  ["--btn-color" as string]: "var(--warning)",
+                  ["--btn-fg" as string]: "#1a1205",
+                }}
               >
                 <Utensils className="w-4 h-4" />
                 End Lunch
@@ -568,7 +584,10 @@ export function TimeClock({ userId }: { userId: string }) {
                   onClick={() => lunchStart.mutate()}
                   disabled={lunchStart.isPending}
                   className="arcade-btn-3d px-8 py-4 font-display text-sm uppercase tracking-widest flex items-center justify-center gap-2"
-                  style={{ ["--btn-color" as string]: "var(--warning)", ["--btn-fg" as string]: "#1a1205" }}
+                  style={{
+                    ["--btn-color" as string]: "var(--warning)",
+                    ["--btn-fg" as string]: "#1a1205",
+                  }}
                 >
                   <Utensils className="w-4 h-4" />
                   Start Lunch
@@ -577,7 +596,10 @@ export function TimeClock({ userId }: { userId: string }) {
                   onClick={handleClockOutTap}
                   disabled={clockOut.isPending}
                   className="arcade-btn-3d px-8 py-4 font-display text-sm uppercase tracking-widest flex items-center justify-center gap-2"
-                  style={{ ["--btn-color" as string]: "var(--destructive)", ["--btn-fg" as string]: "#fff" }}
+                  style={{
+                    ["--btn-color" as string]: "var(--destructive)",
+                    ["--btn-fg" as string]: "#fff",
+                  }}
                 >
                   <Square className="w-4 h-4" />
                   Clock Out
@@ -590,7 +612,10 @@ export function TimeClock({ userId }: { userId: string }) {
             onClick={() => clockIn.mutate()}
             disabled={clockIn.isPending}
             className="arcade-btn-3d w-full sm:w-auto px-8 py-4 font-display text-sm uppercase tracking-widest flex items-center justify-center gap-2"
-            style={{ ["--btn-color" as string]: "var(--victory)", ["--btn-fg" as string]: "#06110a" }}
+            style={{
+              ["--btn-color" as string]: "var(--victory)",
+              ["--btn-fg" as string]: "#06110a",
+            }}
           >
             <Play className="w-4 h-4" />
             Clock In

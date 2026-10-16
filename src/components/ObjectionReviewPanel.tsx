@@ -36,12 +36,14 @@ export function ObjectionReviewPanel({ variant = "desk" }: { variant?: "desk" | 
     queryKey: ["objection_attempts", "pending"],
     staleTime: 15_000,
     queryFn: async () => {
-      const { data, error } = await dojoTable("objection_attempts")
+      // Typed read since the 2026-10-16 types regen.
+      const { data, error } = await supabase
+        .from("objection_attempts")
         .select("*")
         .eq("status", "pending")
         .order("created_at");
       if (error) throw error;
-      return (data ?? []) as unknown as ObjectionAttempt[];
+      return (data ?? []) as ObjectionAttempt[];
     },
   });
 
