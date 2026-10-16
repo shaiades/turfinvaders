@@ -26,8 +26,10 @@ import {
   funnelStages,
   type PinRowLite,
 } from "@/components/ConversionPanels";
+import { useState } from "react";
 import { CoachingFlagChip, CoachingPanel } from "@/components/CoachingCard";
-import { Lock, EyeOff } from "lucide-react";
+import { CoachMessageComposer } from "@/components/CoachMessageComposer";
+import { Lock, EyeOff, Video } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/canvassers/$canvasserId")({
   head: () => ({ meta: [{ title: "Player profile — Turf Invaders" }] }),
@@ -125,6 +127,8 @@ function CanvasserProfile() {
   const isSelf = !!user && user.id === canvasserId;
   const sameTeam = teamId && profileTeamId && teamId === profileTeamId;
   const visibility = !!settings?.global_visibility;
+  // Coach-message composer (Phase 5).
+  const [msgOpen, setMsgOpen] = useState(false);
 
   // VISIBILITY of the profile itself
   const canViewFull = isManagerRole(role) || isSelf || sameTeam || visibility;
@@ -283,6 +287,17 @@ function CanvasserProfile() {
           {team && <TeamBadge name={team.name} color={team.color ?? "#10b981"} />}
           {/* 14-day coaching flag — the move, next to the name (Phase 2 §4) */}
           <CoachingFlagChip canvasserId={canvasserId} />
+          {/* Message from Shai (Phase 5) — owner anywhere, captain their van
+              (the RPC re-checks server-side) */}
+          {!isSelf && (isAdminRole(role) || role === "captain") && (
+            <button
+              type="button"
+              onClick={() => setMsgOpen(true)}
+              className="inline-flex min-h-10 items-center gap-1.5 rounded border border-neon/50 bg-neon/10 px-3 font-display text-[10px] uppercase tracking-widest text-neon hover:bg-neon/20"
+            >
+              <Video className="h-3.5 w-3.5" /> Message
+            </button>
+          )}
           {(isManagerRole(role) || isSelf) && (
             <Link
               to="/canvassers/$canvasserId/field"
@@ -483,6 +498,11 @@ function CanvasserProfile() {
               <CoachingPanel
                 canvasserId={canvasserId}
                 canWrite={!isSelf && (isAdminRole(role) || role === "captain")}
+                onSendMessage={
+                  !isSelf && (isAdminRole(role) || role === "captain")
+                    ? () => setMsgOpen(true)
+                    : undefined
+                }
               />
             </>
           ) : !canReadLogs ? (
@@ -495,6 +515,16 @@ function CanvasserProfile() {
           ) : null}
         </>
       )}
+
+      <CoachMessageComposer
+        open={msgOpen}
+        onOpenChange={setMsgOpen}
+        recipient={{
+          id: canvasserId,
+          name: profileQuery.data?.display_name ?? "this player",
+          teamId: team?.id ?? null,
+        }}
+      />
     </div>
   );
 }

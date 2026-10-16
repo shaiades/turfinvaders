@@ -32,6 +32,7 @@ import { CloseKombatIntro, isCloseKombatIntroForced } from "@/components/CloseKo
 import { EodRecapFx, isEodRecapForced } from "@/components/EodRecapFx";
 import { useArcadeFlags } from "@/hooks/useArcadeFlags";
 import { PraiseToasts, StreetFeed } from "@/components/StreetFeed";
+import { CoachMessageCard } from "@/components/CoachMessageCard";
 import { BountyBanner } from "@/components/BountyBanner";
 import { EodWrapGate, isEodWrapForced } from "@/components/EodWrapGate";
 import {
@@ -906,6 +907,17 @@ export function AppShell({ children }: { children: ReactNode }) {
             heldBack={introActive || eodActive || photoGateActive}
             onActiveChange={setWrapActive}
           />
+        )}
+
+      {/* Message from Shai (Phase 5) — a full-screen private coach video on
+          the next app open while unseen. Sequenced AFTER the morning intro,
+          the evening shows, and the photo gate (heldBack), so onboarding and
+          the recaps never stack under it. Real-role gated: a View-As preview
+          must never burn someone's unseen message (the card also checks). */}
+      {user &&
+        realRole !== null &&
+        (privilegeRole(realRole) === "canvasser" || privilegeRole(realRole) === "captain") && (
+          <CoachMessageCard heldBack={introActive || eodActive || wrapActive || photoGateActive} />
         )}
 
       {/* Blocking profile-photo gate (owner 2026-10-06) — the full-screen

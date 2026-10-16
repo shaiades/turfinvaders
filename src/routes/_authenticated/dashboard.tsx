@@ -45,6 +45,7 @@ import { TimeClockReviewQueue } from "@/components/TimeClockReviewQueue";
 import { VanClockConsole } from "@/components/VanClockConsole";
 import { DayOffQueue } from "@/components/DayOffQueue";
 import { ObjectionReviewPanel } from "@/components/ObjectionReviewPanel";
+import { CoachTriggersCard } from "@/components/CoachTriggersCard";
 import { CaptainVanWarsCard } from "@/components/CaptainVanWarsCard";
 import { ShoutoutComposer } from "@/components/ShoutoutComposer";
 import { BountyComposer } from "@/components/BountyComposer";
@@ -402,6 +403,9 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
         </div>
 
         <TabsContent value="dispatch" className="mt-0">
+          {/* Phase 5: today's coaching moments worth a 🎥, one-tap send.
+              Renders nothing on a quiet day (it owns its bottom margin). */}
+          <CoachTriggersCard />
           <FleetDispatch />
         </TabsContent>
         <TabsContent value="timesheets" className="mt-0">

@@ -328,7 +328,7 @@ export function ObjectionDojo({ drillKey }: { drillKey?: string }) {
 
 /* ============ Recording ============ */
 
-function pickMimeType(): { mime: string; ext: string } {
+export function pickMimeType(): { mime: string; ext: string } {
   if (typeof MediaRecorder === "undefined") return { mime: "", ext: "webm" };
   // Safari records mp4; Chrome/Android prefer webm.
   if (MediaRecorder.isTypeSupported("video/mp4")) return { mime: "video/mp4", ext: "mp4" };

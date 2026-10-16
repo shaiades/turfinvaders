@@ -44,9 +44,12 @@ export function CoachingFlagChip({ canvasserId }: { canvasserId: string | undefi
 export function CoachingPanel({
   canvasserId,
   canWrite,
+  onSendMessage,
 }: {
   canvasserId: string | undefined;
   canWrite: boolean;
+  /** Phase 5: opens the coach-message composer from the flag (ride-along). */
+  onSendMessage?: () => void;
 }) {
   const { user } = useAuth();
   const { flag, stats, team, partners, loading } = useCoaching(canvasserId);
@@ -91,13 +94,18 @@ export function CoachingPanel({
 
         {/* Ride-along pairing — only when the flag calls for one */}
         {flag.key === "ride_along" && partner && (
-          <div className="flex items-center gap-2 rounded-lg border border-[var(--warning)]/40 bg-[color-mix(in_oklab,var(--warning)_8%,transparent)] px-3 py-2">
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--warning)]/40 bg-[color-mix(in_oklab,var(--warning)_8%,transparent)] px-3 py-2">
             <Users className="h-4 w-4 shrink-0 text-[var(--warning)]" />
-            <p className="text-xs">
+            <p className="min-w-0 flex-1 text-xs">
               Ride-along with <span className="font-medium">{partner.name}</span> — converting{" "}
               {pct(partner.tlk > 0 ? partner.ld / partner.tlk : 0)} this window
               {partners[1] ? ` (or ${partners[1].name})` : ""}.
             </p>
+            {onSendMessage && (
+              <Button size="sm" variant="outline" onClick={onSendMessage}>
+                🎥 Send a nudge
+              </Button>
+            )}
           </div>
         )}
 
