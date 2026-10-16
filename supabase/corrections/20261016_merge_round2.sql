@@ -16,7 +16,11 @@
 -- Run: supabase db query --linked --file supabase/corrections/20261016_merge_round2.sql
 -- ═══════════════════════════════════════════════════════════════════════════
 
-BEGIN;
+-- NOTE (2026-10-16): no explicit BEGIN/COMMIT — the `supabase db query`
+-- runner manages the transaction itself and DISCARDED the explicit one (the
+-- summary SELECT printed in-transaction results that then rolled back). The
+-- DO block is atomic on its own; the runner commits the script like it does
+-- the migration files.
 
 DO $$
 DECLARE
@@ -122,7 +126,6 @@ BEGIN
       'failures', v_failures));
 END $$;
 
-COMMIT;
 
 SELECT data->>'groups_merged' AS groups_merged,
        jsonb_pretty(data->'failures') AS failures
