@@ -89,7 +89,8 @@ const FAIL_COOLDOWN_MS = 20_000;
 // garages/sheds consumed print budget before the client filter dropped
 // them, and budget exhaustion is what forces quadrant splits (the slow
 // path). The client filter stays as belt-and-braces.
-const EXCLUDED_BUILDINGS_RE = "^(garage|garages|shed|carport|roof|greenhouse|hut|kiosk|service|ruins|no)$";
+const EXCLUDED_BUILDINGS_RE =
+  "^(garage|garages|shed|carport|roof|greenhouse|hut|kiosk|service|ruins|no)$";
 // Surface "loading" only when a real network fetch outlives this grace —
 // cache hits and fast fetches never flash the pill.
 const LOADING_GRACE_MS = 600;
@@ -199,8 +200,7 @@ function overpassRequest(
       for (const c of ctrls) c.abort();
       settle();
     };
-    const onOuterAbort = () =>
-      finish(() => reject(new DOMException("aborted", "AbortError")));
+    const onOuterAbort = () => finish(() => reject(new DOMException("aborted", "AbortError")));
     const launch = (i: number) => {
       if (done || i >= OVERPASS_ENDPOINTS.length) return;
       launched++;
@@ -330,12 +330,7 @@ async function fetchHouses(
     onChunk();
     return;
   }
-  const ownKey = rectKey(
-    bounds.getSouth(),
-    bounds.getWest(),
-    bounds.getNorth(),
-    bounds.getEast(),
-  );
+  const ownKey = rectKey(bounds.getSouth(), bounds.getWest(), bounds.getNorth(), bounds.getEast());
   const { buildings, nodes } = await overpassRequest(bounds, signal);
   const truncated = buildings >= BUILDING_CAP || nodes >= NODE_CAP;
   if (!truncated || depth >= 1) {
@@ -368,9 +363,7 @@ async function fetchHouses(
     const results = await Promise.allSettled(
       pair.map((q) => fetchHouses(q, signal, onChunk, depth + 1, ownKey)),
     );
-    const failure = results.find(
-      (r): r is PromiseRejectedResult => r.status === "rejected",
-    );
+    const failure = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
     if (failure) throw failure.reason;
   }
   pushCovered(bounds);
@@ -696,10 +689,14 @@ export function HouseBubblesLayer({
           const house = houseCache.get(id);
           if (!house) return;
           const m = matchRef.current.get(id);
+          // A STALE match (a previous day's Go Back / Not Home — Phase 3 §5)
+          // colors the bubble but never rides as the "current" pin: old pins
+          // are read-only (same-day RLS fence), so the sheet must offer a
+          // fresh DROP, not a switch that would silently no-op.
           tapRef.current?.({
             ...house,
-            currentPinId: m?.pin.id,
-            currentType: m?.pin.pin_type,
+            currentPinId: m?.pin.stale ? undefined : m?.pin.id,
+            currentType: m?.pin.stale ? undefined : m?.pin.pin_type,
           });
         },
       };

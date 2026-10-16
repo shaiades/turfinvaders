@@ -1539,3 +1539,41 @@
     animation: none;
   }
 }
+
+/* ── Sun mode (conversion audit 2026-10-15, Phase 3 §2) ─────────────────────
+ * High-contrast field skin: solid fills, no glow, stronger secondary text —
+ * for a phone held at arm's length in direct sunlight. ActiveRun puts
+ * `.sun-mode` on <html> while the map screen is mounted (so portaled sheets
+ * inherit it) and removes it on unmount; the map-rail ☀ button toggles it
+ * (ti_sun_mode_v1, default ON for the field). */
+html.sun-mode body {
+  background-image: none; /* the neon radial wash reads as haze outdoors */
+}
+html.sun-mode * {
+  text-shadow: none !important; /* glow behind text is blur in the sun */
+}
+html.sun-mode .backdrop-blur {
+  backdrop-filter: none !important;
+}
+/* Translucent chrome goes SOLID — map tiles bleeding through the chip bar
+ * and result sheet was the top legibility complaint. */
+html.sun-mode .bg-surface\/60,
+html.sun-mode .bg-surface\/90,
+html.sun-mode .bg-surface\/95 {
+  background-color: var(--surface) !important;
+}
+html.sun-mode .scanlines {
+  display: none;
+}
+html.sun-mode .pulse-glow-wrapper {
+  animation: none;
+}
+/* Secondary text and hairlines step up a weight class per theme. */
+html.sun-mode.dark {
+  --muted-foreground: oklch(0.8 0.03 260);
+  --border: oklch(0.44 0.04 270);
+}
+html.sun-mode:not(.dark) {
+  --muted-foreground: oklch(0.36 0.02 260);
+  --border: oklch(0.74 0.01 250);
+}

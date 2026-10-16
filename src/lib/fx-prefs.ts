@@ -29,14 +29,16 @@ export function isHapticsOn(): boolean {
   }
 }
 
-/** Background music defaults ON (owner ask 2026-10-06) — the stored flag is
- * the MUTE, so an absent key means "play". Separate from the arcade-FX sound
- * toggle above, which stays off by default per the earlier owner spec. */
+/** Background music defaults OFF (conversion audit 2026-10-15, Phase 3 §7 —
+ * reversing the 2026-10-06 default-ON ask): an absent key means "muted", so a
+ * new device is silent until the player opts in with the toggle. A device
+ * whose player already chose ("0"/"1" stored) keeps its choice. Separate from
+ * the arcade-FX sound toggle above. */
 export function isMusicMuted(): boolean {
   try {
-    return localStorage.getItem(MUSIC_MUTED_KEY) === "1";
+    return localStorage.getItem(MUSIC_MUTED_KEY) !== "0";
   } catch {
-    return false;
+    return true;
   }
 }
 

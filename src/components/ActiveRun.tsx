@@ -19,11 +19,12 @@ import { BumpBadge } from "@/components/BumpBadge";
 import { LeadStrikeFx } from "@/components/LeadStrikeFx";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
-import { GratitudeGate, hasPassedGratitudeGate } from "@/components/GratitudeGate";
+import { GratitudeGate } from "@/components/GratitudeGate";
 import { NeonMap, type Territory, type LatLng } from "@/components/NeonMap";
 import { getLastMapView, setLastMapView, type MapView } from "@/lib/last-map-view";
 import type { MapDataStatus } from "@/lib/map-status";
 import { PinActionSheet } from "@/components/PinActionSheet";
+import { QuickClockIn } from "@/components/QuickClockIn";
 import { HouseResultSheet } from "@/components/HouseResultSheet";
 import { FieldStandingsSheet } from "@/components/FieldStandingsSheet";
 import { DoorScriptSheet } from "@/components/DoorScriptSheet";
@@ -42,6 +43,7 @@ import {
   KeyRound,
   Clock3,
   ScrollText,
+  Sun,
   Trophy,
   Users,
   Zap,
@@ -165,21 +167,14 @@ export function ActiveRun({
   onOpenTurfTools?: () => void;
   onOpenCrewMap?: () => void;
 }) {
-  const { user, role, loading, realDisplayName } = useAuth();
+  const { user, role, loading, realDisplayName, teamId } = useAuth();
   const qc = useQueryClient();
   const isCaptain = variant === "captain";
 
-  // Hold the OS location prompt until the Gratitude Gate is answered — day
-  // one used to stack the prompt, the gate, and the keyboard all at once.
-  // Roles the gate bypasses get GPS immediately.
-  const [gatePassed, setGatePassed] = useState(false);
-  useEffect(() => {
-    const check = () => setGatePassed(hasPassedGratitudeGate(user?.id));
-    check();
-    window.addEventListener("ti-gratitude-unlocked", check);
-    return () => window.removeEventListener("ti-gratitude-unlocked", check);
-  }, [user?.id]);
-  const { me, geoStatus } = useGeoWatch(!loading && (!requiresGratitudeGate(role) || gatePassed));
+  // Map + GPS start the moment the screen opens (audit 2026-10-15, Phase 3
+  // §1) — the gratitude ritual no longer holds anything back; it pops as a
+  // one-tap card AFTER the first logged door (see <GratitudeGate> below).
+  const { me, geoStatus } = useGeoWatch(!loading && !!user);
   const pins = useFieldPins(user?.id, me);
   // Objection quick-pick toggle (captain feedback 2026-09-17) — same inline
   // company_settings read used at dashboard.tsx and canvassers.$id.tsx.
@@ -199,9 +194,21 @@ export function ActiveRun({
   // Same cache entry the HUD/piggy surfaces already warm (30s staleTime).
   const selfProfile = useCanvasserProfile(user?.id);
 
-  const [active, setActive] = useState<ActivePin>("not_home");
+  // No armed result by default (audit 2026-10-15, Phase 3 §3): the old
+  // "not_home" default meant any stray map tap dropped a pin. A rep now arms
+  // a chip first; tapping the armed chip again disarms it.
+  const [active, setActive] = useState<ActivePin | null>(null);
   const [editingPinId, setEditingPinId] = useState<string | null>(null);
   const [leadOpen, setLeadOpen] = useState(false);
+  // Phase 3 §4: the lead pin drops only after the Monday form actually
+  // submits — this remembers WHERE it should land (the tapped house, an
+  // existing pin to convert, or the device) while the form is open.
+  const pendingLeadRef = useRef<
+    | { kind: "house"; lat: number; lng: number }
+    | { kind: "switch"; pinId: string }
+    | { kind: "device" }
+    | null
+  >(null);
   // House-anchored Lead flow only: the tapped house's OSM-grade address,
   // shown in the LeadSheet header + sent as the form's `address` prefill
   // param so the rep never re-types what the map already knows.
@@ -213,6 +220,35 @@ export function ActiveRun({
   // 3-second rebuttal card after a tagged objection (Phase 2 §2). seq bumps
   // per showing so a repeat of the same objection re-arms the timer.
   const [rebuttal, setRebuttal] = useState<{ seq: number; objection: string } | null>(null);
+
+  // Sun mode (Phase 3 §2): solid fills, no glow, boosted contrast — ON by
+  // default for the field. Applied as a class on <html> so the portaled
+  // sheets inherit it too; removed when the screen unmounts. localStorage
+  // read happens post-mount (this route SSRs).
+  const [sunMode, setSunMode] = useState(true);
+  useEffect(() => {
+    try {
+      setSunMode(localStorage.getItem("ti_sun_mode_v1") !== "0");
+    } catch {
+      /* private mode — default stays on */
+    }
+  }, []);
+  useEffect(() => {
+    const el = document.documentElement;
+    if (sunMode) el.classList.add("sun-mode");
+    else el.classList.remove("sun-mode");
+    return () => el.classList.remove("sun-mode");
+  }, [sunMode]);
+  const toggleSunMode = () =>
+    setSunMode((s) => {
+      const next = !s;
+      try {
+        localStorage.setItem("ti_sun_mode_v1", next ? "1" : "0");
+      } catch {
+        /* private mode */
+      }
+      return next;
+    });
 
   // Piggy bank: projected dollars per knock. ?piggy_demo=1 fakes knocks
   // locally and never touches real state; parsed after mount because this
@@ -356,7 +392,9 @@ export function ActiveRun({
     return () => window.clearTimeout(t);
   }, [isCaptain, turfsQuery.isSuccess, lockPolygons]);
 
-  const armedResult = KNOCK_RESULTS.find((r) => r.type === active);
+  const armedResult = active ? KNOCK_RESULTS.find((r) => r.type === active) : undefined;
+  // Unarmed-tap hint, throttled so a double tap doesn't stack toasts.
+  const lastArmHintRef = useRef(0);
 
   // Map slot state: the map mounts IMMEDIATELY — tiles start downloading
   // while turfs load, and the on-map status pill narrates loading/error
@@ -388,37 +426,32 @@ export function ActiveRun({
     ? ((pins.pinsQuery.data ?? []).find((p) => p.id === editingPinId) ?? null)
     : null;
 
-  function openLead(address: string | null = null) {
-    if (!me) {
-      toast.error("No GPS fix yet — enable Location and try again.");
-      return;
-    }
+  function openLead(
+    address: string | null = null,
+    target: NonNullable<typeof pendingLeadRef.current> = { kind: "device" },
+  ) {
+    // Form first, pin NEVER before the lead exists (Phase 3 §4): the old
+    // drop-on-open left phantom lead pins (door/talk credits, green stars,
+    // lead badges) for forms that were closed unsubmitted. The pin now lands
+    // in the LeadSheet close handler, only when Monday confirmed the submit.
+    // No GPS fix no longer blocks the form either — the sale beats the pin;
+    // a no-GPS submit gets flagged to the office instead (close handler).
     setLeadAddress(address);
     piggyAtLeadOpenRef.current = piggy.dollars;
-    // Form first — the lead is the revenue event; the pin is bookkeeping.
-    // The drop (fresh GPS fix + insert, up to ~8s) runs behind the overlay so
-    // the doorstep never waits on a spinner; dropAtDevice toasts its own
-    // failures and sonner renders above the sheet's z-[2000]. A failed drop
-    // never blocks or closes the form — the pin stays the correction sheets'
-    // problem, the lead is Monday's.
+    pendingLeadRef.current = target;
     setLeadOpen(true);
-    void pins.dropAtDevice("lead").then((res) => {
-      if (res.ok && user?.id) {
-        qc.invalidateQueries({ queryKey: ["my_pins_today", user.id] });
-        // Lead pins bump doors/talked via trigger (the Monday card credits
-        // the lead itself, once per card) — refresh daily-log reads.
-        qc.invalidateQueries({ queryKey: dailyLogKeys.all(user.id) });
-      }
-    });
   }
 
   return (
     // GRATITUDE_GATE_ROLES decides who checks in; while auth is still
     // resolving the gate holds a blank beat so neither variant flashes.
+    // Phase 3 §1: it's a one-tap card AFTER the first logged door now —
+    // the map and GPS never wait for it.
     <GratitudeGate
       userId={user?.id}
       bypass={!loading && !requiresGratitudeGate(role)}
       pending={loading}
+      promptArmed={Object.values(pins.counts).reduce((a, n) => a + n, 0) > 0}
     >
       <div className="space-y-3 md:space-y-6">
         {/* One-line header: name left, GPS truth + tools right. The old
@@ -429,7 +462,9 @@ export function ActiveRun({
             Active Run
           </h1>
           <div className="flex items-center gap-1.5">
-            <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
+            {/* Punch in without leaving the street (Phase 3 §1) */}
+            <QuickClockIn userId={user?.id} clockHref={isCaptain ? "/mission" : "/dashboard"} />
+            <span className="text-xs font-semibold uppercase text-muted-foreground flex items-center gap-1.5">
               <Crosshair className="w-3 h-3 text-[#00e5ff]" />
               {geoStatus === "denied" ? (
                 <span className="text-destructive">GPS OFF</span>
@@ -452,7 +487,7 @@ export function ActiveRun({
             {isCaptain && onOpenTurfTools && (
               <button
                 onClick={onOpenTurfTools}
-                className="min-h-11 px-3 inline-flex items-center gap-1.5 rounded-md border border-[color-mix(in_oklab,var(--neon)_40%,var(--border))] text-[10px] font-display uppercase tracking-widest text-neon hover:bg-surface-elevated"
+                className="min-h-11 px-3 inline-flex items-center gap-1.5 rounded-md border border-[color-mix(in_oklab,var(--neon)_40%,var(--border))] text-xs font-semibold uppercase text-neon hover:bg-surface-elevated"
               >
                 <Pencil className="w-3.5 h-3.5" /> Turf Tools
               </button>
@@ -463,9 +498,7 @@ export function ActiveRun({
         {/* GPS trouble is invisible otherwise — and a no-GPS pin never counts */}
         {geoStatus === "denied" && (
           <div className="rounded-lg border border-destructive/60 bg-destructive/10 p-3 text-sm text-destructive">
-            <div className="font-display text-[10px] uppercase tracking-widest mb-1">
-              Location blocked
-            </div>
+            <div className="text-xs font-bold uppercase mb-1">Location blocked</div>
             Pins without GPS don't count. Enable Location for this site in your browser settings
             (iPhone: Settings → Apps → Safari → Location · Android: tap the icon left of the address
             bar), then reload.
@@ -494,7 +527,7 @@ export function ActiveRun({
           {mapGate === "ready" && (
             <NeonMap
               territories={territories}
-              pins={pins.pinsQuery.data ?? []}
+              pins={pins.mapPins}
               houses={[]}
               me={me}
               height="clamp(420px, 64dvh, 900px)"
@@ -518,7 +551,21 @@ export function ActiveRun({
               onOpenTurfTools={isCaptain ? onOpenTurfTools : undefined}
               mode={{
                 kind: "pin",
-                onDrop: (ll: LatLng) => pins.guardedMapDrop(ll, active),
+                // Nothing armed → a map tap drops NOTHING (Phase 3 §3): the
+                // old not_home default turned every stray tap into a pin.
+                onDrop: (ll: LatLng) => {
+                  if (!active) {
+                    const now = Date.now();
+                    if (now - lastArmHintRef.current > 2500) {
+                      lastArmHintRef.current = now;
+                      toast("Pick a result chip first — then tap the house.", {
+                        duration: 2000,
+                      });
+                    }
+                    return;
+                  }
+                  pins.guardedMapDrop(ll, active);
+                },
                 armed: armedResult
                   ? { label: armedResult.label, color: armedResult.color }
                   : undefined,
@@ -565,6 +612,22 @@ export function ActiveRun({
                     <ScrollText className="h-5 w-5" />
                   </button>
 
+                  {/* Sun mode — solid fills / no glow for direct sunlight
+                      (Phase 3 §2); ON by default, remembered per device */}
+                  <button
+                    type="button"
+                    aria-label={sunMode ? "Sun mode on — tap for arcade look" : "Turn on sun mode"}
+                    aria-pressed={sunMode}
+                    onClick={toggleSunMode}
+                    className={`absolute bottom-[11rem] left-3 z-[1000] flex h-11 w-11 items-center justify-center rounded-full border backdrop-blur ${
+                      sunMode
+                        ? "border-[var(--warning)] bg-surface text-[var(--warning)]"
+                        : "border-border bg-surface/90 text-muted-foreground"
+                    }`}
+                  >
+                    <Sun className="h-5 w-5" />
+                  </button>
+
                   {/* Rebuttal flash after a tagged objection — reads on the
                       walk to the next door, survives map fullscreen */}
                   {rebuttal && (
@@ -588,9 +651,12 @@ export function ActiveRun({
                         <button
                           key={r.type}
                           type="button"
-                          aria-label={`${r.fullLabel} — arm this result`}
-                          onClick={() => setActive(r.type)}
-                          className="relative flex min-h-11 w-16 flex-col items-center justify-center gap-1 rounded-xl py-1.5"
+                          aria-label={`${r.fullLabel} — ${isArmed ? "disarm" : "arm"} this result`}
+                          aria-pressed={isArmed}
+                          // Tap again to DISARM — stray map taps then drop
+                          // nothing (Phase 3 §3).
+                          onClick={() => setActive(isArmed ? null : r.type)}
+                          className="relative flex min-h-11 min-w-16 flex-col items-center justify-center gap-1 rounded-xl px-2 py-1.5"
                           style={{
                             color: r.color,
                             background: isArmed
@@ -602,7 +668,9 @@ export function ActiveRun({
                           }}
                         >
                           {r.icon}
-                          <span className="font-display text-[7px] uppercase tracking-wide leading-none whitespace-nowrap">
+                          {/* 12px body font — the 7px display-caps label was
+                              unreadable in sunlight (Phase 3 §2) */}
+                          <span className="text-xs font-semibold uppercase leading-none whitespace-nowrap">
                             {r.chipLabel}
                           </span>
                           <BumpBadge count={pins.counts[r.type] ?? 0} color={r.color} />
@@ -644,7 +712,7 @@ export function ActiveRun({
           {(pins.counts["lead"] ?? 0) > 0 && (
             <span
               aria-hidden
-              className="pointer-events-none absolute -top-1.5 -right-1.5 z-10 min-w-5 rounded-full border bg-surface px-1.5 text-center font-display text-[10px] leading-5"
+              className="pointer-events-none absolute -top-1.5 -right-1.5 z-10 min-w-5 rounded-full border bg-surface px-1.5 text-center text-xs font-bold leading-5"
               style={{ color: "#39ff14", borderColor: "#39ff14" }}
             >
               {pins.counts["lead"]}
@@ -669,10 +737,47 @@ export function ActiveRun({
           }}
           onClose={(submitted) => {
             setLeadOpen(false);
+            const closingAddress = leadAddress;
             setLeadAddress(null);
-            // Close-out refresh: reconcile the background pin insert, the
-            // trigger-bumped daily-log counters (HUD Leads, Stats, Log), and
-            // the my-leads list — the exact keys a hard refresh used to buy.
+            // Phase 3 §4: the lead pin exists only once the lead does. On a
+            // detected submit, land the remembered target (tapped house /
+            // pin-to-convert / device spot); an abandoned form drops nothing
+            // — no more phantom lead pins.
+            const target = pendingLeadRef.current;
+            pendingLeadRef.current = null;
+            if (submitted && target) {
+              if (target.kind === "switch") {
+                pins.updatePin.mutate({ id: target.pinId, pin_type: "lead" });
+              } else if (target.kind === "house") {
+                pins.guardedMapDrop({ lat: target.lat, lng: target.lng }, "lead");
+              } else {
+                void pins.dropAtDevice("lead");
+              }
+              // No GPS fix → the pin can't land, but the LEAD is already in
+              // Monday. Flag it to the office (Desk pending queue) so the
+              // address gets confirmed with the homeowner — fire-and-forget,
+              // the doorstep never waits on it.
+              if (!me && target.kind !== "switch" && user?.id) {
+                void supabase
+                  .from("leads")
+                  .insert({
+                    canvasser_id: user.id,
+                    team_id: teamId ?? null,
+                    customer_name: null,
+                    address: closingAddress,
+                    is_sale: false,
+                    sale_amount: null,
+                    notes:
+                      "⚠ Submitted from the field WITHOUT a GPS fix — confirm the address with the homeowner (full details on the Monday card).",
+                  })
+                  .then(({ error }) => {
+                    if (!error) qc.invalidateQueries({ queryKey: ["pending_leads"] });
+                  });
+              }
+            }
+            // Close-out refresh: reconcile the pin insert, the trigger-bumped
+            // daily-log counters (HUD Leads, Stats, Log), and the my-leads
+            // list — the exact keys a hard refresh used to buy.
             if (user?.id) {
               qc.invalidateQueries({ queryKey: ["my_pins_today", user.id] });
               qc.invalidateQueries({ queryKey: dailyLogKeys.all(user.id) });
@@ -729,27 +834,26 @@ export function ActiveRun({
         busy={pins.dropAtPoint.isPending || pins.updatePin.isPending}
         objectionsEnabled={objectionsEnabled}
         onDrop={(h, pin_type, objection) => {
+          // A lead IS the Monday form (one flow, owner directive 2026-09-10)
+          // — but since Phase 3 §4 the pin waits for the SUBMIT: the house
+          // target rides in pendingLeadRef and lands in the close handler,
+          // so an abandoned form leaves no phantom lead pin.
+          if (pin_type === "lead") {
+            openLead(houseLeadAddress(h), { kind: "house", lat: h.lat, lng: h.lng });
+            return;
+          }
           pins.guardedMapDrop({ lat: h.lat, lng: h.lng }, pin_type, objection);
           if (objection) setRebuttal((r) => ({ seq: (r?.seq ?? 0) + 1, objection }));
-          // A lead IS the Monday form — the pin marks the house, the form
-          // submits the lead (one flow, owner directive 2026-09-10). The
-          // house's address rides along (header + form prefill); the OSM
-          // housenumber gate keeps guessed numbers out of the pipeline.
-          if (pin_type === "lead") {
-            setLeadAddress(houseLeadAddress(h));
-            setLeadOpen(true);
-          }
         }}
         onSwitch={(pinId, pin_type, objection) => {
+          // Switching a result TO lead is submitting a lead — the pin
+          // conversion also waits for the Monday submit now.
+          if (pin_type === "lead") {
+            openLead(houseLeadAddress(houseTarget), { kind: "switch", pinId });
+            return;
+          }
           pins.updatePin.mutate({ id: pinId, pin_type, objection });
           if (objection) setRebuttal((r) => ({ seq: (r?.seq ?? 0) + 1, objection }));
-          // Switching a result TO lead is submitting a lead — same one flow
-          // as the tile's drop path above; without this the switch minted a
-          // lead pin with no Monday lead behind it.
-          if (pin_type === "lead") {
-            setLeadAddress(houseLeadAddress(houseTarget));
-            setLeadOpen(true);
-          }
         }}
       />
 
@@ -770,15 +874,17 @@ export function ActiveRun({
         updating={pins.updatePin.isPending}
         deleting={pins.deletePin.isPending}
         onSelect={(pin_type) => {
+          // Correcting a pin TO lead opens the form; the conversion waits
+          // for the Monday submit (Phase 3 §4). No house context on a bare
+          // pin — no address prefill.
+          if (pin_type === "lead") {
+            const pinId = editingPinId;
+            setEditingPinId(null);
+            if (pinId) openLead(null, { kind: "switch", pinId });
+            return;
+          }
           if (editingPinId) pins.updatePin.mutate({ id: editingPinId, pin_type });
           setEditingPinId(null);
-          // Correcting a pin TO lead opens the form too — a lead IS the
-          // Monday form (one flow, owner directive 2026-09-10). No house
-          // context on a bare pin — no address prefill.
-          if (pin_type === "lead") {
-            setLeadAddress(null);
-            setLeadOpen(true);
-          }
         }}
         onDelete={() => {
           if (editingPinId) pins.deletePin.mutate(editingPinId);

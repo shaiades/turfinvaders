@@ -143,7 +143,7 @@ export function HouseResultSheet({
                   type="button"
                   disabled={busy}
                   onClick={() => finishNotInterested(objection)}
-                  className={`min-h-14 rounded-lg border border-border bg-surface px-2 py-2 text-xs font-display uppercase tracking-widest ${busy ? "opacity-60" : ""}`}
+                  className={`min-h-14 rounded-lg border border-border bg-surface px-2 py-2 text-sm font-semibold ${busy ? "opacity-60" : ""}`}
                 >
                   {objection}
                 </button>
@@ -205,13 +205,11 @@ export function HouseResultSheet({
                     }}
                   >
                     {r.icon}
-                    <span className="font-display text-[9px] uppercase tracking-widest">
-                      {r.label}
-                    </span>
+                    {/* ≥12px body font — the 9px display-caps label was
+                        unreadable in sunlight (Phase 3 §2) */}
+                    <span className="text-xs font-semibold uppercase leading-tight">{r.label}</span>
                     {current && (
-                      <span className="text-[8px] uppercase tracking-widest text-muted-foreground">
-                        Current
-                      </span>
+                      <span className="text-xs uppercase text-muted-foreground">Current</span>
                     )}
                   </button>
                 );
@@ -341,7 +339,7 @@ function HouseNotes({ house }: { house: OsmHouse }) {
 
   return (
     <div className="space-y-2 border-t border-border pt-3" data-tour="house-notes">
-      <div className="flex items-center gap-1.5 font-display text-[10px] uppercase tracking-widest text-muted-foreground">
+      <div className="flex items-center gap-1.5 text-xs font-semibold uppercase text-muted-foreground">
         <StickyNote className="w-3.5 h-3.5" />
         House notes
       </div>
@@ -353,7 +351,7 @@ function HouseNotes({ house }: { house: OsmHouse }) {
         >
           <div className="min-w-0 flex-1">
             <div className="text-sm leading-snug break-words">{n.note}</div>
-            <div className="mt-0.5 text-[10px] text-muted-foreground">
+            <div className="mt-0.5 text-xs text-muted-foreground">
               {n.name} · {timeAgo(n.created_at)}
             </div>
           </div>

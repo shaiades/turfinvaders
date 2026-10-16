@@ -42,7 +42,7 @@ export function RebuttalCard({
       className="absolute inset-x-3 top-16 z-[1000] rounded-xl border border-neon/50 bg-surface p-3 shadow-[0_8px_30px_-10px_rgba(0,0,0,0.8)]"
     >
       <div className="flex items-start justify-between gap-2">
-        <div className="font-display text-[10px] uppercase tracking-widest text-neon">
+        <div className="text-xs font-semibold uppercase text-neon">
           “{rebuttal.objection}” — hit back
         </div>
         <button
@@ -62,7 +62,7 @@ export function RebuttalCard({
       <Link
         to="/learn"
         search={{ drill: rebuttal.objection }}
-        className="mt-2 inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-neon/40 bg-neon/10 px-3 font-display text-[10px] uppercase tracking-widest text-neon md:min-h-0 md:py-1.5"
+        className="mt-2 inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-neon/40 bg-neon/10 px-3 text-xs font-semibold uppercase text-neon md:min-h-0 md:py-1.5"
       >
         <Swords className="h-3.5 w-3.5" /> Drill this
       </Link>
