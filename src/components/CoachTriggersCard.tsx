@@ -17,9 +17,7 @@ import { Button } from "@/components/ui/button";
 import { CoachMessageComposer } from "@/components/CoachMessageComposer";
 import { getDispatchProduction } from "@/lib/dispatch.functions";
 import { computeCoachingFlag, computeTeamBaseline, type ConverterRow } from "@/lib/coaching";
-// isLeadSourceName (not Phase 1's isNonPersonName — that lives on the
-// #390 branch; swap when both merge) keeps channel rows off the list.
-import { isLeadSourceName } from "@/lib/lead-sources";
+import { isNonPersonName } from "@/lib/lead-sources";
 import { DOORS_TRACKED_SINCE } from "@/lib/funnel";
 import { weeklyPoints, POINTS_TIER_MID, HOURLY_MID } from "@/lib/pay";
 import { addDaysISO, laMidnightUtcISO, laTodayISO, laWeekStartISO } from "@/lib/dates";
@@ -75,7 +73,7 @@ function useCoachTriggers() {
 
       // ── firsts, from today's leads vs any prior lead/sale ──────────────────
       const leadsToday = (leadsTodayR.data ?? []).filter(
-        (l) => l.canvasser_id && !isLeadSourceName(nameOf(l.canvasser_id)),
+        (l) => l.canvasser_id && !isNonPersonName(nameOf(l.canvasser_id)),
       );
       const candidateIds = [...new Set(leadsToday.map((l) => l.canvasser_id as string))];
       const hadPriorLead = new Set<string>();
@@ -124,7 +122,7 @@ function useCoachTriggers() {
       }
       const yesterday = addDaysISO(today, -1);
       for (const [id, days] of byCanvasserDay) {
-        if (isLeadSourceName(nameOf(id))) continue;
+        if (isNonPersonName(nameOf(id))) continue;
         let before = 0;
         let withToday = 0;
         for (const [date, d] of days) {
@@ -149,7 +147,7 @@ function useCoachTriggers() {
       const coachRows: ConverterRow[] = [];
       for (const [id, r] of Object.entries(prod.results ?? {})) {
         const name = nameOf(id);
-        if (isLeadSourceName(name)) continue;
+        if (isNonPersonName(name)) continue;
         coachRows.push({
           id,
           name,
