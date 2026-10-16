@@ -26,13 +26,6 @@ const SCOPE_LABEL: Record<WrapScope, string> = {
   week: "THIS WEEK",
   month: "THIS MONTH",
 };
-const GRADE_COLOR: Record<string, string> = {
-  S: "var(--kombat-gold)",
-  A: "var(--victory)",
-  B: "var(--neon)",
-  C: "var(--neon-orange)",
-  D: "var(--muted-foreground)",
-};
 
 function dateLabel(): string {
   return new Intl.DateTimeFormat("en-US", {
@@ -160,11 +153,9 @@ export function WrapShow({ scope, onClose }: { scope: WrapScope; onClose: () => 
         dateLabel: dateLabel(),
         rank: d.rank,
         sits: d.sits,
-        sitRateLabel: d.sitRate.grade
-          ? `${d.sitRate.grade} · ${Math.round((d.sitRate.rate ?? 0) * 100)}%`
-          : "—",
+        sitRateLabel: d.sitRate.rate != null ? `${Math.round(d.sitRate.rate * 100)}% sit` : "—",
         salesLabel: fmtVol(d.vol),
-        bonusLabel: `Boss ${d.boss.level} · ${d.boss.bossesDefeated} 🧰`,
+        bonusLabel: `$1,500 chests · ${d.boss.bossesDefeated} 🧰`,
       });
       await shareOrDownloadCard(blob, `turf-invaders-${laTodayISO()}.png`);
     } catch {
@@ -321,14 +312,15 @@ function WrapCard({
           <p className="font-display text-xs uppercase tracking-widest text-muted-foreground">
             Sit rate
           </p>
+          {/* Phase 4 §1: the honest percentage, not a letter grade. */}
           <p
-            className="mt-2 font-display text-[7rem] leading-none"
+            className="mt-2 font-display text-[6rem] leading-none"
             style={{
-              color: d.sitRate.grade ? GRADE_COLOR[d.sitRate.grade] : "var(--muted-foreground)",
-              textShadow: d.sitRate.grade ? `0 0 40px ${GRADE_COLOR[d.sitRate.grade]}` : undefined,
+              color: d.sitRate.rate != null ? "var(--victory)" : "var(--muted-foreground)",
+              textShadow: d.sitRate.rate != null ? "0 0 40px var(--victory)" : undefined,
             }}
           >
-            {d.sitRate.grade ?? "—"}
+            {d.sitRate.rate != null ? `${Math.round(d.sitRate.rate * 100)}%` : "—"}
           </p>
           <p className="mt-2 text-sm text-muted-foreground">
             {d.sits}/{d.sitRate.leads} leads sat
@@ -346,7 +338,7 @@ function WrapCard({
       return (
         <>
           <p className="font-display text-xs uppercase tracking-widest text-[var(--kombat-gold)]">
-            Boss {d.boss.level} · damage today
+            $1,500 chase · damage today
           </p>
           <p className="mt-2 font-display text-4xl tabular-nums text-[var(--kombat-red)]">
             <CountUp to={d.todayVol} reduced={reduced} format={(n) => money(n)} />
@@ -422,35 +414,30 @@ function WrapCard({
     case "badges":
       return (
         <>
+          {/* Phase 4 §1: the XP level/titles beat is retired — badges (the
+              pay-tied survivors) carry this card alone. */}
           <p className="font-display text-xs uppercase tracking-widest text-muted-foreground">
-            Level {d.level.level} · {d.level.title}
-          </p>
-          <div className="mt-3 h-3 w-full overflow-hidden rounded-full border border-border bg-foreground/5">
-            <div
-              className="h-full rounded-full bg-neon transition-[width] duration-1000 ease-out"
-              style={{ width: `${d.level.pct * 100}%`, boxShadow: "0 0 12px var(--neon)" }}
-            />
-          </div>
-          <p className="mt-1.5 font-display text-[10px] uppercase tracking-widest text-muted-foreground">
-            +{d.xpEarned} XP
+            Trophies
           </p>
           <div className="mt-5 flex flex-wrap justify-center gap-2">
-            {d.badges.map((b) => (
-              <span
-                key={b.def.id}
-                title={b.def.blurb}
-                className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs ${
-                  b.unlocked
-                    ? "border-[var(--kombat-gold)] text-foreground"
-                    : "border-border text-muted-foreground/40"
-                }`}
-              >
-                <span aria-hidden className={b.unlocked ? "" : "grayscale"}>
-                  {b.def.icon}
+            {d.badges
+              .filter((b) => b.def.id === "boss_slayer")
+              .map((b) => (
+                <span
+                  key={b.def.id}
+                  title={b.def.blurb}
+                  className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs ${
+                    b.unlocked
+                      ? "border-[var(--kombat-gold)] text-foreground"
+                      : "border-border text-muted-foreground/40"
+                  }`}
+                >
+                  <span aria-hidden className={b.unlocked ? "" : "grayscale"}>
+                    {b.def.icon}
+                  </span>
+                  {b.def.label}
                 </span>
-                {b.def.label}
-              </span>
-            ))}
+              ))}
           </div>
         </>
       );
@@ -510,7 +497,10 @@ function WrapCard({
             )}
             <div className="mt-2 grid grid-cols-2 gap-1 text-[10px]">
               <Mini label="Sits" value={String(d.sits)} />
-              <Mini label="Rate" value={d.sitRate.grade ?? "—"} />
+              <Mini
+                label="Rate"
+                value={d.sitRate.rate != null ? `${Math.round(d.sitRate.rate * 100)}%` : "—"}
+              />
               <Mini label="Sales" value={fmtVol(d.vol)} />
               <Mini label="Bonus" value={`🧰${d.boss.bossesDefeated}`} />
             </div>

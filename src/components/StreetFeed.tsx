@@ -21,6 +21,7 @@ const KIND_ICON: Record<string, string> = {
   badge: "🏅",
   sit: "🎯",
   dojo: "🥋",
+  mystery: "🎁",
 };
 const kindIcon = (k: string) => KIND_ICON[k] ?? "⭐";
 

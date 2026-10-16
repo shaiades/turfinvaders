@@ -6,10 +6,19 @@ import { useRepCartoons, cartoonFor, type RepCartoon } from "@/hooks/useRepCarto
 import { BossMeter } from "@/components/BossMeter";
 import { VanWarsRace } from "@/components/VanWarsRace";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
-import { useArcadeLadder, type LadderRow, type RangeKey } from "@/hooks/useCanvasserArcade";
+import {
+  useArcadeLadder,
+  rangeFor,
+  type LadderRow,
+  type RangeKey,
+} from "@/hooks/useCanvasserArcade";
 import { captureMorningRank } from "@/hooks/useWrapData";
 import { haptic } from "@/lib/arcade-fx";
 import { BOSS_HP } from "@/lib/canvasserPay";
+import { HOURLY_BASE, HOURLY_MID, HOURLY_TOP, POINTS_TIER_MID, POINTS_TIER_TOP } from "@/lib/pay";
+import { useQuery } from "@tanstack/react-query";
+import { getDispatchProduction } from "@/lib/dispatch.functions";
+import { addDaysISO, laMidnightUtcISO } from "@/lib/dates";
 
 /** No fighter art on file → the leaderboard shows a grey "Photo needed"
  *  silhouette (owner 2026-10-06). A still-generating cartoon reads the same for
@@ -56,14 +65,36 @@ export function CanvasserLeaderboard() {
   // Race" (the old Bonus tab, folded in 2026-10-05). Harmless off Month.
   const [monthMode, setMonthMode] = useState<"pts" | "bonus">("pts");
   const moneyMode = tab === "month" && monthMode === "bonus";
+  // Leagues (Phase 4 §5): the main board, the Rookies (first 30 days), and
+  // the Risers (this week vs their own 4-week average — its own component).
+  const [league, setLeague] = useState<"main" | "rookies" | "risers">("main");
   const range: RangeKey = tab;
   const { rows: ptsRows, self, loading } = useArcadeLadder(range);
 
-  // The $ "Bonus Race" ranks by money (the $100K race); every other view by points.
+  // The $ "Bonus Race" ranks by money (the $100K race); every other view by
+  // points. The Rookie league is the same ranking, rookie rows only.
   const rows = useMemo(() => {
-    if (!moneyMode) return ptsRows;
-    return [...ptsRows].sort((a, b) => b.vol - a.vol || b.pts - a.pts);
-  }, [ptsRows, moneyMode]);
+    const pool = league === "rookies" ? ptsRows.filter((r) => r.rookie) : ptsRows;
+    if (!moneyMode) return pool;
+    return [...pool].sort((a, b) => b.vol - a.vol || b.pts - a.pts);
+  }, [ptsRows, moneyMode, league]);
+
+  // Pay-tier census (Phase 4 §6): how many knockers sit at each hourly tier
+  // this week, from PAY-axis points (no dojo bonus). Display-only — the board
+  // week is Mon–Sat while pay runs Mon–Sun, so Sunday evenings can trail the
+  // paycheck by a day.
+  const tierCensus = useMemo(() => {
+    if (tab !== "week") return null;
+    let top = 0,
+      mid = 0,
+      base = 0;
+    for (const r of ptsRows) {
+      if (r.basePts >= POINTS_TIER_TOP) top++;
+      else if (r.basePts >= POINTS_TIER_MID) mid++;
+      else base++;
+    }
+    return { top, mid, base };
+  }, [tab, ptsRows]);
 
   // ── Live rank movement: a ▲/▼ trail when a result reshuffles the board,
   // and a coin pop when a row's credited volume ticks up. Flash clears after
@@ -206,6 +237,30 @@ export function CanvasserLeaderboard() {
             ))}
           </div>
 
+          {/* Leagues — Main / Rookies / Risers (Phase 4 §5) */}
+          <div className="flex gap-1 rounded-lg border border-border bg-surface p-1">
+            {(
+              [
+                ["main", "Main"],
+                ["rookies", "Rookies"],
+                ["risers", "Risers"],
+              ] as const
+            ).map(([k, label]) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setLeague(k)}
+                className={`min-h-11 flex-1 rounded-md px-3 py-1.5 font-display text-[10px] uppercase tracking-widest transition md:min-h-0 ${
+                  league === k
+                    ? "bg-[color-mix(in_oklab,var(--accent)_18%,transparent)] text-[var(--accent)] shadow-[0_0_18px_-4px_var(--accent)]"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
           {/* Month view carries the $100K boss + the points/$ ranking toggle. */}
           {tab === "month" && (
             <>
@@ -234,20 +289,41 @@ export function CanvasserLeaderboard() {
             </>
           )}
 
-          {loading ? (
+          {league === "risers" ? (
+            <RisersBoard selfId={selfId} />
+          ) : loading ? (
             <ArcadeSkeleton className="h-64 w-full" />
           ) : rows.length === 0 ? (
             <ArcadeCard className="p-6 text-center text-sm text-muted-foreground">
-              No production in this range yet — first knock takes #1.
+              {league === "rookies"
+                ? "No rookies on the board this range — invite somebody new."
+                : "No production in this range yet — first knock takes #1."}
             </ArcadeCard>
           ) : (
             <>
+              {/* Pay-tier census — the money ladder in one line (Phase 4 §6).
+                  Counts only; nobody's exact pay shows on a public board. */}
+              {tierCensus && (
+                <p className="text-center font-display text-[10px] uppercase tracking-widest text-muted-foreground">
+                  This week:{" "}
+                  <span className="text-[var(--kombat-gold)]">
+                    ${HOURLY_TOP}/hr ×{tierCensus.top}
+                  </span>{" "}
+                  ·{" "}
+                  <span className="text-victory">
+                    ${HOURLY_MID}/hr ×{tierCensus.mid}
+                  </span>{" "}
+                  · ${HOURLY_BASE}/hr ×{tierCensus.base}
+                </p>
+              )}
+
               {/* Podium */}
               <Podium
                 rows={podium}
                 selfId={selfId}
                 cartoons={cartoons}
                 money={moneyMode}
+                showBonuses={tab === "month"}
                 reduced={reduced}
               />
 
@@ -308,6 +384,7 @@ function Podium({
   selfId,
   cartoons,
   money,
+  showBonuses = false,
   reduced,
 }: {
   rows: LadderRow[];
@@ -315,6 +392,8 @@ function Podium({
   cartoons: Map<string, { name: string; portrait: string | null; full: string | null }> | undefined;
   /** Show credited $ instead of points (the Month "Bonus Race" view). */
   money: boolean;
+  /** Month tab: each top-3's banked $1,500 chests ride under the name. */
+  showBonuses?: boolean;
   reduced: boolean;
 }) {
   // Visual order: #2 left, #1 center (tallest), #3 right.
@@ -362,6 +441,13 @@ function Podium({
               <span className="font-display text-[11px] tabular-nums text-victory">
                 {money ? fmtVol(r.vol) : `${r.pts} pts`}
               </span>
+              {/* Month podium: banked $1,500 chests, in dollars not mystery
+                  icons (Phase 4 §6) */}
+              {showBonuses && bonusCount(r.vol) > 0 && (
+                <span className="font-display text-[10px] tabular-nums text-[var(--kombat-gold)]">
+                  {bonusCount(r.vol)} × $1,500
+                </span>
+              )}
               {/* The two non-ranking metrics ride under the hero number so the
                   top spots show the money and leads the moment they land. A $0 /
                   0-lead part drops out so a fresh podium stays clean. */}
@@ -475,22 +561,14 @@ function ScoreRow({
               </span>
             </>
           )}
-          <span className={r.lds > 0 ? "text-neon" : "text-muted-foreground/40"}>
-            {r.lds} lds
-          </span>
+          <span className={r.lds > 0 ? "text-neon" : "text-muted-foreground/40"}>{r.lds} lds</span>
           {bonuses > 0 && (
             <span className="text-[var(--kombat-gold)]" title={`${bonuses} × $1,500 bonus`}>
               🪙×{bonuses}
             </span>
           )}
-          {r.sit.grade && (
-            <span
-              className="rounded bg-foreground/5 px-1 text-neon"
-              title={`${r.sit.sits}/${r.sit.leads} leads sat`}
-            >
-              {r.sit.grade}
-            </span>
-          )}
+          {/* The S/A/B sit GRADE is retired from canvasser UI (Phase 4 §1);
+              the honest % stays in the sub-line below. */}
         </div>
       </div>
       <div className="mt-0.5 pl-[3.1rem] font-display text-[9px] uppercase tracking-widest text-muted-foreground/70">
@@ -500,5 +578,95 @@ function ScoreRow({
         {r.cancels > 0 ? ` · ${r.cancels} cxl` : ""}
       </div>
     </li>
+  );
+}
+
+// ── Risers (Most Improved) ────────────────────────────────────────────────
+/** This week vs YOUR OWN last-4-week average (Phase 4 §5) — the board a
+ *  mid-pack grinder can win. Pay-axis points only (no dojo bonus), one extra
+ *  28-day aggregate query, cached 5 minutes. */
+function RisersBoard({ selfId }: { selfId: string | undefined }) {
+  const week = useArcadeLadder("week");
+  const { start } = rangeFor("week");
+  const priorQ = useQuery({
+    queryKey: ["arcade_ladder", "risers", start],
+    staleTime: 5 * 60_000,
+    queryFn: async () =>
+      getDispatchProduction({
+        data: {
+          log_start: addDaysISO(start, -28),
+          log_end: addDaysISO(start, -1),
+          vol_start: laMidnightUtcISO(addDaysISO(start, -28)),
+          vol_end: laMidnightUtcISO(start),
+        },
+      }),
+  });
+
+  const rows = useMemo(() => {
+    const prior = priorQ.data;
+    if (!prior) return [];
+    return week.rows
+      .map((r) => {
+        const avg = (prior.points?.[r.id] ?? 0) / 4;
+        return { ...r, avg, delta: r.basePts - avg };
+      })
+      .filter((r) => r.basePts > 0 || r.avg > 0)
+      .sort((a, b) => b.delta - a.delta || b.basePts - a.basePts)
+      .slice(0, 15);
+  }, [week.rows, priorQ.data]);
+
+  if (week.loading || priorQ.isLoading) return <ArcadeSkeleton className="h-64 w-full" />;
+  if (rows.length === 0) {
+    return (
+      <ArcadeCard className="p-6 text-center text-sm text-muted-foreground">
+        The Risers board lights up once this week has production to compare.
+      </ArcadeCard>
+    );
+  }
+
+  return (
+    <ArcadeCard asChild className="overflow-hidden p-0">
+      <section>
+        <header className="flex items-center justify-between border-b border-border px-4 py-3">
+          <h2 className="font-display text-xs uppercase tracking-widest text-neon">
+            Risers · vs your own 4-week average
+          </h2>
+          <span className="font-display text-[10px] uppercase tracking-widest text-muted-foreground">
+            week pts
+          </span>
+        </header>
+        <ol className="divide-y divide-border/60 px-2">
+          {rows.map((r, i) => {
+            const self = r.id === selfId;
+            const up = r.delta >= 0;
+            return (
+              <li
+                key={r.id}
+                className={`flex items-center justify-between gap-3 py-2.5 ${
+                  self ? "-mx-1 rounded bg-neon/10 px-1" : ""
+                }`}
+              >
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <span className="w-8 shrink-0 text-right font-display text-sm tabular-nums text-muted-foreground">
+                    {i + 1}
+                  </span>
+                  <span className={`truncate text-sm ${self ? "font-medium text-neon" : ""}`}>
+                    {r.name}
+                  </span>
+                </div>
+                <div className="flex shrink-0 items-center gap-2 font-display text-[11px] uppercase tabular-nums">
+                  <span className={up ? "text-victory" : "text-destructive"}>
+                    {up ? "▲" : "▼"}
+                    {Math.abs(r.delta).toFixed(1)}
+                  </span>
+                  <span className="text-foreground">{r.basePts} pts</span>
+                  <span className="text-muted-foreground">avg {r.avg.toFixed(1)}</span>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      </section>
+    </ArcadeCard>
   );
 }

@@ -1523,3 +1523,25 @@ html.sun-mode:not(.dark) {
   --muted-foreground: oklch(0.36 0.02 260);
   --border: oklch(0.74 0.01 250);
 }
+
+/* Next-dollar chip, one unit away (Phase 4 §2): a gold nudge, not a seizure.
+ * Skipped under prefers-reduced-motion (the component drops the class). */
+@keyframes money-shake {
+  0%,
+  86%,
+  100% {
+    transform: translateX(0);
+  }
+  88% {
+    transform: translateX(-2px) rotate(-1deg);
+  }
+  92% {
+    transform: translateX(2px) rotate(1deg);
+  }
+  96% {
+    transform: translateX(-1px);
+  }
+}
+.money-shake {
+  animation: money-shake 2.4s ease-in-out infinite;
+}

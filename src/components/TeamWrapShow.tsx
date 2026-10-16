@@ -280,8 +280,8 @@ function TeamCard({
           </p>
           <p className="mt-3 text-sm text-muted-foreground">
             {d.companySits} sits
-            {rate.grade ? ` · ${rate.grade} (${Math.round((rate.rate ?? 0) * 100)}%)` : ""} ·{" "}
-            {d.companySales} sold
+            {rate.rate != null ? ` · ${Math.round(rate.rate * 100)}% sit` : ""} · {d.companySales}{" "}
+            sold
           </p>
         </>
       );
@@ -313,7 +313,7 @@ function TeamCard({
           </p>
           <p className="mt-1 text-sm text-muted-foreground">
             {fmtVol(mvp.vol)} · {mvp.sit.sits} sits
-            {mvp.sit.grade ? ` · ${mvp.sit.grade}` : ""}
+            {mvp.sit.rate != null ? ` · ${Math.round(mvp.sit.rate * 100)}% sit` : ""}
           </p>
         </>
       );
@@ -341,7 +341,7 @@ function TeamCard({
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
             {champ.pts} pts · {fmtVol(champ.vol)}
-            {champ.sit.grade ? ` · ${champ.sit.grade}` : ""}
+            {champ.sit.rate != null ? ` · ${Math.round(champ.sit.rate * 100)}% sit` : ""}
           </p>
           <ul className="mt-5 w-full space-y-2.5">
             {d.vans.map((v, idx) => (

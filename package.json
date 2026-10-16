@@ -35,7 +35,8 @@
     "verify:vanwars": "npx tsx scripts/verify-vanwars.ts",
     "verify:confirmer": "npx tsx scripts/verify-confirmer.ts",
     "verify:coaching": "npx tsx scripts/verify-coaching.ts",
-    "verify:pin-queue": "npx tsx scripts/verify-pin-queue.ts"
+    "verify:pin-queue": "npx tsx scripts/verify-pin-queue.ts",
+    "verify:money": "npx tsx scripts/verify-money.ts"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",

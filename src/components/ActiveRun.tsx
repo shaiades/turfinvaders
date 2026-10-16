@@ -25,6 +25,7 @@ import { getLastMapView, setLastMapView, type MapView } from "@/lib/last-map-vie
 import type { MapDataStatus } from "@/lib/map-status";
 import { PinActionSheet } from "@/components/PinActionSheet";
 import { QuickClockIn } from "@/components/QuickClockIn";
+import { NextDollarChip, RankChip } from "@/components/MoneyChips";
 import { HouseResultSheet } from "@/components/HouseResultSheet";
 import { FieldStandingsSheet } from "@/components/FieldStandingsSheet";
 import { DoorScriptSheet } from "@/components/DoorScriptSheet";
@@ -32,6 +33,7 @@ import { RebuttalCard } from "@/components/RebuttalCard";
 import { prefetchTurfHouses, type OsmHouse } from "@/components/HouseBubbles";
 import { ArcadePanel } from "@/components/arcade";
 import { toast } from "sonner";
+import { haptic } from "@/lib/arcade-fx";
 import { rewardToast } from "@/lib/reward-toast";
 import {
   Copy,
@@ -220,6 +222,24 @@ export function ActiveRun({
   // 3-second rebuttal card after a tagged objection (Phase 2 §2). seq bumps
   // per showing so a repeat of the same objection re-arms the timer.
   const [rebuttal, setRebuttal] = useState<{ seq: number; objection: string } | null>(null);
+
+  // Talk combo (Phase 4 §4): consecutive CONVERSATION results — the same pin
+  // types the bump trigger counts as people_talked_to (talked_to, renter,
+  // go_back, lead, not_interested) — build a streak chip; a not_home breaks
+  // it. Pure hype, client-only, resets with the screen.
+  const [combo, setCombo] = useState(0);
+  const TALK_TYPES = useMemo(
+    () => new Set<ActivePin>(["talked_to", "renter", "go_back", "lead", "not_interested"]),
+    [],
+  );
+  const registerResult = (pin_type: ActivePin) => {
+    setCombo((c) => {
+      if (!TALK_TYPES.has(pin_type)) return 0;
+      const next = c + 1;
+      if (next >= 3) haptic([10, 30, 10, 30, 10]);
+      return next;
+    });
+  };
 
   // Sun mode (Phase 3 §2): solid fills, no glow, boosted contrast — ON by
   // default for the field. Applied as a class on <html> so the portaled
@@ -565,6 +585,7 @@ export function ActiveRun({
                     return;
                   }
                   pins.guardedMapDrop(ll, active);
+                  registerResult(active);
                 },
                 armed: armedResult
                   ? { label: armedResult.label, color: armedResult.color }
@@ -575,8 +596,15 @@ export function ActiveRun({
               // ride along when the map goes fullscreen.
               overlay={
                 <>
-                  {/* Piggy bank — every knock is worth money, watch it stack */}
-                  <div data-tour="field-bank" className="absolute top-3 left-3 z-[1000]">
+                  {/* Live Today rank — one tap into the standings (Phase 4 §3) */}
+                  <RankChip userId={user?.id} onOpen={() => setStandingsOpen(true)} />
+
+                  {/* The nearest real money on the table (Phase 4 §2) */}
+                  <NextDollarChip userId={user?.id} />
+
+                  {/* Piggy bank — every knock is worth money, watch it stack
+                      (below the rank chip since Phase 4 took top-left) */}
+                  <div data-tour="field-bank" className="absolute top-[3.75rem] left-3 z-[1000]">
                     <PiggyBankHUD
                       dollars={piggy.dollars}
                       perKnock={piggy.perKnock}
@@ -637,6 +665,17 @@ export function ActiveRun({
                       objection={rebuttal.objection}
                       onDone={() => setRebuttal(null)}
                     />
+                  )}
+
+                  {/* Talk combo — consecutive conversations, broken by a
+                      Not Home (Phase 4 §4). Shows from 2 up. */}
+                  {combo >= 2 && (
+                    <div
+                      aria-live="polite"
+                      className="absolute bottom-[4.9rem] left-1/2 -translate-x-1/2 z-[1000] rounded-full border border-[var(--warning)] bg-surface px-3 py-1 text-xs font-bold uppercase text-[var(--warning)]"
+                    >
+                      🔥 {combo} talks in a row
+                    </div>
                   )}
 
                   {/* Armed-result switcher pinned to the map — the ONE picker
@@ -750,8 +789,10 @@ export function ActiveRun({
                 pins.updatePin.mutate({ id: target.pinId, pin_type: "lead" });
               } else if (target.kind === "house") {
                 pins.guardedMapDrop({ lat: target.lat, lng: target.lng }, "lead");
+                registerResult("lead");
               } else {
                 void pins.dropAtDevice("lead");
+                registerResult("lead");
               }
               // No GPS fix → the pin can't land, but the LEAD is already in
               // Monday. Flag it to the office (Desk pending queue) so the
@@ -843,6 +884,7 @@ export function ActiveRun({
             return;
           }
           pins.guardedMapDrop({ lat: h.lat, lng: h.lng }, pin_type, objection);
+          registerResult(pin_type);
           if (objection) setRebuttal((r) => ({ seq: (r?.seq ?? 0) + 1, objection }));
         }}
         onSwitch={(pinId, pin_type, objection) => {

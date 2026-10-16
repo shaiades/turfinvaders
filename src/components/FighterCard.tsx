@@ -11,8 +11,23 @@
 
 import { useMemo, useRef } from "react";
 import { Camera } from "lucide-react";
-import { PAY_LOCK_MIN_ROLLING_AVG } from "@/lib/pay";
+import {
+  HOURLY_MID,
+  HOURLY_TOP,
+  PAY_LOCK_MIN_ROLLING_AVG,
+  POINTS_TIER_MID,
+  POINTS_TIER_TOP,
+  payRateForPoints,
+  weeklyPoints,
+} from "@/lib/pay";
 import { BADGES, type BadgeId } from "@/lib/canvasserPay";
+import { addDaysISO, laWeekStartISO } from "@/lib/dates";
+import { sumLogCounters, useSixtyDayLogs } from "@/hooks/useDailyLogs";
+
+// The badges that survive §1: tied to a real pay event. Boss Slayer = the
+// $1,500 monthly volume bonus. (Data for the retired five is kept.)
+const PAY_BADGE_IDS = new Set<BadgeId>(["boss_slayer"]);
+const PAY_BADGES = BADGES.filter((b) => PAY_BADGE_IDS.has(b.id));
 import { ArcadePanel, ArcadeSkeleton } from "@/components/arcade";
 import { BadgeUnlock } from "@/components/BadgeUnlock";
 import { RepAvatar } from "@/components/RepAvatar";
@@ -58,8 +73,38 @@ export function FighterCard({
   readOnly?: boolean;
 }) {
   const profile = useCanvasserProfile(userId);
-  const wrap = useWrapData("month"); // lifetime level + the live-earned badge set
+  const wrap = useWrapData("month"); // the live-earned badge set
   const cartoons = useRepCartoons().data;
+  // The weekly pay tier IS the level (Phase 4 §1) — Mon–Sun pay-axis points,
+  // same math as the HUD's tier hint.
+  const weekLogs = useSixtyDayLogs(userId);
+  const tierPill = useMemo(() => {
+    const wkStart = laWeekStartISO();
+    const wkEnd = addDaysISO(wkStart, 6);
+    const wk = sumLogCounters(
+      (weekLogs.data ?? []).filter((r) => r.log_date >= wkStart && r.log_date <= wkEnd),
+    );
+    const pts = weeklyPoints(wk.demos_sits, wk.sales);
+    const lockRank =
+      profile.data?.pay_lock_status === "reverted" ? null : profile.data?.current_rank;
+    const rate = payRateForPoints(pts, lockRank);
+    if (rate >= HOURLY_TOP) {
+      return {
+        label: `$${HOURLY_TOP}/hr${payRateForPoints(0, lockRank) === HOURLY_TOP ? " locked" : ""}`,
+        hint: "Top tier this week",
+        pct: 1,
+        sub: `${pts} pts this week`,
+      };
+    }
+    const nextAt = pts >= POINTS_TIER_MID ? POINTS_TIER_TOP : POINTS_TIER_MID;
+    const nextRate = pts >= POINTS_TIER_MID ? HOURLY_TOP : HOURLY_MID;
+    return {
+      label: `$${rate}/hr`,
+      hint: `${nextAt - pts} pts to $${nextRate}/hr`,
+      pct: Math.min(1, pts / nextAt),
+      sub: `${pts}/${nextAt} pts → $${nextRate}/hr`,
+    };
+  }, [weekLogs.data, profile.data]);
   const fileRef = useRef<HTMLInputElement>(null);
   const { onPick, busy } = useMyFighterUpload();
 
@@ -145,38 +190,43 @@ export function FighterCard({
             </div>
             <div className="mt-1.5 flex flex-wrap items-center gap-2">
               <RankPill rank={rank} size="md" tappable />
-              <span className="inline-flex items-center gap-1 rounded border border-[var(--kombat-gold)]/50 bg-[color-mix(in_oklab,var(--kombat-gold)_12%,transparent)] px-2 py-0.5 font-display text-[11px] uppercase tracking-widest text-[var(--kombat-gold)]">
-                Lvl {wrap.level.level} · {wrap.level.title}
+              {/* ONE progression (Phase 4 §1): the weekly PAY TIER is the
+                  level — the cosmetic XP curve and its titles are retired
+                  from the UI (data kept). */}
+              <span
+                title={tierPill.hint}
+                className="inline-flex items-center gap-1 rounded border border-[var(--kombat-gold)]/50 bg-[color-mix(in_oklab,var(--kombat-gold)_12%,transparent)] px-2 py-0.5 font-display text-[11px] uppercase tracking-widest text-[var(--kombat-gold)]"
+              >
+                {tierPill.label}
               </span>
             </div>
-            {wrap.loading ? (
-              <ArcadeSkeleton className="mt-2 h-2.5 w-full" />
-            ) : (
-              <div className="mt-2">
-                <div className="h-2.5 w-full overflow-hidden rounded-full border border-border bg-foreground/5">
-                  <div
-                    className="h-full rounded-full bg-neon transition-[width] duration-700 ease-out"
-                    style={{ width: `${wrap.level.pct * 100}%`, boxShadow: "0 0 10px var(--neon)" }}
-                  />
-                </div>
-                <div className="mt-1 text-right font-display text-[9px] uppercase tracking-widest tabular-nums text-muted-foreground">
-                  {wrap.level.intoLevel}/{wrap.level.levelSpan} XP
-                </div>
+            <div className="mt-2">
+              <div className="h-2.5 w-full overflow-hidden rounded-full border border-border bg-foreground/5">
+                <div
+                  className="h-full rounded-full bg-neon transition-[width] duration-700 ease-out"
+                  style={{ width: `${tierPill.pct * 100}%`, boxShadow: "0 0 10px var(--neon)" }}
+                />
               </div>
-            )}
+              <div className="mt-1 text-right font-display text-[9px] uppercase tracking-widest tabular-nums text-muted-foreground">
+                {tierPill.sub}
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Badges row — persisted trophies: once earned, lit forever */}
+        {/* Badges row — persisted trophies: once earned, lit forever. Only
+            PAY-TIED badges survive Phase 4 §1 (Boss Slayer = the $1,500
+            volume bonus); the cosmetic ones are retired from the UI, their
+            earned rows kept. */}
         <div className="mt-4">
           <p className="mb-1.5 font-display text-[9px] uppercase tracking-widest text-muted-foreground">
-            Badges · {badges.earned.size}/{BADGES.length}
+            Badges · {PAY_BADGES.filter((d) => badges.earned.has(d.id)).length}/{PAY_BADGES.length}
           </p>
           {badgesLoading ? (
             <ArcadeSkeleton className="h-8 w-full" />
           ) : (
             <div className="flex flex-wrap gap-1.5">
-              {BADGES.map((def) => {
+              {PAY_BADGES.map((def) => {
                 const unlocked = badges.earned.has(def.id);
                 return (
                   <span
@@ -241,9 +291,14 @@ export function FighterCard({
 
       {/* First-time unlock animation — plays once, then markSeen persists it.
           Never in a preview: the moment (and its seen flag) belongs to the
-          player, not to whoever is looking over their shoulder. */}
-      {!readOnly && badges.unseen.length > 0 && (
-        <BadgeUnlock badges={badges.unseen} onDone={(ids) => badges.markSeen(ids)} />
+          player, not to whoever is looking over their shoulder. Only the
+          pay-tied survivors animate; the onDone flushes EVERY unseen id so a
+          retired badge can't sit "unseen" forever. */}
+      {!readOnly && badges.unseen.some((b) => PAY_BADGE_IDS.has(b.id)) && (
+        <BadgeUnlock
+          badges={badges.unseen.filter((b) => PAY_BADGE_IDS.has(b.id))}
+          onDone={() => badges.markSeen(badges.unseen.map((b) => b.id))}
+        />
       )}
     </>
   );

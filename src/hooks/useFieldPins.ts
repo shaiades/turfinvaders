@@ -6,6 +6,7 @@ import { addDaysISO, laTodayISO } from "@/lib/dates";
 import { dailyLogKeys } from "@/hooks/useDailyLogs";
 import { enqueuePin, flushPinQueue, isNetworkishError, type QueuedPin } from "@/lib/pin-queue";
 import { toast } from "sonner";
+import { rewardToast } from "@/lib/reward-toast";
 import type { FieldPin, LatLng } from "@/components/NeonMap";
 
 /**
@@ -237,6 +238,37 @@ export function useFieldPins(userId: string | undefined, me: LatLng | null) {
     return byType;
   }, [pinsQuery.data]);
 
+  // Mystery drops (Phase 4 §4): the SERVER rolled the dice inside the pin
+  // trigger — after a conversation lands, peek for a fresh prize and
+  // celebrate it once. Fail-soft and fire-and-forget; the knock never waits.
+  const celebratedDropsRef = useRef<Set<string>>(new Set());
+  const checkMysteryDrop = async () => {
+    if (!userId) return;
+    try {
+      const { data } = await (supabase as unknown as import("@supabase/supabase-js").SupabaseClient)
+        .from("arcade_drops")
+        .select("id, points")
+        .eq("canvasser_id", userId)
+        .gte("created_at", new Date(Date.now() - 30_000).toISOString())
+        .order("created_at", { ascending: false })
+        .limit(1);
+      const row = (data ?? [])[0] as { id: string; points: number } | undefined;
+      if (!row || celebratedDropsRef.current.has(row.id)) return;
+      celebratedDropsRef.current.add(row.id);
+      rewardToast("🎁 MYSTERY DROP — +1 arcade point!");
+    } catch {
+      /* the prize layer must never break the knock */
+    }
+  };
+  const TALK_PIN_TYPES = new Set<ActivePin>([
+    "talked_to",
+    "renter",
+    "go_back",
+    "lead",
+    "not_interested",
+    "appt",
+  ] as ActivePin[]);
+
   const dropAtPoint = useMutation({
     // pin_type is captured at tap time — reading the armed result in the
     // callbacks could mislabel the toast if the rep switches mid-flight.
@@ -340,6 +372,7 @@ export function useFieldPins(userId: string | undefined, me: LatLng | null) {
         });
       } else {
         toast.success(RESULT_TOASTS[pin_type] ?? "Pin dropped");
+        if (TALK_PIN_TYPES.has(pin_type)) void checkMysteryDrop();
       }
       // bump_daily_log_from_pin has committed by now — refresh every
       // self-scoped daily_logs read (Log form, Stats, HUD, tally counts).
