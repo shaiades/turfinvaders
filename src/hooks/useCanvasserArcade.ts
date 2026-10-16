@@ -18,7 +18,8 @@ import {
   remainingWorkdaysInMonth,
 } from "@/lib/dates";
 import { useAuth } from "@/hooks/useAuth";
-import { isLeadSourceName } from "@/lib/lead-sources";
+import { dayLadderCompare, rangeLadderCompare } from "@/lib/arcade-rank";
+import { isNonPersonName } from "@/lib/lead-sources";
 import { useMyEarnings } from "@/hooks/useMyEarnings";
 import {
   bossState,
@@ -49,7 +50,8 @@ export type LadderRow = {
   teamId: string | null;
   teamName: string | null;
   teamColor: string | null;
-  /** Arcade points over the range (sit = 1, sale = 2, + dojo bonus). */
+  /** Arcade points over the range (sit = 1, sale = 2, + bounty/dojo/mystery
+   *  bonuses — arcade-only; pay reads base points elsewhere). */
   pts: number;
   /** PAY-axis points only (no dojo bonus) — what the tier strip reads
    *  (Phase 4 §6). Still the Mon–Sat board range, not the Mon–Sun pay week. */
@@ -60,8 +62,12 @@ export type LadderRow = {
   vol: number;
   /** Sales count. */
   sal: number;
-  /** Lead count (daily_logs funnel). */
+  /** Lead count (daily_logs funnel — board outcomes, appointment-day axis). */
   lds: number;
+  /** Leads SET in range (leads_called_in, generation-day axis) — what the
+   *  Today tab ranks by, since sits credit to the appointment day and would
+   *  show a hot setter at 0. */
+  ld: number;
   drs: number;
   tlk: number;
   /** WCC-cancelled sales in range. */
@@ -162,18 +168,23 @@ export function useArcadeLadder(range: RangeKey): ArcadeLadder {
     const rows: LadderRow[] = [];
     for (const id of ids) {
       const r = prod.results?.[id];
-      // Dojo bonus points ride only here (the arcade): Fleet Dispatch, the
-      // HUD tier hint and the pay engine all read base production points.
+      // Bonus points (bounty + dojo + mystery) ride only here (the arcade):
+      // Fleet Dispatch, the HUD tier hint and the pay engine all read base
+      // production points.
       const basePts = prod.points?.[id] ?? 0;
-      const pts = basePts + (prod.dojoPts?.[id] ?? 0) + (prod.dropPts?.[id] ?? 0);
+      const pts =
+        basePts +
+        (prod.bountyPts?.[id] ?? 0) +
+        (prod.dojoPts?.[id] ?? 0) +
+        (prod.dropPts?.[id] ?? 0);
       const vol = prod.volume?.[id] ?? 0;
       const lds = r?.lds ?? 0;
       const cxl = prod.cancels?.[id] ?? 0;
       if (pts === 0 && vol === 0 && lds === 0 && cxl === 0 && (r?.drs ?? 0) === 0) continue;
       const prof = profById.get(id);
-      // Pseudo lead-source channels (Job Walk, Upsell…) are office credit, not
-      // canvassers — they never appear on the reps' ladder.
-      if (isLeadSourceName(prof?.display_name)) continue;
+      // Non-person rows (lead-source channels, test rows, "A & B" compounds)
+      // are office credit, not canvassers — never on the reps' ladder.
+      if (isNonPersonName(prof?.display_name)) continue;
       const teamId = prod.snapshotTeam?.[id] ?? prof?.team_id ?? null;
       const team = teamId ? teamById.get(teamId) : null;
       rows.push({
@@ -188,13 +199,18 @@ export function useArcadeLadder(range: RangeKey): ArcadeLadder {
         vol,
         sal: r?.sal ?? 0,
         lds,
+        ld: r?.ld ?? 0,
         drs: r?.drs ?? 0,
         tlk: r?.tlk ?? 0,
         cancels: cxl,
         sit: sitRate(prod.funnelSits?.[id] ?? 0, prod.funnelLeads?.[id] ?? 0),
       });
     }
-    rows.sort((a, b) => b.pts - a.pts || b.vol - a.vol || b.lds - a.lds || b.drs - a.drs);
+    // Today ranks by leads SET today → conversations → doors (sits credit to
+    // the appointment day, so a points sort shows every hot setter at 0 —
+    // conversion audit 2026-10-15). Week/Month stay on points. Pure
+    // comparators in src/lib/arcade-rank.ts, pinned by verify:arcade-today.
+    rows.sort(range === "day" ? dayLadderCompare : rangeLadderCompare);
 
     const vanMap = new Map<string, VanRow & { _sits: number; _leads: number }>();
     for (const r of rows) {
@@ -233,7 +249,7 @@ export function useArcadeLadder(range: RangeKey): ArcadeLadder {
       }))
       .sort((a, b) => b.pts - a.pts || b.vol - a.vol);
     return { rows, vans };
-  }, [prodQ.data, rosterQ.data]);
+  }, [prodQ.data, rosterQ.data, range]);
 
   const self = useMemo(() => {
     const idx = rows.findIndex((r) => r.id === selfId);

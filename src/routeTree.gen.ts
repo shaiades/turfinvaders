@@ -38,6 +38,7 @@ import { Route as AuthenticatedPurposeLeadershipIndexRouteImport } from './route
 import { Route as AuthenticatedPurposeLeadershipUserIdRouteImport } from './routes/_authenticated/purpose-leadership.$userId'
 import { Route as AuthenticatedTeamsIndexRouteImport } from './routes/_authenticated/teams.index'
 import { Route as AuthenticatedTeamsTeamIdRouteImport } from './routes/_authenticated/teams.$teamId'
+import { Route as ApiInternalCrownVanwarsRouteImport } from './routes/api/internal/crown-vanwars'
 import { Route as ApiInternalGodDigestRouteImport } from './routes/api/internal/god-digest'
 import { Route as ApiInternalReconcileBlockCardsRouteImport } from './routes/api/internal/reconcile-block-cards'
 import { Route as ApiInternalRefreshActionPlansRouteImport } from './routes/api/internal/refresh-action-plans'
@@ -199,6 +200,11 @@ const AuthenticatedTeamsTeamIdRoute =
     path: '/teams/$teamId',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const ApiInternalCrownVanwarsRoute = ApiInternalCrownVanwarsRouteImport.update({
+  id: '/api/internal/crown-vanwars',
+  path: '/api/internal/crown-vanwars',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiInternalGodDigestRoute = ApiInternalGodDigestRouteImport.update({
   id: '/api/internal/god-digest',
   path: '/api/internal/god-digest',
@@ -254,6 +260,7 @@ export interface FileRoutesByFullPath {
   '/my-purpose/workshop': typeof AuthenticatedMyPurposeWorkshopRoute
   '/purpose-leadership/$userId': typeof AuthenticatedPurposeLeadershipUserIdRoute
   '/teams/$teamId': typeof AuthenticatedTeamsTeamIdRoute
+  '/api/internal/crown-vanwars': typeof ApiInternalCrownVanwarsRoute
   '/api/internal/god-digest': typeof ApiInternalGodDigestRoute
   '/api/internal/reconcile-block-cards': typeof ApiInternalReconcileBlockCardsRoute
   '/api/internal/refresh-action-plans': typeof ApiInternalRefreshActionPlansRoute
@@ -289,6 +296,7 @@ export interface FileRoutesByTo {
   '/my-purpose/workshop': typeof AuthenticatedMyPurposeWorkshopRoute
   '/purpose-leadership/$userId': typeof AuthenticatedPurposeLeadershipUserIdRoute
   '/teams/$teamId': typeof AuthenticatedTeamsTeamIdRoute
+  '/api/internal/crown-vanwars': typeof ApiInternalCrownVanwarsRoute
   '/api/internal/god-digest': typeof ApiInternalGodDigestRoute
   '/api/internal/reconcile-block-cards': typeof ApiInternalReconcileBlockCardsRoute
   '/api/internal/refresh-action-plans': typeof ApiInternalRefreshActionPlansRoute
@@ -326,6 +334,7 @@ export interface FileRoutesById {
   '/_authenticated/my-purpose/workshop': typeof AuthenticatedMyPurposeWorkshopRoute
   '/_authenticated/purpose-leadership/$userId': typeof AuthenticatedPurposeLeadershipUserIdRoute
   '/_authenticated/teams/$teamId': typeof AuthenticatedTeamsTeamIdRoute
+  '/api/internal/crown-vanwars': typeof ApiInternalCrownVanwarsRoute
   '/api/internal/god-digest': typeof ApiInternalGodDigestRoute
   '/api/internal/reconcile-block-cards': typeof ApiInternalReconcileBlockCardsRoute
   '/api/internal/refresh-action-plans': typeof ApiInternalRefreshActionPlansRoute
@@ -363,6 +372,7 @@ export interface FileRouteTypes {
     | '/my-purpose/workshop'
     | '/purpose-leadership/$userId'
     | '/teams/$teamId'
+    | '/api/internal/crown-vanwars'
     | '/api/internal/god-digest'
     | '/api/internal/reconcile-block-cards'
     | '/api/internal/refresh-action-plans'
@@ -398,6 +408,7 @@ export interface FileRouteTypes {
     | '/my-purpose/workshop'
     | '/purpose-leadership/$userId'
     | '/teams/$teamId'
+    | '/api/internal/crown-vanwars'
     | '/api/internal/god-digest'
     | '/api/internal/reconcile-block-cards'
     | '/api/internal/refresh-action-plans'
@@ -434,6 +445,7 @@ export interface FileRouteTypes {
     | '/_authenticated/my-purpose/workshop'
     | '/_authenticated/purpose-leadership/$userId'
     | '/_authenticated/teams/$teamId'
+    | '/api/internal/crown-vanwars'
     | '/api/internal/god-digest'
     | '/api/internal/reconcile-block-cards'
     | '/api/internal/refresh-action-plans'
@@ -451,6 +463,7 @@ export interface RootRouteChildren {
   LeadSubmittedRoute: typeof LeadSubmittedRoute
   AuthCallbackRoute: typeof AuthCallbackRoute
   AuthWelcomeRoute: typeof AuthWelcomeRoute
+  ApiInternalCrownVanwarsRoute: typeof ApiInternalCrownVanwarsRoute
   ApiInternalGodDigestRoute: typeof ApiInternalGodDigestRoute
   ApiInternalReconcileBlockCardsRoute: typeof ApiInternalReconcileBlockCardsRoute
   ApiInternalRefreshActionPlansRoute: typeof ApiInternalRefreshActionPlansRoute
@@ -662,6 +675,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedTeamsTeamIdRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/api/internal/crown-vanwars': {
+      id: '/api/internal/crown-vanwars'
+      path: '/api/internal/crown-vanwars'
+      fullPath: '/api/internal/crown-vanwars'
+      preLoaderRoute: typeof ApiInternalCrownVanwarsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/internal/god-digest': {
       id: '/api/internal/god-digest'
       path: '/api/internal/god-digest'
@@ -780,6 +800,7 @@ const rootRouteChildren: RootRouteChildren = {
   LeadSubmittedRoute: LeadSubmittedRoute,
   AuthCallbackRoute: AuthCallbackRoute,
   AuthWelcomeRoute: AuthWelcomeRoute,
+  ApiInternalCrownVanwarsRoute: ApiInternalCrownVanwarsRoute,
   ApiInternalGodDigestRoute: ApiInternalGodDigestRoute,
   ApiInternalReconcileBlockCardsRoute: ApiInternalReconcileBlockCardsRoute,
   ApiInternalRefreshActionPlansRoute: ApiInternalRefreshActionPlansRoute,

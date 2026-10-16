@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { bestBountyMultiplier, type BountyWindow } from "@/lib/arcade-rank";
 import { COMMISSION_BASE, weeklyPoints } from "@/lib/pay";
 import { addDaysISO, laMidnightUtcISO, laTodayISO } from "@/lib/dates";
 import { DEFAULT_OFFICE } from "@/lib/offices";
@@ -67,6 +68,13 @@ async function pageAll<T>(
   return out;
 }
 
+export type DispatchWindow = {
+  log_start: string;
+  log_end: string;
+  vol_start: string;
+  vol_end: string;
+};
+
 export const getDispatchProduction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => {
@@ -82,7 +90,16 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
     }
     return { log_start, log_end, vol_start, vol_end };
   })
-  .handler(async ({ data }) => {
+  .handler(async ({ data }) => computeDispatchProduction(data));
+
+/**
+ * The aggregation itself, callable outside the serverFn wrapper (the Van Wars
+ * Saturday-crown cron reuses it; src/routes/api/internal/crown-vanwars.ts).
+ * Server-only: it imports the service client, so it must never be called from
+ * client code — the serverFn above is the client's door.
+ */
+export async function computeDispatchProduction(data: DispatchWindow) {
+  {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
     const [logRows, leadRows] = await Promise.all([
@@ -201,6 +218,34 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
       }
     }
 
+    // Live bounties (Phase 1 §4, 2026-10-15): a bounty multiplies ARCADE
+    // points per confirmed lead SET inside its window — the only sub-day
+    // timestamp we trust (daily_logs counters have none). Returned as a
+    // separate bountyPts map: the arcade ladder adds it to pts, while the
+    // Fleet board, the HUD tier hint and the pay engine stay on base points
+    // (a bounty hypes the game, never pay).
+    type BountyRow = { multiplier: number | null; starts_at: string; ends_at: string };
+    let bountyWindows: BountyWindow[] = [];
+    try {
+      const { data: bRows } = await (
+        supabaseAdmin as unknown as import("@supabase/supabase-js").SupabaseClient
+      )
+        .from("bounties")
+        .select("multiplier, starts_at, ends_at")
+        .lt("starts_at", data.vol_end)
+        .gt("ends_at", data.vol_start);
+      bountyWindows = ((bRows ?? []) as BountyRow[])
+        .map((b) => ({
+          startMs: Date.parse(b.starts_at),
+          endMs: Date.parse(b.ends_at),
+          mult: Math.max(1, Number(b.multiplier ?? 1)),
+        }))
+        .filter((b) => !Number.isNaN(b.startMs) && !Number.isNaN(b.endMs));
+    } catch {
+      /* bounties are a bonus layer — their absence must never break the board */
+    }
+    const bountyPts: Record<string, number> = {};
+
     const volStartMs = Date.parse(data.vol_start);
     const volEndMs = Date.parse(data.vol_end);
     const volume: Record<string, number> = {};
@@ -230,6 +275,16 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
       }
       const amt = Number(l.sale_amount ?? 0);
       const cancelled = l.sale_cancelled_at != null;
+      // Bounty bonus rides the lead's SET time (created_at), not the
+      // confirm/review axis the volume window uses. Overlapping bounties
+      // don't stack — bestBountyMultiplier takes the single best one.
+      const setMs = Date.parse(l.created_at ?? "");
+      if (!cancelled && !Number.isNaN(setMs)) {
+        const best = bestBountyMultiplier(setMs, bountyWindows);
+        if (best > 1) {
+          bountyPts[l.canvasser_id] = (bountyPts[l.canvasser_id] ?? 0) + (best - 1);
+        }
+      }
       if (!cancelled) {
         volume[l.canvasser_id] = (volume[l.canvasser_id] ?? 0) + amt;
       } else if (amt > 0) {
@@ -387,11 +442,13 @@ export const getDispatchProduction = createServerFn({ method: "POST" })
       snapshotTeam,
       funnelSits,
       funnelLeads,
+      bountyPts,
       dojoPts,
       dropPts,
       activeDays,
     };
-  });
+  }
+}
 
 /**
  * Clock-in presence for a set of LA work days — which user_ids hold a

@@ -98,7 +98,9 @@ export function CanvasserHUD({ userId }: { userId: string }) {
       ) : (
         <RankPill rank={rank} tappable />
       )}
-      <div className="flex items-center gap-3 tabular-nums">
+      {/* flex-wrap: on the narrowest phones the money hint wraps to its own
+          line instead of overflowing or vanishing. */}
+      <div className="flex min-w-0 flex-wrap items-center justify-end gap-x-3 gap-y-0.5 tabular-nums">
         <span className="text-muted-foreground">
           Leads ·{" "}
           <span className={broken ? "text-muted-foreground/40" : metricText(called, "text-neon")}>
@@ -113,9 +115,9 @@ export function CanvasserHUD({ userId }: { userId: string }) {
             {wkBroken ? "—" : wkPts}
           </span>
         </span>
-        {!wkBroken && (
-          <span className="hidden min-[400px]:inline text-muted-foreground/70">{tierHint}</span>
-        )}
+        {/* The money hint shows at EVERY width — standard 390px iPhones were
+            hiding exactly the line that makes the game pay (audit 2026-10-15). */}
+        {!wkBroken && <span className="text-muted-foreground/70">{tierHint}</span>}
       </div>
     </div>
   );

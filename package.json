@@ -33,6 +33,7 @@
     "verify:dispatch-rules": "npx tsx scripts/verify-dispatch-rules.ts",
     "verify:canvasserpay": "npx tsx scripts/verify-canvasser-pay.ts",
     "verify:vanwars": "npx tsx scripts/verify-vanwars.ts",
+    "verify:arcade-today": "npx tsx scripts/verify-arcade-today.ts",
     "verify:confirmer": "npx tsx scripts/verify-confirmer.ts",
     "verify:coaching": "npx tsx scripts/verify-coaching.ts",
     "verify:pin-queue": "npx tsx scripts/verify-pin-queue.ts",
