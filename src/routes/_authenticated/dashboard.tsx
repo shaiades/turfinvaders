@@ -55,6 +55,7 @@ import { useTodayLeads } from "@/hooks/useTodayLeads";
 import { useDateRange } from "@/hooks/useDateRange";
 import { RangeTabs } from "@/components/RangeTabs";
 import { formatCurrency } from "@/lib/utils";
+import { isLeadSourceName } from "@/lib/lead-sources";
 import { Zap, Truck, FileSpreadsheet, UserPlus } from "lucide-react";
 
 // The one ?tab= param serves both audiences: leadership tabs on the left,
@@ -481,7 +482,7 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
     queryFn: async () => {
       const [teamsRes, profilesRes, logsRes] = await Promise.all([
         supabase.from("teams").select("id, name, color"),
-        supabase.from("profiles").select("id, team_id"),
+        supabase.from("profiles").select("id, team_id, display_name"),
         // daily_logs team snapshots — van-at-the-time attribution for
         // metrics rows, so removed members' history stays on their old van.
         supabase
@@ -524,6 +525,12 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
       }
 
       const teamByCanvasser = new Map((profilesRes.data ?? []).map((p) => [p.id, p.team_id]));
+      // Pseudo lead-source channels (Job Walk, Upsell, …) are office credit,
+      // never a van's field production — same gate as the Command Center
+      // panel (owner ask 2026-10-16).
+      const pseudoIds = new Set(
+        (profilesRes.data ?? []).filter((p) => isLeadSourceName(p.display_name)).map((p) => p.id),
+      );
       // Same-day snapshot beats the live pointer (mid-week movers, removed
       // members); the last fallback is the latest snapshot ON OR BEFORE the
       // metric date — the same rule migration 20260827010000's backfill
@@ -547,6 +554,7 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
       };
       const perTeam = new Map<string, { submits: number; confirmed: number; sales: number }>();
       for (const m of metricRows) {
+        if (pseudoIds.has(m.canvasser_id)) continue;
         const tid =
           m.team_id ??
           snapByDay.get(`${m.canvasser_id}|${m.metric_date}`) ??
