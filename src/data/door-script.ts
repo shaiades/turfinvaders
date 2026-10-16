@@ -4,9 +4,9 @@
 // here without touching components.
 //
 //   SCRIPT_STEPS  verbatim — do not touch a word without Shai.
-//   REBUTTALS     new copy, Empathy → Clarification → Realignment, every one
-//                 ending in a two-option question, ≤3 short sunlight-readable
-//                 lines — ALL marked DRAFT — Shai to approve.
+//   REBUTTALS     Empathy → Clarification → Realignment, every one ending in
+//                 a two-option question, ≤3 short sunlight-readable lines —
+//                 approved by Shai 2026-10-16.
 //
 // The INFO step is also the lead form's field order. The form itself is a
 // Monday WorkForms iframe (src/lib/monday-form.ts), so the order is set in
@@ -154,37 +154,37 @@ export type Rebuttal = {
 
 export const REBUTTALS: Rebuttal[] = [
   {
-    objection: "Have a guy", // DRAFT — Shai to approve
+    objection: "Have a guy",
     empathy: "Love that — a good guy is gold.",
     clarification: "Has he been up there since the last storm?",
     realignment: "Use our free report to grade his work — morning or afternoon?",
   },
   {
-    objection: "Not interested", // DRAFT — Shai to approve
+    objection: "Not interested",
     empathy: "Totally fair — I showed up out of nowhere.",
     clarification: "Is it the timing, or you figure the roof's fine?",
     realignment: "It's free and you keep the report either way — 2 or 6?",
   },
   {
-    objection: "No money", // DRAFT — Shai to approve
+    objection: "No money",
     empathy: "I hear you — nobody budgets for a roof.",
     clarification: "The inspection costs nothing — the leak is what gets expensive.",
     realignment: "Get the free report now, decide later — morning or afternoon?",
   },
   {
-    objection: "Not now", // DRAFT — Shai to approve
+    objection: "Not now",
     empathy: "No problem — I caught you mid-day.",
     clarification: "It's 20 minutes and you don't climb anything.",
     realignment: "My guys are already out here tomorrow — 2 or 6?",
   },
   {
-    objection: "Talk to my spouse", // DRAFT — Shai to approve
+    objection: "Talk to my spouse",
     empathy: "Smart — big calls are team calls.",
     clarification: "That's exactly why we book it when you're BOTH home.",
     realignment: "What works for the two of you — morning or afternoon?",
   },
   {
-    objection: "Other", // DRAFT — Shai to approve
+    objection: "Other",
     empathy: "Fair enough — give it to me straight.",
     clarification: "If the inspection's free, what's the real hang-up?",
     realignment: "Worst case you get a free report — tomorrow or the weekend?",
