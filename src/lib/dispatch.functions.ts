@@ -397,6 +397,34 @@ export async function computeDispatchProduction(data: DispatchWindow) {
       /* the Dojo bonus layer must never break the board */
     }
 
+    // Mystery-drop points (Phase 4 §4): rolled server-side by the field_pins
+    // trigger, summed here for the arcade ladder only — pay never sees them.
+    // FAIL-SOFT before the migration lands.
+    const dropPts: Record<string, number> = {};
+    try {
+      const dropRows = await pageAll<{
+        id: string;
+        canvasser_id: string | null;
+        points: number | null;
+      }>(
+        (from, to) =>
+          supabaseAdmin
+            .from("arcade_drops" as never)
+            .select("id, canvasser_id, points")
+            .gte("created_at", data.vol_start)
+            .lt("created_at", data.vol_end)
+            .order("id", { ascending: true })
+            .range(from, to) as never,
+        (r) => String(r.id),
+      );
+      for (const d of dropRows) {
+        if (!d.canvasser_id) continue;
+        dropPts[d.canvasser_id] = (dropPts[d.canvasser_id] ?? 0) + Number(d.points ?? 0);
+      }
+    } catch {
+      /* the prize layer must never break the board */
+    }
+
     const activeDays: Record<string, number> = {};
     for (const [cid, days] of Object.entries(activeDaySets)) activeDays[cid] = days.size;
 
@@ -416,6 +444,7 @@ export async function computeDispatchProduction(data: DispatchWindow) {
       funnelLeads,
       bountyPts,
       dojoPts,
+      dropPts,
       activeDays,
     };
   }

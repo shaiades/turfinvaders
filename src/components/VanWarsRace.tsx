@@ -443,21 +443,8 @@ export function VanWarsRace() {
                     </div>
                   )}
                 </div>
-                {v.sit.grade && (
-                  <span
-                    style={{
-                      fontFamily: GTA,
-                      fontSize: 18,
-                      width: 24,
-                      textAlign: "center",
-                      borderRadius: 4,
-                      color: "#0b0f18",
-                      background: v.color,
-                    }}
-                  >
-                    {v.sit.grade}
-                  </span>
-                )}
+                {/* Letter grades retired from canvasser UI (Phase 4 §1) —
+                    the crew's sit % stays in the numbers. */}
               </div>
               {wasted === v.name && (
                 <div

@@ -34,9 +34,11 @@ export function BossMeter({ userId }: { userId: string }) {
     <ArcadePanel
       title="The $100K Boss"
       faction="kombat"
+      // "Boss N" levels retired (Phase 4 §1) — the meter is the MONEY:
+      // chests banked this month.
       action={
         <span className="font-display text-[10px] uppercase tracking-widest text-[var(--kombat-gold)]">
-          Boss {boss.level}
+          {boss.bossesDefeated} × {money(BOSS_BOUNTY)} banked
         </span>
       }
     >
@@ -90,7 +92,7 @@ export function BossMeter({ userId }: { userId: string }) {
             </>
           ) : (
             <>
-              {money(boss.hpLeft)} to defeat Boss {boss.level} · {money(BOSS_BOUNTY)} chest
+              {money(boss.hpLeft)} to the next {money(BOSS_BOUNTY)} chest
             </>
           )}
         </p>

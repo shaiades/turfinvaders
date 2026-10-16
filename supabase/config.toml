@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.notify-lead-issued]
 verify_jwt = false
+
+[functions.notify-money]
+verify_jwt = false

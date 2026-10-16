@@ -50,9 +50,14 @@ export type LadderRow = {
   teamId: string | null;
   teamName: string | null;
   teamColor: string | null;
-  /** Weekly-points equivalent over the range (sit = 1, sale = 2), plus any
-   *  bounty bonus points (arcade-only; pay reads base points elsewhere). */
+  /** Arcade points over the range (sit = 1, sale = 2, + bounty/dojo/mystery
+   *  bonuses — arcade-only; pay reads base points elsewhere). */
   pts: number;
+  /** PAY-axis points only (no dojo bonus) — what the tier strip reads
+   *  (Phase 4 §6). Still the Mon–Sat board range, not the Mon–Sun pay week. */
+  basePts: number;
+  /** Joined inside their first 30 days — the Rookie league (Phase 4 §5). */
+  rookie: boolean;
   /** Credited sale volume, net of WCC cancellations. */
   vol: number;
   /** Sales count. */
@@ -136,7 +141,7 @@ export function useArcadeLadder(range: RangeKey): ArcadeLadder {
     staleTime: 5 * 60_000,
     queryFn: async () => {
       const [profilesR, teamsR] = await Promise.all([
-        supabase.from("profiles").select("id, display_name, team_id"),
+        supabase.from("profiles").select("id, display_name, team_id, created_at"),
         supabase.from("teams").select("id, name, color"),
       ]);
       if (profilesR.error) throw profilesR.error;
@@ -158,14 +163,20 @@ export function useArcadeLadder(range: RangeKey): ArcadeLadder {
       ...Object.keys(prod.results ?? {}),
       ...Object.keys(prod.cancels ?? {}),
     ]);
+    // Rookie fence: first 30 days from the profile's creation.
+    const rookieSince = Date.now() - 30 * 86_400_000;
     const rows: LadderRow[] = [];
     for (const id of ids) {
       const r = prod.results?.[id];
-      // Bonus points (bounty + dojo) ride only here (the arcade): Fleet
-      // Dispatch, the HUD tier hint and the pay engine all read base
+      // Bonus points (bounty + dojo + mystery) ride only here (the arcade):
+      // Fleet Dispatch, the HUD tier hint and the pay engine all read base
       // production points.
+      const basePts = prod.points?.[id] ?? 0;
       const pts =
-        (prod.points?.[id] ?? 0) + (prod.bountyPts?.[id] ?? 0) + (prod.dojoPts?.[id] ?? 0);
+        basePts +
+        (prod.bountyPts?.[id] ?? 0) +
+        (prod.dojoPts?.[id] ?? 0) +
+        (prod.dropPts?.[id] ?? 0);
       const vol = prod.volume?.[id] ?? 0;
       const lds = r?.lds ?? 0;
       const cxl = prod.cancels?.[id] ?? 0;
@@ -183,6 +194,8 @@ export function useArcadeLadder(range: RangeKey): ArcadeLadder {
         teamName: team?.name ?? null,
         teamColor: team?.color ?? null,
         pts,
+        basePts,
+        rookie: prof?.created_at ? Date.parse(prof.created_at) >= rookieSince : false,
         vol,
         sal: r?.sal ?? 0,
         lds,
