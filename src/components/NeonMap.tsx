@@ -25,6 +25,7 @@ import { ZipBordersLayer, ZIP_MIN_ZOOM, type ZipTint } from "@/components/ZipBor
 import { HouseBubblesLayer, HOUSE_MIN_ZOOM, type OsmHouse } from "@/components/HouseBubbles";
 import { houseAtPoint, snapTapToHouse } from "@/lib/house-cache";
 import { CustomerHomesLayer } from "@/components/CustomerHomes";
+import { HouseAddressPopup } from "@/components/HouseAddressPopup";
 
 // Canonical copy lives in lib/pin-results (SSR-safe); re-exported here so map
 // consumers keep a single import site.
@@ -206,6 +207,138 @@ function pulseDotIcon(color: string) {
       iconAnchor: [11, 11],
     });
   });
+}
+
+// Hold-for-address gesture tuning. 500ms matches Apple Maps' drop-a-pin
+// hold; 8px of drift cancels (Leaflet's own drag threshold is ~3px, so the
+// movestart hook below is the real jitter guard — this is the cheap first
+// gate for slow swipes that haven't moved the map yet).
+const HOLD_MS = 500;
+const HOLD_MOVE_PX = 8;
+
+/** Apple-Maps-style hold-for-address (owner ask 2026-10-16): press and hold
+ *  anywhere → NeonMap drops a pin + address popup (HouseAddressPopup) so a
+ *  rep never hunts the same roof down in Google/Apple Maps. The touch
+ *  long-press is hand-rolled (iOS Safari never fires contextmenu); desktop
+ *  right-click and Android's native long-press DO fire contextmenu, so both
+ *  routes funnel through one time-deduped fire(). Listening for the map's
+ *  contextmenu event also makes Leaflet preventDefault the browser menu.
+ *  On release, the finger still synthesizes a click — onSwallowClick arms
+ *  the map-level guard (justDrewRef pattern) and a one-shot capture
+ *  listener eats the DOM click before it can reach a house bubble or pin
+ *  marker, so reading an address can never also log a knock. */
+function LongPressCapture({
+  onLongPress,
+  onSwallowClick,
+}: {
+  onLongPress: (ll: LatLng) => void;
+  onSwallowClick: () => void;
+}) {
+  const map = useMap();
+  const cbRef = useRef({ onLongPress, onSwallowClick });
+  cbRef.current = { onLongPress, onSwallowClick };
+
+  useEffect(() => {
+    const el = map.getContainer();
+    let timer = 0;
+    let active = -1; // pointerId of the candidate touch, -1 = none
+    let fired = false;
+    let lastFireAt = 0;
+    let sx = 0,
+      sy = 0;
+
+    const swallow = (e: MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    const disarmSwallow = () =>
+      el.removeEventListener("click", swallow, { capture: true } as EventListenerOptions);
+
+    const fire = (lat: number, lng: number) => {
+      // Dedupe window: on Android the native contextmenu and our 500ms timer
+      // land within milliseconds of each other for the same hold.
+      if (Date.now() - lastFireAt < 700) return;
+      lastFireAt = Date.now();
+      fired = true;
+      try {
+        navigator.vibrate?.(30);
+      } catch {
+        /* iOS: no vibration API */
+      }
+      cbRef.current.onLongPress({ lat, lng });
+    };
+
+    const cancelTimer = () => {
+      if (timer) {
+        window.clearTimeout(timer);
+        timer = 0;
+      }
+    };
+    const reset = () => {
+      cancelTimer();
+      active = -1;
+    };
+
+    const onDown = (e: PointerEvent) => {
+      if (active !== -1) {
+        // Second finger joins → this is a pinch/rotate, never a hold.
+        reset();
+        return;
+      }
+      if (e.pointerType !== "touch" || !e.isPrimary) return; // mouse = right-click path
+      active = e.pointerId;
+      fired = false;
+      sx = e.clientX;
+      sy = e.clientY;
+      timer = window.setTimeout(() => {
+        timer = 0;
+        const rect = el.getBoundingClientRect();
+        const ll = map.containerPointToLatLng(L.point(sx - rect.left, sy - rect.top));
+        fire(ll.lat, ll.lng);
+      }, HOLD_MS);
+    };
+    const onMove = (e: PointerEvent) => {
+      if (e.pointerId !== active) return;
+      if (Math.hypot(e.clientX - sx, e.clientY - sy) > HOLD_MOVE_PX) cancelTimer();
+    };
+    const onUp = (e: PointerEvent) => {
+      if (e.pointerId !== active) return;
+      if (fired) {
+        cbRef.current.onSwallowClick();
+        el.addEventListener("click", swallow, { capture: true, once: true });
+        // Belt for the once:true suspenders — if no click ever arrives
+        // (e.g. the browser suppressed it itself), the trap must not eat
+        // tomorrow's legitimate tap.
+        window.setTimeout(disarmSwallow, 700);
+      }
+      reset();
+    };
+    const onCancel = (e: PointerEvent) => {
+      if (e.pointerId === active) reset();
+    };
+    const onCtx = (e: L.LeafletMouseEvent) => {
+      fire(e.latlng.lat, e.latlng.lng);
+    };
+    const onMapStir = () => cancelTimer(); // map started pan/zoom under the finger
+
+    el.addEventListener("pointerdown", onDown);
+    el.addEventListener("pointermove", onMove);
+    el.addEventListener("pointerup", onUp);
+    el.addEventListener("pointercancel", onCancel);
+    map.on("contextmenu", onCtx);
+    map.on("movestart zoomstart", onMapStir);
+    return () => {
+      cancelTimer();
+      disarmSwallow();
+      el.removeEventListener("pointerdown", onDown);
+      el.removeEventListener("pointermove", onMove);
+      el.removeEventListener("pointerup", onUp);
+      el.removeEventListener("pointercancel", onCancel);
+      map.off("contextmenu", onCtx);
+      map.off("movestart zoomstart", onMapStir);
+    };
+  }, [map]);
+  return null;
 }
 
 function ClickCapture({ onClick }: { onClick: (ll: LatLng) => void }) {
@@ -1026,6 +1159,13 @@ function NeonMapInner({
   const canInspect = mode.kind === "pin" && houseBubbles && !!onHouseTap;
   const inspecting = inspectOn && canInspect;
 
+  // Hold-for-address (owner ask 2026-10-16, Apple Maps parity): the house
+  // under the last long-press, rendered as a dropped pin + address popup.
+  // Canvass maps only (houseBubbles) — the screens where reps need an
+  // address without leaving the app. houseAtPoint snaps to the nearest
+  // cached house or mints a synthetic point-house the popup reverse-geocodes.
+  const [heldHouse, setHeldHouse] = useState<OsmHouse | null>(null);
+
   // A search fly-away is a deliberate departure — the next GPS tick must not
   // yank the map back to the dot.
   useEffect(() => {
@@ -1446,6 +1586,24 @@ function NeonMapInner({
               onHouseTap={onHouseTap}
               onStatusChange={setCirclesStatus}
               retryToken={houseRetryToken}
+            />
+          )}
+          {houseBubbles && !drawingNow && (
+            <LongPressCapture
+              onLongPress={(ll) => setHeldHouse(houseAtPoint(ll.lat, ll.lng, pins))}
+              onSwallowClick={() => {
+                justDrewRef.current = Date.now();
+              }}
+            />
+          )}
+          {houseBubbles && !drawingNow && heldHouse && (
+            // Keyed on the house: a new hold replaces pin + popup in place.
+            // The remove of the SUPERSEDED popup races the new mount, so
+            // onClosed id-checks before clearing.
+            <HouseAddressPopup
+              key={heldHouse.id}
+              house={heldHouse}
+              onClosed={(id) => setHeldHouse((h) => (h && h.id === id ? null : h))}
             />
           )}
           {hasFit && <FitPolygons polygons={fitPolygons!} />}
