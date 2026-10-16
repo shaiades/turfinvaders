@@ -14,8 +14,10 @@ export const RANK_ORDER = [
 export type Rank = (typeof RANK_ORDER)[number] | string;
 
 export const RANK_PERKS: Record<string, string> = {
-  "Jr. Silver": "Back of van, no music vote",
-  "Sr. Silver": "Quickstart Hat, Back of van",
+  // Jr. Silver lists what the rank GIVES (owner 2026-10-15: no demeaning
+  // "back of van, no music vote" copy — every rung reads as a win).
+  "Jr. Silver": "Rookie badge — first rung of the ladder",
+  "Sr. Silver": "Quickstart Hat",
   "Jr. Gold": "G pin, Eligible for front, music vote",
   "Sr. Gold": "Premium polo, SG Pin",
   "Jr. Diamond": "Premium Diamonds hat, Jr Diamond Pin, Front seat, control music",

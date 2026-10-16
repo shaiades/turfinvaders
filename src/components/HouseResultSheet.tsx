@@ -23,7 +23,7 @@ import { Input } from "@/components/ui/input";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import { withTimeout } from "@/lib/abort-timeout";
+import { useReverseGeocode } from "@/hooks/useReverseGeocode";
 import { PIN_LABELS, type PinType } from "@/lib/pin-results";
 import { haversineM, MATCH_METERS, type OsmHouse } from "@/lib/house-cache";
 import { DOOR_OBJECTIONS } from "@/lib/objections";
@@ -98,35 +98,12 @@ export function HouseResultSheet({
 
   // The address is the title (owner emphasis 2026-09-15: "address more than
   // homeowner name" — names are licensed data this stack doesn't have).
-  // OSM addr tags first; where they're missing, ONE Nominatim reverse lookup
-  // per house per session fills the gap. Trust tiers keep it honest:
-  //  - OSM num + street: exact.
-  //  - OSM num + reverse-geocoded road: the number is OSM truth, the road is
-  //    near-certain at parcel distance — still shown plain.
-  //  - reverse-geocoded number: interpolated, can be the neighbor's — shown
-  //    with a ≈ and NEVER passed onward into the lead form.
+  // OSM addr tags first; where they're missing, the shared one-per-session
+  // Nominatim lookup fills the gap. The hook's doc holds the trust tiers —
+  // the ≈ display and never-into-the-lead-form rule for interpolated numbers
+  // are enforced below.
   const needsGeocode = open && !!view && !(view.num && view.street);
-  const revQuery = useQuery({
-    enabled: needsGeocode,
-    queryKey: ["rev_geocode", view?.id],
-    staleTime: Infinity,
-    gcTime: 60 * 60_000,
-    retry: false,
-    queryFn: async ({ signal }) => {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${view!.lat}&lon=${view!.lng}&zoom=18&addressdetails=1`,
-        { signal: withTimeout(signal, 6_000), headers: { Accept: "application/json" } },
-      );
-      if (!res.ok) throw new Error(`nominatim ${res.status}`);
-      const data = (await res.json()) as { address?: Record<string, string> };
-      const a = data.address ?? {};
-      return {
-        hn: a.house_number ?? "",
-        road: a.road ?? a.pedestrian ?? a.residential ?? "",
-        postcode: a.postcode ?? "",
-      };
-    },
-  });
+  const revQuery = useReverseGeocode(view, needsGeocode);
   const road = view?.street || revQuery.data?.road || "";
   // Exact-grade address: OSM housenumber + a street from either source.
   const exactAddr = view?.num && road ? `${view.num} ${road}` : null;

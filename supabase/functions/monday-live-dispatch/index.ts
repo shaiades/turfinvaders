@@ -29,6 +29,13 @@ function normalizeName(s: string): string {
   return s.trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
+// Accent-folded normalizeName — "Cris López" and "Cris Lopez" fold to the
+// same key. JS twin of SQL fold_display_name (20261027120000); used only as
+// a matcher tier, never as a stored identity key.
+function foldName(s: string): string {
+  return normalizeName(s.normalize('NFD').replace(/[̀-ͯ]/g, ''))
+}
+
 function todayLA(): string {
   const fmt = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/Los_Angeles',
@@ -1035,6 +1042,29 @@ serve(async (req) => {
       }
     }
 
+    // 4b: accent-folded exact match — "Cris López" on the board, "Cris
+    // Lopez" in profiles (or vice versa) is the same exact name minus
+    // diacritics, so it binds on EVERY board (unlike the fuzzy tiers). Only
+    // when exactly one live profile folds to the same key — two accented
+    // twins stay ambiguous and fall through. Below aliases: a folded hit is
+    // an inference, an alias is a recorded manager decision.
+    if (!match) {
+      const wantedFold = foldName(canvasserName)
+      const byFold = candidates.filter((p) => foldName(p.display_name as string) === wantedFold)
+      if (byFold.length === 1) {
+        match = byFold[0]
+        await supabaseAdmin.from('webhook_logs').insert({
+          step: '4b_Fold_Hit',
+          data: {
+            canvasserName,
+            foldKey: wantedFold,
+            matchedId: match.id,
+            matchedName: match.display_name,
+          },
+        })
+      }
+    }
+
     // A bare first name from the office ("Bobby") must not spawn a shadow
     // profile when exactly ONE profile carries that first name (owner,
     // 2026-08-10: Bobby's Friday lead credited a "Bobby" placeholder and
@@ -1083,6 +1113,13 @@ serve(async (req) => {
       }
       // Best-effort role grant (ignore duplicate/insert errors).
       await supabaseAdmin.from('user_roles').insert({ user_id: newId, role: 'canvasser' })
+      // Compound attribution names ("Cris López & Eric") are channels, not
+      // people — flag them hidden-from-game at mint so the dupe audit can't
+      // recur. Separate best-effort UPDATE (not part of the insert) so an
+      // edge deploy that outruns the 20261027120000 migration keeps minting.
+      if (canvasserName.includes('&')) {
+        await supabaseAdmin.from('profiles').update({ non_person: true }).eq('id', newId)
+      }
       match = { ...created, _norm: normalizeName(canvasserName) }
       autoCreated = true
       await supabaseAdmin.from('webhook_logs').insert({
