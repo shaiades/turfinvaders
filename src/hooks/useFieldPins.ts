@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { getPositionOrNull } from "@/lib/utils";
-import { laTodayISO } from "@/lib/dates";
+import { addDaysISO, laTodayISO } from "@/lib/dates";
 import { dailyLogKeys } from "@/hooks/useDailyLogs";
+import { enqueuePin, flushPinQueue, isNetworkishError, type QueuedPin } from "@/lib/pin-queue";
 import { toast } from "sonner";
 import type { FieldPin, LatLng } from "@/components/NeonMap";
 
@@ -156,6 +157,79 @@ export function useFieldPins(userId: string | undefined, me: LatLng | null) {
 
   const { query: pinsQuery, pinsKey } = useMyPinsToday(userId);
 
+  // Open houses from the last 14 days (Phase 3 §5): yesterday's Go Backs and
+  // Not Homes stay visible — dimmed, read-only (the same-day RLS fence means
+  // they can't be edited; a new tap on the house drops a fresh pin instead).
+  const todayISO = laTodayISO();
+  const stalePinsQuery = useQuery({
+    enabled: !!userId,
+    queryKey: ["my_pins_stale", userId, todayISO],
+    staleTime: 5 * 60_000,
+    gcTime: 30 * 60_000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("field_pins")
+        .select("id, pin_type, lat, lng, is_remote_drop, distance_m, created_at")
+        .eq("canvasser_id", userId!)
+        .in("pin_type", ["go_back", "not_home"])
+        .gte("log_date", addDaysISO(todayISO, -13))
+        .lt("log_date", todayISO);
+      if (error) throw error;
+      return ((data ?? []) as FieldPin[]).map((p) => ({ ...p, stale: true as const }));
+    },
+  });
+
+  // What the map renders: history underneath, today on top.
+  const mapPins = useMemo(
+    () => [...(stalePinsQuery.data ?? []), ...(pinsQuery.data ?? [])],
+    [stalePinsQuery.data, pinsQuery.data],
+  );
+
+  // Offline queue replay (Phase 3 §4): on mount, on reconnect, and on
+  // foreground — saved knocks land with their knock-time date and ids, so a
+  // double replay dies on the PK instead of double-counting.
+  useEffect(() => {
+    if (!userId) return;
+    let busy = false;
+    const flush = async () => {
+      if (busy) return;
+      if (typeof navigator !== "undefined" && !navigator.onLine) return;
+      busy = true;
+      try {
+        const res = await flushPinQueue(async (pin) => {
+          const { error } = await supabase.from("field_pins").insert(pin as never);
+          return { error };
+        });
+        if (res.sent > 0) {
+          toast.success(
+            `📶 Back online — ${res.sent} saved knock${res.sent === 1 ? "" : "s"} sent`,
+          );
+          qc.invalidateQueries({ queryKey: ["my_pins_today", userId] });
+          qc.invalidateQueries({ queryKey: ["my_pins_stale", userId] });
+          qc.invalidateQueries({ queryKey: dailyLogKeys.all(userId) });
+        }
+        if (res.discarded.length > 0) {
+          toast.error(
+            `${res.discarded.length} saved knock${res.discarded.length === 1 ? " was" : "s were"} rejected by the server`,
+          );
+        }
+      } finally {
+        busy = false;
+      }
+    };
+    void flush();
+    const onOnline = () => void flush();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void flush();
+    };
+    window.addEventListener("online", onOnline);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [userId, qc]);
+
   const counts = useMemo(() => {
     const pins = pinsQuery.data ?? [];
     const byType: Partial<Record<ActivePin, number>> = {};
@@ -189,7 +263,11 @@ export function useFieldPins(userId: string | undefined, me: LatLng | null) {
       }
       const distance_m = haversineMeters(device, ll);
       const is_remote_drop = distance_m > REMOTE_DROP_LIMIT_M;
-      const { error } = await supabase.from("field_pins").insert({
+      // The row is FULLY built before the insert — client id (idempotent
+      // replay), knock-time log_date and the measured remote-drop verdict —
+      // so an offline failure can queue it verbatim (Phase 3 §4).
+      const row: QueuedPin = {
+        id: crypto.randomUUID(),
         canvasser_id: userId!,
         pin_type,
         lat: ll.lat,
@@ -200,13 +278,26 @@ export function useFieldPins(userId: string | undefined, me: LatLng | null) {
         distance_m,
         is_remote_drop,
         objection: objection ?? null,
-      });
-      if (error) throw error;
-      return { is_remote_drop, distance_m, pin_type };
+      };
+      const { error } = await supabase.from("field_pins").insert(row as never);
+      if (error) {
+        if (
+          isNetworkishError(error.message, typeof navigator === "undefined" || navigator.onLine)
+        ) {
+          enqueuePin(row);
+          return { is_remote_drop, distance_m, pin_type, queued: true as const };
+        }
+        throw error;
+      }
+      return { is_remote_drop, distance_m, pin_type, queued: false as const };
     },
     // Serialize concurrent drops instead of dropping them: rapid taps on a
     // duplex both land, in order, each with its own optimistic row.
     scope: { id: "drop-pin" },
+    // Run the mutationFn even with navigator.onLine false — the insert fails
+    // fast and the row lands in the offline queue instead of react-query's
+    // in-memory pause (which dies with the tab).
+    networkMode: "always",
     onMutate: async ({ ll, pin_type }) => {
       // Haptic + optimistic synthetic row, so slow LTE shows the pin
       // instantly instead of inviting a second tap.
@@ -235,7 +326,13 @@ export function useFieldPins(userId: string | undefined, me: LatLng | null) {
         },
       ]);
     },
-    onSuccess: ({ is_remote_drop, distance_m, pin_type }) => {
+    onSuccess: ({ is_remote_drop, distance_m, pin_type, queued }) => {
+      if (queued) {
+        toast("📴 No signal — knock saved, it sends when you're back online.", {
+          duration: 3000,
+        });
+        return;
+      }
       if (is_remote_drop) {
         const yds = Math.round(distance_m * 1.0936);
         toast.warning(`⚠ Remote Drop flagged · ${yds} yds from pin`, {
@@ -286,7 +383,8 @@ export function useFieldPins(userId: string | undefined, me: LatLng | null) {
       toast.error("No GPS fix yet — enable Location and try again.");
       return { ok: false as const };
     }
-    const { error } = await supabase.from("field_pins").insert({
+    const row: QueuedPin = {
+      id: crypto.randomUUID(),
       canvasser_id: userId,
       pin_type,
       lat: fix.coords.latitude,
@@ -296,8 +394,17 @@ export function useFieldPins(userId: string | undefined, me: LatLng | null) {
       device_lng: fix.coords.longitude,
       distance_m: 0,
       is_remote_drop: false,
-    });
+      objection: null,
+    };
+    const { error } = await supabase.from("field_pins").insert(row as never);
     if (error) {
+      if (isNetworkishError(error.message, typeof navigator === "undefined" || navigator.onLine)) {
+        enqueuePin(row);
+        toast("📴 No signal — knock saved, it sends when you're back online.", {
+          duration: 3000,
+        });
+        return { ok: true as const, queued: true as const };
+      }
       toast.error(error.message || "Couldn't save pin");
       return { ok: false as const };
     }
@@ -373,6 +480,9 @@ export function useFieldPins(userId: string | undefined, me: LatLng | null) {
   return {
     pinsKey,
     pinsQuery,
+    /** Today's pins + the last 14 days of open Go Back / Not Home houses
+     *  (dimmed, read-only) — what NeonMap should render. */
+    mapPins,
     counts,
     dropAtPoint,
     guardedMapDrop,

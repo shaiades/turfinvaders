@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { addDaysISO, completedReportDay, fmtWorkedDay, lastWorkedDaysBefore } from "@/lib/dates";
+import {
+  addDaysISO,
+  completedReportDay,
+  fmtWorkedDay,
+  lastWorkedDaysBefore,
+  laTodayISO,
+} from "@/lib/dates";
 import { useClockPresence, useDailyWrapRows, type WrapRow } from "@/hooks/useDailyWrapRows";
 import { clamp01, easeInOut, easeOutBack, makeBeeper, popText, rr } from "./intro-fx";
 
@@ -317,6 +323,13 @@ export function EodRecapFx({
     // sequences ?eod_demo=1 AFTER the morning intro instead of stacking
     // two z-[10020] overlays (and letting the buried intro burn its flag).
     if (forced) return "loading";
+    // SAME EVENING ONLY (audit 2026-10-15, Phase 3 §1): the recap plays
+    // between the 6 PM lock and LA midnight of the day it recaps. Before the
+    // lock, completedReportDay() is YESTERDAY — the old behavior replayed
+    // last night's recap at 7 AM to anyone who hadn't opened the app after
+    // 6 PM. Mornings belong to today's doors. Unstamped on purpose, so a rep
+    // who opens at 6:30 PM still gets tonight's.
+    if (completedReportDay() !== laTodayISO()) return "done";
     return readLocalSeen(seenKey(userId), completedReportDay()) ? "done" : "checking";
   });
   const [ready, setReady] = useState(forced);
@@ -499,6 +512,9 @@ export function EodRecapFx({
       // remount the page tour via eodActive.
       if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
       const d = completedReportDay();
+      // Same-evening rule (Phase 3 §1): a morning foreground must not replay
+      // last night's show — only re-arm inside the 6 PM→midnight window.
+      if (d !== laTodayISO()) return;
       if (readLocalSeen(seenKey(userId), d)) return;
       doneRef.current = false;
       setReady(false);

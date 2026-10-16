@@ -1,10 +1,7 @@
 import { useEffect, useState } from "react";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Heart, Lock } from "lucide-react";
+import { Heart, X } from "lucide-react";
 import { laTodayISO } from "@/lib/dates";
 import { supabase } from "@/integrations/supabase/client";
-
 
 function storageKey(userId: string) {
   return `gratitude:${userId}:${laTodayISO()}`;
@@ -12,91 +9,125 @@ function storageKey(userId: string) {
 
 export function hasPassedGratitudeGate(userId: string | undefined): boolean {
   if (!userId || typeof window === "undefined") return false;
-  try { return !!window.localStorage.getItem(storageKey(userId)); } catch { return false; }
+  try {
+    return !!window.localStorage.getItem(storageKey(userId));
+  } catch {
+    return false;
+  }
 }
 
-// bypass: roles exempt from the daily ritual skip straight to the content —
-// GRATITUDE_GATE_ROLES in role-policy.ts says who checks in (owner decision
-// 2026-08-19: canvassers and captains do; owners, Admins, sales reps don't).
-// pending: role still resolving — hold a blank beat instead of flashing the
-// gate at an exempt role (or the map at a gated one) on cold loads.
+// One-tap answers — tap one and you're back on the doors. The free-text ritual
+// became a wall between a rookie and their first knock (audit 2026-10-15);
+// the WORDS matter less than the beat of gratitude, so presets win.
+const PRESETS = ["My family", "My health", "My team", "This opportunity"] as const;
+
+/**
+ * Gratitude check-in (owner ritual, reworked in the 2026-10-15 audit,
+ * Phase 3 §1). The gate NO LONGER blocks the map: ActiveRun mounts, GPS
+ * starts, doors get knocked. After the FIRST logged door of the day
+ * (`promptArmed`), a one-tap card slides over the map — tap what you're
+ * grateful for and it's gone. Still once per LA day (same localStorage key
+ * as the old gate, so nobody gets double-prompted across the deploy), still
+ * feeds the Daily Wrap gratitude wall, still fires ti-gratitude-unlocked for
+ * the tutorial.
+ *
+ * `pending` (auth still resolving) keeps holding children back — ActiveRun's
+ * savedView freeze depends on children not mounting until auth settles.
+ * `bypass` skips the ritual for exempt roles (GRATITUDE_GATE_ROLES).
+ */
 export function GratitudeGate({
-  userId, bypass = false, pending = false, children,
-}: { userId: string | undefined; bypass?: boolean; pending?: boolean; children: React.ReactNode }) {
+  userId,
+  bypass = false,
+  pending = false,
+  promptArmed = false,
+  children,
+}: {
+  userId: string | undefined;
+  bypass?: boolean;
+  pending?: boolean;
+  /** True once today's first door is logged — the prompt waits for it. */
+  promptArmed?: boolean;
+  children: React.ReactNode;
+}) {
   const [unlocked, setUnlocked] = useState<boolean>(() => hasPassedGratitudeGate(userId));
-  const [text, setText] = useState("");
+  // "Later" hides the card until the next mount — never blocks, never nags
+  // twice in one stretch of street.
+  const [snoozed, setSnoozed] = useState(false);
 
-  useEffect(() => { setUnlocked(hasPassedGratitudeGate(userId)); }, [userId]);
+  useEffect(() => {
+    setUnlocked(hasPassedGratitudeGate(userId));
+  }, [userId]);
 
-  if (bypass || unlocked) return <>{children}</>;
   if (pending) return null;
 
-  const submit = () => {
-    const v = text.trim();
-    if (v.length < 2 || !userId) return;
+  const submit = (v: string) => {
+    if (!userId) return;
     try {
-      window.localStorage.setItem(storageKey(userId), JSON.stringify({ text: v, at: new Date().toISOString() }));
-    } catch { /* ignore */ }
+      window.localStorage.setItem(
+        storageKey(userId),
+        JSON.stringify({ text: v, at: new Date().toISOString() }),
+      );
+    } catch {
+      /* ignore */
+    }
     // Best-effort share to the Daily Wrap's gratitude wall (owner call
-    // 2026-09-11). Fire-and-forget: the gate NEVER waits on the network,
-    // and a dead connection at 7 AM must not block the day. Untyped table
-    // access until the generated types catch up (ObjectionDojo's pattern).
+    // 2026-09-11). Fire-and-forget: the prompt NEVER waits on the network.
+    // Untyped table access until the generated types catch up.
     void (supabase as unknown as { from: (t: string) => ReturnType<typeof supabase.from> })
       .from("gratitude_entries")
       .insert({ user_id: userId, entry_date: laTodayISO(), text: v.slice(0, 280) })
       .then(() => {});
     setUnlocked(true);
-    // The canvasser tutorial defers its field-screen pop until the gate
-    // opens (teaching buttons the gate hides would point at nothing).
+    // The canvasser tutorial defers its field-screen pop until the ritual
+    // completes (same event the old gate fired).
     window.dispatchEvent(new Event("ti-gratitude-unlocked"));
   };
 
+  const showPrompt = !bypass && !unlocked && !snoozed && promptArmed && !!userId;
+
   return (
-    <div className="min-h-[70vh] flex items-center justify-center px-4">
-      <div
-        data-tour="gratitude-gate"
-        className="relative w-full max-w-xl overflow-hidden rounded-2xl border border-[color-mix(in_oklab,var(--neon)_45%,var(--border))] bg-[linear-gradient(160deg,#08080d,#0e0a18)] p-8 md:p-10"
-        style={{ boxShadow: "0 0 60px -20px var(--neon), inset 0 0 60px -20px var(--neon)" }}
-      >
-        <div className="absolute inset-0 pointer-events-none scanlines opacity-20" />
-        <div className="relative space-y-6 text-center">
-          <div className="inline-flex items-center gap-2 text-[10px] font-display uppercase tracking-[0.3em] text-neon">
-            <Lock className="w-3 h-3" /> Gratitude Gate
+    <>
+      {children}
+      {showPrompt && (
+        <div className="fixed inset-x-0 bottom-20 z-[1900] px-3 pb-safe">
+          <div
+            data-tour="gratitude-gate"
+            role="dialog"
+            aria-label="Gratitude check-in"
+            className="mx-auto w-full max-w-xl rounded-2xl border border-[color-mix(in_oklab,var(--neon)_45%,var(--border))] bg-surface p-4 shadow-[0_12px_40px_-12px_rgba(0,0,0,0.8)]"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-2 text-sm font-semibold">
+                <Heart className="h-4 w-4 text-[#ff4d8d]" aria-hidden />
+                First door down — what are you grateful for?
+              </div>
+              <button
+                type="button"
+                aria-label="Ask me later"
+                onClick={() => setSnoozed(true)}
+                className="-m-1 flex h-8 w-8 shrink-0 items-center justify-center rounded text-muted-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              {PRESETS.map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => submit(p)}
+                  className="min-h-11 rounded-xl border border-neon/50 bg-neon/10 px-3 text-sm font-medium text-neon"
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+            <p className="mt-2 text-center text-xs text-muted-foreground">
+              One tap · once a day · lands on the Daily Wrap wall
+            </p>
           </div>
-          <Heart className="w-10 h-10 mx-auto text-[#ff4d8d]"
-                 style={{ filter: "drop-shadow(0 0 12px #ff4d8d)" }} />
-          <h1 className="font-display text-2xl md:text-3xl text-neon leading-tight">
-            What are you grateful for today?
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            One sentence is enough. The map unlocks the moment you answer.
-          </p>
-          <div className="space-y-3 text-left">
-            {/* No autoFocus: it used to raise the keyboard in the same commit
-                as the gate (and, before the GPS deferral, the location
-                prompt) — let the rookie read the question first. */}
-            <Input
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
-              placeholder="My family · waking up healthy · this opportunity…"
-              className="h-14 px-4 text-base bg-background/60 border-[color-mix(in_oklab,var(--neon)_45%,var(--border))] focus-visible:ring-neon"
-              style={{ boxShadow: "inset 0 0 18px -8px var(--neon)" }}
-            />
-            <Button
-              onClick={submit}
-              disabled={text.trim().length < 2}
-              className="w-full h-12 font-display uppercase tracking-widest bg-neon/20 hover:bg-neon/30 text-neon border border-neon/60"
-              style={{ boxShadow: "0 0 22px -6px var(--neon)" }}
-            >
-              Unlock the Field
-            </Button>
-          </div>
-          <p className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-            Resets at midnight · one check-in per day
-          </p>
         </div>
-      </div>
-    </div>
+      )}
+    </>
   );
 }

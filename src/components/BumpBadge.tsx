@@ -43,7 +43,7 @@ export function BumpBadge({
   return (
     <span
       className={cn(
-        "absolute -top-1 -right-1 min-w-4 rounded-full bg-surface px-1 text-center font-display text-[9px] leading-4",
+        "absolute -top-1.5 -right-1.5 min-w-5 rounded-full bg-surface px-1 text-center text-xs font-bold leading-5",
         bump && !reduced && "transition-transform duration-250 scale-125",
         className,
       )}

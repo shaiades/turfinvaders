@@ -104,13 +104,10 @@ export function PinActionSheet({
                   }}
                 >
                   {r.icon}
-                  <span className="font-display text-[9px] uppercase tracking-widest">
-                    {r.label}
-                  </span>
+                  {/* ≥12px body font — sunlight rule (Phase 3 §2) */}
+                  <span className="text-xs font-semibold uppercase leading-tight">{r.label}</span>
                   {current && (
-                    <span className="text-[8px] uppercase tracking-widest text-muted-foreground">
-                      Current
-                    </span>
+                    <span className="text-xs uppercase text-muted-foreground">Current</span>
                   )}
                 </button>
               );

@@ -56,6 +56,10 @@ export type FieldPin = {
   created_at?: string;
   /** Optimistic row awaiting server truth — rendered dimmed, not tappable. */
   pending?: boolean;
+  /** A previous day's open house (Go Back / Not Home, 14-day memory —
+   *  Phase 3 §5): dimmed, never tappable (the same-day RLS fence makes old
+   *  pins read-only; a new tap on the house drops a fresh pin). */
+  stale?: boolean;
   /** Crew view: replaces the dot's white border with the owner's color so
    *  the result color (fill) still reads while pins attribute to a rep.
    *  hsl() strings welcome — alpha goes through color-mix, never hex tricks. */
@@ -1639,12 +1643,12 @@ function NeonMapInner({
           ))}
 
           {pins.map((p) => {
-            const tappable = !!onPinClick && !p.pending;
+            const tappable = !!onPinClick && !p.pending && !p.stale;
             return (
               <Marker
                 key={p.id}
                 position={[p.lat, p.lng]}
-                opacity={p.pending ? 0.6 : 1}
+                opacity={p.pending ? 0.6 : p.stale ? 0.45 : 1}
                 // Inert markers must not swallow map taps — an untappable pin
                 // would otherwise be a dead zone over the door next to it.
                 interactive={tappable}
@@ -1683,12 +1687,12 @@ function NeonMapInner({
         {/* Draw mode controls */}
         {mode.kind === "draw" && (
           <div className="absolute top-3 right-3 z-[1000] flex flex-col gap-2 text-xs">
-            <div className="rounded border border-neon/60 bg-surface/90 backdrop-blur px-3 py-2 font-display text-[10px] uppercase tracking-widest text-neon">
+            <div className="rounded border border-neon/60 bg-surface/90 backdrop-blur px-3 py-2 text-xs font-semibold uppercase text-neon">
               Drag to draw an area · tap for points
               {draft.length > 0 ? ` · ${draft.length} pts` : ""}
             </div>
             {drawHint && (
-              <div className="rounded border border-yellow-400/60 bg-surface/90 backdrop-blur px-3 py-2 font-display text-[10px] uppercase tracking-widest text-yellow-300">
+              <div className="rounded border border-yellow-400/60 bg-surface/90 backdrop-blur px-3 py-2 text-xs font-semibold uppercase text-yellow-300">
                 {drawHint}
               </div>
             )}
@@ -1696,13 +1700,13 @@ function NeonMapInner({
               <button
                 onClick={finishDraft}
                 disabled={draft.length < 3}
-                className="flex-1 min-h-[40px] rounded bg-victory text-black font-display text-[10px] uppercase tracking-widest px-3 py-2 disabled:opacity-40"
+                className="flex-1 min-h-[40px] rounded bg-victory text-black text-xs font-semibold uppercase px-3 py-2 disabled:opacity-40"
               >
                 Save Polygon
               </button>
               <button
                 onClick={() => setDraft([])}
-                className="min-h-[40px] rounded border border-border bg-surface/90 px-3 py-2 font-display text-[10px] uppercase tracking-widest"
+                className="min-h-[40px] rounded border border-border bg-surface/90 px-3 py-2 text-xs font-semibold uppercase"
               >
                 Clear
               </button>
@@ -1714,24 +1718,29 @@ function NeonMapInner({
           can't silently mislabel a street of doors. While the info tool is
           armed it narrates THAT instead: taps read addresses, nothing logs. */}
         {inspecting ? (
-          <div className="absolute top-3 right-3 z-[1000] flex items-center gap-2 rounded border border-[#00e5ff]/60 bg-surface/90 backdrop-blur px-3 py-2 font-display text-[10px] uppercase tracking-widest text-[#00e5ff]">
+          <div className="absolute top-3 right-3 z-[1000] flex items-center gap-2 rounded border border-[#00e5ff]/60 bg-surface/90 backdrop-blur px-3 py-2 text-xs font-semibold uppercase text-[#00e5ff]">
             <Info className="h-3.5 w-3.5 shrink-0" />
             House info: tap any house
           </div>
-        ) : mode.kind === "pin" && (
-          <div className="absolute top-3 right-3 z-[1000] flex items-center gap-2 rounded border border-neon/60 bg-surface/90 backdrop-blur px-3 py-2 font-display text-[10px] uppercase tracking-widest text-neon">
-            {mode.armed ? (
-              <>
-                <span
-                  className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
-                  style={{ background: mode.armed.color, boxShadow: `0 0 8px ${mode.armed.color}` }}
-                />
-                Dropping: {mode.armed.label}
-              </>
-            ) : (
-              "Tap map to drop pin"
-            )}
-          </div>
+        ) : (
+          mode.kind === "pin" && (
+            <div className="absolute top-3 right-3 z-[1000] flex items-center gap-2 rounded border border-neon/60 bg-surface/90 backdrop-blur px-3 py-2 text-xs font-semibold uppercase text-neon">
+              {mode.armed ? (
+                <>
+                  <span
+                    className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{
+                      background: mode.armed.color,
+                      boxShadow: `0 0 8px ${mode.armed.color}`,
+                    }}
+                  />
+                  Dropping: {mode.armed.label}
+                </>
+              ) : (
+                "Tap map to drop pin"
+              )}
+            </div>
+          )
         )}
 
         {/* ONE status pill, bottom-center. Its band (bottom-16) is SHARED:
@@ -1756,8 +1765,9 @@ function NeonMapInner({
           aria-live="polite"
           className="absolute bottom-16 left-1/2 -translate-x-1/2 z-[1000] max-w-[calc(100%-8rem)] empty:hidden"
         >
-          {!drawingNow && mapStatus && (
-            mapStatus.kind === "zoom-hint" ? (
+          {!drawingNow &&
+            mapStatus &&
+            (mapStatus.kind === "zoom-hint" ? (
               <button
                 type="button"
                 // From far out, a bare setZoom lands on map-center nowhere —
@@ -1767,7 +1777,7 @@ function NeonMapInner({
                     ? mapRef.current?.setView([me.lat, me.lng], HOUSE_MIN_ZOOM)
                     : mapRef.current?.setZoom(HOUSE_MIN_ZOOM)
                 }
-                className="min-h-11 rounded-full border border-neon/60 bg-surface/90 backdrop-blur px-4 py-2 text-center font-display text-[10px] uppercase tracking-widest text-neon"
+                className="min-h-11 rounded-full border border-neon/60 bg-surface/90 backdrop-blur px-4 py-2 text-center text-xs font-semibold uppercase text-neon"
               >
                 Zoom in for house circles
               </button>
@@ -1775,7 +1785,7 @@ function NeonMapInner({
               <button
                 type="button"
                 onClick={() => setHouseRetryToken((t) => t + 1)}
-                className="min-h-11 rounded-full border border-[var(--warning)]/60 bg-surface/90 backdrop-blur px-4 py-2 text-center font-display text-[10px] uppercase tracking-widest text-[var(--warning)]"
+                className="min-h-11 rounded-full border border-[var(--warning)]/60 bg-surface/90 backdrop-blur px-4 py-2 text-center text-xs font-semibold uppercase text-[var(--warning)]"
               >
                 Circles unavailable — tap here to retry · map taps still log
               </button>
@@ -1783,13 +1793,13 @@ function NeonMapInner({
               <button
                 type="button"
                 onClick={mapStatus.onRetry}
-                className="min-h-11 rounded-full border border-[var(--warning)]/60 bg-surface/90 backdrop-blur px-4 py-2 text-center font-display text-[10px] uppercase tracking-widest text-[var(--warning)]"
+                className="min-h-11 rounded-full border border-[var(--warning)]/60 bg-surface/90 backdrop-blur px-4 py-2 text-center text-xs font-semibold uppercase text-[var(--warning)]"
               >
                 Couldn't load {mapStatus.what} — tap to retry
               </button>
             ) : (
               <div
-                className={`pointer-events-none rounded-full border bg-surface/90 backdrop-blur px-4 py-2 text-center font-display text-[10px] uppercase tracking-widest ${
+                className={`pointer-events-none rounded-full border bg-surface/90 backdrop-blur px-4 py-2 text-center text-xs font-semibold uppercase ${
                   mapStatus.kind === "offline" || mapStatus.kind === "weak-signal"
                     ? "border-[var(--warning)]/60 text-[var(--warning)]"
                     : "border-neon/60 text-neon animate-pulse"
@@ -1805,8 +1815,7 @@ function NeonMapInner({
                         ? "Loading map…"
                         : "Finding house circles…"}
               </div>
-            )
-          )}
+            ))}
         </div>
 
         {/* Map controls: Turf Tools + house info + fullscreen + compass +
@@ -1873,7 +1882,11 @@ function NeonMapInner({
               className="flex h-11 w-11 items-center justify-center rounded-full border bg-surface/90 backdrop-blur"
               style={
                 inspectOn
-                  ? { color: "#00e5ff", borderColor: "#00e5ff99", boxShadow: "0 0 10px -2px #00e5ff" }
+                  ? {
+                      color: "#00e5ff",
+                      borderColor: "#00e5ff99",
+                      boxShadow: "0 0 10px -2px #00e5ff",
+                    }
                   : { color: "var(--muted-foreground)", borderColor: "var(--border)" }
               }
             >
@@ -1922,7 +1935,7 @@ function NeonMapInner({
               style={{ transform: `rotate(${bearing}deg)`, transition: "transform 120ms linear" }}
             >
               <Navigation2 className="h-5 w-5" fill="currentColor" />
-              <span className="absolute -top-1.5 font-display text-[7px] leading-none" aria-hidden>
+              <span className="absolute -top-1.5 text-xs font-bold leading-none" aria-hidden>
                 N
               </span>
             </span>
@@ -1933,7 +1946,7 @@ function NeonMapInner({
             aria-pressed={zipOn}
             title={`ZIP code borders ${zipOn ? "on" : "off"} — visible from zoom ${ZIP_MIN_ZOOM}+`}
             onClick={toggleZip}
-            className="flex h-11 w-11 items-center justify-center rounded-full border bg-surface/90 backdrop-blur font-display text-[10px] tracking-widest"
+            className="flex h-11 w-11 items-center justify-center rounded-full border bg-surface/90 backdrop-blur text-xs font-semibold"
             style={
               zipOn
                 ? {
@@ -2008,13 +2021,13 @@ class MapCrashBoundary extends Component<
           className="flex flex-col items-center justify-center gap-3 rounded-lg border border-border bg-surface/60"
           style={{ height: typeof h === "number" ? `min(${h}px, 65vh)` : h }}
         >
-          <div className="font-display text-[10px] uppercase tracking-widest text-muted-foreground">
+          <div className="text-xs font-semibold uppercase text-muted-foreground">
             The map hit a snag
           </div>
           <button
             type="button"
             onClick={() => this.setState((s) => ({ crashed: false, attempt: s.attempt + 1 }))}
-            className="min-h-11 rounded border border-neon/60 bg-surface px-4 font-display text-[10px] uppercase tracking-widest text-neon"
+            className="min-h-11 rounded border border-neon/60 bg-surface px-4 text-xs font-semibold uppercase text-neon"
           >
             Reload map
           </button>

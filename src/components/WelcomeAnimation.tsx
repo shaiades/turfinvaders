@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { isLaToday } from "@/lib/dates";
 import { clamp01, easeInOut, easeOutBack, limb, popText, rr } from "./intro-fx";
 
 /**
@@ -44,8 +43,9 @@ type AnimMeta = { ti_welcome_anim?: string };
 
 function readLocal(key: string): boolean {
   try {
-    // Daily replay: "seen" = the stored stamp's LA date is today.
-    return isLaToday(window.localStorage.getItem(key));
+    // Once EVER (audit 2026-10-15, Phase 3 §1 — was once per LA day): any
+    // stored stamp means the intro has played on this account.
+    return !!window.localStorage.getItem(key);
   } catch {
     return true; // can't persist "seen" → never loop the intro
   }
@@ -942,7 +942,9 @@ export function WelcomeAnimation({
         new Promise<AnimMeta>((resolve) => window.setTimeout(() => resolve({}), 1200)),
       ]).catch(() => ({}) as AnimMeta);
       if (cancelled) return;
-      if (isLaToday(meta.ti_welcome_anim)) {
+      // Cross-device backstop, once-ever like the local stamp: ANY recorded
+      // play on the account means a new phone skips the intro too.
+      if (meta.ti_welcome_anim) {
         writeLocal(seenKey(userId));
         finish();
       } else {

@@ -401,9 +401,15 @@ export const PiggyBankHUD = memo(function PiggyBankHUD({
       >
         {canvasEl}
         <div className="flex items-center gap-4">
-          <PigFill pct={fill} bump={pigBump} flare={flare} reduced={reduced} className="h-14 w-14" />
+          <PigFill
+            pct={fill}
+            bump={pigBump}
+            flare={flare}
+            reduced={reduced}
+            className="h-14 w-14"
+          />
           <div className="min-w-0">
-            <div className="text-[9px] font-display uppercase tracking-[0.2em] text-muted-foreground">
+            <div className="text-xs font-semibold uppercase text-muted-foreground">
               Piggy Bank · Projected
             </div>
             <div
@@ -443,7 +449,7 @@ export const PiggyBankHUD = memo(function PiggyBankHUD({
         <PigFill pct={fill} bump={pigBump} flare={flare} reduced={reduced} className="h-5 w-5" />
         <span
           className={cn(
-            "font-display text-[10px] text-victory tabular-nums",
+            "text-xs font-semibold text-victory tabular-nums",
             tickBump && !reduced && "transition-transform duration-200 scale-105",
           )}
           style={{ textShadow: "0 0 10px var(--victory)" }}
@@ -452,7 +458,7 @@ export const PiggyBankHUD = memo(function PiggyBankHUD({
         </span>
       </button>
       {caption && (
-        <div className="absolute top-full left-0 z-[1002] mt-1 whitespace-nowrap rounded-md border border-border bg-surface/95 px-2 py-1 font-display text-[9px] uppercase tracking-widest text-muted-foreground">
+        <div className="absolute top-full left-0 z-[1002] mt-1 whitespace-nowrap rounded-md border border-border bg-surface/95 px-2 py-1 text-xs font-semibold uppercase text-muted-foreground">
           {dl !== null && perKnockEff !== null
             ? `${kn} doors · ${formatCurrency(Math.round(dl))} projected`
             : `${kn} doors · awaiting rate data`}
@@ -461,9 +467,7 @@ export const PiggyBankHUD = memo(function PiggyBankHUD({
               ≈{paceKnocks.toLocaleString()} knocks to week goal
             </span>
           )}
-          {paceKnocks === 0 && (
-            <span className="block text-victory">Week goal covered 🏆</span>
-          )}
+          {paceKnocks === 0 && <span className="block text-victory">Week goal covered 🏆</span>}
         </div>
       )}
       <span className="sr-only" aria-live="polite">

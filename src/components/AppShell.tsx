@@ -30,7 +30,7 @@ import { WelcomeAnimation, isWelcomeAnimationForced } from "@/components/Welcome
 import { CloseKombatIntro, isCloseKombatIntroForced } from "@/components/CloseKombatIntro";
 import { EodRecapFx, isEodRecapForced } from "@/components/EodRecapFx";
 import { useArcadeFlags } from "@/hooks/useArcadeFlags";
-import { StreetFeed } from "@/components/StreetFeed";
+import { PraiseToasts, StreetFeed } from "@/components/StreetFeed";
 import { BountyBanner } from "@/components/BountyBanner";
 import { EodWrapGate, isEodWrapForced } from "@/components/EodWrapGate";
 import {
@@ -170,6 +170,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   const revoked = useLiveAccessRevoked(user?.id ?? null, accessRevoked);
   const router = useRouter();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  // The Active Run map screens (canvasser /field, captain /my-territory):
+  // chrome gets out of the way there (Phase 3 §6) — no logo bar, no Street
+  // Feed ticker; the sticky HUD strip stays (it's the score).
+  const isFieldRoute = pathname === "/field" || pathname.startsWith("/my-territory");
   // First-sign-in arcade intro: while it's checking/playing, hold the page
   // tour back so the two first-open moments can't stack.
   const [introActive, setIntroActive] = useState(false);
@@ -595,7 +599,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             on the right). Canvassers get the tutorial replay in the left
             slot, the management tier gets the hamburger, everyone else
             keeps the spacer. */}
-        <div className="md:hidden flex items-center justify-between px-4 py-2">
+        <div
+          className={`md:hidden items-center justify-between px-4 py-2 ${isFieldRoute ? "hidden" : "flex"}`}
+        >
           {user ? (
             <div className="flex items-center">
               <button
@@ -760,9 +766,18 @@ export function AppShell({ children }: { children: ReactNode }) {
         {user && (role === "canvasser" || role === "captain") && <CanvasserHUD userId={user.id} />}
       </header>
       {/* §7 Street Feed — the field's live big-moments ticker (field + leadership,
-          not sales reps who live in Close Kombat). */}
-      {user && realRole !== null && privilegeRole(realRole) !== "sales_rep" && <StreetFeed />}
+          not sales reps who live in Close Kombat). Phase 3 §6: NOT on the
+          Active Run screen — the map earns that row; praise reaches the
+          street as the 2-second toast below instead. BountyBanner stays (it
+          renders nothing unless a bounty is live, and a live bounty is money). */}
+      {user && realRole !== null && privilegeRole(realRole) !== "sales_rep" && !isFieldRoute && (
+        <StreetFeed />
+      )}
       {user && realRole !== null && privilegeRole(realRole) !== "sales_rep" && <BountyBanner />}
+      {/* Praise toasts — shoutouts land as a 2s toast EVERYWHERE (field
+          included), headless so stripping the ticker off the map screen
+          can't kill the watcher (Phase 3 §6). */}
+      {user && realRole !== null && privilegeRole(realRole) !== "sales_rep" && <PraiseToasts />}
       {/* App-wide crew-live publisher — self-gated (field tiers, real role,
           GPS already granted). Renders nothing. */}
       <CrewBeacon />

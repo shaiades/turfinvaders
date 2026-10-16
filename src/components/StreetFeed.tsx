@@ -1,15 +1,14 @@
 // Street Feed (§7) — one live ticker of the field's big moments under the
-// header, for every field role. Tap it for the last 50. A new SHOUTOUT lands
-// as a confetti banner on every phone (public praise, turned way up). Reads
-// useFeed (realtime); writes are leaders-only. Reduced-motion skips the
-// confetti but keeps the banner + feed.
+// header (not on the Active Run map screen — Phase 3 §6). Tap it for the last
+// 50. A new SHOUTOUT lands as a 2-second toast on every phone via the
+// headless <PraiseToasts/> below (public praise that doesn't cover the door).
+// Reads useFeed (realtime); writes are leaders-only.
 
 import { useEffect, useRef, useState } from "react";
-import confetti from "canvas-confetti";
 import { Megaphone } from "lucide-react";
+import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { useFeed, type FeedEvent } from "@/hooks/useFeed";
-import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
+import { useFeed } from "@/hooks/useFeed";
 import { playArcadeSound, haptic } from "@/lib/arcade-fx";
 
 const KIND_ICON: Record<string, string> = {
@@ -33,16 +32,18 @@ function timeAgo(iso: string): string {
   return `${Math.floor(s / 86400)}d`;
 }
 
-export function StreetFeed() {
+/**
+ * Praise watcher (Phase 3 §6) — headless, mounted once in AppShell. A NEW
+ * shoutout (created after mount) lands as a 2-second toast with a light
+ * haptic, on EVERY screen including the Active Run map (which no longer
+ * carries the ticker). Replaces the old 4.2s confetti banner — praise should
+ * pat the shoulder, not cover the door. Latches the newest shoutout id seen
+ * at mount so history never fires on load.
+ */
+export function PraiseToasts() {
   const { events } = useFeed(50);
-  const [open, setOpen] = useState(false);
-  const reduced = usePrefersReducedMotion();
-
-  // Confetti banner on a NEW shoutout (created after mount). Latch the newest
-  // shoutout id seen at mount so old ones don't fire on load.
   const seenRef = useRef<string | null>(null);
   const armed = useRef(false);
-  const [banner, setBanner] = useState<FeedEvent | null>(null);
   useEffect(() => {
     const latestShout = events.find((e) => e.kind === "shoutout") ?? null;
     if (!armed.current) {
@@ -52,20 +53,17 @@ export function StreetFeed() {
     }
     if (latestShout && latestShout.id !== seenRef.current) {
       seenRef.current = latestShout.id;
-      setBanner(latestShout);
       playArcadeSound("coin");
       haptic([20, 40, 20]);
-      if (!reduced) {
-        try {
-          confetti({ particleCount: 90, spread: 70, origin: { y: 0.3 } });
-        } catch {
-          /* confetti is garnish */
-        }
-      }
-      const t = setTimeout(() => setBanner(null), 4200);
-      return () => clearTimeout(t);
+      toast(`📣 ${latestShout.body}`, { duration: 2000 });
     }
-  }, [events, reduced]);
+  }, [events]);
+  return null;
+}
+
+export function StreetFeed() {
+  const { events } = useFeed(50);
+  const [open, setOpen] = useState(false);
 
   const latest = events[0];
 
@@ -129,27 +127,6 @@ export function StreetFeed() {
           )}
         </DialogContent>
       </Dialog>
-
-      {banner && (
-        <div
-          role="status"
-          className="fixed inset-x-0 top-0 z-[10015] flex justify-center px-3 pt-[max(0.75rem,env(safe-area-inset-top))]"
-        >
-          <div
-            className="max-w-md rounded-xl border-2 px-4 py-2.5 text-center"
-            style={{
-              borderColor: banner.color ?? "var(--kombat-gold)",
-              background: "color-mix(in oklab, var(--kombat-gold) 14%, var(--surface))",
-              boxShadow: "0 10px 30px -10px var(--kombat-gold)",
-            }}
-          >
-            <div className="font-display text-[9px] uppercase tracking-[0.24em] text-[var(--kombat-gold)]">
-              📣 Shoutout
-            </div>
-            <div className="mt-0.5 text-sm text-foreground">{banner.body}</div>
-          </div>
-        </div>
-      )}
     </>
   );
 }
