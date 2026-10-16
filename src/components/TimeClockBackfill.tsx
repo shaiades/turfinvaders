@@ -76,7 +76,9 @@ export function TimeClockBackfill({
       const { data: newId, error } = await supabase.rpc("admin_create_time_entry", {
         _user_id: userId,
         _clock_in: inISO,
-        _clock_out: outISO,
+        // null = backfilled shift left open — the RPC accepts SQL NULL for
+        // this required arg; the generated types can't express that.
+        _clock_out: outISO as unknown as string,
         _reason: trimmed,
       });
       if (error) throw error;

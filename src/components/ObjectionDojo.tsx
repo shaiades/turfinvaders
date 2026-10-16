@@ -86,12 +86,14 @@ export function useObjections() {
     staleTime: 60_000,
     retry: false,
     queryFn: async () => {
-      const { data, error } = await dojoTable("objections")
+      // Typed read since the 2026-10-16 types regen.
+      const { data, error } = await supabase
+        .from("objections")
         .select("*")
         .eq("active", true)
         .order("sort");
       if (error) throw error;
-      return (data ?? []) as unknown as Objection[];
+      return (data ?? []) as Objection[];
     },
   });
 }

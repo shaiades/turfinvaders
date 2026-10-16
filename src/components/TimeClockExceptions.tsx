@@ -81,8 +81,11 @@ export function TimeClockExceptions({ profiles }: { profiles: Profile[] }) {
       const { error } = await supabase.rpc("grant_time_clock_exception", {
         _user_id: userId,
         _date: date,
-        _early_from: earlyFrom || null,
-        _late_until: lateUntil || null,
+        // Required args that genuinely accept SQL NULL (one of the two must
+        // be set; the RPC CHECKs it) — the generated types can't express a
+        // nullable required arg, hence the cast.
+        _early_from: (earlyFrom || null) as unknown as string,
+        _late_until: (lateUntil || null) as unknown as string,
         _reason: trimmed,
       });
       if (error) throw error;

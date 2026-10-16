@@ -73,7 +73,8 @@ export function GratitudeGate({
     // Best-effort share to the Daily Wrap's gratitude wall (owner call
     // 2026-09-11). Fire-and-forget: the prompt NEVER waits on the network.
     // Untyped table access until the generated types catch up.
-    void (supabase as unknown as { from: (t: string) => ReturnType<typeof supabase.from> })
+    // Typed insert since the 2026-10-16 types regen.
+    void supabase
       .from("gratitude_entries")
       .insert({ user_id: userId, entry_date: laTodayISO(), text: v.slice(0, 280) })
       .then(() => {});

@@ -521,7 +521,9 @@ export function TimesheetEditor({
         const { error } = await supabase.rpc("admin_update_time_entry", {
           _id: id,
           _clock_in: clock.clock_in,
-          _clock_out: clock.clock_out,
+          // null = still clocked in — the RPC accepts SQL NULL for this
+          // required arg; the generated types can't express that.
+          _clock_out: clock.clock_out as unknown as string,
           _reason: reason,
         });
         if (error) throw error;
@@ -912,11 +914,14 @@ export function TimesheetEditor({
                     Mark an absence
                   </DialogTitle>
                   <DialogDescription>
-                    Sick / excused / unexcused / no-show — any date or range, past days included.
-                    It lands approved; the person gets a notification.
+                    Sick / excused / unexcused / no-show — any date or range, past days included. It
+                    lands approved; the person gets a notification.
                   </DialogDescription>
                 </DialogHeader>
-                <AdminAbsenceDialog profiles={pickerProfiles} onDone={() => setAbsenceOpen(false)} />
+                <AdminAbsenceDialog
+                  profiles={pickerProfiles}
+                  onDone={() => setAbsenceOpen(false)}
+                />
               </DialogContent>
             </Dialog>
             {!scope && (
@@ -1097,96 +1102,110 @@ export function TimesheetEditor({
                     {groupHeaderActions(g)}
                   </div>
                   {g.list.map(
-                ({ e, name, edit, dirty, inVal, outVal, lunchOutVal, lunchInVal, onLunchNow }) => (
-                  <MobileCard key={e.id}>
-                    <MobileCardHeader
-                      left={
-                        <>
-                          <span className="tabular-nums">{e.log_date}</span>
-                          <EntryFlags e={e} />
-                        </>
-                      }
-                      right={
-                        <span className="text-neon tabular-nums">
-                          {Number(e.billable_hours ?? 0).toFixed(2)}h
-                        </span>
-                      }
-                    />
-                    <label className="block space-y-1">
-                      <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-                        Clock In
-                      </span>
-                      <Input
-                        type="datetime-local"
-                        value={inVal}
-                        onChange={(v) => editField(e.id, "clock_in", v.target.value)}
-                        className="w-full"
-                      />
-                    </label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <label className="block space-y-1">
-                        <span className="flex items-center gap-1.5 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-                          <Utensils className="w-3 h-3 text-warning" />
-                          Lunch Out
-                        </span>
-                        <Input
-                          type="time"
-                          value={lunchOutVal}
-                          onChange={(v) => editField(e.id, "lunch_out", v.target.value)}
-                          className="w-full"
+                    ({
+                      e,
+                      name,
+                      edit,
+                      dirty,
+                      inVal,
+                      outVal,
+                      lunchOutVal,
+                      lunchInVal,
+                      onLunchNow,
+                    }) => (
+                      <MobileCard key={e.id}>
+                        <MobileCardHeader
+                          left={
+                            <>
+                              <span className="tabular-nums">{e.log_date}</span>
+                              <EntryFlags e={e} />
+                            </>
+                          }
+                          right={
+                            <span className="text-neon tabular-nums">
+                              {Number(e.billable_hours ?? 0).toFixed(2)}h
+                            </span>
+                          }
                         />
-                      </label>
-                      <label className="block space-y-1">
-                        <span className="flex items-center gap-1.5 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-                          Lunch In
-                          {onLunchNow && (
-                            <span className="text-[9px] text-warning animate-pulse">out now</span>
-                          )}
-                        </span>
-                        <Input
-                          type="time"
-                          value={lunchInVal}
-                          onChange={(v) => editField(e.id, "lunch_in", v.target.value)}
-                          className="w-full"
+                        <label className="block space-y-1">
+                          <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                            Clock In
+                          </span>
+                          <Input
+                            type="datetime-local"
+                            value={inVal}
+                            onChange={(v) => editField(e.id, "clock_in", v.target.value)}
+                            className="w-full"
+                          />
+                        </label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <label className="block space-y-1">
+                            <span className="flex items-center gap-1.5 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                              <Utensils className="w-3 h-3 text-warning" />
+                              Lunch Out
+                            </span>
+                            <Input
+                              type="time"
+                              value={lunchOutVal}
+                              onChange={(v) => editField(e.id, "lunch_out", v.target.value)}
+                              className="w-full"
+                            />
+                          </label>
+                          <label className="block space-y-1">
+                            <span className="flex items-center gap-1.5 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                              Lunch In
+                              {onLunchNow && (
+                                <span className="text-[9px] text-warning animate-pulse">
+                                  out now
+                                </span>
+                              )}
+                            </span>
+                            <Input
+                              type="time"
+                              value={lunchInVal}
+                              onChange={(v) => editField(e.id, "lunch_in", v.target.value)}
+                              className="w-full"
+                            />
+                          </label>
+                        </div>
+                        <label className="block space-y-1">
+                          <span className="flex items-center gap-1.5 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                            Clock Out
+                            {!e.clock_out && !edit.clock_out && (
+                              <button
+                                type="button"
+                                disabled={saveMut.isPending}
+                                onClick={() => clockOutNow(e)}
+                                className="inline-flex min-h-11 md:min-h-0 items-center gap-1 normal-case tracking-normal text-victory animate-pulse hover:animate-none hover:underline disabled:opacity-50"
+                              >
+                                <Square className="w-2.5 h-2.5" />
+                                live — tap to clock out
+                              </button>
+                            )}
+                          </span>
+                          <Input
+                            type="datetime-local"
+                            value={outVal}
+                            onChange={(v) => editField(e.id, "clock_out", v.target.value)}
+                            className="w-full"
+                          />
+                        </label>
+                        <TimeEntryActions
+                          dirty={dirty}
+                          saving={saveMut.isPending}
+                          deleting={voidMut.isPending}
+                          onSave={() => saveRow(e)}
+                          onVoid={() => voidRow(e, name)}
+                          onHistory={() =>
+                            setAuditFor({ ids: [e.id], title: `${name} · ${e.log_date}` })
+                          }
+                          onResolve={
+                            canResolve(e) ? () => setResolveFor({ entry: e, name }) : undefined
+                          }
                         />
-                      </label>
-                    </div>
-                    <label className="block space-y-1">
-                      <span className="flex items-center gap-1.5 text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-                        Clock Out
-                        {!e.clock_out && !edit.clock_out && (
-                          <button
-                            type="button"
-                            disabled={saveMut.isPending}
-                            onClick={() => clockOutNow(e)}
-                            className="inline-flex min-h-11 md:min-h-0 items-center gap-1 normal-case tracking-normal text-victory animate-pulse hover:animate-none hover:underline disabled:opacity-50"
-                          >
-                            <Square className="w-2.5 h-2.5" />
-                            live — tap to clock out
-                          </button>
-                        )}
-                      </span>
-                      <Input
-                        type="datetime-local"
-                        value={outVal}
-                        onChange={(v) => editField(e.id, "clock_out", v.target.value)}
-                        className="w-full"
-                      />
-                    </label>
-                    <TimeEntryActions
-                      dirty={dirty}
-                      saving={saveMut.isPending}
-                      deleting={voidMut.isPending}
-                      onSave={() => saveRow(e)}
-                      onVoid={() => voidRow(e, name)}
-                      onHistory={() =>
-                        setAuditFor({ ids: [e.id], title: `${name} · ${e.log_date}` })
-                      }
-                      onResolve={canResolve(e) ? () => setResolveFor({ entry: e, name }) : undefined}
-                    />
-                  </MobileCard>
-                ),
-              )}
+                      </MobileCard>
+                    ),
+                  )}
                 </div>
               ))}
             </MobileCardList>
@@ -1231,108 +1250,110 @@ export function TimesheetEditor({
                         </td>
                       </tr>
                       {g.list.map(
-                    ({
-                      e,
-                      name,
-                      edit,
-                      dirty,
-                      inVal,
-                      outVal,
-                      lunchOutVal,
-                      lunchInVal,
-                      onLunchNow,
-                    }) => {
-                      return (
-                        <tr
-                          key={e.id}
-                          className="border-b border-border/40 transition-colors duration-200 hover:bg-surface-elevated"
-                        >
-                          <td className="py-2 pr-3 font-medium">
-                            {name}
-                            <EntryFlags e={e} />
-                          </td>
-                          <td className="py-2 pr-3 text-xs text-muted-foreground tabular-nums">
-                            {e.log_date}
-                          </td>
-                          <td className="py-2 pr-3">
-                            <Input
-                              type="datetime-local"
-                              value={inVal}
-                              onChange={(v) => editField(e.id, "clock_in", v.target.value)}
-                              className="h-8 text-xs w-full min-w-[150px]"
-                            />
-                          </td>
-                          <td className="py-2 pr-3">
-                            <Input
-                              type="time"
-                              value={lunchOutVal}
-                              onChange={(v) => editField(e.id, "lunch_out", v.target.value)}
-                              className="h-8 text-xs w-[92px]"
-                            />
-                          </td>
-                          <td className="py-2 pr-3">
-                            <div className="flex items-center gap-1">
-                              <Input
-                                type="time"
-                                value={lunchInVal}
-                                onChange={(v) => editField(e.id, "lunch_in", v.target.value)}
-                                className="h-8 text-xs w-[92px]"
-                              />
-                              {onLunchNow && (
-                                <span className="text-[9px] font-display uppercase text-warning animate-pulse">
-                                  out now
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="py-2 pr-3">
-                            <div className="flex items-center gap-1">
-                              <Input
-                                type="datetime-local"
-                                value={outVal}
-                                onChange={(v) => editField(e.id, "clock_out", v.target.value)}
-                                className="h-8 text-xs w-full min-w-[150px]"
-                              />
-                              {!e.clock_out && !edit.clock_out && (
-                                <button
-                                  type="button"
-                                  disabled={saveMut.isPending}
-                                  onClick={() => clockOutNow(e)}
-                                  title="Clock them out right now"
-                                  className="inline-flex items-center gap-0.5 whitespace-nowrap text-[9px] font-display uppercase text-victory animate-pulse hover:animate-none hover:underline disabled:opacity-50"
-                                >
-                                  <Square className="w-2.5 h-2.5" />
-                                  live
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                          <td className="py-2 pr-3 text-right font-display text-neon tabular-nums">
-                            {Number(e.billable_hours ?? 0).toFixed(2)}h
-                          </td>
-                          <td className="py-2 pr-3 text-right font-display text-victory tabular-nums">
-                            {(totalsByUser.get(e.user_id) ?? 0).toFixed(2)}h
-                          </td>
-                          <td className="py-2 pr-1 text-right">
-                            <TimeEntryActions
-                              compact
-                              dirty={dirty}
-                              saving={saveMut.isPending}
-                              deleting={voidMut.isPending}
-                              onSave={() => saveRow(e)}
-                              onVoid={() => voidRow(e, name)}
-                              onHistory={() =>
-                                setAuditFor({ ids: [e.id], title: `${name} · ${e.log_date}` })
-                              }
-                              onResolve={
-                                canResolve(e) ? () => setResolveFor({ entry: e, name }) : undefined
-                              }
-                            />
-                          </td>
-                        </tr>
-                      );
-                    },
-                  )}
+                        ({
+                          e,
+                          name,
+                          edit,
+                          dirty,
+                          inVal,
+                          outVal,
+                          lunchOutVal,
+                          lunchInVal,
+                          onLunchNow,
+                        }) => {
+                          return (
+                            <tr
+                              key={e.id}
+                              className="border-b border-border/40 transition-colors duration-200 hover:bg-surface-elevated"
+                            >
+                              <td className="py-2 pr-3 font-medium">
+                                {name}
+                                <EntryFlags e={e} />
+                              </td>
+                              <td className="py-2 pr-3 text-xs text-muted-foreground tabular-nums">
+                                {e.log_date}
+                              </td>
+                              <td className="py-2 pr-3">
+                                <Input
+                                  type="datetime-local"
+                                  value={inVal}
+                                  onChange={(v) => editField(e.id, "clock_in", v.target.value)}
+                                  className="h-8 text-xs w-full min-w-[150px]"
+                                />
+                              </td>
+                              <td className="py-2 pr-3">
+                                <Input
+                                  type="time"
+                                  value={lunchOutVal}
+                                  onChange={(v) => editField(e.id, "lunch_out", v.target.value)}
+                                  className="h-8 text-xs w-[92px]"
+                                />
+                              </td>
+                              <td className="py-2 pr-3">
+                                <div className="flex items-center gap-1">
+                                  <Input
+                                    type="time"
+                                    value={lunchInVal}
+                                    onChange={(v) => editField(e.id, "lunch_in", v.target.value)}
+                                    className="h-8 text-xs w-[92px]"
+                                  />
+                                  {onLunchNow && (
+                                    <span className="text-[9px] font-display uppercase text-warning animate-pulse">
+                                      out now
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-2 pr-3">
+                                <div className="flex items-center gap-1">
+                                  <Input
+                                    type="datetime-local"
+                                    value={outVal}
+                                    onChange={(v) => editField(e.id, "clock_out", v.target.value)}
+                                    className="h-8 text-xs w-full min-w-[150px]"
+                                  />
+                                  {!e.clock_out && !edit.clock_out && (
+                                    <button
+                                      type="button"
+                                      disabled={saveMut.isPending}
+                                      onClick={() => clockOutNow(e)}
+                                      title="Clock them out right now"
+                                      className="inline-flex items-center gap-0.5 whitespace-nowrap text-[9px] font-display uppercase text-victory animate-pulse hover:animate-none hover:underline disabled:opacity-50"
+                                    >
+                                      <Square className="w-2.5 h-2.5" />
+                                      live
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-2 pr-3 text-right font-display text-neon tabular-nums">
+                                {Number(e.billable_hours ?? 0).toFixed(2)}h
+                              </td>
+                              <td className="py-2 pr-3 text-right font-display text-victory tabular-nums">
+                                {(totalsByUser.get(e.user_id) ?? 0).toFixed(2)}h
+                              </td>
+                              <td className="py-2 pr-1 text-right">
+                                <TimeEntryActions
+                                  compact
+                                  dirty={dirty}
+                                  saving={saveMut.isPending}
+                                  deleting={voidMut.isPending}
+                                  onSave={() => saveRow(e)}
+                                  onVoid={() => voidRow(e, name)}
+                                  onHistory={() =>
+                                    setAuditFor({ ids: [e.id], title: `${name} · ${e.log_date}` })
+                                  }
+                                  onResolve={
+                                    canResolve(e)
+                                      ? () => setResolveFor({ entry: e, name })
+                                      : undefined
+                                  }
+                                />
+                              </td>
+                            </tr>
+                          );
+                        },
+                      )}
                     </Fragment>
                   ))}
                 </tbody>
@@ -1348,7 +1369,11 @@ export function TimesheetEditor({
         title={reasonReq?.kind === "void" ? "Void entry" : "Reason required"}
         prompt={reasonReq?.prompt ?? ""}
         confirmLabel={
-          reasonReq?.kind === "void" ? "Void" : reasonReq?.kind === "clockout" ? "Clock Out" : "Save"
+          reasonReq?.kind === "void"
+            ? "Void"
+            : reasonReq?.kind === "clockout"
+              ? "Clock Out"
+              : "Save"
         }
         destructive={reasonReq?.kind === "void"}
         pending={saveMut.isPending || voidMut.isPending}
@@ -1395,8 +1420,9 @@ function ResolveStatusDialog({
     mutationFn: async () => {
       const { error } = await supabase.rpc("admin_set_shift_status", {
         _entry_id: entryId!,
-        _meal: meal || null,
-        _rest: rest || null,
+        // Required-but-nullable RPC args (see TimeClockExceptions note).
+        _meal: (meal || null) as unknown as string,
+        _rest: (rest || null) as unknown as string,
         _reason: reason.trim(),
       });
       if (error) throw error;

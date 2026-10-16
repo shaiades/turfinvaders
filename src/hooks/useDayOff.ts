@@ -179,7 +179,7 @@ export function useDayOffMutations() {
         _user_id: vars.userId,
         _dates: vars.dates,
         _kind: vars.kind,
-        _reason: vars.reason ?? null,
+        _reason: vars.reason,
       });
       if (error) throw error;
       return data as unknown as SubmitDayOffResult;
@@ -192,7 +192,7 @@ export function useDayOffMutations() {
       const { error } = await supabase.rpc("review_day_off", {
         _id: vars.id,
         _approve: vars.approve,
-        _deny_reason: vars.denyReason ?? null,
+        _deny_reason: vars.denyReason,
       });
       if (error) throw error;
     },
