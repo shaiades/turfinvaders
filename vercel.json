@@ -41,6 +41,14 @@
       "schedule": "0 2 * * 1"
     },
     {
+      "path": "/api/internal/crown-vanwars",
+      "schedule": "0 1 * * 0"
+    },
+    {
+      "path": "/api/internal/crown-vanwars",
+      "schedule": "0 2 * * 0"
+    },
+    {
       "path": "/api/internal/reconcile-block-cards",
       "schedule": "0 15 * * *"
     },

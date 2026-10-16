@@ -19,6 +19,7 @@ import {
   getDispatchProduction,
   type DispatchResults,
 } from "@/lib/dispatch.functions";
+import { isNonPersonName } from "@/lib/lead-sources";
 import { isAdminRole } from "@/lib/roles";
 import { RangeTabs } from "@/components/RangeTabs";
 import { RepAvatar } from "@/components/RepAvatar";
@@ -153,6 +154,9 @@ export function FieldStandingsSheet({
     const byTeam = new Map<string, MemberRow[]>();
 
     for (const p of roster.data?.profiles ?? []) {
+      // Non-person rows (lead-source channels, "Test", "A & B" compounds)
+      // are office credit, never standings rows.
+      if (isNonPersonName(p.display_name)) continue;
       const roles = rolesByUser.get(p.id) ?? [];
       // Canvasser-tier board membership, FleetDispatch semantics: captains
       // knock too; confirmers ride as canvasser-tier rows; Admin-tier

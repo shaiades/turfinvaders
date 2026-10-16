@@ -1,7 +1,9 @@
-// §6 Bounties — an owner/manager launches a time-boxed category push that shows
-// as a banner for the whole field. Managers only (RLS). Scales arcade points
-// only, never pay (and v1 is the banner/motivation — see the migration note on
-// the data-limited point-scaling).
+// §6 Bounties — an owner/manager launches a time-boxed boost that shows as a
+// banner for the whole field. Managers only (RLS). Since the 2026-10-15 audit
+// every bounty means ONE thing, which really scores: multiplier× arcade points
+// per confirmed lead set inside the window (leads carry the only sub-day
+// timestamp we trust). The old sit/sale/doors category picker is gone — those
+// couldn't score and made the banner lie. Game points only, never pay.
 
 import { useState } from "react";
 import { Zap } from "lucide-react";
@@ -16,13 +18,8 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
-import { createBounty, type Bounty } from "@/hooks/useBounties";
+import { createBounty } from "@/hooks/useBounties";
 
-const CATS: { v: Bounty["category"]; label: string }[] = [
-  { v: "sit", label: "Sits" },
-  { v: "sale", label: "Sales" },
-  { v: "doors", label: "Doors" },
-];
 const DURATIONS = [
   { m: 60, label: "1h" },
   { m: 120, label: "2h" },
@@ -34,7 +31,6 @@ export function BountyComposer() {
   const { user } = useAuth();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [cat, setCat] = useState<Bounty["category"]>("sit");
   const [mult, setMult] = useState(2);
   const [mins, setMins] = useState(120);
   const [busy, setBusy] = useState(false);
@@ -43,11 +39,9 @@ export function BountyComposer() {
     if (!user?.id) return;
     setBusy(true);
     try {
-      const catLabel = CATS.find((c) => c.v === cat)!.label.toLowerCase();
       const durLabel = DURATIONS.find((d) => d.m === mins)?.label ?? `${mins}m`;
       await createBounty({
-        label: `${mult}× ${catLabel} for the next ${durLabel}`,
-        category: cat,
+        label: `${mult}× pts per lead for the next ${durLabel}`,
         multiplier: mult,
         minutes: mins,
         userId: user.id,
@@ -79,23 +73,10 @@ export function BountyComposer() {
           <DialogTitle>Launch a bounty</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
-          <div>
-            <label className="font-display text-[10px] uppercase tracking-widest text-muted-foreground">
-              Category
-            </label>
-            <div className="mt-1 flex flex-wrap gap-1.5">
-              {CATS.map((c) => (
-                <button
-                  key={c.v}
-                  type="button"
-                  onClick={() => setCat(c.v)}
-                  className={chip(cat === c.v)}
-                >
-                  {c.label}
-                </button>
-              ))}
-            </div>
-          </div>
+          <p className="text-xs text-muted-foreground">
+            Every confirmed lead set while the bounty runs earns the multiplier on the arcade
+            boards. Game points only — pay is untouched.
+          </p>
           <div>
             <label className="font-display text-[10px] uppercase tracking-widest text-muted-foreground">
               Multiplier

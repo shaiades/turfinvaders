@@ -2,19 +2,21 @@
 // Vice City neon, a Pricedown-style heavy title, GTA cash-green crew banks,
 // wanted-level heat stars, angled character-select crew cards, and the iconic
 // WASTED stamp on the crew that just lost #1. Crews still RACE down the strip —
-// a van's position is its war score (points per active knocker, config-
-// switchable; sit 1 / sale 2) — lurching with a nitrous burst when a crew
-// surges and sparking on a sale, with a full-width "TOOK THE BLOCK" lead-change
-// banner (hiss + haptic). Reduced motion drops the strip for the static cards.
-// Vans race under their CAPTAIN's name. Numbers ride useVanWars → the week
-// ladder the Solo board uses. The Wall / Trophy case reads vanwars_wins (dark
-// until the migration + Saturday crowning land). Captains fire one callout a day.
+// a van's position is its war score (LEADS SET per active knocker since the
+// 2026-10-15 audit; the Confirmation desk and Unassigned never race, and a
+// crew needs 3 active knockers to rank) — lurching with a nitrous burst when
+// a crew surges and sparking on a sale, with a full-width "TOOK THE BLOCK"
+// lead-change banner (hiss + haptic). Reduced motion drops the strip for the
+// static cards. Vans race under their CAPTAIN's name. Numbers ride useVanWars
+// → the week ladder the Solo board uses. The Wall / Trophy case reads
+// vanwars_wins — the Saturday 6 PM PT cron crowns the champion automatically
+// (src/routes/api/internal/crown-vanwars.ts). Captains fire one callout a day.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
-import { useVanWars, useCrownVanWars, isCrownWindow, type VanWarWin } from "@/hooks/useVanWars";
-import { toast } from "sonner";
+import { useVanWars, type VanWarWin } from "@/hooks/useVanWars";
+import { MIN_CREW_TO_RANK } from "@/lib/vanwars";
 import { ArcadeCard, ArcadeSkeleton } from "@/components/arcade";
 import { playArcadeSound, haptic } from "@/lib/arcade-fx";
 import { laTodayISO } from "@/lib/dates";
@@ -78,8 +80,7 @@ function WantedStars({ n }: { n: number }) {
 export function VanWarsRace() {
   const { user, realRole } = useAuth();
   const reduced = usePrefersReducedMotion();
-  const { standings, leader, config, wins, loading } = useVanWars();
-  const { crown, crowning } = useCrownVanWars();
+  const { standings, leader, wins, loading } = useVanWars();
 
   // ── Live events: per-crew surge (war up = nitro, $ up = sparks) + a change
   // of leader (the TOOK-THE-BLOCK banner + the WASTED stamp on the loser).
@@ -205,7 +206,7 @@ export function VanWarsRace() {
           className="mt-1 font-display text-[9px] uppercase tracking-[0.26em] text-[color:var(--pink,#ff2e9a)]"
           style={{ color: "#ff5cb4" }}
         >
-          This week · crowned Saturday 6 PM
+          This week · auto-crowned Saturday 6 PM
         </div>
       </div>
 
@@ -420,17 +421,27 @@ export function VanWarsRace() {
                     {v.name}
                   </div>
                   <div className="mt-0.5 font-display text-[9px] uppercase tracking-wide text-muted-foreground">
-                    {v.pts} pts · {v.knockers} {v.knockers === 1 ? "knocker" : "knockers"} ·{" "}
-                    <span style={{ color: CASH }}>{v.vol > 0 ? fmtCash(v.vol) : "desk"}</span>
+                    {v.lds} lds · {v.knockers} {v.knockers === 1 ? "knocker" : "knockers"} ·{" "}
+                    <span style={{ color: CASH }}>{fmtCash(v.vol)}</span>
                   </div>
                 </div>
                 <div className="text-right">
-                  <div style={{ fontFamily: GTA, fontSize: 26, lineHeight: 1, color: v.color }}>
-                    {Math.round(v.war)}
-                  </div>
-                  <div className="font-display text-[7px] uppercase tracking-[0.2em] text-muted-foreground">
-                    War / head
-                  </div>
+                  {v.ranked ? (
+                    <>
+                      <div style={{ fontFamily: GTA, fontSize: 26, lineHeight: 1, color: v.color }}>
+                        {v.war.toFixed(1)}
+                      </div>
+                      <div className="font-display text-[7px] uppercase tracking-[0.2em] text-muted-foreground">
+                        Leads / knocker
+                      </div>
+                    </>
+                  ) : (
+                    <div className="font-display text-[8px] uppercase tracking-[0.18em] text-muted-foreground">
+                      Needs {MIN_CREW_TO_RANK}
+                      <br />
+                      knockers
+                    </div>
+                  )}
                 </div>
                 {v.sit.grade && (
                   <span
@@ -472,8 +483,9 @@ export function VanWarsRace() {
           );
         })}
         <p className="font-display text-[10px] leading-relaxed text-muted-foreground">
-          War score = points per active knocker, so a small crew can still jack #1. Ties break on
-          sit rate.
+          War score = leads set per active knocker, so a small crew that converts can still jack #1.
+          Ties break on total leads. Crews need {MIN_CREW_TO_RANK} active knockers to rank — the
+          champ is auto-crowned Saturday 6 PM.
         </p>
       </div>
 
@@ -518,29 +530,8 @@ export function VanWarsRace() {
       )}
 
       {/* ── Trophy case (Wall of Fame) ────────────────────────────────── */}
-      {/* §3 tail — a captain crowns the week's champion into the Wall. Only in
-          the Sat-6PM→Sun window; records the objective leader, idempotent. */}
-      {isCaptain && isCrownWindow() && standings.length >= 2 && (
-        <button
-          type="button"
-          disabled={crowning}
-          onClick={async () => {
-            await crown(standings);
-            playArcadeSound("horn");
-            haptic([40, 60, 40]);
-            toast.success(`👑 ${standings[0].name}'s crew crowned this week`);
-          }}
-          className="min-h-11 w-full rounded-xl border-2 px-4 py-3 font-display text-sm uppercase italic tracking-widest transition disabled:opacity-50 md:min-h-0"
-          style={{
-            color: "#2a1e02",
-            borderColor: WANTED,
-            background: `linear-gradient(100deg, #ffe08a, ${WANTED})`,
-            boxShadow: `0 0 26px -6px ${WANTED}`,
-          }}
-        >
-          {crowning ? "Crowning…" : "👑 Crown this week's champion"}
-        </button>
-      )}
+      {/* The Saturday 6 PM PT cron crowns the champion into vanwars_wins and
+          announces it on the Street Feed — no button, no forgetting. */}
       <TrophyCase wins={wins} />
     </div>
   );
