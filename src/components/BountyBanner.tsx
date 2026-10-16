@@ -1,10 +1,11 @@
-// §6 Bounties — the field banner for any active bounty (a time-boxed category
-// push). Renders nothing when none are live. Mounted under the header for field
-// roles alongside the Street Feed.
+// §6 Bounties — the field banner for any active bounty. Since the 2026-10-15
+// audit a bounty really SCORES: every confirmed lead set inside the window
+// earns multiplier× arcade points on the ladder (getDispatchProduction's
+// bountyPts — game only, never pay). The banner says exactly that and nothing
+// else: no banner may promise something that doesn't score. Renders nothing
+// when none are live. Mounted under the header for field roles.
 
-import { useActiveBounties, type Bounty } from "@/hooks/useBounties";
-
-const CAT_LABEL: Record<Bounty["category"], string> = { sit: "SIT", sale: "SALE", doors: "DOOR" };
+import { useActiveBounties } from "@/hooks/useBounties";
 
 function endsIn(iso: string): string {
   const m = Math.max(0, Math.round((new Date(iso).getTime() - Date.now()) / 60_000));
@@ -25,7 +26,7 @@ export function BountyBanner() {
         >
           <span aria-hidden>⏱️</span>
           <span className="shrink-0 font-display text-[11px] uppercase tracking-widest text-[var(--warning)]">
-            {b.multiplier}× {CAT_LABEL[b.category]} pts
+            {b.multiplier}× pts per lead
           </span>
           <span className="truncate text-[11px] text-foreground/90">· {b.label}</span>
           <span className="ml-auto shrink-0 font-display text-[9px] uppercase tracking-widest text-muted-foreground">

@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { weeklyPoints } from "@/lib/pay";
 import { ArcadePanel } from "@/components/arcade";
 import { laWeekStartISO } from "@/lib/dates";
+import { isLeadSourceName } from "@/lib/lead-sources";
 const turfInvadersHero = { url: "/turf-invaders-hero.jpg" };
 
 type Props = {
@@ -35,10 +36,22 @@ export function CommandCenter({ teamId, range }: Props) {
         .gte("log_date", startISO);
       if (endISO) q = q.lte("log_date", endISO);
       if (teamId) q = q.eq("team_id", teamId);
-      const { data, error } = await q;
-      if (error) throw error;
+      // Pseudo lead-source channels (Job Walk, Upsell, …) are office credit,
+      // not field production — their logs never count on the field-facing
+      // Command Center (owner ask 2026-10-16). Same rule as the dispatch
+      // board / ladder / wrap; matched by profile name because legacy channel
+      // logs can carry a team snapshot.
+      const [logsRes, profilesRes] = await Promise.all([
+        q,
+        supabase.from("profiles").select("id, display_name"),
+      ]);
+      if (logsRes.error) throw logsRes.error;
+      if (profilesRes.error) throw profilesRes.error;
+      const pseudoIds = new Set(
+        (profilesRes.data ?? []).filter((p) => isLeadSourceName(p.display_name)).map((p) => p.id),
+      );
 
-      const rows = data ?? [];
+      const rows = (logsRes.data ?? []).filter((r) => !pseudoIds.has(r.canvasser_id));
       const daySet = new Set<string>();
       let confirmedLeads = 0, leadsCalledIn = 0, demosSits = 0, sales = 0, noShows = 0;
       for (const r of rows) {

@@ -1,16 +1,19 @@
 /** Assertions for the Van Wars scoring in src/lib/vanwars.ts — run with
  *  `npm run verify:vanwars`.
  *
- *  Pins the contracts the street race must never drift on:
- *   · war points with the (1,2) defaults equal the pay engine's `pts`,
- *   · retuned sit/sale weights recompute correctly (non-sale sits = pts − 2·sal),
- *   · per-head mode lets a small crew out-rank a bigger one,
- *   · total mode ranks by the summed war points,
- *   · ties break on sit rate, and the crew grade comes through. */
+ *  Pins the contracts of the 2026-10-15 rework the street race must never
+ *  drift on:
+ *   · war score = leads SET per ACTIVE knocker (doors logged in range),
+ *   · leads from inactive crew members count in the total, never the divisor,
+ *   · the Unassigned (null team) bucket and the Confirmation desk never race,
+ *   · a crew needs MIN_CREW_TO_RANK (3) active knockers to rank or win —
+ *     smaller crews still appear, sorted after every ranked crew,
+ *   · ties break on total leads, then funnel sit rate,
+ *   · the crew sit grade comes through. */
 import {
-  DEFAULT_VANWARS_CONFIG,
-  warPointsFor,
-  resolveVanWarsConfig,
+  MIN_CREW_TO_RANK,
+  isActiveKnocker,
+  isDeskCrew,
   buildVanWarStandings,
   type VanWarRowInput,
 } from "../src/lib/vanwars";
@@ -29,109 +32,120 @@ function expectEq(label: string, got: unknown, want: unknown) {
   }
 }
 
-// ── war points ──────────────────────────────────────────────────────────────
-expectEq("defaults: war == pts (3 sits, 1 sale)", warPointsFor(4, 1), 4);
-expectEq("defaults: war == pts (pure sits)", warPointsFor(3, 0), 3);
-expectEq("defaults: empty", warPointsFor(0, 0), 0);
-// Retuned (sit 1, sale 3): pts=5,sal=1 → nonSaleSits = 5 − 2 = 3 → 1·3 + 3·1 = 6.
+const knocker = (
+  teamId: string | null,
+  label: string,
+  teamName: string | null,
+  ld: number,
+  drs: number,
+  extra: Partial<VanWarRowInput> = {},
+): VanWarRowInput => ({
+  teamId,
+  label,
+  teamName,
+  teamColor: "#abc",
+  ld,
+  drs,
+  pts: 0,
+  vol: 0,
+  sitSits: 0,
+  sitLeads: 0,
+  ...extra,
+});
+
+// ── gates ────────────────────────────────────────────────────────────────────
+expectEq("min crew to rank is 3", MIN_CREW_TO_RANK, 3);
+expectEq("doors logged = active", isActiveKnocker(1), true);
+expectEq("no doors = inactive", isActiveKnocker(0), false);
+expectEq("Confirmation is the desk", isDeskCrew("Confirmation"), true);
+expectEq("case-insensitive desk match", isDeskCrew("CONFIRMATION CREW"), true);
+expectEq("regular vans race", isDeskCrew("Van 2"), false);
+expectEq("null team name races", isDeskCrew(null), false);
+
+// ── exclusions ───────────────────────────────────────────────────────────────
+const excluded = buildVanWarStandings([
+  knocker(null, "Unassigned", null, 9, 50), // no van — never races
+  knocker("desk", "Confirmation", "Confirmation", 9, 50), // desk — never races
+  knocker("v1", "Arturo", "Van 1", 2, 40),
+]);
+expectEq("unassigned + desk dropped", excluded.length, 1);
+expectEq("the real van survives", excluded[0].name, "Arturo");
+
+// ── war = leads per ACTIVE knocker ──────────────────────────────────────────
+const perHead = buildVanWarStandings([
+  // Van 1: 3 active knockers, 6 leads → war 2.0
+  knocker("v1", "Arturo", "Van 1", 4, 120),
+  knocker("v1", "Arturo", "Van 1", 2, 80),
+  knocker("v1", "Arturo", "Van 1", 0, 60),
+  // Van 2: 4 active knockers, 4 leads → war 1.0 (bigger crew, worse rate)
+  knocker("v2", "Kieran", "Van 2", 1, 90),
+  knocker("v2", "Kieran", "Van 2", 1, 90),
+  knocker("v2", "Kieran", "Van 2", 1, 90),
+  knocker("v2", "Kieran", "Van 2", 1, 90),
+]);
+expectEq("converting crew #1", perHead[0].name, "Arturo");
+expectEq("war = 6 leads / 3 knockers", perHead[0].war, 2);
+expectEq("crew total leads", perHead[0].lds, 6);
+expectEq("bigger crew war 1.0", perHead[1].war, 1);
 expectEq(
-  "retuned sale weight 3",
-  warPointsFor(5, 1, { mode: "per_head", sitWeight: 1, saleWeight: 3 }),
-  6,
+  "both crews ranked",
+  perHead.map((s) => s.ranked),
+  [true, true],
 );
 
-// ── config coercion ───────────────────────────────────────────────────────
-expectEq("resolve defaults from null", resolveVanWarsConfig(null), DEFAULT_VANWARS_CONFIG);
-expectEq(
-  "resolve a full row",
-  resolveVanWarsConfig({ mode: "total", sit_weight: 2, sale_weight: 5 }),
-  {
-    mode: "total",
-    sitWeight: 2,
-    saleWeight: 5,
-  },
-);
-expectEq(
-  "resolve rejects bad weights",
-  resolveVanWarsConfig({ mode: "per_head", sit_weight: 0, sale_weight: -3 }),
-  {
-    mode: "per_head",
-    sitWeight: 1,
-    saleWeight: 2,
-  },
-);
+// ── inactive members: leads count, divisor doesn't ──────────────────────────
+const bench = buildVanWarStandings([
+  knocker("v1", "Arturo", "Van 1", 2, 50),
+  knocker("v1", "Arturo", "Van 1", 2, 50),
+  knocker("v1", "Arturo", "Van 1", 2, 50),
+  // Set 3 leads but logged zero doors — counts in lds, not in knockers.
+  knocker("v1", "Arturo", "Van 1", 3, 0),
+]);
+expectEq("bench leads still count", bench[0].lds, 9);
+expectEq("bench rider not a knocker", bench[0].knockers, 3);
+expectEq("war divides by active only", bench[0].war, 3);
 
-// ── standings: per-head lets a small crew win ───────────────────────────────
-const rows: VanWarRowInput[] = [
-  // Big crew: 2 knockers, warTotal 6, per-head 3.
-  {
-    teamId: "v",
-    label: "Vipers",
-    teamColor: "#a",
-    pts: 4,
-    sal: 1,
-    vol: 100,
-    sitSits: 2,
-    sitLeads: 4,
-  },
-  {
-    teamId: "v",
-    label: "Vipers",
-    teamColor: "#a",
-    pts: 2,
-    sal: 0,
-    vol: 0,
-    sitSits: 1,
-    sitLeads: 2,
-  },
-  // Small crew: 1 knocker, warTotal 5, per-head 5.
-  {
-    teamId: "n",
-    label: "Night Owls",
-    teamColor: "#b",
-    pts: 5,
-    sal: 2,
-    vol: 200,
-    sitSits: 3,
-    sitLeads: 4,
-  },
-];
-const perHead = buildVanWarStandings(rows, { mode: "per_head", sitWeight: 1, saleWeight: 2 });
-expectEq("per-head: small crew #1", perHead[0].name, "Night Owls");
-expectEq("per-head: small crew war 5", perHead[0].war, 5);
-expectEq("per-head: big crew war 3", perHead[1].war, 3);
-expectEq("per-head: big crew knockers 2", perHead[1].knockers, 2);
+// ── minimum crew: under 3 active knockers shows but can't rank ──────────────
+const small = buildVanWarStandings([
+  // 2 active knockers, monster rate — still unranked.
+  knocker("duo", "Logan", "Van 3", 8, 100),
+  knocker("duo", "Logan", "Van 3", 6, 100),
+  // 3 active knockers, modest rate — ranked, so it sorts FIRST.
+  knocker("full", "Cris", "Van 4", 3, 80),
+  knocker("full", "Cris", "Van 4", 2, 80),
+  knocker("full", "Cris", "Van 4", 1, 80),
+]);
+expectEq("full crew ranks #1", small[0].name, "Cris");
+expectEq("full crew is ranked", small[0].ranked, true);
+expectEq("duo shows but unranked", small[1].ranked, false);
+expectEq("duo keeps its score for display", small[1].war, 7);
 
-const total = buildVanWarStandings(rows, { mode: "total", sitWeight: 1, saleWeight: 2 });
-expectEq("total: big crew #1 (war 6)", total[0].name, "Vipers");
-expectEq("total: big crew war 6", total[0].war, 6);
+// ── ties: total leads, then sit rate ────────────────────────────────────────
+const tie = buildVanWarStandings([
+  // Both crews war 1.0; A has 3 total leads, B has 6 → B wins on total leads.
+  knocker("a", "A", "Van A", 1, 10),
+  knocker("a", "A", "Van A", 1, 10),
+  knocker("a", "A", "Van A", 1, 10),
+  knocker("b", "B", "Van B", 1, 10),
+  knocker("b", "B", "Van B", 1, 10),
+  knocker("b", "B", "Van B", 1, 10),
+  knocker("b", "B", "Van B", 1, 10),
+  knocker("b", "B", "Van B", 1, 10),
+  knocker("b", "B", "Van B", 1, 10),
+]);
+expectEq("equal war: more total leads wins", tie[0].name, "B");
 
-// ── ties break on sit rate ──────────────────────────────────────────────────
-const tie: VanWarRowInput[] = [
-  {
-    teamId: "lo",
-    label: "Low Sit",
-    teamColor: "#c",
-    pts: 4,
-    sal: 0,
-    vol: 0,
-    sitSits: 1,
-    sitLeads: 4,
-  }, // 25%
-  {
-    teamId: "hi",
-    label: "High Sit",
-    teamColor: "#d",
-    pts: 4,
-    sal: 0,
-    vol: 0,
-    sitSits: 3,
-    sitLeads: 4,
-  }, // 75%
-];
-const broke = buildVanWarStandings(tie, DEFAULT_VANWARS_CONFIG);
-expectEq("tie: equal war, higher sit rate wins", broke[0].name, "High Sit");
-expectEq("tie: grade comes through (S)", broke[0].sit.grade, "S");
+const sitTie = buildVanWarStandings([
+  // war and total leads equal; sit rate 75% vs 25% breaks it.
+  knocker("hi", "High Sit", "Van H", 2, 10, { sitSits: 3, sitLeads: 4 }),
+  knocker("hi", "High Sit", "Van H", 1, 10),
+  knocker("hi", "High Sit", "Van H", 1, 10),
+  knocker("lo", "Low Sit", "Van L", 2, 10, { sitSits: 1, sitLeads: 4 }),
+  knocker("lo", "Low Sit", "Van L", 1, 10),
+  knocker("lo", "Low Sit", "Van L", 1, 10),
+]);
+expectEq("full tie: higher sit rate wins", sitTie[0].name, "High Sit");
+expectEq("grade comes through (S)", sitTie[0].sit.grade, "S");
 
 console.log(failures === 0 ? "\n✅ 0 failure(s)" : `\n❌ ${failures} failure(s)`);
 process.exit(failures === 0 ? 0 : 1);

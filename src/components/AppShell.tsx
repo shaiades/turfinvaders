@@ -12,6 +12,7 @@ import {
   type AppRole,
   type CanvasserPick,
 } from "@/hooks/useAuth";
+import { isNonPersonName } from "@/lib/lead-sources";
 import { useSwipeNav } from "@/hooks/useSwipeNav";
 import { useTheme } from "@/hooks/useTheme";
 import { usePendingDojoCount } from "@/hooks/usePendingDojoCount";
@@ -262,10 +263,13 @@ export function AppShell({ children }: { children: ReactNode }) {
         .select("id, display_name")
         .in("id", ids);
       if (profErr) throw profErr;
+      // Non-person rows (lead-source channels, "Test", "A & B" compounds —
+      // the Bouncer grants them the canvasser role at mint) are attribution
+      // buckets, not previewable players.
       return (profs ?? [])
         .flatMap((p) => {
           const n = (p.display_name ?? "").trim();
-          return n ? [{ id: p.id, name: n }] : [];
+          return n && !isNonPersonName(n) ? [{ id: p.id, name: n }] : [];
         })
         .sort((a, b) => a.name.localeCompare(b.name));
     },
