@@ -8,6 +8,9 @@ import {
   getMondayFormUrlWithPrefill,
   isLeadCloseV2Enabled,
   LEAD_SUBMITTED_MESSAGE_TYPE,
+  savePendingLead,
+  clearPendingLead,
+  readPendingLead,
 } from "@/lib/monday-form";
 import { useCanvasserProfile } from "@/hooks/useCanvasserProfile";
 import { useGeoWatch, useFieldPins, type ActivePin } from "@/hooks/useFieldPins";
@@ -44,6 +47,8 @@ import {
   ThumbsDown,
   KeyRound,
   Clock3,
+  Loader2,
+  RefreshCw,
   ScrollText,
   Sun,
   Trophy,
@@ -459,8 +464,29 @@ export function ActiveRun({
     setLeadAddress(address);
     piggyAtLeadOpenRef.current = piggy.dollars;
     pendingLeadRef.current = target;
+    // Crash insurance: iOS killing the page mid-form (white screen, field
+    // report 2026-10-16) wiped this ref and silently ate the knock. The
+    // mirror below lets the restore effect reopen the form after a reload.
+    savePendingLead(target, address);
     setLeadOpen(true);
   }
+
+  // Crash recovery: a fresh pending-lead snapshot on mount means the page
+  // died (or was reloaded) while the lead form was open — reopen it with the
+  // same target/address so the knock isn't lost. Waits for auth so the
+  // reopened form still gets the agent-name prefill (attribution keys on
+  // it); ref-guarded so it restores at most once per page load.
+  const restoredLeadRef = useRef(false);
+  useEffect(() => {
+    if (restoredLeadRef.current || loading || !user?.id) return;
+    restoredLeadRef.current = true;
+    const snap = readPendingLead();
+    if (!snap) return;
+    pendingLeadRef.current = snap.target;
+    setLeadAddress(snap.address);
+    setLeadOpen(true);
+    toast.info("Picking up where you left off — the app reloaded mid-lead.");
+  }, [loading, user?.id]);
 
   return (
     // GRATITUDE_GATE_ROLES decides who checks in; while auth is still
@@ -784,6 +810,7 @@ export function ActiveRun({
             // — no more phantom lead pins.
             const target = pendingLeadRef.current;
             pendingLeadRef.current = null;
+            clearPendingLead();
             if (submitted && target) {
               if (target.kind === "switch") {
                 pins.updatePin.mutate({ id: target.pinId, pin_type: "lead" });
@@ -950,6 +977,13 @@ function LeadSheet({
   const [formUrl] = useState(() => getMondayFormUrlWithPrefill(prefill));
   const [detectOn] = useState(isLeadCloseV2Enabled);
   const [submitted, setSubmitted] = useState(false);
+  // The embed used to fail silently — a white rectangle with no hint whether
+  // it was still coming (field cellular) or dead (field report 2026-10-16).
+  // "loading" paints a spinner until the iframe's load event; no event after
+  // 12s = "stalled", a visible message + Retry. A late load event still
+  // clears either state. frameGen keys the iframe so Retry rebuilds it.
+  const [frameState, setFrameState] = useState<"loading" | "ready" | "stalled">("loading");
+  const [frameGen, setFrameGen] = useState(0);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   // The close callback closes over ActiveRun state — keep the freshest copy
@@ -1014,6 +1048,14 @@ function LeadSheet({
       if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [detectOn, mondayOrigin]);
+
+  useEffect(() => {
+    if (frameState !== "loading") return;
+    const t = window.setTimeout(() => {
+      setFrameState((s) => (s === "loading" ? "stalled" : s));
+    }, 12_000);
+    return () => window.clearTimeout(t);
+  }, [frameState, frameGen]);
 
   // iOS soft keyboard: the layout viewport pans under `fixed inset-0` and
   // can push the header X (or the Done bar) outside the visible screen.
@@ -1085,13 +1127,45 @@ function LeadSheet({
           <X className="w-6 h-6" />
         </button>
       </div>
-      <iframe
-        ref={iframeRef}
-        src={formUrl}
-        title="Submit New Lead"
-        className="flex-1 w-full border-0"
-        allow="clipboard-write; camera; microphone; geolocation"
-      />
+      <div className="relative flex-1 min-h-0">
+        <iframe
+          key={frameGen}
+          ref={iframeRef}
+          src={formUrl}
+          title="Submit New Lead"
+          onLoad={() => setFrameState("ready")}
+          className="h-full w-full border-0"
+          allow="clipboard-write; camera; microphone; geolocation"
+        />
+        {frameState !== "ready" && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background px-6 text-center">
+            {frameState === "loading" ? (
+              <>
+                <Loader2 className="h-6 w-6 animate-spin text-neon" />
+                <p className="text-sm text-muted-foreground">Loading the lead form…</p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm font-semibold">The form is taking too long to load.</p>
+                <p className="text-sm text-muted-foreground">
+                  Weak signal slows it down — it may still come up, or tap retry.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFrameState("loading");
+                    setFrameGen((g) => g + 1);
+                  }}
+                  className="min-h-11 inline-flex items-center gap-2 rounded-md border border-border px-4 text-sm font-semibold active:scale-95 transition"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  Retry
+                </button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
       {/* The labelled exit the bare X never was — and the celebration rail
           when the submit signal lands. X and Done are semantically identical
           (the DETECTION state decides the celebration, not the control). */}

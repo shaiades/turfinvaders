@@ -65,6 +65,77 @@ export function getMondayFormUrlWithPrefill(prefill: {
 // internals. The office's shared form keeps Monday's own thank-you screen.
 export const LEAD_SUBMITTED_MESSAGE_TYPE = "ti:lead-submitted";
 
+// Crash insurance for the open lead form (field report 2026-10-16): iOS can
+// kill the whole page while the heavy Monday embed is up — white screen, and
+// the in-memory pending lead (which house, which address) died with it, so
+// the knock was silently lost. While the LeadSheet is open, its target is
+// mirrored here; a fresh snapshot found on mount means the page died
+// mid-lead and the form reopens where the rep was. Stale snapshots (rep
+// moved on, next shift) are ignored and cleared.
+export const PENDING_LEAD_STORAGE_KEY = "knockout.pending_lead";
+const PENDING_LEAD_MAX_AGE_MS = 20 * 60 * 1000;
+
+export type PendingLeadTarget =
+  | { kind: "house"; lat: number; lng: number }
+  | { kind: "switch"; pinId: string }
+  | { kind: "device" };
+
+export type PendingLeadSnapshot = {
+  target: PendingLeadTarget;
+  address: string | null;
+  at: number;
+};
+
+export function savePendingLead(target: PendingLeadTarget, address: string | null) {
+  try {
+    const snap: PendingLeadSnapshot = { target, address, at: Date.now() };
+    localStorage.setItem(PENDING_LEAD_STORAGE_KEY, JSON.stringify(snap));
+  } catch {
+    /* storage unavailable — recovery is best-effort */
+  }
+}
+
+export function clearPendingLead() {
+  try {
+    localStorage.removeItem(PENDING_LEAD_STORAGE_KEY);
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+/** A fresh mid-lead snapshot, or null. Reading consumes nothing; the caller
+ *  clears it via the normal close path. Malformed/stale entries are removed. */
+export function readPendingLead(): PendingLeadSnapshot | null {
+  try {
+    const raw = localStorage.getItem(PENDING_LEAD_STORAGE_KEY);
+    if (!raw) return null;
+    const snap = JSON.parse(raw) as PendingLeadSnapshot;
+    const kind = snap?.target?.kind;
+    const validTarget =
+      (kind === "house" &&
+        typeof snap.target.lat === "number" &&
+        typeof snap.target.lng === "number") ||
+      (kind === "switch" && typeof snap.target.pinId === "string") ||
+      kind === "device";
+    if (
+      !validTarget ||
+      typeof snap.at !== "number" ||
+      Date.now() - snap.at > PENDING_LEAD_MAX_AGE_MS
+    ) {
+      localStorage.removeItem(PENDING_LEAD_STORAGE_KEY);
+      return null;
+    }
+    return snap;
+  } catch {
+    try {
+      localStorage.removeItem(PENDING_LEAD_STORAGE_KEY);
+    } catch {
+      /* storage unavailable */
+    }
+    return null;
+  }
+}
+
 // Per-device kill switch for the auto-close listener ("off" disables it; the
 // flow degrades to the labelled Done bar). Same per-device convention as the
 // URL override above.
