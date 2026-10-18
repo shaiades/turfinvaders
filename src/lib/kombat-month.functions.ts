@@ -169,13 +169,49 @@ export const reviewContestProof = createServerFn({ method: "POST" })
 
     const award = computeProofAward(category, onISO, prior, rules, bounties);
 
-    const { data: profile } = await supabaseAdmin
-      .from("profiles")
-      .select("display_name")
-      .eq("id", proof.rep_id)
+    // Ledger identity is the Monday BOARD name (totalsFromLedger groups raw
+    // rep_name strings), but a profile is free to carry a handle
+    // ("CurtofWest") or a smart-quote spelling ("Josh O’Connor"). Minting the
+    // display name verbatim opened a SECOND leaderboard row beside the rep's
+    // card points (duplicate-profiles fix 2026-10-18), so resolve the board
+    // name the same way the viewer binds: alias first (authoritative), then
+    // buildRepMatcher's conservative ladder over the month's card-minted
+    // names. No safe match → the display name, same as before.
+    const { data: aliasRow } = await supabaseAdmin
+      .from("kombat_rep_aliases")
+      .select("board_name")
+      .eq("profile_id", proof.rep_id)
       .maybeSingle();
-    const repName = (profile?.display_name ?? "").trim();
-    if (repName === "") throw new Error("The rep has no profile display name — fix that first.");
+    let repName = (aliasRow?.board_name ?? "").trim();
+    if (repName === "") {
+      const { data: profile } = await supabaseAdmin
+        .from("profiles")
+        .select("display_name")
+        .eq("id", proof.rep_id)
+        .maybeSingle();
+      const displayName = (profile?.display_name ?? "").trim();
+      if (displayName === "") {
+        throw new Error("The rep has no profile display name — fix that first.");
+      }
+      // Card/report rows carry board names; proof rows may carry old display
+      // names, so they never enter the pool. Paged like pageLedger — the
+      // client default of 1000 rows would silently truncate a busy month.
+      const boardNames = new Set<string>();
+      const PAGE = 1000;
+      for (let from = 0; ; from += PAGE) {
+        const { data: rows } = await supabaseAdmin
+          .from("contest_ledger")
+          .select("rep_name")
+          .eq("month", rules.contest.month)
+          .neq("source_kind", "proof")
+          .order("id")
+          .range(from, from + PAGE - 1);
+        for (const r of rows ?? []) boardNames.add(r.rep_name);
+        if (!rows || rows.length < PAGE) break;
+      }
+      const { buildRepMatcher } = await import("@/lib/rep-identity");
+      repName = buildRepMatcher(displayName, [...boardNames]).matched ?? displayName;
+    }
 
     // Compare-and-swap, same as the deny path: 0 rows = someone beat us.
     const { data: approved, error: apErr } = await supabaseAdmin
