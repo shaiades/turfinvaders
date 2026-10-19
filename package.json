@@ -37,7 +37,8 @@
     "verify:confirmer": "npx tsx scripts/verify-confirmer.ts",
     "verify:coaching": "npx tsx scripts/verify-coaching.ts",
     "verify:pin-queue": "npx tsx scripts/verify-pin-queue.ts",
-    "verify:money": "npx tsx scripts/verify-money.ts"
+    "verify:money": "npx tsx scripts/verify-money.ts",
+    "verify:dialer": "npx tsx scripts/verify-dialer.ts"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",

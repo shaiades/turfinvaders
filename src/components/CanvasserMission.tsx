@@ -115,6 +115,12 @@ export function CanvasserMission({
 
   const stats = useCanvasserStats(userId);
 
+  // Confirmers (experienceRole, pre-collapse) live this exact Mission — only
+  // the nouns change: Plan back-solves to dials, Stats shows call results in
+  // place of the field_pins panel (owner mandate 2026-10-19).
+  const { experienceRole } = useAuth();
+  const channel = experienceRole === "confirmer" ? ("phone" as const) : ("door" as const);
+
   return (
     <div className="space-y-6">
       {/* The login photo request now lives app-wide in AppShell (owner
@@ -185,7 +191,11 @@ export function CanvasserMission({
         </div>
 
         <TabsContent value="plan" className="mt-6">
-          <PlanPanel userId={userId} readOnly={previewing} />
+          <PlanPanel
+            userId={userId}
+            readOnly={previewing}
+            unit={channel === "phone" ? "dials" : "doors"}
+          />
         </TabsContent>
 
         <TabsContent value="log" className="mt-6">
@@ -193,7 +203,12 @@ export function CanvasserMission({
         </TabsContent>
 
         <TabsContent value="stats" className="mt-6 space-y-5">
-          <CanvasserStats stats={stats} userId={userId} onEditGoal={() => setTab("plan")} />
+          <CanvasserStats
+            stats={stats}
+            userId={userId}
+            onEditGoal={() => setTab("plan")}
+            channel={channel}
+          />
         </TabsContent>
       </Tabs>
     </div>
@@ -215,18 +230,20 @@ function TodayPanel({
   stats: CanvasserStatsData;
   previewing?: boolean;
 }) {
-  const { role } = useAuth();
+  const { role, experienceRole } = useAuth();
   const today = stats.today;
+  // Same counter, same ledger — the phone room just calls a door a dial.
+  const phones = experienceRole === "confirmer";
   return (
     <div className="space-y-6">
       <div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <GrindCounter
-            label="Doors"
-            counterLabel="DOORS · TODAY"
+            label={phones ? "Dials" : "Doors"}
+            counterLabel={phones ? "DIALS · TODAY" : "DOORS · TODAY"}
             size="md"
             value={today.doors_knocked}
-            icon={<DoorOpen className="w-4 h-4" />}
+            icon={phones ? <PhoneCall className="w-4 h-4" /> : <DoorOpen className="w-4 h-4" />}
             accent="#ff2d55"
           />
           <GrindCounter
@@ -257,10 +274,13 @@ function TodayPanel({
           />
         </div>
         <p className="mt-2 text-[10px] text-muted-foreground">
-          Counts live as pins land on Active Run.
-          {role === "captain"
-            ? " Missed pins on a dead-phone day? You're the captain — flag it to the office."
-            : " Missed pins on a dead-phone day? Tell your captain."}
+          {phones
+            ? "Counts live as calls land on Dial Run. Leads credit from the Monday board."
+            : `Counts live as pins land on Active Run.${
+                role === "captain"
+                  ? " Missed pins on a dead-phone day? You're the captain — flag it to the office."
+                  : " Missed pins on a dead-phone day? Tell your captain."
+              }`}
         </p>
       </div>
       <DailyLogPanel

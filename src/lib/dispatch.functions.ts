@@ -547,9 +547,30 @@ export const getClockPresence = createServerFn({ method: "POST" })
  */
 export const getFunnelBaseline = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async () => {
+  .inputValidator((data: unknown) => {
+    const obj = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+    // "phone" scopes the baseline to confirmer-role accounts: dial→lead rates
+    // are a different animal from door→lead rates, and a door baseline would
+    // misprice a dial. Default stays the company-wide door baseline.
+    const channel = obj.channel === "phone" ? ("phone" as const) : ("door" as const);
+    return { channel };
+  })
+  .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const since = addDaysISO(laTodayISO(), -60);
+
+    // Phone channel: restrict every aggregate to people holding the confirmer
+    // role, so the baseline describes the phone room's own funnel. Thin data
+    // → unusable rates → rates: null downstream (the honest empty state).
+    let confirmerIds: Set<string> | null = null;
+    if (data.channel === "phone") {
+      const { data: confRoles, error } = await supabaseAdmin
+        .from("user_roles")
+        .select("user_id")
+        .eq("role", "confirmer");
+      if (error) throw error;
+      confirmerIds = new Set((confRoles ?? []).map((r) => r.user_id as string));
+    }
 
     // Sits + sales live in daily_logs; confirms live in daily_metrics (the
     // office pipeline — daily_logs.confirmed_leads has never been written);
@@ -580,10 +601,10 @@ export const getFunnelBaseline = createServerFn({ method: "POST" })
       ),
       // WCC-cancelled sales pay nothing (calc v7 / useCanvasserStats parity)
       // — they must not prop up the projected average commission either.
-      pageAll<{ sale_amount: number | null }>((from, to) =>
+      pageAll<{ canvasser_id: string | null; sale_amount: number | null }>((from, to) =>
         supabaseAdmin
           .from("leads")
-          .select("sale_amount")
+          .select("canvasser_id, sale_amount")
           .eq("status", "confirmed")
           .eq("is_sale", true)
           .is("sale_cancelled_at", null)
@@ -601,6 +622,7 @@ export const getFunnelBaseline = createServerFn({ method: "POST" })
     const split: SplitFunnelInputs = { ...EMPTY_SPLIT };
     const doorDays = new Set<string>();
     for (const r of logRows) {
+      if (confirmerIds && !confirmerIds.has(r.canvasser_id)) continue;
       split.sits += r.demos_sits ?? 0;
       split.sales += r.sales ?? 0;
       if (r.log_date >= DOORS_TRACKED_SINCE && (r.doors_knocked ?? 0) > 0) {
@@ -609,6 +631,7 @@ export const getFunnelBaseline = createServerFn({ method: "POST" })
       }
     }
     for (const m of metricRows) {
+      if (confirmerIds && !confirmerIds.has(m.canvasser_id)) continue;
       split.confirmed += m.leads_confirmed ?? 0;
       if (
         m.metric_date >= DOORS_TRACKED_SINCE &&
@@ -618,6 +641,9 @@ export const getFunnelBaseline = createServerFn({ method: "POST" })
       }
     }
 
+    // The avg commission stays COMPANY-WIDE on both channels: a confirmed
+    // sale is worth the same dollars whoever sourced the lead, and the phone
+    // room's own sale sample is too thin to price honestly.
     const revenue = saleRows.reduce((a, r) => a + Number(r.sale_amount ?? 0), 0);
     const avgSale = saleRows.length > 0 ? revenue / saleRows.length : 0;
 

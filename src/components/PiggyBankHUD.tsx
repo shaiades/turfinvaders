@@ -21,6 +21,14 @@ import { clamp01, drawCoin, easeInOut, makeBeeper, popText } from "./intro-fx";
 
 type Variant = "map" | "card";
 
+// Channel wording: the knocker pig counts doors, the Dial Run pig counts
+// dials. Same math, same pig — only the nouns change.
+type Unit = "doors" | "dials";
+const UNIT_WORDS: Record<Unit, { noun: string; per: string; did: string }> = {
+  doors: { noun: "doors", per: "knock", did: "knocked" },
+  dials: { noun: "dials", per: "dial", did: "dialed" },
+};
+
 /** Display bucket only — the pig visibly refills every $100 banked. Not a
  *  goal and not a reported figure. */
 const FILL_STEP = 100;
@@ -129,6 +137,7 @@ export const PiggyBankHUD = memo(function PiggyBankHUD({
   demo = false,
   demoRateMs,
   celebrate = null,
+  unit = "doors",
   className,
 }: {
   dollars: number | null;
@@ -138,6 +147,8 @@ export const PiggyBankHUD = memo(function PiggyBankHUD({
   paceKnocks?: number | null;
   source?: "personal" | "company";
   variant?: Variant;
+  /** "dials" swaps the nouns for the phone room (Dial Run). */
+  unit?: Unit;
   /** Preview driver (?piggy_demo=1) — fakes knocks locally, writes nothing. */
   demo?: boolean;
   demoRateMs?: number;
@@ -150,6 +161,7 @@ export const PiggyBankHUD = memo(function PiggyBankHUD({
 }) {
   const reduced = usePrefersReducedMotion();
   const g = GEO[variant];
+  const w = UNIT_WORDS[unit];
 
   // Demo mode replaces the feed entirely so previews never mix with (or
   // touch) real state.
@@ -359,18 +371,18 @@ export const PiggyBankHUD = memo(function PiggyBankHUD({
     const id = window.setTimeout(() => {
       setLiveText(
         dl !== null
-          ? `Projected today: ${formatCurrency(Math.round(dl))} from ${kn} doors`
-          : `${kn} doors knocked today`,
+          ? `Projected today: ${formatCurrency(Math.round(dl))} from ${kn} ${w.noun}`
+          : `${kn} ${w.noun} ${w.did} today`,
       );
     }, 4000);
     return () => window.clearTimeout(id);
-  }, [dl, kn]);
+  }, [dl, kn, w]);
 
   const fill = dl === null ? 1 : (((dl % FILL_STEP) + FILL_STEP) % FILL_STEP) / FILL_STEP;
   const ariaLabel =
     dl !== null
-      ? `Projected today: ${formatCurrency(Math.round(dl))} from ${kn} doors`
-      : `${kn} doors knocked today`;
+      ? `Projected today: ${formatCurrency(Math.round(dl))} from ${kn} ${w.noun}`
+      : `${kn} ${w.noun} ${w.did} today`;
 
   const onTap = () => {
     if (demo) {
@@ -419,14 +431,14 @@ export const PiggyBankHUD = memo(function PiggyBankHUD({
               )}
               style={{ textShadow: "0 0 12px var(--victory)" }}
             >
-              {dl !== null ? fmtBank(displayDollars) : `${kn} doors`}
+              {dl !== null ? fmtBank(displayDollars) : `${kn} ${w.noun}`}
             </div>
             <div className="mt-1.5 text-xs text-muted-foreground">
               {dl !== null && perKnockEff !== null
-                ? `${kn} doors × ${fmtCents(perKnockEff)} projected per knock · ${
+                ? `${kn} ${w.noun} × ${fmtCents(perKnockEff)} projected per ${w.per} · ${
                     source === "personal" ? "your 60-day rates" : "company averages"
                   }`
-                : "Awaiting conversion data — doors still bank"}
+                : `Awaiting conversion data — ${w.noun} still bank`}
             </div>
           </div>
         </div>
@@ -460,11 +472,11 @@ export const PiggyBankHUD = memo(function PiggyBankHUD({
       {caption && (
         <div className="absolute top-full left-0 z-[1002] mt-1 whitespace-nowrap rounded-md border border-border bg-surface/95 px-2 py-1 text-xs font-semibold uppercase text-muted-foreground">
           {dl !== null && perKnockEff !== null
-            ? `${kn} doors · ${formatCurrency(Math.round(dl))} projected`
-            : `${kn} doors · awaiting rate data`}
+            ? `${kn} ${w.noun} · ${formatCurrency(Math.round(dl))} projected`
+            : `${kn} ${w.noun} · awaiting rate data`}
           {paceKnocks !== null && paceKnocks > 0 && (
             <span className="block text-[var(--warning)]">
-              ≈{paceKnocks.toLocaleString()} knocks to week goal
+              ≈{paceKnocks.toLocaleString()} {w.noun} to week goal
             </span>
           )}
           {paceKnocks === 0 && <span className="block text-victory">Week goal covered 🏆</span>}

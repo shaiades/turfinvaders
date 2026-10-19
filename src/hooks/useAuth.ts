@@ -10,6 +10,12 @@ export interface AuthState {
   user: User | null;
   role: AppRole | null;
   realRole: AppRole | null;
+  /** The effective role BEFORE the privilegeRole collapse: what experience
+   *  this user lives, View As included. Confirmers collapse to canvasser for
+   *  every permission (`role`), but their one experience fork — Dial Run
+   *  instead of the GPS map — keys on this. `realRole` can't carry it: an
+   *  owner previewing "Confirmer" keeps realRole "owner". */
+  experienceRole: AppRole | null;
   teamId: string | null;
   displayName: string | null;
   /** The profile's actual name, untouched by the View As rep picker. */
@@ -111,7 +117,11 @@ function getUserShared() {
 
 type HydrateFetch = Promise<{
   roles: Array<{ role: string }> | null;
-  profile: { team_id: string | null; display_name: string | null; is_active: boolean | null } | null;
+  profile: {
+    team_id: string | null;
+    display_name: string | null;
+    is_active: boolean | null;
+  } | null;
 }>;
 let rolesProfileCache: { uid: string; at: number; promise: HydrateFetch } | null = null;
 const ROLES_PROFILE_TTL_MS = 15_000;
@@ -126,7 +136,11 @@ function fetchRolesProfile(uid: string): HydrateFetch {
   }
   const promise = Promise.all([
     supabase.from("user_roles").select("role").eq("user_id", uid),
-    supabase.from("profiles").select("team_id, display_name, is_active").eq("id", uid).maybeSingle(),
+    supabase
+      .from("profiles")
+      .select("team_id, display_name, is_active")
+      .eq("id", uid)
+      .maybeSingle(),
   ]).then(([{ data: roles }, { data: profile }]) => ({ roles, profile }));
   rolesProfileCache = { uid, at: now, promise };
   return promise;
@@ -138,6 +152,7 @@ export function useAuth(): AuthState {
     user: null,
     role: null,
     realRole: null,
+    experienceRole: null,
     teamId: null,
     displayName: null,
     realDisplayName: null,
@@ -156,6 +171,7 @@ export function useAuth(): AuthState {
             user: null,
             role: null,
             realRole: null,
+            experienceRole: null,
             teamId: null,
             displayName: null,
             realDisplayName: null,
@@ -171,7 +187,8 @@ export function useAuth(): AuthState {
       // dev_role_override left in this browser's localStorage must never
       // re-skin anyone but an owner — captains included.
       const override = canUseViewAs(realRole) ? readDevRole() : null;
-      const effRole = privilegeRole(override ?? realRole);
+      const experienceRole = override ?? realRole;
+      const effRole = privilegeRole(experienceRole);
       const realDisplayName = profile?.display_name ?? user.email ?? null;
       const canvasserPick = effectiveCanvasserPick(realRole, effRole);
       if (active) {
@@ -183,6 +200,7 @@ export function useAuth(): AuthState {
           // `realRole` stays raw for labels and the owner-only tier checks.
           role: effRole,
           realRole,
+          experienceRole,
           teamId: profile?.team_id ?? null,
           displayName:
             effectiveDevName(realRole, effRole) ?? canvasserPick?.name ?? realDisplayName,
@@ -205,11 +223,13 @@ export function useAuth(): AuthState {
     function onOverride() {
       setState((s) => {
         const override = canUseViewAs(s.realRole) ? readDevRole() : null;
-        const effRole = privilegeRole(override ?? s.realRole);
+        const experienceRole = override ?? s.realRole;
+        const effRole = privilegeRole(experienceRole);
         const canvasserPick = effectiveCanvasserPick(s.realRole, effRole);
         return {
           ...s,
           role: effRole,
+          experienceRole,
           displayName:
             effectiveDevName(s.realRole, effRole) ?? canvasserPick?.name ?? s.realDisplayName,
           previewCanvasserId: canvasserPick?.id ?? null,

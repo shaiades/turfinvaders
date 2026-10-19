@@ -116,6 +116,10 @@ function NavBadge({ count }: { count?: number }) {
 // before the location commits), so it can stay off this list.
 const CANVASSER_ALLOWED = [
   "/field",
+  // Dial Run — the confirmer's no-map Active Run. On the shared canvasser
+  // list (not a confirmer-only one): /phones itself bounces non-confirmers
+  // back to /field, and the fewer parallel lists the better.
+  "/phones",
   "/my-territory",
   "/dashboard",
   // /mission is the captain split-out of the Mission surface; a canvasser who
@@ -140,7 +144,8 @@ const CANVASSER_ALLOWED = [
 const SALES_REP_ALLOWED = ["/close-kombat", "/my-purpose"];
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { user, role, realRole, displayName, realDisplayName, accessRevoked } = useAuth();
+  const { user, role, realRole, experienceRole, displayName, realDisplayName, accessRevoked } =
+    useAuth();
   // §7 praise-public/coach-private: the Doughnut Zone stays on captain/manager
   // views; field roles only see it when the owner flips the flag off.
   const arcadeFlags = useArcadeFlags();
@@ -303,13 +308,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   });
 
   // Canvasser guard: block manual navigation to leadership routes.
+  // Confirmers bounce home to Dial Run instead of the GPS map.
   useEffect(() => {
     if (role !== "canvasser") return;
     const allowed = CANVASSER_ALLOWED.some((p) => pathname === p || pathname.startsWith(p + "/"));
     if (!allowed) {
-      router.navigate({ to: "/field", replace: true });
+      router.navigate({ to: experienceRole === "confirmer" ? "/phones" : "/field", replace: true });
     }
-  }, [role, pathname, router]);
+  }, [role, experienceRole, pathname, router]);
 
   // Sales-rep guard: their whole app is Close Kombat. Only force-navigate
   // when the REAL roles can actually enter /close-kombat — its beforeLoad
@@ -352,7 +358,12 @@ export function AppShell({ children }: { children: ReactNode }) {
       // activeOptions then matches on pathname only, keeping the item lit
       // while the inner tabs rewrite ?tab=.
       return [
-        { to: "/field", label: "Active Run", icon: Zap },
+        // Confirmers (experienceRole, pre-collapse) live the same five-tab
+        // canvasser app with one swap: Dial Run (phone tallies) in place of
+        // the GPS map (owner mandate 2026-10-19).
+        experienceRole === "confirmer"
+          ? { to: "/phones", label: "Dial Run", icon: PhoneCall }
+          : { to: "/field", label: "Active Run", icon: Zap },
         { to: "/dashboard", label: "Mission", icon: Target },
         { to: "/learn", label: "Learn", icon: GraduationCap },
         { to: "/leaderboard", label: "Leaders", icon: Trophy },
