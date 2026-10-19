@@ -94,6 +94,7 @@ type Entry = {
   second_meal_status: string;
   rest_break_status: string;
   meal_periods: Meal[];
+  rest_breaks: Array<{ id: string; break_start: string; break_end: string | null }>;
 };
 type Profile = { id: string; display_name: string; is_active?: boolean; is_placeholder?: boolean };
 
@@ -269,9 +270,19 @@ function EntryFlags({ e }: { e: Entry }) {
       {rest && (
         <span
           className="text-[9px] font-display uppercase tracking-widest text-warning border border-warning/40 rounded px-1"
-          title="10-minute paid rest breaks — worker attestation at clock-out, or Resolve."
+          title="10-minute paid rest breaks — punched, attested at clock-out, or Resolve."
         >
           {rest}
+        </span>
+      )}
+      {(e.rest_breaks?.length ?? 0) > 0 && (
+        <span
+          className="text-[9px] font-display uppercase tracking-widest text-neon border border-neon/40 rounded px-1"
+          title={`Punched rest breaks (PT): ${(e.rest_breaks ?? [])
+            .map((b) => `${laTimeHM(b.break_start)}–${b.break_end ? laTimeHM(b.break_end) : "…"}`)
+            .join(", ")} — paid time, nothing deducted.`}
+        >
+          {e.rest_breaks.length}×10 punched
         </span>
       )}
       {extra > 0 && (
@@ -389,7 +400,7 @@ export function TimesheetEditor({
       let entriesQ = supabase
         .from("time_entries")
         .select(
-          "id, user_id, clock_in, clock_out, log_date, billable_hours, entry_source, needs_correction, meal_status, second_meal_status, rest_break_status, meal_periods (id, meal_start, meal_end)",
+          "id, user_id, clock_in, clock_out, log_date, billable_hours, entry_source, needs_correction, meal_status, second_meal_status, rest_break_status, meal_periods (id, meal_start, meal_end), rest_breaks (id, break_start, break_end)",
         )
         .gte("log_date", padStart)
         .lte("log_date", padEnd)

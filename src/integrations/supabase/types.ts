@@ -1563,6 +1563,48 @@ export type Database = {
           },
         ]
       }
+      rest_breaks: {
+        Row: {
+          break_end: string | null
+          break_start: string
+          created_at: string
+          id: string
+          time_entry_id: string
+          user_id: string
+        }
+        Insert: {
+          break_end?: string | null
+          break_start?: string
+          created_at?: string
+          id?: string
+          time_entry_id: string
+          user_id: string
+        }
+        Update: {
+          break_end?: string | null
+          break_start?: string
+          created_at?: string
+          id?: string
+          time_entry_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rest_breaks_time_entry_id_fkey"
+            columns: ["time_entry_id"]
+            isOneToOne: false
+            referencedRelation: "time_entries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rest_breaks_time_entry_id_fkey"
+            columns: ["time_entry_id"]
+            isOneToOne: false
+            referencedRelation: "timesheet_day_detail"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       monday_write_locks: {
         Row: {
           acquired_at: string
@@ -4431,6 +4473,9 @@ export type Database = {
           meal_status: string | null
           meal_windows: string | null
           needs_correction: boolean | null
+          rest_break_count: number | null
+          rest_break_minutes: number | null
+          break_windows: string | null
           rest_break_status: string | null
           reviewed_at: string | null
           reviewed_by: string | null
@@ -4587,6 +4632,8 @@ export type Database = {
       crew_clock_in: { Args: { _user_ids: string[] }; Returns: Json }
       crew_clock_out: { Args: { _user_ids: string[] }; Returns: Json }
       crew_end_lunch: { Args: { _user_ids: string[] }; Returns: Json }
+      crew_start_break: { Args: { _user_ids: string[] }; Returns: Json }
+      crew_end_break: { Args: { _user_ids: string[] }; Returns: Json }
       crew_start_lunch: { Args: { _user_ids: string[] }; Returns: Json }
       customer_last_name: { Args: { name: string }; Returns: string }
       ensure_purpose_profile: {
