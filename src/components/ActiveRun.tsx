@@ -11,6 +11,7 @@ import {
   savePendingLead,
   clearPendingLead,
   readPendingLead,
+  MAX_PENDING_LEAD_RESTORES,
 } from "@/lib/monday-form";
 import { useCanvasserProfile } from "@/hooks/useCanvasserProfile";
 import { useGeoWatch, useFieldPins, type ActivePin } from "@/hooks/useFieldPins";
@@ -475,13 +476,28 @@ export function ActiveRun({
   // died (or was reloaded) while the lead form was open — reopen it with the
   // same target/address so the knock isn't lost. Waits for auth so the
   // reopened form still gets the agent-name prefill (attribution keys on
-  // it); ref-guarded so it restores at most once per page load.
+  // it); ref-guarded so it restores at most once per page load. Capped
+  // restores: a device the embed reliably kills (field report 2026-10-19)
+  // must not auto-reopen into the crash forever — after the cap, stop and
+  // say so instead of looping white screens.
   const restoredLeadRef = useRef(false);
   useEffect(() => {
     if (restoredLeadRef.current || loading || !user?.id) return;
     restoredLeadRef.current = true;
     const snap = readPendingLead();
     if (!snap) return;
+    const restores = snap.restores ?? 0;
+    if (restores >= MAX_PENDING_LEAD_RESTORES) {
+      clearPendingLead();
+      toast.error(
+        snap.address
+          ? `The lead form keeps crashing this phone — your lead at ${snap.address} was NOT submitted. Write it down and log it after the shift.`
+          : "The lead form keeps crashing this phone — that lead was NOT submitted. Write it down and log it after the shift.",
+        { duration: 15000 },
+      );
+      return;
+    }
+    savePendingLead(snap.target, snap.address, restores + 1);
     pendingLeadRef.current = snap.target;
     setLeadAddress(snap.address);
     setLeadOpen(true);
@@ -570,7 +586,13 @@ export function ActiveRun({
               </div>
             </ArcadePanel>
           )}
-          {mapGate === "ready" && (
+          {/* !leadOpen: the satellite map UNMOUNTS while the Monday embed is
+              up. Both at once is the page's peak memory, and iOS was killing
+              the whole page right as the form opened (white screens, field
+              reports 2026-10-16/19) — the sheet fully covers the screen
+              anyway, and the close handler re-reads the persisted view so
+              the map comes back exactly where the rep left it. */}
+          {mapGate === "ready" && !leadOpen && (
             <NeonMap
               territories={territories}
               pins={pins.mapPins}
@@ -801,6 +823,12 @@ export function ActiveRun({
             address: leadAddress,
           }}
           onClose={(submitted) => {
+            // The map unmounted while the sheet was up — re-read the
+            // persisted view (onViewChange kept it current) so the remount
+            // lands where the rep actually was, not the morning's spot.
+            if (user?.id) {
+              savedViewRef.current = getLastMapView(user.id) ?? savedViewRef.current;
+            }
             setLeadOpen(false);
             const closingAddress = leadAddress;
             setLeadAddress(null);
