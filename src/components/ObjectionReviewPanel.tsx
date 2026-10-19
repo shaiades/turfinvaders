@@ -16,6 +16,8 @@ import {
 } from "@/components/ObjectionDojo";
 import { toast } from "sonner";
 import { Check, Eye, Plus, X } from "lucide-react";
+import { RepAvatar } from "@/components/RepAvatar";
+import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
 
 /**
  * Objection Dojo review queue — on the Confirmation Desk beside the lead
@@ -48,6 +50,7 @@ export function ObjectionReviewPanel({ variant = "desk" }: { variant?: "desk" | 
   });
 
   const names = useAttemptNames(pending.data ?? []);
+  const cartoons = useRepCartoons().data;
   const [preview, setPreview] = useState<{ id: string; url: string } | null>(null);
   const [denyFor, setDenyFor] = useState<string | null>(null);
   const [denyReason, setDenyReason] = useState("");
@@ -136,13 +139,20 @@ export function ObjectionReviewPanel({ variant = "desk" }: { variant?: "desk" | 
             {pending.data!.map((a) => (
               <li key={a.id} className="py-3 space-y-3">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
-                  <div className="min-w-0">
-                    <div className="font-medium truncate">
-                      {names.data?.get(a.canvasser_id) ?? "…"}
-                    </div>
-                    <div className="text-xs text-muted-foreground truncate">
-                      {byId.get(a.objection_id)?.title ?? "Unknown objection"} ·{" "}
-                      {new Date(a.created_at).toLocaleString()}
+                  <div className="flex items-center gap-3 min-w-0">
+                    <RepAvatar
+                      name={names.data?.get(a.canvasser_id) ?? "?"}
+                      cartoon={cartoonFor(cartoons, names.data?.get(a.canvasser_id))}
+                      className="h-9 w-9"
+                    />
+                    <div className="min-w-0">
+                      <div className="font-medium truncate">
+                        {names.data?.get(a.canvasser_id) ?? "…"}
+                      </div>
+                      <div className="text-xs text-muted-foreground truncate">
+                        {byId.get(a.objection_id)?.title ?? "Unknown objection"} ·{" "}
+                        {new Date(a.created_at).toLocaleString()}
+                      </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">

@@ -7,6 +7,8 @@ import { useDateRange } from "@/hooks/useDateRange";
 import { RangeTabs } from "@/components/RangeTabs";
 import { normalizeName } from "@/lib/utils";
 import { FormerBadge } from "@/components/FormerBadge";
+import { RepAvatar } from "@/components/RepAvatar";
+import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
 
 export const Route = createFileRoute("/_authenticated/teams/$teamId")({
   head: () => ({ meta: [{ title: "Van — Turf Invaders" }] }),
@@ -22,6 +24,7 @@ function TeamDetail() {
   // 2026-08-12; defaults to the pay week like the rest of the manager suite.
   const rangeControls = useDateRange({ initialTab: "week" });
   const { range } = rangeControls;
+  const cartoons = useRepCartoons().data;
 
   const { data } = useQuery({
     queryKey: ["team_detail", teamId, range.startISO, range.endISO],
@@ -66,7 +69,12 @@ function TeamDetail() {
       const agg = new Map<string, { leads: number; sales: number; sits: number }>();
       for (const l of logsR.data ?? []) {
         const a = agg.get(l.canvasser_id) ?? { leads: 0, sales: 0, sits: 0 };
-        a.leads += (l.demos_sits ?? 0) + (l.sales ?? 0) + (l.no_demo ?? 0) + (l.one_legs ?? 0) + (l.future_leads ?? 0);
+        a.leads +=
+          (l.demos_sits ?? 0) +
+          (l.sales ?? 0) +
+          (l.no_demo ?? 0) +
+          (l.one_legs ?? 0) +
+          (l.future_leads ?? 0);
         a.sales += l.sales ?? 0;
         a.sits += l.demos_sits ?? 0;
         agg.set(l.canvasser_id, a);
@@ -117,9 +125,14 @@ function TeamDetail() {
 
       // Totals fold from data rows via the member list (former included), so
       // this page agrees with the /teams index card for the same van/range.
-      const totals = members.reduce((acc, m) => ({
-        leads: acc.leads + m.leads, sales: acc.sales + m.sales, sits: acc.sits + m.sits,
-      }), { leads: 0, sales: 0, sits: 0 });
+      const totals = members.reduce(
+        (acc, m) => ({
+          leads: acc.leads + m.leads,
+          sales: acc.sales + m.sales,
+          sits: acc.sits + m.sits,
+        }),
+        { leads: 0, sales: 0, sits: 0 },
+      );
 
       return { team: { ...team, color: team.color ?? "#00f0ff", captainName }, members, totals };
     },
@@ -144,10 +157,14 @@ function TeamDetail() {
   return (
     <div className="space-y-8">
       <div>
-        <Link to="/teams" className="text-xs text-muted-foreground hover:text-neon">← All Vans</Link>
+        <Link to="/teams" className="text-xs text-muted-foreground hover:text-neon">
+          ← All Vans
+        </Link>
         <div className="mt-3 flex items-center gap-3">
           <TeamBadge name={team.name} color={team.color} />
-          <span className="text-xs text-muted-foreground">Captain · <span className="text-foreground">{team.captainName}</span></span>
+          <span className="text-xs text-muted-foreground">
+            Captain · <span className="text-foreground">{team.captainName}</span>
+          </span>
         </div>
       </div>
 
@@ -183,19 +200,41 @@ function TeamDetail() {
 
       <ArcadePanel title="Roster">
         {members.length === 0 ? (
-          <div className="text-sm text-muted-foreground">No canvassers assigned to this Van yet.</div>
+          <div className="text-sm text-muted-foreground">
+            No canvassers assigned to this Van yet.
+          </div>
         ) : (
           <ol className="divide-y divide-border">
             {members.map((m, i) => (
               <li key={m.id} className="flex items-center justify-between py-3">
                 <div className="flex items-center gap-3 min-w-0">
-                  <span className="font-display text-xs text-muted-foreground w-6">{String(i + 1).padStart(2, "0")}</span>
-                  <Link to="/canvassers/$canvasserId" params={{ canvasserId: m.id }} className="font-medium hover:text-neon min-w-0 truncate">{m.name}</Link>
+                  <span className="font-display text-xs text-muted-foreground w-6">
+                    {String(i + 1).padStart(2, "0")}
+                  </span>
+                  <RepAvatar
+                    name={m.name}
+                    cartoon={cartoonFor(cartoons, m.name)}
+                    className="h-8 w-8"
+                    textClassName="text-[10px]"
+                  />
+                  <Link
+                    to="/canvassers/$canvasserId"
+                    params={{ canvasserId: m.id }}
+                    className="font-medium hover:text-neon min-w-0 truncate"
+                  >
+                    {m.name}
+                  </Link>
                   {m.former && <FormerBadge />}
                 </div>
                 <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                  <span>{m.leads}<span className="hidden sm:inline"> leads</span></span>
-                  <span>{m.sales}<span className="hidden sm:inline"> sales</span></span>
+                  <span>
+                    {m.leads}
+                    <span className="hidden sm:inline"> leads</span>
+                  </span>
+                  <span>
+                    {m.sales}
+                    <span className="hidden sm:inline"> sales</span>
+                  </span>
                   <span className="text-victory">{m.points} pts</span>
                 </div>
               </li>

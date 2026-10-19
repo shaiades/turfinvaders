@@ -15,6 +15,8 @@ import { Button } from "@/components/ui/button";
 import { ReasonDialog } from "@/components/ReasonDialog";
 import { PROOF_LABELS, fmtPts, type ProofCategory } from "@/lib/kombat-month";
 import { reviewContestProof } from "@/lib/kombat-month.functions";
+import { RepAvatar } from "@/components/RepAvatar";
+import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
 
 type ProofRow = {
   id: string;
@@ -32,6 +34,7 @@ const VIDEO_EXT = /\.(mp4|webm|mov|m4v)$/i;
 
 export function ContestProofReviewPanel() {
   const qc = useQueryClient();
+  const cartoons = useRepCartoons().data;
 
   const pending = useQuery({
     queryKey: ["contest_proofs", "pending"],
@@ -119,28 +122,35 @@ export function ContestProofReviewPanel() {
             {pending.data!.map((p) => (
               <li key={p.id} className="py-3 space-y-3">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
-                  <div className="min-w-0">
-                    <div className="font-medium truncate">
-                      {names.data?.get(p.rep_id) ?? "…"}
-                      <span className="ml-2 text-xs text-kombat-gold font-display uppercase tracking-widest">
-                        {PROOF_LABELS[p.category as ProofCategory] ?? p.category}
-                      </span>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <RepAvatar
+                      name={names.data?.get(p.rep_id) ?? "?"}
+                      cartoon={cartoonFor(cartoons, names.data?.get(p.rep_id))}
+                      className="h-9 w-9"
+                    />
+                    <div className="min-w-0">
+                      <div className="font-medium truncate">
+                        {names.data?.get(p.rep_id) ?? "…"}
+                        <span className="ml-2 text-xs text-kombat-gold font-display uppercase tracking-widest">
+                          {PROOF_LABELS[p.category as ProofCategory] ?? p.category}
+                        </span>
+                      </div>
+                      <div className="text-xs text-muted-foreground truncate">
+                        {p.note} · {new Date(p.created_at).toLocaleString()}
+                        {p.customer_name && <> · {p.customer_name}</>}
+                        {p.sat_on && <> · sat {p.sat_on}</>}
+                      </div>
+                      {p.link_url && (
+                        <a
+                          href={p.link_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-xs text-neon underline underline-offset-2 truncate block max-w-xs"
+                        >
+                          {p.link_url}
+                        </a>
+                      )}
                     </div>
-                    <div className="text-xs text-muted-foreground truncate">
-                      {p.note} · {new Date(p.created_at).toLocaleString()}
-                      {p.customer_name && <> · {p.customer_name}</>}
-                      {p.sat_on && <> · sat {p.sat_on}</>}
-                    </div>
-                    {p.link_url && (
-                      <a
-                        href={p.link_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-xs text-neon underline underline-offset-2 truncate block max-w-xs"
-                      >
-                        {p.link_url}
-                      </a>
-                    )}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     {p.storage_path && (
