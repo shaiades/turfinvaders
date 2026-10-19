@@ -24,6 +24,8 @@ import { canManageTarget, isVanExemptRole } from "@/lib/role-policy";
 import { normalizeName } from "@/lib/utils";
 import { isLeadSourceKey } from "@/lib/lead-sources";
 import { DEFAULT_OFFICE, OFFICE_LOCATIONS } from "@/lib/offices";
+import { RepAvatar } from "@/components/RepAvatar";
+import { useRepCartoons, cartoonFor, type RepCartoon } from "@/hooks/useRepCartoons";
 
 /**
  * The one go-to mover: search the whole roster, tap to select several
@@ -66,6 +68,7 @@ export function MovePlayersSheet({
   const { data: vans = [] } = useDispatchVans({ enabled: open });
   const moveAgents = useMoveAgents(vans);
   const setVanLock = useSetVanLock();
+  const cartoons = useRepCartoons().data;
 
   const [search, setSearch] = useState("");
   const [officeChip, setOfficeChip] = useState<OfficeChip>("All");
@@ -287,6 +290,7 @@ export function MovePlayersSheet({
                       key={g.key}
                       g={g}
                       van={null}
+                      cartoon={cartoonFor(cartoons, g.display_name)}
                       isSelected={selected.has(g.key)}
                       onToggle={toggle}
                     />
@@ -313,6 +317,7 @@ export function MovePlayersSheet({
                           key={g.key}
                           g={g}
                           van={van}
+                          cartoon={cartoonFor(cartoons, g.display_name)}
                           isSelected={selected.has(g.key)}
                           onToggle={toggle}
                         />
@@ -392,11 +397,13 @@ export function MovePlayersSheet({
 function GroupRow({
   g,
   van,
+  cartoon,
   isSelected,
   onToggle,
 }: {
   g: MoveGroup;
   van: Van | null;
+  cartoon?: RepCartoon;
   isSelected: boolean;
   onToggle: (key: string) => void;
 }) {
@@ -421,6 +428,12 @@ function GroupRow({
         {isSelected && <Check className="w-3.5 h-3.5" />}
       </span>
       <span className="text-sm truncate min-w-0 flex-1 flex items-center gap-2">
+        <RepAvatar
+          name={g.display_name ?? "Unknown"}
+          cartoon={cartoon}
+          className="h-6 w-6"
+          textClassName="text-[9px]"
+        />
         <span className="truncate">{g.display_name ?? "Unknown"}</span>
         {g.isCaptain && (
           <span className="shrink-0 text-[9px] font-display uppercase tracking-widest px-1.5 py-0.5 rounded border border-accent/60 text-accent bg-accent/10">

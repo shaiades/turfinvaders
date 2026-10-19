@@ -15,6 +15,8 @@ import { Check, X, Inbox } from "lucide-react";
 import { ObjectionReviewPanel } from "@/components/ObjectionReviewPanel";
 import { ContestProofReviewPanel } from "@/components/ContestProofReviewPanel";
 import { PushAlertsCard } from "@/components/PushAlertsCard";
+import { RepAvatar } from "@/components/RepAvatar";
+import { useRepCartoons, cartoonFor, type RepCartoon } from "@/hooks/useRepCartoons";
 
 export const Route = createFileRoute("/_authenticated/confirmation-desk")({
   head: () => ({ meta: [{ title: "Confirmation Desk — Turf Invaders" }] }),
@@ -38,6 +40,7 @@ function ConfirmationDesk() {
   const { user } = useAuth();
   const qc = useQueryClient();
   const { data: leadsToday } = useTodayLeads();
+  const cartoons = useRepCartoons().data;
 
   const pending = useQuery({
     queryKey: ["pending_leads"],
@@ -145,6 +148,10 @@ function ConfirmationDesk() {
                 canvasserName={
                   directory.data?.profiles.get(l.canvasser_id)?.display_name ?? "Unknown"
                 }
+                cartoon={cartoonFor(
+                  cartoons,
+                  directory.data?.profiles.get(l.canvasser_id)?.display_name,
+                )}
                 team={l.team_id ? directory.data?.teams.get(l.team_id) : undefined}
                 onConfirm={() => decide.mutate({ id: l.id, status: "confirmed" })}
                 onDeny={(reason) =>
@@ -174,6 +181,7 @@ function ConfirmationDesk() {
 function PendingRow({
   lead,
   canvasserName,
+  cartoon,
   team,
   onConfirm,
   onDeny,
@@ -181,6 +189,7 @@ function PendingRow({
 }: {
   lead: PendingLead;
   canvasserName: string;
+  cartoon?: RepCartoon;
   team?: { id: string; name: string; color: string };
   onConfirm: () => void;
   onDeny: (reason: string) => void;
@@ -190,59 +199,62 @@ function PendingRow({
   const [reason, setReason] = useState("");
   return (
     <li className="py-4 grid gap-3 md:grid-cols-[1fr_auto] md:items-center">
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-medium">{lead.customer_name || "Unnamed lead"}</span>
-          {team && <TeamBadge name={team.name} color={team.color} />}
-          {lead.is_sale && (
-            <span className="text-[10px] font-display uppercase tracking-widest px-2 py-0.5 rounded border border-[var(--victory)] text-victory">
-              Sale {lead.sale_amount ? `· $${Number(lead.sale_amount).toLocaleString()}` : ""}
-            </span>
+      <div className="flex items-start gap-3 min-w-0">
+        <RepAvatar name={canvasserName} cartoon={cartoon} className="h-10 w-10 mt-0.5" />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium">{lead.customer_name || "Unnamed lead"}</span>
+            {team && <TeamBadge name={team.name} color={team.color} />}
+            {lead.is_sale && (
+              <span className="text-[10px] font-display uppercase tracking-widest px-2 py-0.5 rounded border border-[var(--victory)] text-victory">
+                Sale {lead.sale_amount ? `· $${Number(lead.sale_amount).toLocaleString()}` : ""}
+              </span>
+            )}
+          </div>
+          <div className="text-xs text-muted-foreground mt-1">
+            {canvasserName} · {lead.address || "no address"} ·{" "}
+            {new Date(lead.created_at).toLocaleString()}
+          </div>
+          {lead.notes && (
+            <div className="text-xs mt-1.5 text-muted-foreground italic">"{lead.notes}"</div>
+          )}
+          {denying && (
+            <div className="mt-3 flex flex-col sm:flex-row gap-2 sm:items-start">
+              <Textarea
+                rows={2}
+                placeholder="Reason for denial…"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+              />
+              <div className="flex gap-2 sm:flex-col sm:gap-1.5">
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  disabled={pending}
+                  className="flex-1 sm:flex-none"
+                  onClick={() => {
+                    onDeny(reason);
+                    setDenying(false);
+                    setReason("");
+                  }}
+                >
+                  Confirm Deny
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="flex-1 sm:flex-none"
+                  onClick={() => {
+                    setDenying(false);
+                    setReason("");
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
           )}
         </div>
-        <div className="text-xs text-muted-foreground mt-1">
-          {canvasserName} · {lead.address || "no address"} ·{" "}
-          {new Date(lead.created_at).toLocaleString()}
-        </div>
-        {lead.notes && (
-          <div className="text-xs mt-1.5 text-muted-foreground italic">"{lead.notes}"</div>
-        )}
-        {denying && (
-          <div className="mt-3 flex flex-col sm:flex-row gap-2 sm:items-start">
-            <Textarea
-              rows={2}
-              placeholder="Reason for denial…"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-            />
-            <div className="flex gap-2 sm:flex-col sm:gap-1.5">
-              <Button
-                size="sm"
-                variant="destructive"
-                disabled={pending}
-                className="flex-1 sm:flex-none"
-                onClick={() => {
-                  onDeny(reason);
-                  setDenying(false);
-                  setReason("");
-                }}
-              >
-                Confirm Deny
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="flex-1 sm:flex-none"
-                onClick={() => {
-                  setDenying(false);
-                  setReason("");
-                }}
-              >
-                Cancel
-              </Button>
-            </div>
-          </div>
-        )}
       </div>
       {!denying && (
         <div className="flex gap-2 md:justify-end">

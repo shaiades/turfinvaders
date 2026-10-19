@@ -30,6 +30,8 @@ import { useState } from "react";
 import { CoachingFlagChip, CoachingPanel } from "@/components/CoachingCard";
 import { CoachMessageComposer } from "@/components/CoachMessageComposer";
 import { Lock, EyeOff, Video } from "lucide-react";
+import { RepAvatar } from "@/components/RepAvatar";
+import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
 
 export const Route = createFileRoute("/_authenticated/canvassers/$canvasserId")({
   head: () => ({ meta: [{ title: "Player profile — Turf Invaders" }] }),
@@ -69,6 +71,7 @@ function CanvasserProfile() {
   // "week to date" anchor) and drives both production stats and revenue.
   const rangeControls = useDateRange({ initialTab: "week" });
   const { range } = rangeControls;
+  const cartoons = useRepCartoons().data;
 
   const { data: settings } = useQuery({
     queryKey: ["company_settings"],
@@ -281,6 +284,12 @@ function CanvasserProfile() {
           </Link>
         ) : null}
         <div className="mt-3 flex items-center gap-3 flex-wrap">
+          <RepAvatar
+            name={profileQuery.data?.display_name ?? "Player"}
+            cartoon={cartoonFor(cartoons, profileQuery.data?.display_name)}
+            className="h-12 w-12"
+            textClassName="text-sm"
+          />
           <h1 className="font-display text-2xl text-neon">
             {(profileQuery.data?.display_name ?? "PLAYER").toUpperCase()}
           </h1>
