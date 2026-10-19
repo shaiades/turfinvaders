@@ -298,6 +298,41 @@ export type Database = {
         }
         Relationships: []
       }
+      call_logs: {
+        Row: {
+          canvasser_id: string
+          created_at: string
+          disposition: Database["public"]["Enums"]["pin_type"]
+          id: string
+          log_date: string
+          note: string | null
+        }
+        Insert: {
+          canvasser_id: string
+          created_at?: string
+          disposition: Database["public"]["Enums"]["pin_type"]
+          id?: string
+          log_date?: string
+          note?: string | null
+        }
+        Update: {
+          canvasser_id?: string
+          created_at?: string
+          disposition?: Database["public"]["Enums"]["pin_type"]
+          id?: string
+          log_date?: string
+          note?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "call_logs_canvasser_id_fkey"
+            columns: ["canvasser_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       canvasser_aliases: {
         Row: {
           alias_norm: string
@@ -3802,6 +3837,7 @@ export type Database = {
         Row: {
           active_monday_board_oc: string | null
           active_monday_board_sd: string | null
+          confirmer_dial_credit: boolean
           confirmer_recycle_credit: boolean
           created_at: string
           dispatch_pairing: Json | null
@@ -3823,6 +3859,7 @@ export type Database = {
         Insert: {
           active_monday_board_oc?: string | null
           active_monday_board_sd?: string | null
+          confirmer_dial_credit?: boolean
           confirmer_recycle_credit?: boolean
           created_at?: string
           dispatch_pairing?: Json | null
@@ -3844,6 +3881,7 @@ export type Database = {
         Update: {
           active_monday_board_oc?: string | null
           active_monday_board_sd?: string | null
+          confirmer_dial_credit?: boolean
           confirmer_recycle_credit?: boolean
           created_at?: string
           dispatch_pairing?: Json | null

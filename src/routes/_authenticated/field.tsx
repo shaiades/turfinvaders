@@ -11,12 +11,15 @@ export const Route = createFileRoute("/_authenticated/field")({
 // Role fan-out (dashboard.tsx pattern). Reads the effective role so View As
 // previews the real thing.
 function FieldPage() {
-  const { role, loading } = useAuth();
+  const { role, experienceRole, loading } = useAuth();
   const navigate = useNavigate();
   if (loading) return <div className="text-sm text-muted-foreground">Loading…</div>;
   // Admin tier never canvasses from here — a stray tally tap would insert a
   // field_pins row under their uid and bump their daily_logs via trigger.
   if (isAdminRole(role)) return <Navigate to="/my-territory" replace />;
+  // Confirmers work phones, not doors: old bookmarks and post-login landings
+  // on /field roll to Dial Run (owner mandate 2026-10-19).
+  if (experienceRole === "confirmer") return <Navigate to="/phones" replace />;
   // Captains normally live on their Territory tab (which adds Turf Tools),
   // but a hand-typed /field still gives them the canvass screen — Crew Map
   // button included (it was missing here pre-2026-09-14).

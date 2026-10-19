@@ -13,16 +13,7 @@ import { ArcadePanel, NeonBar } from "@/components/arcade";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import {
-  Calendar,
-  DoorOpen,
-  PhoneCall,
-  Sparkles,
-  Target,
-  Trophy,
-  Users,
-  Zap,
-} from "lucide-react";
+import { Calendar, DoorOpen, PhoneCall, Sparkles, Target, Trophy, Users, Zap } from "lucide-react";
 
 /**
  * The Plan tab — the Playbook and the old "My Goals" Mission merged into one
@@ -45,15 +36,40 @@ function fmtInt(n: number) {
   return Math.ceil(n).toLocaleString();
 }
 
+// Channel wording (owner mandate 2026-10-19): the confirmer's playbook speaks
+// dials, the knocker's speaks doors. Same engine, same numbers — only nouns.
+type PlanUnit = "doors" | "dials";
+const PLAN_WORDS: Record<
+  PlanUnit,
+  { noun: string; action: string; verb: string; starter: string }
+> = {
+  doors: {
+    noun: "doors",
+    action: "Knocks",
+    verb: "knock",
+    starter: "aim for the starter target — 90 doors a day",
+  },
+  dials: {
+    noun: "dials",
+    action: "Dials",
+    verb: "dial",
+    starter: "stack dials and tag every call — the rates build themselves",
+  },
+};
+
 export function PlanPanel({
   userId,
   readOnly = false,
+  unit = "doors",
 }: {
   userId: string;
   /** View As canvasser pick: show the PICKED canvasser's playbook without
    *  ever letting the preview overwrite their goals. */
   readOnly?: boolean;
+  /** "dials" swaps the nouns for the phone room (Dial Run). */
+  unit?: PlanUnit;
 }) {
+  const w = PLAN_WORDS[unit];
   const stats = useCanvasserStats(userId);
   const { funnelRates, earnings } = stats;
   const [horizon, setHorizon] = useState<Horizon>("week");
@@ -140,7 +156,7 @@ export function PlanPanel({
         <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
           {math.ready
             ? funnelRates.source === "personal"
-              ? `Personal rates · ${funnelRates.sampleDoors.toLocaleString()} tracked doors`
+              ? `Personal rates · ${funnelRates.sampleDoors.toLocaleString()} tracked ${w.noun}`
               : "Company avg · 60d baseline"
             : "Awaiting conversion data"}
         </span>
@@ -169,15 +185,21 @@ export function PlanPanel({
         {math.ready && !math.goalMet && (
           <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr_auto_1fr] items-center gap-3 md:gap-4">
             <EquationTile
-              label={horizon === "week" ? "Knocks · This Week" : "Knocks · This Month"}
+              label={horizon === "week" ? `${w.action} · This Week` : `${w.action} · This Month`}
               value={fmtInt(math.requiredKnocks)}
-              sub={`${(math.leadDoorRate * 100).toFixed(1)}% of knocks become leads`}
+              sub={`${(math.leadDoorRate * 100).toFixed(1)}% of ${w.noun} become leads`}
               accent="var(--neon)"
-              icon={<DoorOpen className="w-3.5 h-3.5" />}
+              icon={
+                unit === "dials" ? (
+                  <PhoneCall className="w-3.5 h-3.5" />
+                ) : (
+                  <DoorOpen className="w-3.5 h-3.5" />
+                )
+              }
             />
             <Operator>×</Operator>
             <EquationTile
-              label="Value / Knock"
+              label={unit === "dials" ? "Value / Dial" : "Value / Knock"}
               value={formatCurrency(math.valuePerKnock)}
               accent="var(--accent)"
               icon={<Sparkles className="w-3.5 h-3.5" />}
@@ -209,9 +231,9 @@ export function PlanPanel({
               Playbook warming up
             </div>
             <p className="mt-2 text-xs text-muted-foreground max-w-md mx-auto">
-              Your Playbook turns your income goal into today's door math. It needs real conversion
-              data — yours after ~200 doors, or the company's recent baseline. Until then: set your
-              goal above and aim for the starter target — 90 doors a day.
+              Your Playbook turns your income goal into today's {unit === "dials" ? "dial" : "door"}{" "}
+              math. It needs real conversion data — yours after ~200 {w.noun}, or the company's
+              recent baseline. Until then: set your goal above and {w.starter}.
             </p>
           </div>
         )}
@@ -265,6 +287,7 @@ export function PlanPanel({
             daysLeft={math.daysLeft}
             goal={goal}
             horizon={horizon}
+            unit={unit}
           />
         )}
       </div>
@@ -532,6 +555,7 @@ function DailyAction({
   daysLeft,
   goal,
   horizon,
+  unit = "doors",
 }: {
   doorsPerDay: number;
   talksPerDay: number;
@@ -539,7 +563,9 @@ function DailyAction({
   daysLeft: number;
   goal: number;
   horizon: Horizon;
+  unit?: PlanUnit;
 }) {
+  const w = PLAN_WORDS[unit];
   const doors = Math.ceil(doorsPerDay);
   const talks = Math.ceil(talksPerDay);
   const pct = doors > 0 ? Math.min(1, todayDoors / doors) : 0;
@@ -564,9 +590,9 @@ function DailyAction({
 
       <div className="mt-4 font-display text-lg md:text-xl text-foreground/90 leading-relaxed">
         To hit <span className="text-victory text-mega-victory">{formatCurrency(goal)}</span>, your
-        mission today is to knock{" "}
+        mission today is to {w.verb}{" "}
         <span className="text-neon" style={{ textShadow: "0 0 18px var(--neon)" }}>
-          {doors.toLocaleString()} doors
+          {doors.toLocaleString()} {w.noun}
         </span>{" "}
         and talk to{" "}
         <span className="text-accent" style={{ textShadow: "0 0 18px var(--accent)" }}>
@@ -582,7 +608,7 @@ function DailyAction({
           <span className={todayDoors >= doors ? "text-victory" : "text-neon"}>
             {todayDoors.toLocaleString()}
           </span>{" "}
-          of {doors.toLocaleString()} doors
+          of {doors.toLocaleString()} {w.noun}
           {todayDoors >= doors && doors > 0 && " — mission complete, keep stacking"}
         </div>
       </div>

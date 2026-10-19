@@ -10,6 +10,8 @@ import {
   Home,
   KeyRound,
   MessageSquare,
+  PhoneCall,
+  PhoneMissed,
   Sparkles,
   ThumbsDown,
   Undo2,
@@ -65,7 +67,10 @@ export function FunnelStageBars({ stages }: { stages: FunnelStage[] }) {
                 }}
               />
             </div>
-            <div className="w-10 shrink-0 text-right font-display text-sm" style={{ color: s.color }}>
+            <div
+              className="w-10 shrink-0 text-right font-display text-sm"
+              style={{ color: s.color }}
+            >
               {s.value.toLocaleString()}
             </div>
             <div className="w-14 shrink-0 text-right text-[10px] uppercase tracking-widest text-muted-foreground">
@@ -83,17 +88,71 @@ export function FunnelStageBars({ stages }: { stages: FunnelStage[] }) {
 
 // Result cards use the picker's abbreviations so they fit 375px; legacy pin
 // types only render when they actually occur in the window.
-const RESULT_ORDER: Array<{ type: PinType; label: string; icon: React.ReactNode; alwaysShow: boolean }> = [
+const RESULT_ORDER: Array<{
+  type: PinType;
+  label: string;
+  icon: React.ReactNode;
+  alwaysShow: boolean;
+}> = [
   { type: "lead", label: "Lead", icon: <Sparkles className="w-3.5 h-3.5" />, alwaysShow: true },
   { type: "not_home", label: "NH", icon: <Home className="w-3.5 h-3.5" />, alwaysShow: true },
   { type: "go_back", label: "GB", icon: <Undo2 className="w-3.5 h-3.5" />, alwaysShow: true },
   { type: "renter", label: "Renter", icon: <KeyRound className="w-3.5 h-3.5" />, alwaysShow: true },
-  { type: "not_interested", label: "NI", icon: <ThumbsDown className="w-3.5 h-3.5" />, alwaysShow: true },
+  {
+    type: "not_interested",
+    label: "NI",
+    icon: <ThumbsDown className="w-3.5 h-3.5" />,
+    alwaysShow: true,
+  },
   // Appt was retired as a knock result 2026-09-11 (the Lead flow owns it) —
   // legacy appt pins still render, but a permanent zero card earns nothing.
-  { type: "appt", label: "Appt", icon: <CalendarCheck className="w-3.5 h-3.5" />, alwaysShow: false },
-  { type: "talked_to", label: "Talked", icon: <MessageSquare className="w-3.5 h-3.5" />, alwaysShow: false },
+  {
+    type: "appt",
+    label: "Appt",
+    icon: <CalendarCheck className="w-3.5 h-3.5" />,
+    alwaysShow: false,
+  },
+  {
+    type: "talked_to",
+    label: "Talked",
+    icon: <MessageSquare className="w-3.5 h-3.5" />,
+    alwaysShow: false,
+  },
   { type: "knock", label: "Knock", icon: <DoorOpen className="w-3.5 h-3.5" />, alwaysShow: false },
+];
+
+// The same vocabulary heard on the phones (Dial Run / call_logs): dial=knock,
+// no answer=not_home, callback=go_back. renter/appt are door-only and absent
+// from call_logs by CHECK constraint, so they're simply not listed.
+const PHONE_RESULT_ORDER: Array<{
+  type: PinType;
+  label: string;
+  icon: React.ReactNode;
+  alwaysShow: boolean;
+}> = [
+  { type: "lead", label: "Lead", icon: <Sparkles className="w-3.5 h-3.5" />, alwaysShow: true },
+  {
+    type: "talked_to",
+    label: "Talked",
+    icon: <MessageSquare className="w-3.5 h-3.5" />,
+    alwaysShow: true,
+  },
+  {
+    type: "not_home",
+    label: "No Ans",
+    icon: <PhoneMissed className="w-3.5 h-3.5" />,
+    alwaysShow: true,
+  },
+  { type: "go_back", label: "CB", icon: <Undo2 className="w-3.5 h-3.5" />, alwaysShow: true },
+  {
+    type: "not_interested",
+    label: "NI",
+    icon: <ThumbsDown className="w-3.5 h-3.5" />,
+    alwaysShow: true,
+  },
+  // A bare dial (never tagged) counts the dial only — show the card when any
+  // exist so untagged work is visible, not mysterious.
+  { type: "knock", label: "Dial", icon: <PhoneCall className="w-3.5 h-3.5" />, alwaysShow: false },
 ];
 
 export type PinRowLite = { pin_type: PinType; is_remote_drop: boolean | null };
@@ -107,47 +166,64 @@ export function countPins(pins: readonly PinRowLite[]) {
   return { byType, total: counted.length, remote: pins.length - counted.length };
 }
 
-export function DoorResultsGrid({ pins }: { pins: readonly PinRowLite[] }) {
+export function DoorResultsGrid({
+  pins,
+  channel = "door",
+}: {
+  pins: readonly PinRowLite[];
+  /** "phone" renders the Dial Run vocabulary (call_logs rows cast to
+   *  PinRowLite — same enum, phone labels). */
+  channel?: "door" | "phone";
+}) {
   const { byType, total, remote } = countPins(pins);
+  const order = channel === "phone" ? PHONE_RESULT_ORDER : RESULT_ORDER;
   return (
     <>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-        {RESULT_ORDER.filter((r) => r.alwaysShow || (byType[r.type] ?? 0) > 0).map((r) => {
-          const n = byType[r.type] ?? 0;
-          const color = PIN_COLORS[r.type];
-          return (
-            <div
-              key={r.type}
-              className="rounded-lg border p-3 min-w-0"
-              style={{
-                borderColor: `color-mix(in oklab, ${color} 30%, var(--border))`,
-                background: `color-mix(in oklab, ${color} 5%, var(--surface))`,
-              }}
-            >
+        {order
+          .filter((r) => r.alwaysShow || (byType[r.type] ?? 0) > 0)
+          .map((r) => {
+            const n = byType[r.type] ?? 0;
+            const color = PIN_COLORS[r.type];
+            return (
               <div
-                className="flex items-center gap-1.5 text-[9px] font-display uppercase tracking-widest truncate"
-                style={{ color }}
+                key={r.type}
+                className="rounded-lg border p-3 min-w-0"
+                style={{
+                  borderColor: `color-mix(in oklab, ${color} 30%, var(--border))`,
+                  background: `color-mix(in oklab, ${color} 5%, var(--surface))`,
+                }}
               >
-                {r.icon} <span className="truncate">{r.label}</span>
-              </div>
-              <div className="mt-2 flex items-end justify-between gap-2">
-                <span
-                  className="font-display text-2xl leading-none"
-                  style={{ color, textShadow: `0 0 12px color-mix(in srgb, ${color} 55%, transparent)` }}
+                <div
+                  className="flex items-center gap-1.5 text-[9px] font-display uppercase tracking-widest truncate"
+                  style={{ color }}
                 >
-                  {n}
-                </span>
-                <span className="text-[10px] uppercase tracking-widest text-muted-foreground">
-                  {total > 0 ? `${Math.round((n / total) * 100)}%` : "0%"}
-                </span>
+                  {r.icon} <span className="truncate">{r.label}</span>
+                </div>
+                <div className="mt-2 flex items-end justify-between gap-2">
+                  <span
+                    className="font-display text-2xl leading-none"
+                    style={{
+                      color,
+                      textShadow: `0 0 12px color-mix(in srgb, ${color} 55%, transparent)`,
+                    }}
+                  >
+                    {n}
+                  </span>
+                  <span className="text-[10px] uppercase tracking-widest text-muted-foreground">
+                    {total > 0 ? `${Math.round((n / total) * 100)}%` : "0%"}
+                  </span>
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
       </div>
       <div className="mt-3 text-[10px] uppercase tracking-widest text-muted-foreground">
-        Appt pins mark the house — appointments &amp; sales are counted from Monday.
-        {remote > 0 ? ` · ${remote} remote drop(s) excluded` : ""}
+        {channel === "phone"
+          ? "Leads are worked on the Monday board · untagged dials count the dial only."
+          : `Appt pins mark the house — appointments & sales are counted from Monday.${
+              remote > 0 ? ` · ${remote} remote drop(s) excluded` : ""
+            }`}
       </div>
     </>
   );

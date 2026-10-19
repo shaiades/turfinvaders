@@ -10,6 +10,7 @@ import {
   type SplitFunnelInputs,
 } from "@/lib/funnel";
 import { getFunnelBaseline } from "@/lib/dispatch.functions";
+import { useAuth } from "@/hooks/useAuth";
 import { useSixtyDayLogs } from "@/hooks/useDailyLogs";
 import { useSixtyDaySelfMetrics } from "@/hooks/useSelfMetrics";
 
@@ -38,6 +39,12 @@ export function useFunnelRates(userId: string): {
 } {
   const logsQ = useSixtyDayLogs(userId);
   const metricsQ = useSixtyDaySelfMetrics(userId);
+  // Confirmers' doors are DIALS (Dial Run → call_logs → daily_logs), so their
+  // fallback baseline must be the phone room's own funnel, not the door
+  // company average — a door baseline would misprice every dial. Keyed on
+  // experienceRole so an owner's View-As-Confirmer preview prices like one.
+  const { experienceRole } = useAuth();
+  const channel: "door" | "phone" = experienceRole === "confirmer" ? "phone" : "door";
 
   const personal = useMemo(() => {
     // Pair-matched like the company baseline: era confirms count only on
@@ -63,11 +70,11 @@ export function useFunnelRates(userId: string): {
   }, [logsQ.data, metricsQ.data]);
 
   const baselineQ = useQuery({
-    queryKey: ["funnel", "baseline"],
+    queryKey: ["funnel", "baseline", channel],
     // 60-day company aggregate — refetching the server fn on every window
     // focus is pure waste on the field route, which refocuses all shift.
     staleTime: 15 * 60_000,
-    queryFn: async () => getFunnelBaseline(),
+    queryFn: async () => getFunnelBaseline({ data: { channel } }),
   });
 
   const company = baselineQ.data?.split ?? EMPTY_SPLIT;

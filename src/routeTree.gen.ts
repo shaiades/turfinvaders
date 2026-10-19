@@ -26,6 +26,7 @@ import { Route as AuthenticatedLearnRouteImport } from './routes/_authenticated/
 import { Route as AuthenticatedLogRouteImport } from './routes/_authenticated/log'
 import { Route as AuthenticatedMissionRouteImport } from './routes/_authenticated/mission'
 import { Route as AuthenticatedMyTerritoryRouteImport } from './routes/_authenticated/my-territory'
+import { Route as AuthenticatedPhonesRouteImport } from './routes/_authenticated/phones'
 import { Route as AuthenticatedPlaybookRouteImport } from './routes/_authenticated/playbook'
 import { Route as AuthenticatedReportsRouteImport } from './routes/_authenticated/reports'
 import { Route as AuthenticatedUsersRouteImport } from './routes/_authenticated/users'
@@ -134,6 +135,11 @@ const AuthenticatedMyTerritoryRoute =
     path: '/my-territory',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedPhonesRoute = AuthenticatedPhonesRouteImport.update({
+  id: '/phones',
+  path: '/phones',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedPlaybookRoute = AuthenticatedPlaybookRouteImport.update({
   id: '/playbook',
   path: '/playbook',
@@ -251,6 +257,7 @@ export interface FileRoutesByFullPath {
   '/log': typeof AuthenticatedLogRoute
   '/mission': typeof AuthenticatedMissionRoute
   '/my-territory': typeof AuthenticatedMyTerritoryRoute
+  '/phones': typeof AuthenticatedPhonesRoute
   '/playbook': typeof AuthenticatedPlaybookRoute
   '/reports': typeof AuthenticatedReportsRoute
   '/users': typeof AuthenticatedUsersRoute
@@ -287,6 +294,7 @@ export interface FileRoutesByTo {
   '/log': typeof AuthenticatedLogRoute
   '/mission': typeof AuthenticatedMissionRoute
   '/my-territory': typeof AuthenticatedMyTerritoryRoute
+  '/phones': typeof AuthenticatedPhonesRoute
   '/playbook': typeof AuthenticatedPlaybookRoute
   '/reports': typeof AuthenticatedReportsRoute
   '/users': typeof AuthenticatedUsersRoute
@@ -325,6 +333,7 @@ export interface FileRoutesById {
   '/_authenticated/log': typeof AuthenticatedLogRoute
   '/_authenticated/mission': typeof AuthenticatedMissionRoute
   '/_authenticated/my-territory': typeof AuthenticatedMyTerritoryRoute
+  '/_authenticated/phones': typeof AuthenticatedPhonesRoute
   '/_authenticated/playbook': typeof AuthenticatedPlaybookRoute
   '/_authenticated/reports': typeof AuthenticatedReportsRoute
   '/_authenticated/users': typeof AuthenticatedUsersRoute
@@ -363,6 +372,7 @@ export interface FileRouteTypes {
     | '/log'
     | '/mission'
     | '/my-territory'
+    | '/phones'
     | '/playbook'
     | '/reports'
     | '/users'
@@ -399,6 +409,7 @@ export interface FileRouteTypes {
     | '/log'
     | '/mission'
     | '/my-territory'
+    | '/phones'
     | '/playbook'
     | '/reports'
     | '/users'
@@ -436,6 +447,7 @@ export interface FileRouteTypes {
     | '/_authenticated/log'
     | '/_authenticated/mission'
     | '/_authenticated/my-territory'
+    | '/_authenticated/phones'
     | '/_authenticated/playbook'
     | '/_authenticated/reports'
     | '/_authenticated/users'
@@ -589,6 +601,13 @@ declare module '@tanstack/react-router' {
       path: '/my-territory'
       fullPath: '/my-territory'
       preLoaderRoute: typeof AuthenticatedMyTerritoryRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/phones': {
+      id: '/_authenticated/phones'
+      path: '/phones'
+      fullPath: '/phones'
+      preLoaderRoute: typeof AuthenticatedPhonesRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/playbook': {
@@ -749,6 +768,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedLogRoute: typeof AuthenticatedLogRoute
   AuthenticatedMissionRoute: typeof AuthenticatedMissionRoute
   AuthenticatedMyTerritoryRoute: typeof AuthenticatedMyTerritoryRoute
+  AuthenticatedPhonesRoute: typeof AuthenticatedPhonesRoute
   AuthenticatedPlaybookRoute: typeof AuthenticatedPlaybookRoute
   AuthenticatedReportsRoute: typeof AuthenticatedReportsRoute
   AuthenticatedUsersRoute: typeof AuthenticatedUsersRoute
@@ -775,6 +795,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedLogRoute: AuthenticatedLogRoute,
   AuthenticatedMissionRoute: AuthenticatedMissionRoute,
   AuthenticatedMyTerritoryRoute: AuthenticatedMyTerritoryRoute,
+  AuthenticatedPhonesRoute: AuthenticatedPhonesRoute,
   AuthenticatedPlaybookRoute: AuthenticatedPlaybookRoute,
   AuthenticatedReportsRoute: AuthenticatedReportsRoute,
   AuthenticatedUsersRoute: AuthenticatedUsersRoute,

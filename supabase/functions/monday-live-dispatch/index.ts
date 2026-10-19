@@ -289,6 +289,16 @@ serve(async (req) => {
         return new Response('Duplicate delivery', { status: 200, headers: corsHeaders })
       }
     }
+    // ── Confirmer dial detection (owner 2026-10-19) ── a "Log Call" tap on
+    // Monday counts as a dial, so the phone room never has to tally twice.
+    // Keyed on the changed column's TITLE (carried in the event payload — no
+    // API spend): the owner's button/automation writes a column named one of
+    // these, on whatever board the confirmation team works.
+    const columnTitleFromEvent = String(event?.columnTitle ?? '')
+    const DIAL_COLUMN_TITLES = new Set(['log call', 'log a call', 'call log', 'calls', 'dials'])
+    const isDialTitleEvent =
+      !isCreateEvent && !!changedColumnId && DIAL_COLUMN_TITLES.has(normalizeLoose(columnTitleFromEvent))
+
     const statusFromEvent: string | undefined =
       event?.value?.label?.text ||
       event?.value?.label ||
@@ -355,7 +365,7 @@ serve(async (req) => {
       isIncomingLeadsBoard && !isCreateEvent && changedColumnId === LEAD_STATUS_COL_ID
     const isLeadDateEvent =
       isIncomingLeadsBoard && !isCreateEvent && changedColumnId === LEAD_DATE_COL_ID
-    if (isIncomingLeadsBoard && !isCreateEvent && !isLeadStatusEvent && !isLeadDateEvent) {
+    if (isIncomingLeadsBoard && !isCreateEvent && !isLeadStatusEvent && !isLeadDateEvent && !isDialTitleEvent) {
       await supabaseAdmin.from('webhook_logs').insert({
         step: 'Ignored_Leads_Board_Other_Column',
         data: { pulseId: String(pulseId), boardId, changedColumnId: changedColumnId ?? null },
@@ -384,6 +394,93 @@ serve(async (req) => {
       return new Response('No token', { status: 200, headers: corsHeaders })
     }
     mondayToken = String(mondayToken)
+
+    // ── Confirmer dial credit (owner 2026-10-19: "count log call as a dial")
+    // The person who tapped Log Call IS the dialer, so attribution comes from
+    // the event's userId (one cheap users() query — the item is never
+    // fetched). Only confirmer-role accounts credit: a manager poking the
+    // column counts nothing. The insert lands in call_logs, whose trigger
+    // bumps the same daily_logs counters as a Dial Run tap — one ledger.
+    // Kill switch: system_settings.confirmer_dial_credit = false.
+    if (isDialTitleEvent) {
+      const pid = String(pulseId)
+      if ((settingsRow as any)?.confirmer_dial_credit === false) {
+        await supabaseAdmin.from('webhook_logs').insert({
+          step: 'Confirmer_Dial_Disabled',
+          data: { pulseId: pid, columnTitle: columnTitleFromEvent },
+        })
+        return new Response('Dial credit disabled', { status: 200, headers: corsHeaders })
+      }
+      const mondayUserId = String(event?.userId ?? '')
+      let dialerName = ''
+      if (/^\d+$/.test(mondayUserId)) {
+        const uRes = await mondayQuery(
+          mondayToken,
+          `query { users (ids: [${mondayUserId}]) { id name } }`,
+        )
+        dialerName = String((uRes.data?.users as Array<{ name?: string }> | undefined)?.[0]?.name ?? '').trim()
+      }
+      let credited: string | null = null
+      if (dialerName) {
+        const { data: confRoles } = await supabaseAdmin
+          .from('user_roles')
+          .select('user_id')
+          .eq('role', 'confirmer')
+        const confIds = (confRoles ?? []).map((r: { user_id: string }) => r.user_id)
+        if (confIds.length) {
+          const { data: confProfs } = await supabaseAdmin
+            .from('profiles')
+            .select('id, display_name')
+            .in('id', confIds)
+          const want = foldName(dialerName)
+          credited =
+            (confProfs ?? []).find(
+              (p: { id: string; display_name: string | null }) =>
+                foldName(p.display_name ?? '') === want,
+            )?.id ?? null
+        }
+      }
+      if (credited) {
+        // One bare dial ('knock'): +1 doors_knocked via the call trigger.
+        // Outcomes stay in the app or on the board — this is just the dial.
+        const insRes = await supabaseAdmin
+          .from('call_logs')
+          .insert({ canvasser_id: credited, disposition: 'knock' })
+        if (insRes.error) {
+          await supabaseAdmin.from('webhook_logs').insert({
+            step: 'Confirmer_Dial_Error',
+            data: { pulseId: pid, error: insRes.error.message },
+          })
+          // Transient (or the call_logs migration isn't applied yet): 502 so
+          // Monday's retry loop redelivers instead of dropping the dial.
+          return new Response('Dial credit failed', { status: 502, headers: corsHeaders })
+        }
+        await supabaseAdmin.from('webhook_logs').insert({
+          step: 'Confirmer_Dial_Credited',
+          data: { pulseId: pid, dialer: dialerName, canvasserId: credited, columnTitle: columnTitleFromEvent },
+        })
+      } else {
+        await supabaseAdmin.from('webhook_logs').insert({
+          step: 'Confirmer_Dial_Skipped',
+          data: {
+            pulseId: pid,
+            mondayUserId: mondayUserId || null,
+            dialer: dialerName || null,
+            note: 'clicker is not a confirmer-role account',
+          },
+        })
+      }
+      if (triggerUuid) {
+        await supabaseAdmin.from('webhook_logs').insert({
+          step: 'Event_Processed',
+          data: { triggerUuid, pulseId: pid },
+        })
+      }
+      return new Response(credited ? 'Dial credited' : 'Dial skipped', {
+        status: 200,
+        headers: corsHeaders,
+      })
+    }
 
     // Step 3b: Query Monday GraphQL for the item. FormulaValue.display_value
     // covers formula-typed columns (e.g. a computed Sale Price), whose plain

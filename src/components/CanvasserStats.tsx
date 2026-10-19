@@ -28,10 +28,14 @@ export function CanvasserStats({
   stats,
   userId,
   onEditGoal,
+  channel = "door",
 }: {
   stats: CanvasserStatsData;
   userId: string;
   onEditGoal: () => void;
+  /** "phone" shows the confirmer's call results (call_logs) in place of the
+   *  field_pins panel — which would read permanently empty for them. */
+  channel?: "door" | "phone";
 }) {
   const { week } = stats;
   return (
@@ -40,7 +44,11 @@ export function CanvasserStats({
           read-only here; captains/office write from your profile page. */}
       <CoachingPanel canvasserId={userId} canWrite={false} />
       <ConversionFunnelPanel stats={stats} onOpenPlan={onEditGoal} />
-      <DoorResultsPanel userId={userId} />
+      {channel === "phone" ? (
+        <PhoneResultsPanel userId={userId} />
+      ) : (
+        <DoorResultsPanel userId={userId} />
+      )}
       <BigStat
         label="Leads Per Day"
         value={stats.lpd.toFixed(1)}
@@ -201,6 +209,56 @@ function ConversionFunnelPanel({
             </Button>
           </div>
         </>
+      )}
+    </ArcadePanel>
+  );
+}
+
+/** The confirmer's twin of DoorResultsPanel: this week's call_logs rendered
+ *  through the same grid (dispositions share the pin_type enum). */
+function PhoneResultsPanel({ userId }: { userId: string }) {
+  const weekStart = laWeekStartISO();
+  const callsQuery = useQuery({
+    enabled: !!userId,
+    queryKey: ["my_calls_week", userId, weekStart],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("call_logs")
+        .select("disposition")
+        .eq("canvasser_id", userId)
+        .gte("log_date", weekStart)
+        .lte("log_date", addDaysISO(weekStart, 5));
+      if (error) throw error;
+      return (data ?? []).map((c) => ({
+        pin_type: c.disposition as PinType,
+        is_remote_drop: false,
+      }));
+    },
+  });
+
+  const callRows = callsQuery.data ?? [];
+  const { total } = countPins(callRows);
+
+  return (
+    <ArcadePanel
+      title="On the Phone · This Week"
+      action={
+        <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+          {total.toLocaleString()} dials
+        </span>
+      }
+    >
+      {callsQuery.isPending ? (
+        <div className="text-sm text-muted-foreground">Loading this week's calls…</div>
+      ) : callsQuery.isError ? (
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <span className="text-sm text-muted-foreground">Couldn't load this week's calls.</span>
+          <Button variant="outline" onClick={() => callsQuery.refetch()}>
+            Retry
+          </Button>
+        </div>
+      ) : (
+        <DoorResultsGrid pins={callRows} channel="phone" />
       )}
     </ArcadePanel>
   );
