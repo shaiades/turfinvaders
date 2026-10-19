@@ -7,7 +7,7 @@ import { rewardToast } from "@/lib/reward-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useOpenShift, useTodayShifts } from "@/hooks/useTimeClockSelf";
 import { invalidatePunchCaches } from "@/lib/time-clock-keys";
-import { REST_BREAK_REQUIRED_AFTER_HOURS } from "@/lib/pay";
+import { REST_BREAK_MIN_MINUTES, restBreaksRequired } from "@/lib/pay";
 
 import { ArcadePanel } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
@@ -48,6 +48,13 @@ type MealRow = {
   meal_end: string | null;
 };
 
+type BreakRow = {
+  id: string;
+  time_entry_id: string;
+  break_start: string;
+  break_end: string | null;
+};
+
 export function TimeClock({ userId }: { userId: string }) {
   const qc = useQueryClient();
   const [now, setNow] = useState(() => Date.now());
@@ -86,6 +93,28 @@ export function TimeClock({ userId }: { userId: string }) {
   });
 
   const today = isoDateLocal(new Date());
+
+  // Today's punched rest breaks (every shift of the day): drives the Take 10
+  // button, the breaks-today line, and skipping the clock-out question when
+  // the punches already satisfy the day's quota.
+  const { data: todayShiftsForBreaks } = useTodayShifts(userId);
+  const todayEntryIds = useMemo(
+    () => (todayShiftsForBreaks ?? []).map((e) => e.id),
+    [todayShiftsForBreaks],
+  );
+  const { data: todayBreaks } = useQuery({
+    enabled: todayEntryIds.length > 0,
+    queryKey: ["time-clock-breaks", userId, today, todayEntryIds.length],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("rest_breaks")
+        .select("id, time_entry_id, break_start, break_end")
+        .in("time_entry_id", todayEntryIds)
+        .order("break_start", { ascending: true });
+      if (error) return [];
+      return (data ?? []) as BreakRow[];
+    },
+  });
 
   // Today's early/late pass, if a manager granted one: it silences the
   // early-clock-in review flag server-side and extends the auto-close
@@ -272,10 +301,65 @@ export function TimeClock({ userId }: { userId: string }) {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  // Paid 10-minute rest breaks: punched like lunch, but they deduct NOTHING
+  // — the timer keeps running and the time pays. The punch is the record.
+  const openBreak = (todayBreaks ?? []).find((b) => !b.break_end) ?? null;
+  const punchedBreaksToday = (todayBreaks ?? []).filter((b) => {
+    const end = b.break_end ? new Date(b.break_end).getTime() : now;
+    return end - new Date(b.break_start).getTime() >= REST_BREAK_MIN_MINUTES * 60_000;
+  }).length;
+  const breakMinutesToday = Math.round(
+    (todayBreaks ?? []).reduce((s, b) => {
+      const end = b.break_end ? new Date(b.break_end).getTime() : now;
+      return s + Math.max(0, end - new Date(b.break_start).getTime());
+    }, 0) / 60_000,
+  );
+
+  const breakStart = useMutation({
+    mutationFn: async () => {
+      if (!openEntry) throw new Error("Clock in before taking a break");
+      if (openMeal) throw new Error("End your lunch first");
+      const { error } = await supabase.from("rest_breaks").insert({
+        time_entry_id: openEntry.id,
+        user_id: userId,
+        break_start: new Date().toISOString(),
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Break started — you're still on the clock and paid");
+      invalidatePunchCaches(qc);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const breakEnd = useMutation({
+    mutationFn: async () => {
+      if (!openBreak) throw new Error("No break in progress");
+      const { error } = await supabase
+        .from("rest_breaks")
+        .update({ break_end: new Date().toISOString() })
+        .eq("id", openBreak.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Break done — back at it");
+      invalidatePunchCaches(qc);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const clockOut = useMutation({
     mutationFn: async ({ meal, rest }: { meal: MealAttest; rest: RestAttest }) => {
       if (!openEntry) throw new Error("No open shift to clock out of");
       if (openMeal) throw new Error("End your lunch before clocking out");
+      // An open break just ends at the door — it's paid time either way.
+      if (openBreak) {
+        await supabase
+          .from("rest_breaks")
+          .update({ break_end: new Date().toISOString() })
+          .eq("id", openBreak.id);
+      }
       const patch: {
         clock_out: string;
         meal_status?: "missed" | "unrecorded";
@@ -340,10 +424,12 @@ export function TimeClock({ userId }: { userId: string }) {
   const isSunday = new Date(`${laTodayISO()}T12:00:00Z`).getUTCDay() === 0;
 
   // Clock Out attestations: a day past the meal threshold with no recorded
-  // 30-min meal answers the lunch question; a day of 3.5+ hours answers the
-  // rest-break question (CA Wage Order 4 — the server stores both).
+  // 30-min meal answers the lunch question. The rest question only appears
+  // when the day's PUNCHED breaks fall short of its quota — enough punches
+  // and the record speaks for itself (compute v9 resolves 'ok' by record).
   const needsMealAttestation = dayRawHours > MEAL_REQUIRED_AFTER_HOURS && !hasCompliantMeal;
-  const needsRestAttestation = dayRawHours >= REST_BREAK_REQUIRED_AFTER_HOURS;
+  const breaksRequiredToday = restBreaksRequired(dayRawHours);
+  const needsRestAttestation = breaksRequiredToday > 0 && punchedBreaksToday < breaksRequiredToday;
   const handleClockOutTap = () => {
     if (needsMealAttestation) setAttesting({});
     else if (needsRestAttestation) setAttesting({ meal: null });
@@ -436,12 +522,20 @@ export function TimeClock({ userId }: { userId: string }) {
             className={`w-10 h-10 rounded-full flex items-center justify-center border ${
               openMeal
                 ? "bg-warning/10 border-warning text-warning animate-pulse"
-                : isClockedIn
-                  ? "bg-victory/10 border-victory text-victory animate-pulse"
-                  : "bg-surface-elevated border-border text-muted-foreground"
+                : openBreak
+                  ? "bg-neon/10 border-neon text-neon animate-pulse"
+                  : isClockedIn
+                    ? "bg-victory/10 border-victory text-victory animate-pulse"
+                    : "bg-surface-elevated border-border text-muted-foreground"
             }`}
           >
-            {openMeal ? <Utensils className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
+            {openMeal ? (
+              <Utensils className="w-4 h-4" />
+            ) : openBreak ? (
+              <Coffee className="w-4 h-4" />
+            ) : (
+              <Clock className="w-4 h-4" />
+            )}
           </div>
           <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
             {openError
@@ -450,9 +544,11 @@ export function TimeClock({ userId }: { userId: string }) {
                 ? "Loading…"
                 : openMeal
                   ? "On lunch"
-                  : isClockedIn
-                    ? "On the clock"
-                    : "Off the clock"}
+                  : openBreak
+                    ? "On break · paid"
+                    : isClockedIn
+                      ? "On the clock"
+                      : "Off the clock"}
           </div>
         </div>
 
@@ -477,8 +573,13 @@ export function TimeClock({ userId }: { userId: string }) {
             </span>
           ) : openMeal ? (
             <span className="text-warning">Lunch running · {fmtDuration(lunchMs)}</span>
+          ) : openBreak ? (
+            <span className="text-neon">
+              Break running · {fmtDuration(now - new Date(openBreak.break_start).getTime())} — still
+              paid
+            </span>
           ) : (
-            <>Punch your lunch when you take it — only punched lunches are deducted</>
+            <>Punch your lunch and your 10s — breaks are paid, lunches are deducted</>
           )}
         </div>
 
@@ -530,8 +631,9 @@ export function TimeClock({ userId }: { userId: string }) {
           ) : (
             <div className="w-full max-w-md rounded-lg border border-warning/50 bg-warning/10 p-4 space-y-3">
               <div className="text-sm text-foreground text-center">
-                Did you get your paid 10-minute rest breaks today? (One per 4 hours worked — they're
-                on the clock.)
+                Today owes {breaksRequiredToday} paid 10-minute break
+                {breaksRequiredToday === 1 ? "" : "s"} and {punchedBreaksToday || "none"}{" "}
+                {punchedBreaksToday === 1 ? "was" : "were"} punched. Did you get your breaks?
               </div>
               <button
                 onClick={() => answerRest("ok")}
@@ -578,12 +680,37 @@ export function TimeClock({ userId }: { userId: string }) {
                 <Utensils className="w-4 h-4" />
                 End Lunch
               </button>
+            ) : openBreak ? (
+              <button
+                onClick={() => breakEnd.mutate()}
+                disabled={breakEnd.isPending}
+                className="arcade-btn-3d px-8 py-4 font-display text-sm uppercase tracking-widest flex items-center justify-center gap-2"
+                style={{
+                  ["--btn-color" as string]: "var(--neon)",
+                  ["--btn-fg" as string]: "#041012",
+                }}
+              >
+                <Coffee className="w-4 h-4" />
+                End Break
+              </button>
             ) : (
               <>
                 <button
+                  onClick={() => breakStart.mutate()}
+                  disabled={breakStart.isPending}
+                  className="arcade-btn-3d px-6 py-4 font-display text-sm uppercase tracking-widest flex items-center justify-center gap-2"
+                  style={{
+                    ["--btn-color" as string]: "var(--neon)",
+                    ["--btn-fg" as string]: "#041012",
+                  }}
+                >
+                  <Coffee className="w-4 h-4" />
+                  Take 10
+                </button>
+                <button
                   onClick={() => lunchStart.mutate()}
                   disabled={lunchStart.isPending}
-                  className="arcade-btn-3d px-8 py-4 font-display text-sm uppercase tracking-widest flex items-center justify-center gap-2"
+                  className="arcade-btn-3d px-6 py-4 font-display text-sm uppercase tracking-widest flex items-center justify-center gap-2"
                   style={{
                     ["--btn-color" as string]: "var(--warning)",
                     ["--btn-fg" as string]: "#1a1205",
@@ -595,7 +722,7 @@ export function TimeClock({ userId }: { userId: string }) {
                 <button
                   onClick={handleClockOutTap}
                   disabled={clockOut.isPending}
-                  className="arcade-btn-3d px-8 py-4 font-display text-sm uppercase tracking-widest flex items-center justify-center gap-2"
+                  className="arcade-btn-3d px-6 py-4 font-display text-sm uppercase tracking-widest flex items-center justify-center gap-2"
                   style={{
                     ["--btn-color" as string]: "var(--destructive)",
                     ["--btn-fg" as string]: "#fff",
@@ -622,9 +749,19 @@ export function TimeClock({ userId }: { userId: string }) {
           </button>
         )}
 
-        {isClockedIn && !openMeal && recordedMealMinutes > 0 && (
+        {isClockedIn && !openMeal && (recordedMealMinutes > 0 || breakMinutesToday > 0) && (
           <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
-            Lunch punched today: {Math.round(recordedMealMinutes)} min
+            {recordedMealMinutes > 0 && (
+              <>Lunch punched today: {Math.round(recordedMealMinutes)} min</>
+            )}
+            {recordedMealMinutes > 0 && breakMinutesToday > 0 && <span className="mx-1.5">·</span>}
+            {breakMinutesToday > 0 && (
+              <>
+                Breaks: {punchedBreaksToday}
+                {breaksRequiredToday > 0 && <>/{breaksRequiredToday}</>} · {breakMinutesToday} min
+                (paid)
+              </>
+            )}
           </div>
         )}
       </div>

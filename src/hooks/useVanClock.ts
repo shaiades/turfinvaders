@@ -8,6 +8,7 @@ export type MemberClockState = {
   openEntryId: string | null;
   clockIn: string | null;
   onLunchSince: string | null;
+  onBreakSince: string | null;
   /** Billable hours already closed today. */
   todayHours: number;
   /** Last clock-out today (null while open or not in yet). */
@@ -57,25 +58,35 @@ export function useVanClockStatus(teamId: string, memberIds: string[]) {
       if (todayRes.error) throw todayRes.error;
       const open = openRes.data ?? [];
       let openMeals: Array<{ time_entry_id: string; meal_start: string }> = [];
+      let openBreaks: Array<{ time_entry_id: string; break_start: string }> = [];
       if (open.length > 0) {
-        const { data, error } = await supabase
-          .from("meal_periods")
-          .select("time_entry_id, meal_start")
-          .in(
-            "time_entry_id",
-            open.map((o) => o.id),
-          )
-          .is("meal_end", null);
-        if (error) throw error;
-        openMeals = data ?? [];
+        const ids = open.map((o) => o.id);
+        const [mealsRes, breaksRes] = await Promise.all([
+          supabase
+            .from("meal_periods")
+            .select("time_entry_id, meal_start")
+            .in("time_entry_id", ids)
+            .is("meal_end", null),
+          supabase
+            .from("rest_breaks")
+            .select("time_entry_id, break_start")
+            .in("time_entry_id", ids)
+            .is("break_end", null),
+        ]);
+        if (mealsRes.error) throw mealsRes.error;
+        openMeals = mealsRes.data ?? [];
+        // Pre-deploy (table not shipped) reads as "nobody on break".
+        openBreaks = breaksRes.error ? [] : (breaksRes.data ?? []);
       }
       const mealByEntry = new Map(openMeals.map((m) => [m.time_entry_id, m.meal_start]));
+      const breakByEntry = new Map(openBreaks.map((b) => [b.time_entry_id, b.break_start]));
       const byUser = new Map<string, MemberClockState>();
       for (const id of memberIds) {
         byUser.set(id, {
           openEntryId: null,
           clockIn: null,
           onLunchSince: null,
+          onBreakSince: null,
           todayHours: 0,
           lastOut: null,
         });
@@ -86,6 +97,7 @@ export function useVanClockStatus(teamId: string, memberIds: string[]) {
         s.openEntryId = o.id;
         s.clockIn = o.clock_in;
         s.onLunchSince = mealByEntry.get(o.id) ?? null;
+        s.onBreakSince = breakByEntry.get(o.id) ?? null;
       }
       for (const t of todayRes.data ?? []) {
         const s = byUser.get(t.user_id);
@@ -98,16 +110,27 @@ export function useVanClockStatus(teamId: string, memberIds: string[]) {
   });
 }
 
-export type CrewAction = "clock_in" | "clock_out" | "start_lunch" | "end_lunch";
+export type CrewAction =
+  "clock_in" | "clock_out" | "start_lunch" | "end_lunch" | "start_break" | "end_break";
 
-const CREW_RPC: Record<CrewAction, "crew_clock_in" | "crew_clock_out" | "crew_start_lunch" | "crew_end_lunch"> = {
+const CREW_RPC: Record<
+  CrewAction,
+  | "crew_clock_in"
+  | "crew_clock_out"
+  | "crew_start_lunch"
+  | "crew_end_lunch"
+  | "crew_start_break"
+  | "crew_end_break"
+> = {
   clock_in: "crew_clock_in",
   clock_out: "crew_clock_out",
   start_lunch: "crew_start_lunch",
   end_lunch: "crew_end_lunch",
+  start_break: "crew_start_break",
+  end_break: "crew_end_break",
 };
 
-/** One mutation for all four bulk punches. The RPCs are "now"-only and
+/** One mutation for all six bulk punches. The RPCs are "now"-only and
  *  skip-and-report per member; authorization errors are the only throws. */
 export function useCrewAction() {
   const qc = useQueryClient();

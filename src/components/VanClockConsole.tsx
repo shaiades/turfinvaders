@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Clock, Play, Square, Utensils } from "lucide-react";
+import { Clock, Coffee, Play, Square, Utensils } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -36,6 +36,8 @@ const ACTION_LABEL: Record<CrewAction, string> = {
   clock_out: "Clock Out Van",
   start_lunch: "Start Lunch",
   end_lunch: "End Lunch",
+  start_break: "Start 10 Break",
+  end_break: "End Break",
 };
 
 const SKIP_LABEL: Record<string, string> = {
@@ -45,6 +47,8 @@ const SKIP_LABEL: Record<string, string> = {
   no_open_shift: "not clocked in",
   already_on_lunch: "already on lunch",
   not_on_lunch: "not on lunch",
+  already_on_break: "already on break",
+  not_on_break: "not on break",
 };
 
 /** Members a bulk action can actually move — drives button enablement. */
@@ -56,9 +60,13 @@ function eligible(action: CrewAction, s: MemberClockState | undefined): boolean 
     case "clock_out":
       return !!s.openEntryId;
     case "start_lunch":
-      return !!s.openEntryId && !s.onLunchSince;
+      return !!s.openEntryId && !s.onLunchSince && !s.onBreakSince;
     case "end_lunch":
       return !!s.onLunchSince;
+    case "start_break":
+      return !!s.openEntryId && !s.onLunchSince && !s.onBreakSince;
+    case "end_break":
+      return !!s.onBreakSince;
   }
 }
 
@@ -86,7 +94,7 @@ export function VanClockConsole({ teamId }: { teamId: string }) {
   const status = useVanClockStatus(teamId, memberIds);
   useRealtimeInvalidate({
     channel: `van-clock-${teamId}`,
-    tables: ["time_entries", "meal_periods"],
+    tables: ["time_entries", "meal_periods", "rest_breaks"],
     invalidateKeys: [["van-clock"]],
   });
 
@@ -146,7 +154,8 @@ export function VanClockConsole({ teamId }: { teamId: string }) {
                 : undefined,
           });
         },
-        onError: (e: Error) => toast.error(`${ACTION_LABEL[action]} failed`, { description: e.message }),
+        onError: (e: Error) =>
+          toast.error(`${ACTION_LABEL[action]} failed`, { description: e.message }),
       },
     );
     setConfirming(null);
@@ -221,7 +230,22 @@ export function VanClockConsole({ teamId }: { teamId: string }) {
               ) : s?.onLunchSince ? (
                 <span className="inline-flex items-center gap-1 text-[9px] font-display uppercase tracking-widest text-warning tabular-nums">
                   <Utensils className="w-3 h-3" />
-                  Lunch · {Math.max(0, Math.round((Date.now() - new Date(s.onLunchSince).getTime()) / 60000))}m
+                  Lunch ·{" "}
+                  {Math.max(
+                    0,
+                    Math.round((Date.now() - new Date(s.onLunchSince).getTime()) / 60000),
+                  )}
+                  m
+                </span>
+              ) : s?.onBreakSince ? (
+                <span className="inline-flex items-center gap-1 text-[9px] font-display uppercase tracking-widest text-neon tabular-nums">
+                  <Coffee className="w-3 h-3" />
+                  Break ·{" "}
+                  {Math.max(
+                    0,
+                    Math.round((Date.now() - new Date(s.onBreakSince).getTime()) / 60000),
+                  )}
+                  m
                 </span>
               ) : s?.openEntryId ? (
                 <span className="inline-flex items-center gap-1 text-[9px] font-display uppercase tracking-widest text-victory tabular-nums">
@@ -258,6 +282,8 @@ export function VanClockConsole({ teamId }: { teamId: string }) {
         {(
           [
             ["clock_in", "var(--victory)", "#06110a", Play],
+            ["start_break", "var(--neon)", "#041012", Coffee],
+            ["end_break", "var(--neon)", "#041012", Coffee],
             ["start_lunch", "var(--warning)", "#1a1205", Utensils],
             ["end_lunch", "var(--warning)", "#1a1205", Clock],
             ["clock_out", "var(--destructive)", "#fff", Square],
@@ -325,6 +351,10 @@ export function VanClockConsole({ teamId }: { teamId: string }) {
                 "Punches everyone below out for lunch, right now. Lunch is unpaid and off the clock — 30+ minutes before the 5th hour keeps the day compliant."}
               {confirming === "end_lunch" &&
                 "Ends lunch for everyone below — they're back on the clock as of right now."}
+              {confirming === "start_break" &&
+                "Starts a paid 10-minute rest break for everyone below, right now. They stay on the clock — the punch is the record that the break was provided."}
+              {confirming === "end_break" &&
+                "Ends the rest break for everyone below. Breaks of 10+ minutes count toward the day's required breaks."}
               {confirming === "clock_out" &&
                 "Ends the shift for everyone below as of right now. Anyone still on lunch has it ended at the same moment. Each person confirms their own lunch and rest breaks next time they open the app — days over 5 hours with no 30-minute lunch get flagged for review."}{" "}
               Their phones update within a minute.

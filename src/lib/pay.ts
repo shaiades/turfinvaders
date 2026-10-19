@@ -40,6 +40,18 @@ export const SECOND_MEAL_AFTER_HOURS = 10;
  *  of each per day). Mirrors compute v8's rest_break_status rule. */
 export const REST_BREAK_REQUIRED_AFTER_HOURS = 3.5;
 
+/** Breaks owed for a day's on-the-clock hours — the DLSE chart ("one per 4
+ *  hours or major fraction"): <3.5h → 0, 3.5–6h → 1, >6–10h → 2, >10–14h →
+ *  3, … Mirrors compute v9's _breaks_required — change the two together. */
+export function restBreaksRequired(dayHours: number): number {
+  if (dayHours < REST_BREAK_REQUIRED_AFTER_HOURS) return 0;
+  const whole = Math.floor(dayHours / 4);
+  return Math.max(1, whole + (dayHours - whole * 4 > 2 ? 1 : 0));
+}
+
+/** A punched rest break counts toward the quota at 10+ minutes. */
+export const REST_BREAK_MIN_MINUTES = 10;
+
 export const COMMISSION_BASE = 0.01;
 export const COMMISSION_TOP = 0.02;
 
