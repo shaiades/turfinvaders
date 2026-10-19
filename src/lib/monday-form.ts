@@ -84,11 +84,18 @@ export type PendingLeadSnapshot = {
   target: PendingLeadTarget;
   address: string | null;
   at: number;
+  /** Auto-restores already spent on this snapshot. A device that keeps
+   *  crashing on the embed must not reopen into the crash forever (field
+   *  report 2026-10-19, round 2) — the restore effect stops after
+   *  MAX_PENDING_LEAD_RESTORES and tells the rep instead. */
+  restores?: number;
 };
 
-export function savePendingLead(target: PendingLeadTarget, address: string | null) {
+export const MAX_PENDING_LEAD_RESTORES = 2;
+
+export function savePendingLead(target: PendingLeadTarget, address: string | null, restores = 0) {
   try {
-    const snap: PendingLeadSnapshot = { target, address, at: Date.now() };
+    const snap: PendingLeadSnapshot = { target, address, at: Date.now(), restores };
     localStorage.setItem(PENDING_LEAD_STORAGE_KEY, JSON.stringify(snap));
   } catch {
     /* storage unavailable — recovery is best-effort */
