@@ -133,7 +133,7 @@ export function DialerRun() {
             </div>
           )}
 
-          <div className="pulse-glow-wrapper relative w-full">
+          <div data-tour="phones-dial" className="pulse-glow-wrapper relative w-full">
             <button
               type="button"
               onClick={onDial}
@@ -172,7 +172,7 @@ export function DialerRun() {
           </div>
 
           {/* Outcome chips — the door picker's phone vocabulary */}
-          <div className="mt-3 grid grid-cols-5 gap-1.5">
+          <div data-tour="phones-chips" className="mt-3 grid grid-cols-5 gap-1.5">
             {CALL_RESULTS.map((r) => (
               <button
                 key={r.type}
@@ -239,43 +239,47 @@ export function DialerRun() {
             </p>
           </ArcadePanel>
 
-          <PiggyBankHUD
-            variant="card"
-            unit="dials"
-            dollars={piggy.dollars}
-            perKnock={piggy.perDial}
-            knocks={piggy.dials}
-            paceKnocks={piggy.paceDials}
-            source={piggy.source}
-            celebrate={celebrate}
-          />
-
-          <ArcadePanel title="Goal Engine" status={piggy.paceDials === 0 ? "good" : "warn"}>
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="text-xs font-semibold uppercase text-muted-foreground">
-                Week goal
-              </span>
-              <span className="font-display text-lg tabular-nums text-victory">
-                {formatCurrency(Math.round(piggy.weekEarned))}
-                <span className="text-muted-foreground">
-                  {" "}
-                  / {formatCurrency(Math.round(piggy.weeklyGoal))}
-                </span>
-              </span>
-            </div>
-            <NeonBar
-              pct={piggy.weeklyGoal > 0 ? piggy.weekEarned / piggy.weeklyGoal : 0}
-              accent="var(--victory)"
-              sheen
+          <div data-tour="phones-bank">
+            <PiggyBankHUD
+              variant="card"
+              unit="dials"
+              dollars={piggy.dollars}
+              perKnock={piggy.perDial}
+              knocks={piggy.dials}
+              paceKnocks={piggy.paceDials}
+              source={piggy.source}
+              celebrate={celebrate}
             />
-            <p className="mt-3 text-xs text-muted-foreground">
-              {piggy.paceDials === null
-                ? "Set your income goal in Mission → Plan and the engine back-solves it into dials per day."
-                : piggy.paceDials === 0
-                  ? "Week goal covered — every dial from here is gravy. 🏆"
-                  : `≈${piggy.paceDials.toLocaleString()} more dials this week at your current per-dial value closes the gap.`}
-            </p>
-          </ArcadePanel>
+          </div>
+
+          <div data-tour="phones-goal">
+            <ArcadePanel title="Goal Engine" status={piggy.paceDials === 0 ? "good" : "warn"}>
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-xs font-semibold uppercase text-muted-foreground">
+                  Week goal
+                </span>
+                <span className="font-display text-lg tabular-nums text-victory">
+                  {formatCurrency(Math.round(piggy.weekEarned))}
+                  <span className="text-muted-foreground">
+                    {" "}
+                    / {formatCurrency(Math.round(piggy.weeklyGoal))}
+                  </span>
+                </span>
+              </div>
+              <NeonBar
+                pct={piggy.weeklyGoal > 0 ? piggy.weekEarned / piggy.weeklyGoal : 0}
+                accent="var(--victory)"
+                sheen
+              />
+              <p className="mt-3 text-xs text-muted-foreground">
+                {piggy.paceDials === null
+                  ? "Set your income goal in Mission → Plan and the engine back-solves it into dials per day."
+                  : piggy.paceDials === 0
+                    ? "Week goal covered — every dial from here is gravy. 🏆"
+                    : `≈${piggy.paceDials.toLocaleString()} more dials this week at your current per-dial value closes the gap.`}
+              </p>
+            </ArcadePanel>
+          </div>
         </div>
       </div>
 
