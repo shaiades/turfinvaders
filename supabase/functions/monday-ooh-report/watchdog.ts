@@ -1,17 +1,19 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // UNCOVERED-LEAD WATCHDOG (Step 7). A scheduled sweep (pg_cron every 5 min, the
 // in-code window below keeps it to 7 AM–9 PM PT): if a repless lead starts
-// within 60 minutes and nobody is free, iMessage the managers ONCE with the late
-// reporters and a suggested rep, and record the alert so it never repeats.
+// within 60 minutes and nobody is free, put ONE row in the Close Kombat → Dispo
+// "Needs review" list with the late reporters and a suggested rep, and record
+// the alert so it never repeats. (Owner mandate 2026-10-29: the dispatcher
+// phone texts ONLY a sale and a no-show at the door — the watchdog never texts.)
 //
 // Rule 6 (owner mandate 2026-10-08): if no free rep can get there on time, still
 // SEND the closest working rep — people6 ADDITIVE (Rule 1), Iss pressed, a
 // "running ~X min late, office please call customer" note on the card, and a
-// managers text. Never over a lead a human touched today (Rule 3); Daniel is
+// Needs-review row. Never over a lead a human touched today (Rule 3); Daniel is
 // never sent alone (Rule 8); every people6/Iss write is audited (Rule 21).
 //
 // Pure decisions live in dispatch.ts; this is the Deno glue (settings, Monday
-// reads/writes, Inkbox, the alert ledger). Inert unless live_dispatch_mode != 'off'.
+// reads/writes, the alert ledger). Inert unless live_dispatch_mode != 'off'.
 // ═══════════════════════════════════════════════════════════════════════════
 import type { Supa } from "./supa.ts";
 import {
@@ -64,7 +66,6 @@ import {
   wallClock12,
   withPairing,
 } from "./dispatch.ts";
-import { sendDispatcherIMessage } from "./inkbox.ts";
 import { fetchAttendanceOverrides, logDispatchDecision, logDispatchWrite } from "./history.ts";
 import { acquireAll, recentlyTouched, releaseAll, sleep } from "./locks.ts";
 
@@ -242,13 +243,32 @@ export async function runWatchdog(supabase: Supa): Promise<WatchdogSummary> {
           issued: true,
         });
       } else {
-        // Nobody could be sent (or dry-run / blocked) → the original alert text.
+        // Nobody could be sent (or dry-run / blocked). Owner mandate 2026-10-29:
+        // the dispatcher phone texts ONLY a sale and a no-show at the door — an
+        // uncovered lead goes to the Close Kombat → Dispo "Needs review" list.
         const when = wallClock12(a.lead.apptWallMinutes);
         const suggested = a.suggestedRep ? ` Suggested rep: ${a.suggestedRep}.` : "";
         const late = lateReporters.length ? ` Late reporters: ${lateReporters.join(", ")}.` : "";
-        await sendDispatcherIMessage(
-          `⚠️ Uncovered lead (${office}): ${a.lead.name} at ${when} — nobody free.${suggested}${late}`,
-        ).catch(() => undefined);
+        await supabase
+          .from("ooh_report_queue")
+          .upsert(
+            {
+              form_item_id: `watchdog-${a.lead.itemId}`,
+              status: "needs_review",
+              reason: `⚠️ Uncovered lead at ${when} — nobody free.${suggested}${late}`,
+              rep_name: a.suggestedRep,
+              office,
+              board_id: boardId,
+              target_item_id: a.lead.itemId,
+              lead_id: a.lead.itemId,
+              raw: { customerName: a.lead.name, apptLabel: when },
+            },
+            { onConflict: "form_item_id" },
+          )
+          .then(
+            () => undefined,
+            () => undefined,
+          );
         await logDispatchDecision(supabase, {
           mode: mode === "live" ? "live" : "dry_run",
           trigger: "watchdog",
@@ -461,16 +481,35 @@ async function coverLate(p: {
     await releaseAll(p.supabase, lockKeys, lockHolder);
   }
 
-  // Rule 6 text: running late, office please call the customer.
-  await sendDispatcherIMessage(
-    buildRunningLateText({
-      office: p.office,
-      leadName: p.lead.name,
-      repName: plan.rep.name,
-      lateMinutes: plan.lateMinutes,
-      apptClock: wallClock12(p.lead.apptWallMinutes),
-    }),
-  ).catch(() => undefined);
+  // Rule 6 surfacing (owner mandate 2026-10-29: only a sale and a no-show at
+  // the door buzz the phone): the "running late — office please call the
+  // customer" ask shows in the Close Kombat → Dispo "Needs review" list.
+  await p.supabase
+    .from("ooh_report_queue")
+    .upsert(
+      {
+        form_item_id: `watchdog-${p.lead.itemId}`,
+        status: "needs_review",
+        reason: buildRunningLateText({
+          office: p.office,
+          leadName: p.lead.name,
+          repName: plan.rep.name,
+          lateMinutes: plan.lateMinutes,
+          apptClock: wallClock12(p.lead.apptWallMinutes),
+        }),
+        rep_name: plan.rep.name,
+        office: p.office,
+        board_id: p.boardId,
+        target_item_id: p.lead.itemId,
+        lead_id: p.lead.itemId,
+        raw: { customerName: p.lead.name, apptLabel: wallClock12(p.lead.apptWallMinutes) },
+      },
+      { onConflict: "form_item_id" },
+    )
+    .then(
+      () => undefined,
+      () => undefined,
+    );
 
   return {
     covered: true,
