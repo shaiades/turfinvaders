@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { requiresGratitudeGate } from "@/lib/roles";
 import { assigneeColor } from "@/lib/assignee-colors";
+import { isOldArea } from "@/lib/turf-age";
 import {
   getMondayFormUrlWithPrefill,
   isLeadCloseV2Enabled,
@@ -163,6 +164,7 @@ type TurfRow = {
   polygon_coordinates: LatLng[];
   assigned_user_id: string | null;
   assigned_at: string | null;
+  created_at: string;
   assignee: { display_name: string | null } | null;
 };
 
@@ -316,7 +318,7 @@ export function ActiveRun({
     queryKey: ["turfs", user?.id, role],
     queryFn: async () => {
       let q = supabase.from("turfs").select(
-        `id, name, color, polygon_coordinates, assigned_user_id, assigned_at,
+        `id, name, color, polygon_coordinates, assigned_user_id, assigned_at, created_at,
            assignee:profiles!turfs_assigned_user_id_fkey(display_name)`,
       );
       if (!isCaptain) q = q.eq("assigned_user_id", user!.id);
@@ -389,6 +391,10 @@ export function ActiveRun({
             ? (t.assignee?.display_name ?? "Assigned")
             : "Unassigned"
           : t.name?.trim() || "Your turf",
+        // Captain map only: month-stale areas hide behind NeonMap's clock
+        // toggle. A canvasser's own turf never hides — stale or not, it's
+        // the ground their pins and turf-lock live on.
+        old: isCaptain ? isOldArea(t) : undefined,
       })),
     [turfsQuery.data, isCaptain],
   );
@@ -399,9 +405,14 @@ export function ActiveRun({
   const lockPolygons = useMemo(
     () =>
       (turfsQuery.data ?? [])
+        // Captains: the fit frame tracks what the map shows by default —
+        // framing month-old hidden areas re-zoomed the view out to every
+        // turf ever drawn. Canvassers keep every assigned ring (lock +
+        // house prefetch must cover stale-but-live assignments).
+        .filter((t) => !isCaptain || !isOldArea(t))
         .map((t) => (t.polygon_coordinates ?? []) as LatLng[])
         .filter((p) => p.length >= 3),
-    [turfsQuery.data],
+    [turfsQuery.data, isCaptain],
   );
 
   // Preload the day's houses over morning WiFi/parking-lot signal, into the

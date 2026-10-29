@@ -8,6 +8,7 @@ import { useGeoWatch } from "@/hooks/useFieldPins";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
 import { assigneeColor } from "@/lib/assignee-colors";
 import { isLaToday } from "@/lib/dates";
+import { isOldArea } from "@/lib/turf-age";
 import { ArcadePanel } from "@/components/arcade";
 import { ActiveRun } from "@/components/ActiveRun";
 import { CrewMap } from "@/components/CrewMap";
@@ -50,6 +51,7 @@ type TurfRow = {
   assigned_user_id: string | null;
   assigned_by: string | null;
   assigned_at: string | null;
+  created_at: string;
   assignee: { display_name: string | null } | null;
   assigner: { display_name: string | null } | null;
 };
@@ -365,7 +367,7 @@ function ManagerTerritoryView({
       const { data, error } = await supabase
         .from("turfs")
         .select(
-          `id, name, color, polygon_coordinates, assigned_user_id, assigned_by, assigned_at,
+          `id, name, color, polygon_coordinates, assigned_user_id, assigned_by, assigned_at, created_at,
            assignee:profiles!turfs_assigned_user_id_fkey(display_name),
            assigner:profiles!turfs_assigned_by_fkey(display_name)`,
         )
@@ -609,6 +611,10 @@ function ManagerTerritoryView({
             : undefined,
         currentAssignee: t.assigned_user_id ? (t.assignee?.display_name ?? "Assigned") : null,
         history: historyByTurf.get(t.id) ?? [],
+        // Month-stale areas hide behind NeonMap's clock toggle (owner ask
+        // 2026-10-29) — the Assigned Areas LIST below still shows every row,
+        // so old areas stay findable/deletable even while off the map.
+        old: isOldArea(t),
       })),
     [turfsQuery.data, historyByTurf],
   );
@@ -661,7 +667,13 @@ function ManagerTerritoryView({
   // would zoom the map out to the whole two-county extent on load and break the
   // assignment workflow. The RepCard coverage is still there when you zoom out.
   const fitPolygons: LatLng[][] = useMemo(
-    () => territories.map((t) => t.polygon).filter((p) => p.length >= 3),
+    // Fresh turfs only — framing month-old hidden areas would zoom the
+    // load view back out to every area ever drawn.
+    () =>
+      territories
+        .filter((t) => !t.old)
+        .map((t) => t.polygon)
+        .filter((p) => p.length >= 3),
     [territories],
   );
 
@@ -1374,6 +1386,13 @@ function ManagerTerritoryView({
                             : "Unassigned"}
                           {" · "}
                           {(t.polygon_coordinates ?? []).length} vertices
+                          {/* Flags rows the map hides by default, so "tapped
+                              it but nothing's there" explains itself. */}
+                          {isOldArea(t) && (
+                            <span className="ml-1.5 rounded-full border border-[#ffd60a66] px-1.5 text-[#ffd60a]">
+                              30d+ · hidden on map
+                            </span>
+                          )}
                         </div>
                       </div>
                     </button>
