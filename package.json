@@ -38,6 +38,7 @@
     "verify:coaching": "npx tsx scripts/verify-coaching.ts",
     "verify:pin-queue": "npx tsx scripts/verify-pin-queue.ts",
     "verify:money": "npx tsx scripts/verify-money.ts",
+    "verify:turfage": "npx tsx scripts/verify-turf-age.ts",
     "verify:dialer": "npx tsx scripts/verify-dialer.ts"
   },
   "dependencies": {

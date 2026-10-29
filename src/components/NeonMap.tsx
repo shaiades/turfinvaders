@@ -11,7 +11,15 @@ import {
 } from "react-leaflet";
 import L from "leaflet";
 import "leaflet-rotate";
-import { Info, LocateFixed, Maximize2, Minimize2, Navigation2, Pencil } from "lucide-react";
+import {
+  History,
+  Info,
+  LocateFixed,
+  Maximize2,
+  Minimize2,
+  Navigation2,
+  Pencil,
+} from "lucide-react";
 import { viewBounds } from "@/lib/map-bounds";
 import {
   resolveMapStatus,
@@ -45,6 +53,11 @@ export type Territory = {
   currentAssignee?: string | null;
   /** Past assignments newest-first, dates pre-formatted for the popup. */
   history?: Array<{ name: string; when: string }>;
+  /** Not touched in OLD_AREA_DAYS (lib/turf-age) — hidden by default so last
+   *  month's tagged areas stop burying today's map; the rail's clock toggle
+   *  brings them back. Only captain/manager screens set this: a canvasser's
+   *  own turf stays visible however stale its assignment. */
+  old?: boolean;
 };
 
 export type FieldPin = {
@@ -1029,7 +1042,7 @@ function FreehandCapture({
 }
 
 function NeonMapInner({
-  territories,
+  territories: allTerritories,
   pins = [],
   houses = [],
   me,
@@ -1152,6 +1165,39 @@ function NeonMapInner({
       return !on;
     });
   }
+
+  // Month-old tagged areas hide by DEFAULT (owner ask 2026-10-29: last
+  // month's areas buried the map — couldn't draw new turf or read sales).
+  // Preference sticks per device, ZIP-toggle style; the flagging itself is
+  // the owning screen's call (Territory.old), so canvasser maps — which
+  // never set the flag — are untouched.
+  const [oldOn, setOldOn] = useState(() => {
+    try {
+      return typeof window !== "undefined" && localStorage.getItem("ti_show_old_areas") === "1";
+    } catch {
+      return false;
+    }
+  });
+  function toggleOldAreas() {
+    setOldOn((on) => {
+      try {
+        localStorage.setItem("ti_show_old_areas", on ? "0" : "1");
+      } catch {
+        /* preference just won't stick */
+      }
+      return !on;
+    });
+  }
+  const oldCount = useMemo(
+    () => allTerritories.reduce((n, t) => (t.old ? n + 1 : n), 0),
+    [allTerritories],
+  );
+  // Same name as the prop so every downstream memo (render set, labels,
+  // popups) sees one consistent, filtered world.
+  const territories = useMemo(
+    () => (oldOn || oldCount === 0 ? allTerritories : allTerritories.filter((t) => !t.old)),
+    [allTerritories, oldOn, oldCount],
+  );
 
   // House-info tool (owner ask 2026-09-28, RepCard parity): armed, EVERY map
   // tap answers "what's this house?" — the result sheet with its address —
@@ -2117,6 +2163,40 @@ function NeonMapInner({
           >
             ZIP
           </button>
+          {/* Old tagged areas (30d+) — hidden by default; tap to overlay
+              them for history checks. Only mounts when some exist. */}
+          {oldCount > 0 && (
+            <button
+              type="button"
+              aria-label={
+                oldOn
+                  ? `Hide ${oldCount} area${oldCount === 1 ? "" : "s"} older than 30 days`
+                  : `Show ${oldCount} area${oldCount === 1 ? "" : "s"} older than 30 days`
+              }
+              aria-pressed={oldOn}
+              title={`Old areas (30d+) ${oldOn ? "shown" : "hidden"} — ${oldCount} on this map`}
+              onClick={toggleOldAreas}
+              className="relative flex h-11 w-11 items-center justify-center rounded-full border bg-surface/90 backdrop-blur"
+              style={
+                oldOn
+                  ? {
+                      color: "#ffd60a",
+                      borderColor: "#ffd60a99",
+                      boxShadow: "0 0 10px -2px #ffd60a",
+                    }
+                  : { color: "var(--muted-foreground)", borderColor: "var(--border)" }
+              }
+            >
+              <History className="h-5 w-5" />
+              <span
+                aria-hidden
+                className="absolute -top-1 -right-1 rounded-full bg-surface px-1 text-[10px] font-bold leading-4 border"
+                style={{ borderColor: "inherit", color: "inherit" }}
+              >
+                {oldCount > 99 ? "99+" : oldCount}
+              </span>
+            </button>
+          )}
           {/* Recenter on my location — and re-arm follow-my-dot after a browse */}
           {me && !drawingNow && (
             <button

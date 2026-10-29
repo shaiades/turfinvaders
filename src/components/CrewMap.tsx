@@ -31,6 +31,7 @@ import { assigneeColor } from "@/lib/assignee-colors";
 import { isLeadSourceName } from "@/lib/lead-sources";
 import { laTodayISO } from "@/lib/dates";
 import { isManagerRole } from "@/lib/roles";
+import { isOldArea } from "@/lib/turf-age";
 import { ArcadePanel } from "@/components/arcade";
 import {
   NeonMap,
@@ -51,6 +52,8 @@ type TurfRow = {
   color: string;
   polygon_coordinates: LatLng[];
   assigned_user_id: string | null;
+  assigned_at: string | null;
+  created_at: string;
   assignee: { display_name: string | null } | null;
 };
 
@@ -107,7 +110,7 @@ export function CrewMap({ onBack }: { onBack: () => void }) {
     staleTime: 5 * 60_000,
     queryFn: async () => {
       const { data, error } = await supabase.from("turfs").select(
-        `id, name, color, polygon_coordinates, assigned_user_id,
+        `id, name, color, polygon_coordinates, assigned_user_id, assigned_at, created_at,
            assignee:profiles!turfs_assigned_user_id_fkey(display_name)`,
       );
       if (error) throw error;
@@ -125,6 +128,9 @@ export function CrewMap({ onBack }: { onBack: () => void }) {
         assignmentLabel: t.assigned_user_id
           ? (t.assignee?.display_name ?? "Assigned")
           : "Unassigned",
+        // Today's-crew map: month-old areas are pure clutter here; NeonMap's
+        // clock toggle brings them back for history checks.
+        old: isOldArea(t),
       })),
     [turfsQ.data],
   );
