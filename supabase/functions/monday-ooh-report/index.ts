@@ -10,17 +10,16 @@
 // the computed plan in ooh_report_queue, write nothing. Never routes anything
 // itself; never touches destination boards.
 //
-// TEXT NOISE (owner mandate 2026-10-07 — Inkbox caps iMessage at 100/day): the
-// dispatcher phone (Shai/Tyler/Jorge) is texted for ONLY four things —
+// TEXT NOISE (owner mandate 2026-10-29, tightened from 2026-10-07): the
+// dispatcher phone (leadership) is texted for ONLY two things —
 //   1. a sale / reload / upsell (buildSaleAlert, with the "missing sale info"
 //      nudge folded into that one text);
-//   2. a no-show at the door;
-//   3. an uncovered lead within 60 min (the watchdog);
-//   4. (there is no 4th — #1's folded nudge is the "missing sale info" case).
-// EVERYTHING ELSE that used to buzz the phone — a dispo that needs review or
-// errored, a routine "Issued:", a "[DRY RUN] would issue", "Free reps", a
-// could-not-issue, a managers-please-assign — now shows in the Close Kombat →
-// Dispo "Needs review" list instead (ooh_report_queue) and/or the decision log.
+//   2. a no-show at the door (customer not home — the office calls it off).
+// EVERYTHING ELSE that used to buzz the phone — the watchdog's uncovered-lead
+// and running-late alerts, a dispo that needs review or errored, a routine
+// "Issued:", a "[DRY RUN] would issue", "Free reps", a could-not-issue, a
+// managers-please-assign — now shows in the Close Kombat → Dispo "Needs review"
+// list instead (ooh_report_queue) and/or the decision log.
 // ═══════════════════════════════════════════════════════════════════════════
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { makeClient, type Supa } from "./supa.ts";
@@ -1098,7 +1097,7 @@ serve(async (req) => {
         rowWithTarget,
       );
       // Live-issuing can still be REHEARSED here (no block was written, so it can
-      // only ever simulate): compute + log the decision and text "[DRY RUN]…".
+      // only ever simulate): compute + log the decision (no text).
       if (dispatchMode !== "off" && office && !wplan.atTheDoor) {
         await runDispatch({
           token,
@@ -1267,7 +1266,7 @@ serve(async (req) => {
     } else if (dispatchMode !== "off" && office) {
       // ── Live issuing (Step 7): hand the freed rep(s) their next lead. In
       // live mode this writes people6 + Iss on Monday; in dry_run it only
-      // computes, logs and texts "[DRY RUN]…". Never fails the write-back.
+      // computes and logs. Never fails the write-back.
       released = await runDispatch({
         token,
         supabase,

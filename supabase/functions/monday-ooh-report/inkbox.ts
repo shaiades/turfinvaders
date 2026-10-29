@@ -1,9 +1,9 @@
 // Best-effort iMessage via the Inkbox HTTP API from the dispatcher identity
-// (@tidaldispatcher). Owner mandate 2026-10-07 (Inkbox caps iMessage at
-// 100/day): the ONLY things that text the dispatcher phone are the SALE alert
-// (with the "missing sale info" nudge folded in), the no-show-at-the-door
-// message, and the watchdog's uncovered-lead alert. Everything else now lives
-// in the Close Kombat → Dispo "Needs review" list, not a text.
+// (@tidaldispatcher). Owner mandate 2026-10-29 (tightened from 2026-10-07): the
+// ONLY things that text the dispatcher phone are the SALE alert (with the
+// "missing sale info" nudge folded in) and the no-show-at-the-door message.
+// Everything else — the watchdog alerts included — lives in the Close Kombat →
+// Dispo "Needs review" list, not a text.
 //
 // Real Inkbox contract (confirmed 2026-10-05):
 //   POST {INKBOX_API_URL}/imessage/messages?agent_identity_id=<id>
