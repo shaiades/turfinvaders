@@ -2085,7 +2085,7 @@ expectEq("weekday → Tuesday block group", BLOCK_DAY_GROUP[2], "new_group73798"
     form({
       [FORM_COL.result]: status(RESULT.NO_DEMO),
       [FORM_COL.onBlock]: status(ON_BLOCK.YES),
-      [FORM_COL.whyNoDemo]: status(5, "Bad lead / wrong info"),
+      [FORM_COL.whyNoDemo]: status(2, "Not the owner (renter, etc.)"),
       [FORM_COL.whatHappened]: text("renters, owners weren't home"),
     }),
   );
@@ -2101,7 +2101,88 @@ expectEq("weekday → Tuesday block group", BLOCK_DAY_GROUP[2], "new_group73798"
   const line = buildDetailsLine(f, SUBMIT);
   expect(
     "No demo details read 'No demo - <reason> (time)'",
-    line.startsWith("No demo - Bad lead / wrong info: renters, owners weren't home") &&
+    line.startsWith("No demo - Not the owner (renter, etc.): renters, owners weren't home") &&
+      line.endsWith("(10:08)"),
+  );
+}
+// ── Dispo form redesign (owner brief 2026-10-29) ─────────────────────────────
+// PM branches end with the buyer segment: "cash" | "finance ran" | "finance not ran".
+{
+  const f = parseOohForm(
+    "pmcash",
+    form({
+      [FORM_COL.result]: status(RESULT.PITCH_MISS),
+      [FORM_COL.onBlock]: status(ON_BLOCK.YES),
+      [FORM_COL.buyerType]: status(0, "Cash"),
+    }),
+  );
+  const line = buildDetailsLine(f, SUBMIT);
+  expect("PM cash buyer → 'PM - cash (time)'", line === "PM - cash (10:08)");
+}
+{
+  const f = parseOohForm(
+    "pmfin",
+    form({
+      [FORM_COL.result]: status(RESULT.PITCH_MISS),
+      [FORM_COL.onBlock]: status(ON_BLOCK.YES),
+      [FORM_COL.buyerType]: status(1, "Finance"),
+      [FORM_COL.financeRan]: status(0),
+    }),
+  );
+  expect(
+    "PM finance ran → 'PM - finance ran (time)'",
+    buildDetailsLine(f, SUBMIT) === "PM - finance ran (10:08)",
+  );
+}
+{
+  const f = parseOohForm(
+    "pmrsfin",
+    form({
+      [FORM_COL.result]: status(RESULT.PM_WITH_RESET),
+      [FORM_COL.onBlock]: status(ON_BLOCK.YES),
+      [FORM_COL.buyerType]: status(1, "Finance"),
+      [FORM_COL.financeRan]: status(1),
+    }),
+  );
+  expect(
+    "PM w/ RS finance not ran → '… finance not ran'",
+    buildDetailsLine(f, SUBMIT) === "PM w/ RS - finance not ran (10:08)",
+  );
+}
+// Reset "other" carries the rep's free-text reason; blank buyer stays omitted.
+{
+  const f = parseOohForm(
+    "rsother",
+    form({
+      [FORM_COL.result]: status(RESULT.RESET),
+      [FORM_COL.onBlock]: status(ON_BLOCK.YES),
+      [FORM_COL.resetLegType]: status(1, "Other"),
+      [FORM_COL.whyReset]: text("HOA approval needed first"),
+      [FORM_COL.resetDate]: date("2026-10-11", "17:00:00"),
+    }),
+  );
+  const line = buildDetailsLine(f, SUBMIT);
+  expect(
+    "Reset (other) details carry the reason + date",
+    line.startsWith("Reset - HOA approval needed first, reset ") && line.endsWith("(10:08)"),
+  );
+}
+// One-legger with no reset carries the why-no-reset reason after "no reset".
+{
+  const f = parseOohForm(
+    "olwhy",
+    form({
+      [FORM_COL.result]: status(RESULT.ONE_LEGGER),
+      [FORM_COL.onBlock]: status(ON_BLOCK.YES),
+      [FORM_COL.whoMissing]: status(0, "Spouse / partner"),
+      [FORM_COL.resetCall]: status(1),
+      [FORM_COL.whyNoReset]: text("husband traveling until Nov"),
+    }),
+  );
+  const line = buildDetailsLine(f, SUBMIT);
+  expect(
+    "OL no-reset details carry the reason",
+    line.startsWith("OL - Spouse / partner missing, no reset, husband traveling until Nov") &&
       line.endsWith("(10:08)"),
   );
 }

@@ -86,6 +86,12 @@ export const FORM_COL = {
   whoMissing: "single_select55d5i6x",
   inspection: "single_selecte9k7kil", // 0 Yes | 1 No
   resetCall: "single_selectyucz7h0", // 0 Yes-reset set | 1 No reset
+  // ── Dispo form redesign (owner brief 2026-10-29) ──
+  resetLegType: "single_selectlymivr0", // Reset only: 0 one-leg | 1 other
+  whyReset: "long_textso3e43he", // Reset + "other": free-text reason
+  whyNoReset: "long_textelb2o3k4", // One-legger + "no reset": free-text reason
+  buyerType: "single_selecth29x83h", // PM branches: 0 Cash | 1 Finance
+  financeRan: "single_select253j7th", // buyerType Finance: 0 ran | 1 not ran
   whyNoDemo: "single_selectdqlakw6",
   whatHappened: "long_textpk8jpais",
   minutesWaited: "numberbudx8yh5",
@@ -397,6 +403,11 @@ export type OohForm = {
   whoMissing: string | null;
   inspection: number | null; // 0 Yes | 1 No
   resetCall: number | null; // 0 reset set | 1 no reset
+  resetLegType: number | null; // Reset only: 0 one-leg | 1 other
+  whyReset: string | null; // Reset + "other": free-text reason
+  whyNoReset: string | null; // One-legger + "no reset": free-text reason
+  buyerType: number | null; // PM branches: 0 Cash | 1 Finance
+  financeRan: number | null; // buyerType Finance: 0 ran | 1 not ran
   whyNoDemo: string | null;
   whatHappened: string | null;
   minutesWaited: number | null;
@@ -499,6 +510,11 @@ export function parseOohForm(formItemId: string, cols: ColMap): OohForm {
     whoMissing: statusText(g(FORM_COL.whoMissing)),
     inspection: statusIndex(g(FORM_COL.inspection)),
     resetCall: statusIndex(g(FORM_COL.resetCall)),
+    resetLegType: statusIndex(g(FORM_COL.resetLegType)),
+    whyReset: textVal(g(FORM_COL.whyReset)),
+    whyNoReset: textVal(g(FORM_COL.whyNoReset)),
+    buyerType: statusIndex(g(FORM_COL.buyerType)),
+    financeRan: statusIndex(g(FORM_COL.financeRan)),
     whyNoDemo: statusText(g(FORM_COL.whyNoDemo)),
     whatHappened: textVal(g(FORM_COL.whatHappened)),
     minutesWaited: numVal(g(FORM_COL.minutesWaited)),
@@ -659,6 +675,16 @@ export function buildDetailsLine(
     );
   }
 
+  // Cash / finance buyer (PM branches only — owner brief 2026-10-29: the PM
+  // details end "cash" | "finance ran" | "finance not ran"). Blank = unknown,
+  // omitted — never backfilled.
+  if (isObjectionResult && form.buyerType != null) {
+    if (form.buyerType === 0) parts.push("cash");
+    else if (form.financeRan != null)
+      parts.push(form.financeRan === 0 ? "finance ran" : "finance not ran");
+    else parts.push("finance");
+  }
+
   // Reset / One-legger branch details.
   if (form.result === RESULT.RESET || form.result === RESULT.ONE_LEGGER) {
     const bits: string[] = [];
@@ -669,7 +695,10 @@ export function buildDetailsLine(
       // Keyed on the reset DATE (what actually decides OL vs Reset), not the
       // reset-call flag, so the note can never disagree with the disposition.
       bits.push(form.resetDate ? "reset set" : "no reset");
+      if (!form.resetDate && form.whyNoReset) bits.push(form.whyNoReset);
     }
+    // Reset "other" branch: the rep's free-text reason for the reset.
+    if (form.result === RESULT.RESET && form.whyReset) bits.push(form.whyReset);
     if (form.resetDate) bits.push(`reset ${fmtReset(form.resetDate)}`);
     if (bits.length) parts.push(bits.join(", "));
   } else if (form.result === RESULT.PM_WITH_RESET && form.resetDate) {
