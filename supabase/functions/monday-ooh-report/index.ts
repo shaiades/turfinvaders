@@ -100,6 +100,7 @@ import {
   mustPair,
   nowWallMinutes,
   planIssue,
+  planMorningIssue,
   withPairing,
 } from "./dispatch.ts";
 import { runWatchdog } from "./watchdog.ts";
@@ -265,6 +266,32 @@ serve(async (req) => {
       return ok(result);
     } catch (e) {
       console.error("[ooh build-approvals] error", e instanceof Error ? e.message : String(e));
+      return ok({ error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  // ── 9 PM morning issue (owner mandate 2026-10-30) ───────────────────────────
+  // The pg_cron job run_nightly_morning_issue posts here with the shared notify
+  // secret. First applies tonight's approved lineup rows (same path as the 8:45
+  // catch-up), then presses Iss on each rep's FIRST lead of tomorrow — "the rep
+  // gets their morning lead every evening at 9 PM the night before". ?force=true
+  // bypasses the enabled flag; the writes stay gated on live_dispatch_mode.
+  if (url.searchParams.get("task") === "morning-issue") {
+    const notifySecret = denoEnv?.get("NOTIFY_SECRET");
+    const provided = req.headers.get("x-notify-secret") ?? url.searchParams.get("secret");
+    if (notifySecret && provided !== notifySecret) {
+      return new Response("unauthorized", { status: 401, headers: corsHeaders });
+    }
+    const supabase = makeClient(
+      denoEnv?.get("SUPABASE_URL") ?? "",
+      denoEnv?.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+    );
+    const force = url.searchParams.get("force") === "true";
+    try {
+      const result = await runMorningIssue(supabase, { force });
+      return ok(result);
+    } catch (e) {
+      console.error("[ooh morning-issue] error", e instanceof Error ? e.message : String(e));
       return ok({ error: e instanceof Error ? e.message : String(e) });
     }
   }
@@ -2064,4 +2091,132 @@ async function fillSalesProcessingForItem(
     .update({ filled_at: new Date().toISOString(), sp_item_id: spItemId })
     .eq("form_item_id", match.form_item_id);
   return { filled: true, reason: "filled" };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 9 PM MORNING ISSUE (owner mandate 2026-10-30): apply tonight's approved
+// lineup rows, then press Iss on each rep's FIRST lead of tomorrow so every
+// rep knows their morning appointment the night before (Monday's "New
+// Opportunity!" ping fires on the Iss press). The rest of their day still
+// issues one-at-a-time through live dispatch as they dispo. Scheduled by the
+// pg_cron job run_nightly_morning_issue (9 PM PT); the 8:45 AM auto-issue
+// stays as a catch-up for rows approved overnight.
+// ═══════════════════════════════════════════════════════════════════════════
+async function runMorningIssue(
+  supabase: Supa,
+  opts: { force?: boolean } = {},
+): Promise<Record<string, unknown>> {
+  const { data: settings } = await supabase.from("system_settings").select("*").maybeSingle();
+  const enabled = settings?.nightly_auto_issue_enabled === true;
+  if (!opts.force && !enabled) return { ran: false, reason: "nightly_auto_issue_enabled is off" };
+  const token = (((settings?.monday_api_token as string | null) ?? "")).trim();
+  if (!token) return { ran: false, reason: "no Monday token" };
+  const mode = ((settings?.live_dispatch_mode as string | null) ?? "off") as
+    | "off"
+    | "dry_run"
+    | "live";
+  if (mode === "off") return { ran: false, reason: "live_dispatch_mode=off" };
+
+  // 1. Apply tonight's approved lineup rows FIRST (people6 adds, re-read
+  //    guarded, write-locked), so the issue pass below sees the final staffing.
+  const applied = await runNightlyAutoIssue(supabase, { force: opts.force });
+
+  // 2. Issue each rep's first lead of tomorrow.
+  const nowMs = Date.now();
+  const tomorrowISO = laDate(nowMs + 24 * 3600_000);
+  const groupId = BLOCK_DAY_GROUP[weekdayOfDate(tomorrowISO, nowMs)];
+  const boards: Array<{ office: "SD" | "OC"; boardId: string | null }> = [
+    { office: "SD", boardId: (settings?.active_monday_board_sd as string | null) ?? null },
+    { office: "OC", boardId: (settings?.active_monday_board_oc as string | null) ?? null },
+  ];
+  let issuedCount = 0;
+  let failedCount = 0;
+  for (const { office, boardId } of boards) {
+    if (!boardId) continue;
+    const items = await fetchDispatchDayItems(token, boardId, groupId).catch(() => []);
+    const plan = planMorningIssue({ leads: items, tomorrowISO });
+    if (plan.issues.length === 0) {
+      await logDispatchDecision(supabase, {
+        mode: mode === "live" ? "live" : "dry_run",
+        trigger: "morning-issue",
+        formItemId: null,
+        repName: null,
+        office,
+        boardId,
+        leadItemId: null,
+        leadName: null,
+        action: "none",
+        score: null,
+        driveMinutes: null,
+        strength: null,
+        reason: `no morning leads to issue for ${tomorrowISO} (${plan.candidates} candidates)`,
+        issued: false,
+      });
+      continue;
+    }
+    for (const issue of plan.issues) {
+      // Rule L: serialize against any concurrent writer on this lead.
+      const lockHolder = `morning-issue:${issue.lead.itemId}`;
+      const lockKeys = [`item:${issue.lead.itemId}`];
+      const lock = await acquireAll(supabase, lockKeys, lockHolder);
+      let didIssue = false;
+      let failReason: string | null = null;
+      if (!lock.ok) {
+        failReason = `write lock ${lock.blockedKey} held by another writer, backed off (Rule L)`;
+      } else {
+        try {
+          if (await recentlyTouched(token, boardId, issue.lead.itemId, 15)) await sleep(4000);
+          if (mode === "live") {
+            const issLabel = issLabelForLead(issue.lead);
+            const r = await setStatus(
+              token,
+              boardId,
+              issue.lead.itemId,
+              BLOCK_COL.iss,
+              issLabel,
+              `morning-iss-${issue.lead.itemId}`,
+            );
+            if (r.error) failReason = `Iss: ${r.error}`;
+            else {
+              await logDispatchWrite(supabase, {
+                mode,
+                trigger: "morning-issue",
+                formItemId: null,
+                boardId,
+                itemId: issue.lead.itemId,
+                leadName: issue.lead.name,
+                columnId: BLOCK_COL.iss,
+                columnLabel: "Iss",
+                oldValue: issue.lead.issLabel ?? null,
+                newValue: issLabel,
+                reason: issue.reason,
+              });
+              didIssue = true;
+            }
+          }
+        } finally {
+          await releaseAll(supabase, lockKeys, lockHolder);
+        }
+      }
+      if (didIssue) issuedCount++;
+      else failedCount++;
+      await logDispatchDecision(supabase, {
+        mode: mode === "live" ? "live" : "dry_run",
+        trigger: "morning-issue",
+        formItemId: null,
+        repName: issue.repNames.join(" + "),
+        office,
+        boardId,
+        leadItemId: issue.lead.itemId,
+        leadName: issue.lead.name,
+        action: didIssue ? "issue" : "none",
+        score: null,
+        driveMinutes: null,
+        strength: null,
+        reason: failReason ?? (mode === "live" ? issue.reason : `[DRY RUN] ${issue.reason}`),
+        issued: didIssue,
+      });
+    }
+  }
+  return { ran: true, tomorrowISO, applied, issued: issuedCount, failed: failedCount };
 }

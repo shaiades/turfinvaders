@@ -18,7 +18,7 @@
 // working, the day's leads with coordinates, each lead's history) and does the
 // writing + texting; this module never touches Monday, Supabase or Inkbox.
 // ═══════════════════════════════════════════════════════════════════════════
-import { LABEL, laHourMinute, normName } from "./engine.ts";
+import { LABEL, hasExistingDisposition, laHourMinute, normName } from "./engine.ts";
 
 // ── Config: every weight + the rep-strength table in ONE place ────────────────
 /** Minutes a rep is reckoned to drive per mile at typical SD/OC surface-street
@@ -837,6 +837,74 @@ export function buildIssuedText(input: {
  */
 export function issLabelForLead(lead: Pick<DispatchLead, "isJobWalk">): string {
   return lead.isJobWalk ? LABEL.officeAppt : LABEL.iss;
+}
+
+// ── 9 PM morning issue (owner mandate 2026-10-30) ────────────────────────────
+/** A tomorrow-group block item as the morning-issue planner sees it: a
+ *  DispatchLead plus the disposition labels (DispatchDayItem fits). */
+export type MorningIssueItem = DispatchLead & {
+  pm: string | null;
+  rs: string | null;
+  ol: string | null;
+  bo: string | null;
+  sale: string | null;
+};
+
+export type MorningIssuePlan = {
+  /** One entry per lead to press Iss on; repNames are the reps whose FIRST
+   *  lead of tomorrow it is (a shared pair lead appears once). */
+  issues: Array<{ lead: MorningIssueItem; repNames: string[]; reason: string }>;
+  /** Issuable, staffed, tomorrow-dated leads NOT issued (the rep's later
+   *  appointments — live dispatch hands those out one at a time). */
+  candidates: number;
+};
+
+/**
+ * Owner mandate 2026-10-30: "the rep gets their morning lead every evening at
+ * 9 PM the night before." Each rep staffed on tomorrow's block gets exactly
+ * their EARLIEST appointment issued (Iss pressed — which fires Monday's "New
+ * Opportunity!" ping); the rest of their day still issues one-at-a-time
+ * through live dispatch. A lead qualifies only when it is staffed (people6),
+ * explicitly dated TOMORROW (the 10/29 staged-copy guard, same field), still
+ * "Not Issued", and carries no disposition. Pure.
+ */
+export function planMorningIssue(input: {
+  leads: MorningIssueItem[];
+  tomorrowISO: string;
+}): MorningIssuePlan {
+  const candidates = input.leads.filter(
+    (l) =>
+      l.reps.length > 0 &&
+      l.apptDateISO === input.tomorrowISO &&
+      isIssuableStatus(l) &&
+      !hasExistingDisposition(l),
+  );
+  // Earliest first (unknown times last, name-stable), then the first unseen
+  // lead per rep wins — one morning lead per rep, a pair's shared lead once.
+  const sorted = [...candidates].sort((a, b) => {
+    const ta = a.apptWallMinutes ?? Number.MAX_SAFE_INTEGER;
+    const tb = b.apptWallMinutes ?? Number.MAX_SAFE_INTEGER;
+    return ta !== tb ? ta - tb : a.name.localeCompare(b.name);
+  });
+  const seen = new Set<string>();
+  const byItem = new Map<string, { lead: MorningIssueItem; repNames: string[] }>();
+  for (const lead of sorted) {
+    for (const rep of lead.reps) {
+      const key = normName(rep);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      const entry = byItem.get(lead.itemId) ?? { lead, repNames: [] };
+      entry.repNames.push(rep);
+      byItem.set(lead.itemId, entry);
+    }
+  }
+  return {
+    issues: [...byItem.values()].map((e) => ({
+      ...e,
+      reason: `first lead of ${input.tomorrowISO} for ${e.repNames.join(" + ")} (9 PM morning issue)`,
+    })),
+    candidates: candidates.length,
+  };
 }
 
 /** Display-cased first name for a text ("Jaxon", not "jaxon"). */
