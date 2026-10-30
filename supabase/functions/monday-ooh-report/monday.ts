@@ -11,6 +11,7 @@ import {
   type ColMap,
   type DayItem,
   type MatchCandidate,
+  laDateFromMondayDate,
   laWallMinutesFromUtc,
   normName,
 } from "./engine.ts";
@@ -229,6 +230,23 @@ function wallMinutesFromDate(value: string | null, text: string | null): number 
   // Fallback: `text` is already rendered in the account's timezone (Pacific).
   const m = (text ?? "").match(/(\d{1,2}):(\d{2})/);
   return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+
+/** LA calendar date (YYYY-MM-DD) of a Monday date column, or null when the
+ *  column is blank. Same UTC→LA conversion as wallMinutesFromDate; a date
+ *  without a time is a literal calendar day. */
+function apptDateISOFromDate(value: string | null, text: string | null): string | null {
+  try {
+    if (value) {
+      const v = JSON.parse(value) as { date?: string | null; time?: string | null };
+      const iso = laDateFromMondayDate(v.date ?? null, v.time ?? null);
+      if (iso) return iso;
+    }
+  } catch {
+    /* fall through */
+  }
+  const m = (text ?? "").match(/\d{4}-\d{2}-\d{2}/);
+  return m ? m[0] : null;
 }
 
 /** Fetch one block item (the report target). */
@@ -698,6 +716,10 @@ export async function fetchDispatchDayItems(
         .filter(Boolean),
       issLabel: label(cols, BLOCK_COL.iss),
       apptWallMinutes: wallMinutesFromDate(
+        cols[BLOCK_COL.apptDateTime]?.value ?? null,
+        cols[BLOCK_COL.apptDateTime]?.text ?? null,
+      ),
+      apptDateISO: apptDateISOFromDate(
         cols[BLOCK_COL.apptDateTime]?.value ?? null,
         cols[BLOCK_COL.apptDateTime]?.text ?? null,
       ),

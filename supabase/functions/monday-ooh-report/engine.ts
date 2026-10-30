@@ -365,6 +365,24 @@ export function laWallMinutesFromUtc(
   return hour * 60 + minute;
 }
 
+/**
+ * LA calendar date (YYYY-MM-DD) for a Monday date-column value. With a time the
+ * stored {date,time} pair is UTC and must be converted (a 5:30 PM PT value is
+ * stored as 00:30 the NEXT UTC day — read raw, it lands on the wrong date);
+ * a date-only value is a literal calendar day and comes back unchanged.
+ */
+export function laDateFromMondayDate(
+  date: string | null | undefined,
+  time: string | null | undefined,
+): string | null {
+  if (!date) return null;
+  if (!time) return date;
+  const [y, mo, d] = date.split("-").map(Number);
+  const [hh, mm] = time.split(":").map(Number);
+  if (![y, mo, d, hh].every(Number.isFinite)) return date;
+  return laDate(Date.UTC(y, mo - 1, d, hh || 0, mm || 0));
+}
+
 /** "H:MM" elapsed between two wall-clock minute counts (same LA day). null if
  *  not computable or non-positive. */
 export function minutesToHM(mins: number | null): string | null {

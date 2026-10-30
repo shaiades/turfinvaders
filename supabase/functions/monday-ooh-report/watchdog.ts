@@ -130,11 +130,19 @@ export async function runWatchdog(supabase: Supa): Promise<WatchdogSummary> {
 
   for (const { office, boardId } of offices) {
     if (!boardId) continue;
-    const [dayItems, boardAttendance, overrides] = await Promise.all([
+    const [allDayItems, boardAttendance, overrides] = await Promise.all([
       fetchDispatchDayItems(token, boardId, groupId).catch(() => []),
       fetchAttendance(token, office, weekday).catch(() => new Map<string, AttendanceShifts>()),
       fetchAttendanceOverrides(supabase, todayLA, office),
     ]);
+    // Owner guard 2026-10-29: a card explicitly dated another day (a staged
+    // future reset copy parked in today's group) is invisible to the watchdog —
+    // its wall-clock time would otherwise read as "starting soon TODAY" and get
+    // covered/alerted. A blank Date/Time stays (it can't trigger coverage, but
+    // its reps still count as holding it).
+    const dayItems = allDayItems.filter(
+      (l) => l.apptDateISO === null || l.apptDateISO === todayLA,
+    );
     if (dayItems.length === 0) continue;
     // Manager overrides from the app BEAT the attendance board here too (the
     // 10/6 playbook's last unshipped piece): an Off row pulls a listed rep out

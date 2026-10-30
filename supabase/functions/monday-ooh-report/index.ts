@@ -1474,7 +1474,13 @@ async function runDispatch(p: {
       lastCoords: p.block.coords,
     };
     const pool = dayItems.filter((l) => l.itemId !== p.reportedLeadId && !chosen.has(l.itemId));
-    const plan = planIssue({ rep, dayLeads: pool, nowWallMinutes: nowWall, cfg: p.cfg });
+    const plan = planIssue({
+      rep,
+      dayLeads: pool,
+      nowWallMinutes: nowWall,
+      todayISO: todayLA,
+      cfg: p.cfg,
+    });
 
     if (plan.action === "issue") {
       chosen.add(plan.lead.itemId);
