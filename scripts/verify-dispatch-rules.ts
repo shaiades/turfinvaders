@@ -53,6 +53,7 @@ import {
   mustPair,
   planIssue,
   planLateCoverage,
+  planMorningIssue,
   planWatchdog,
   runningLateNote,
   shouldTextManagers,
@@ -1154,7 +1155,49 @@ function mkDayItem(over: Partial<ApprovalsDayItem> = {}): ApprovalsDayItem {
   );
 }
 
-// NIGHTLY AUTO-BUILD (owner 2026-10-30: the 9 PM job that builds tomorrow's
+// 9 PM MORNING ISSUE (owner 2026-10-30 evening: "the rep gets their morning
+// lead every evening at 9 PM the night before"). Each rep staffed on
+// tomorrow's block gets exactly their EARLIEST appointment issued; everything
+// else — unstaffed, wrong-day/blank-dated, already pressed, disposed, or the
+// rep's later leads — is left for live dispatch.
+{
+  const TOMORROW = "2026-10-30";
+  const items = [
+    // Garett's two leads: 9 AM issues, 1 PM stays with live dispatch.
+    mkDayItem({ itemId: "30", name: "Early", apptWallMinutes: 9 * 60, apptDateISO: TOMORROW, reps: ["Garett Bodine"] }),
+    mkDayItem({ itemId: "31", name: "Later", apptWallMinutes: 13 * 60, apptDateISO: TOMORROW, reps: ["Garett Bodine"] }),
+    // A pair's shared first lead issues ONCE, for both reps.
+    mkDayItem({ itemId: "32", name: "Pair", apptWallMinutes: 10 * 60, apptDateISO: TOMORROW, reps: ["Jaxon Heilman", "Daniel Mock"] }),
+    // Unstaffed → the office's job, not the night issue's.
+    mkDayItem({ itemId: "33", name: "Nobody", apptWallMinutes: 8 * 60, apptDateISO: TOMORROW, reps: [] }),
+    // Blank Date/Time (the 10/29 staged-copy guard) and wrong-day → never.
+    mkDayItem({ itemId: "34", name: "Blank", apptWallMinutes: 8 * 60, apptDateISO: null, reps: ["Yakup Sancakli"] }),
+    mkDayItem({ itemId: "35", name: "NextWeek", apptWallMinutes: 8 * 60, apptDateISO: "2026-11-03", reps: ["Yakup Sancakli"] }),
+    // Already pressed / already disposed → untouched.
+    mkDayItem({ itemId: "36", name: "Pressed", apptWallMinutes: 8 * 60, apptDateISO: TOMORROW, reps: ["Nick Smith"], issLabel: LABEL.iss }),
+    mkDayItem({ itemId: "37", name: "Disposed", apptWallMinutes: 8 * 60, apptDateISO: TOMORROW, reps: ["Curtis Westergard"], rs: LABEL.reset }),
+  ];
+  const plan = planMorningIssue({ leads: items, tomorrowISO: TOMORROW });
+  expectEq(
+    "Morning issue: each rep's earliest tomorrow lead, nothing else",
+    plan.issues.map((i) => i.lead.itemId).sort(),
+    ["30", "32"],
+  );
+  expectEq(
+    "Morning issue: the shared pair lead carries both reps, once",
+    plan.issues.find((i) => i.lead.itemId === "32")?.repNames,
+    ["Jaxon Heilman", "Daniel Mock"],
+  );
+  expectEq(
+    "Morning issue: Yakup (blank/wrong-day only) gets nothing — the guard holds at night too",
+    plan.issues.some((i) => i.repNames.some((r) => r.startsWith("Yakup"))),
+    false,
+  );
+  // Garett's later lead was a candidate (counted) but NOT issued.
+  expectEq("Morning issue: later leads stay with live dispatch", plan.candidates, 3);
+}
+
+// NIGHTLY AUTO-BUILD (owner 2026-10-30: the evening job that builds tomorrow's
 // lineup unattended). The engine's ONLY self-generated proposal is the rule-I7
 // reset-owner add; everything else stays "No change" for the manager.
 {

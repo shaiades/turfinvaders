@@ -106,7 +106,7 @@ export async function fetchAttendanceOverrides(
 
 export type DispatchDecision = {
   mode: "dry_run" | "live";
-  trigger: "report" | "watchdog";
+  trigger: "report" | "watchdog" | "morning-issue";
   formItemId: string | null;
   repName: string | null;
   office: "SD" | "OC" | null;
@@ -126,7 +126,7 @@ export type DispatchDecision = {
  *  time). Logged around EVERY such write the dispatcher makes. */
 export type DispatchWrite = {
   mode: "dry_run" | "live";
-  trigger: "report" | "watchdog" | "late_cover" | "approvals";
+  trigger: "report" | "watchdog" | "late_cover" | "approvals" | "morning-issue";
   formItemId: string | null;
   boardId: string | null;
   itemId: string;
