@@ -46,6 +46,7 @@ import {
   applyGuard,
   applyWriteIds,
   approvalsGroupTitle,
+  autoProposals,
   buildApprovalsRows,
   decisionKind,
   isControlRowName,
@@ -80,7 +81,7 @@ export type BuildApprovalsSummary = {
  */
 export async function runBuildApprovals(
   supabase: Supa,
-  opts: { dateISO?: string; proposals?: ProposalInput[] } = {},
+  opts: { dateISO?: string; proposals?: ProposalInput[]; autoPropose?: boolean } = {},
 ): Promise<BuildApprovalsSummary> {
   const { data: settings } = await supabase.from("system_settings").select("*").maybeSingle();
   const token = ((settings?.monday_api_token as string | null) ?? "").trim();
@@ -103,7 +104,12 @@ export async function runBuildApprovals(
     if (!boardId) continue;
     const items = await fetchDispatchDayItems(token, boardId, groupId).catch(() => []);
     const resetOrigins = await lookupResetOrigins(supabase, items);
-    const rows = buildApprovalsRows({ office, items, proposals, resetOrigins });
+    // autoPropose: the engine's own rule-I7 adds, with any passed-in proposals
+    // taking precedence (buildApprovalsRows keys by item id, last one wins).
+    const officeProposals = opts.autoPropose
+      ? [...autoProposals(items, resetOrigins), ...proposals]
+      : proposals;
+    const rows = buildApprovalsRows({ office, items, proposals: officeProposals, resetOrigins });
 
     // Find or create this office's section for the date.
     const title = approvalsGroupTitle(office, dateISO);
@@ -242,6 +248,30 @@ export async function runBuildApprovals(
     summary.offices![office] = { rows: rows.length, changes, created, updated };
   }
   return summary;
+}
+
+/**
+ * The scheduled 9 PM PT build (owner 2026-10-30 — "the lineup must exist
+ * every night without anyone remembering to build it"). Builds TOMORROW's
+ * full-block view with the rule-I7 auto-proposals, writing ONLY the approvals
+ * board, so the manager just presses Approve and the 8:45 auto-issue has rows
+ * to apply. Gated on the same nightly_auto_issue_enabled switch as the 8:45
+ * job — the two are one chain; `force` is for a manual / test run.
+ */
+export async function runNightlyBuildApprovals(
+  supabase: Supa,
+  opts: { force?: boolean } = {},
+): Promise<BuildApprovalsSummary & { ran: boolean }> {
+  const { data: settings } = await supabase
+    .from("system_settings")
+    .select("nightly_auto_issue_enabled")
+    .maybeSingle();
+  const enabled = settings?.nightly_auto_issue_enabled === true;
+  if (!opts.force && !enabled) {
+    return { ok: false, ran: false, reason: "nightly_auto_issue_enabled is off" };
+  }
+  const res = await runBuildApprovals(supabase, { autoPropose: true });
+  return { ...res, ran: true };
 }
 
 /** Rule I7 lookup — who created each reset? Best-effort: the processed OOH
