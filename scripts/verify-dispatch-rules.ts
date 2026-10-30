@@ -98,6 +98,10 @@ const SD_A = { lat: 32.8, lng: -117.1 };
 const SD_NEAR = { lat: 32.81, lng: -117.11 };
 const SD_FAR = { lat: 33.1, lng: -117.3 };
 
+/** Today's date for the pure-planner tests — every fixture lead is dated today
+ *  unless a test overrides it (the 10/29 not-today guard). */
+const TODAY_ISO = "2026-10-29";
+
 function mkLead(over: Partial<DispatchLead> = {}): DispatchLead {
   return {
     itemId: "L",
@@ -106,6 +110,7 @@ function mkLead(over: Partial<DispatchLead> = {}): DispatchLead {
     reps: [],
     issLabel: LABEL.notIssued,
     apptWallMinutes: 14 * 60,
+    apptDateISO: TODAY_ISO,
     coords: null,
     products: [],
     isReset: false,
@@ -159,6 +164,7 @@ function mkRep(over: Partial<DispatchRep> = {}): DispatchRep {
     rep,
     dayLeads: [mkLead({ itemId: "taken", reps: ["Someone Else"], apptWallMinutes: 14 * 60 })],
     nowWallMinutes: 10 * 60,
+    todayISO: TODAY_ISO,
   });
   expectEq("Rule 2: a lead held by another rep is never reassigned", taken.action, "none");
   expectEq("Rule 2: a normal issue presses Iss", issLabelForLead({ isJobWalk: false }), LABEL.iss);
@@ -247,6 +253,7 @@ function mkRep(over: Partial<DispatchRep> = {}): DispatchRep {
       rep,
       dayLeads: [mkLead({ itemId: "x", apptWallMinutes: now + 20 + 5 })],
       nowWallMinutes: now,
+    todayISO: TODAY_ISO,
     }).action,
     "none",
   );
@@ -256,6 +263,7 @@ function mkRep(over: Partial<DispatchRep> = {}): DispatchRep {
       rep,
       dayLeads: [mkLead({ itemId: "x", apptWallMinutes: now + 20 + 10 })],
       nowWallMinutes: now,
+    todayISO: TODAY_ISO,
     }).action,
     "issue",
   );
@@ -266,6 +274,7 @@ function mkRep(over: Partial<DispatchRep> = {}): DispatchRep {
       mkLead({ itemId: "sooner", coords: SD_FAR, apptWallMinutes: 13 * 60 }),
     ],
     nowWallMinutes: now,
+    todayISO: TODAY_ISO,
   });
   expectEq(
     "Rule 5: the soonest-starting coverable lead wins",
@@ -345,6 +354,7 @@ function mkRep(over: Partial<DispatchRep> = {}): DispatchRep {
       mkLead({ itemId: "within2h", coords: SD_FAR, apptWallMinutes: now + 90 }),
     ],
     nowWallMinutes: now,
+    todayISO: TODAY_ISO,
   });
   expectEq(
     "Rule 7: a lead in the next 2h is covered before a later one",
@@ -405,6 +415,7 @@ function mkRep(over: Partial<DispatchRep> = {}): DispatchRep {
       rep: mkRep({ name: "Yakup Sancakli" }),
       dayLeads: [mkLead({ itemId: "d-lead", reps: ["Daniel Figueiredo"], issLabel: "Add Rep" })],
       nowWallMinutes: 10 * 60,
+    todayISO: TODAY_ISO,
       cfg: avoidCfg,
     }).action,
     "none",
@@ -422,6 +433,7 @@ function mkRep(over: Partial<DispatchRep> = {}): DispatchRep {
       mkLead({ itemId: "smith", name: "Smith", coords: SD_FAR, apptWallMinutes: 14 * 60 }),
     ],
     nowWallMinutes: 13 * 60,
+    todayISO: TODAY_ISO,
   });
   expectEq(
     "Rule 9: Yakup gets the 2:00 Smith, not the 4:00 Hackett",
@@ -757,7 +769,7 @@ function mkRep(over: Partial<DispatchRep> = {}): DispatchRep {
     coords: SD_NEAR,
     apptWallMinutes: 13 * 60,
   });
-  const plan = planIssue({ rep: freed, dayLeads: [yin], nowWallMinutes: 11 * 60 });
+  const plan = planIssue({ rep: freed, dayLeads: [yin], nowWallMinutes: 11 * 60, todayISO: TODAY_ISO });
   expect(
     "Yin/Ronnell #3: a freed nearby rep is routed to the Add Rep lead",
     plan.action === "issue" && plan.lead.itemId === "yin",
@@ -774,7 +786,7 @@ function mkRep(over: Partial<DispatchRep> = {}): DispatchRep {
   const ronnell = mkRep({ name: "Ronnell Vital" });
   expectEq(
     "Yin/Ronnell #3: the current rep is never re-issued their own Add Rep lead",
-    planIssue({ rep: ronnell, dayLeads: [yin], nowWallMinutes: 11 * 60 }).action,
+    planIssue({ rep: ronnell, dayLeads: [yin], nowWallMinutes: 11 * 60, todayISO: TODAY_ISO }).action,
     "none",
   );
 }
@@ -903,6 +915,7 @@ function mkRep(over: Partial<DispatchRep> = {}): DispatchRep {
       rep: asRep("Jaxon Heilman", out.get("jaxon")!),
       dayLeads: [mkLead({ apptWallMinutes: 14 * 60 })],
       nowWallMinutes: 10 * 60,
+      todayISO: TODAY_ISO,
     }).action,
     "none",
   );
@@ -912,6 +925,7 @@ function mkRep(over: Partial<DispatchRep> = {}): DispatchRep {
       rep: asRep("Ghost Rep", out.get("ghost")!),
       dayLeads: [mkLead({ apptWallMinutes: 14 * 60 })],
       nowWallMinutes: 10 * 60,
+      todayISO: TODAY_ISO,
     }).action,
     "issue",
   );
@@ -1216,6 +1230,58 @@ function mkDayItem(over: Partial<ApprovalsDayItem> = {}): ApprovalsDayItem {
   expectEq("Rule J10: Approve applies", decisionKind("Approve"), "approve");
   expectEq("Rule J10: Don't approve records a rejection", decisionKind("Don't approve"), "reject");
   expectEq("Rule J10: Add rep is a manager-directed add", decisionKind("Add rep"), "add_rep");
+}
+
+// ═══ TODAY-ONLY GUARD (owner 2026-10-29: the Garett/Nov-3 mis-issue) ═════════
+// A staged reset copy for a future day sits in today's group with status
+// Not Issued and its date in Reset Date — Date/Time blank (or another day).
+// Auto-issue must skip it; only a lead DATED today may be handed to a rep.
+{
+  const rep = mkRep();
+  const blankDate = planIssue({
+    rep,
+    dayLeads: [mkLead({ itemId: "copy", apptWallMinutes: null, apptDateISO: null })],
+    nowWallMinutes: 10 * 60,
+    todayISO: TODAY_ISO,
+  });
+  expectEq("Today-only: a blank Date/Time lead is never auto-issued", blankDate.action, "none");
+  expect(
+    "Today-only: the decision reason says why nothing was issued",
+    blankDate.action === "none" && blankDate.reason.includes("Date/Time blank or not today"),
+  );
+  expectEq(
+    "Today-only: a future-day lead is never auto-issued (even with a time)",
+    planIssue({
+      rep,
+      dayLeads: [mkLead({ itemId: "nov3", apptWallMinutes: 15 * 60, apptDateISO: "2026-11-03" })],
+      nowWallMinutes: 10 * 60,
+      todayISO: TODAY_ISO,
+    }).action,
+    "none",
+  );
+  const dateOnly = planIssue({
+    rep,
+    dayLeads: [mkLead({ itemId: "dateonly", apptWallMinutes: null, apptDateISO: TODAY_ISO })],
+    nowWallMinutes: 10 * 60,
+    todayISO: TODAY_ISO,
+  });
+  expect(
+    "Today-only: a lead dated today WITHOUT a time still issues",
+    dateOnly.action === "issue" && dateOnly.lead.itemId === "dateonly",
+  );
+  const mixed = planIssue({
+    rep,
+    dayLeads: [
+      mkLead({ itemId: "nov3", apptWallMinutes: null, apptDateISO: "2026-11-03" }),
+      mkLead({ itemId: "tonight", apptWallMinutes: 15 * 60, apptDateISO: TODAY_ISO }),
+    ],
+    nowWallMinutes: 10 * 60,
+    todayISO: TODAY_ISO,
+  });
+  expect(
+    "Today-only: with a future copy AND a real lead in the pool, the real lead wins",
+    mixed.action === "issue" && mixed.lead.itemId === "tonight",
+  );
 }
 
 if (failures > 0) {

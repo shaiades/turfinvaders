@@ -181,6 +181,11 @@ export type DispatchLead = {
   issLabel: string | null;
   /** Appointment wall-minutes (LA) for today — same ordering key the engine uses. */
   apptWallMinutes: number | null;
+  /** Appointment LA calendar date (YYYY-MM-DD) from Date/Time; null when the
+   *  column is blank. Auto-issue requires it to BE today (owner guard
+   *  2026-10-29): a staged future reset copy, or a card with no Date/Time at
+   *  all, must never be handed to a freed rep. */
+  apptDateISO: string | null;
   /** House coordinates from the Monday Location column (null when unmapped). */
   coords: LatLng | null;
   /** Products quoted/booked on the card (normalized, for the strength table). */
@@ -656,6 +661,8 @@ export type PlanIssueInput = {
   dayLeads: DispatchLead[];
   /** "Now" in LA wall-minutes (hour*60+minute). */
   nowWallMinutes: number;
+  /** Today's LA calendar date (YYYY-MM-DD) — only leads dated today may issue. */
+  todayISO: string;
   cfg?: typeof DISPATCH_CONFIG;
 };
 
@@ -708,8 +715,18 @@ export function planIssue(input: PlanIssueInput): IssuePlan {
   const managerLeads: Array<{ lead: DispatchLead; reason: string }> = [];
 
   const eligible: Array<ScoredCandidate & { ownLead: boolean; addRep: boolean }> = [];
+  let skippedNotToday = 0;
   for (const lead of dayLeads) {
     if (!inPool(lead)) continue;
+    // Owner guard 2026-10-29: only a lead whose Date/Time is TODAY may be
+    // auto-issued. A blank Date/Time or a future day means a staged copy (a
+    // reset carried forward to next week lives in today's group with its date
+    // in Reset Date and Date/Time empty) — the 10/29 mis-issues: two Nov-3/4
+    // reset copies pressed to Iss, one rep handed both.
+    if (lead.apptDateISO !== input.todayISO) {
+      skippedNotToday += 1;
+      continue;
+    }
     const hr = hardRuleCheck(rep, lead, cfg);
     if (!hr.ok) {
       if (hr.disposition === "manager") managerLeads.push({ lead, reason: hr.reason });
@@ -766,7 +783,13 @@ export function planIssue(input: PlanIssueInput): IssuePlan {
   }
   const mgr = managerLeads[0];
   if (mgr) return { action: "manager", lead: mgr.lead, reason: mgr.reason };
-  return { action: "none", reason: "no eligible lead for this rep right now" };
+  return {
+    action: "none",
+    reason:
+      skippedNotToday > 0
+        ? `no eligible lead for this rep right now (${skippedNotToday} skipped: Date/Time blank or not today)`
+        : "no eligible lead for this rep right now",
+  };
 }
 
 // ── Manager-text builders (pure; the edge fn sends them via Inkbox) ───────────
