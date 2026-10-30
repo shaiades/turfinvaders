@@ -103,7 +103,12 @@ import {
   withPairing,
 } from "./dispatch.ts";
 import { runWatchdog } from "./watchdog.ts";
-import { runApprovalsDecision, runBuildApprovals, runNightlyAutoIssue } from "./approvals-live.ts";
+import {
+  runApprovalsDecision,
+  runBuildApprovals,
+  runNightlyAutoIssue,
+  runNightlyBuildApprovals,
+} from "./approvals-live.ts";
 import { APPROVALS_BOARD_ID, APPROVALS_COL, type ProposalInput } from "./approvals.ts";
 import {
   enrichHistory,
@@ -233,6 +238,33 @@ serve(async (req) => {
       return ok(result);
     } catch (e) {
       console.error("[ooh auto-issue] error", e instanceof Error ? e.message : String(e));
+      return ok({ error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  // ── Nightly approvals build (scheduled 9 PM PT; owner 2026-10-30) ──────────
+  // The pg_cron job run_nightly_approvals_build posts here with the shared
+  // notify secret. Builds TOMORROW's full-block view on the Nightly Lineup –
+  // Approvals board (writes ONLY that board), auto-proposing just the rule-I7
+  // reset-owner adds — so the manager only has to press Approve and the 8:45
+  // auto-issue has rows to apply. ?force=true bypasses the enabled flag for a
+  // manual / test run.
+  if (url.searchParams.get("task") === "build-approvals") {
+    const notifySecret = denoEnv?.get("NOTIFY_SECRET");
+    const provided = req.headers.get("x-notify-secret") ?? url.searchParams.get("secret");
+    if (notifySecret && provided !== notifySecret) {
+      return new Response("unauthorized", { status: 401, headers: corsHeaders });
+    }
+    const supabase = makeClient(
+      denoEnv?.get("SUPABASE_URL") ?? "",
+      denoEnv?.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+    );
+    const force = url.searchParams.get("force") === "true";
+    try {
+      const result = await runNightlyBuildApprovals(supabase, { force });
+      return ok(result);
+    } catch (e) {
+      console.error("[ooh build-approvals] error", e instanceof Error ? e.message : String(e));
       return ok({ error: e instanceof Error ? e.message : String(e) });
     }
   }

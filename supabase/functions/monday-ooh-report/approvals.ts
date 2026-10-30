@@ -147,6 +147,31 @@ export function resetOwners(
   return fromReport.length > 0 ? fromReport : null;
 }
 
+/**
+ * The 9 PM auto-build's self-generated plan (owner 2026-10-30): the ONLY
+ * change the engine proposes on its own is rule I7 — a reset with an empty
+ * people6 goes back to the rep (+ partner) who created it. Every other row
+ * stays "No change"; staffing is the manager's call on the board (Change /
+ * Add rep acts immediately, Approve defers to the 8:45 apply).
+ */
+export function autoProposals(
+  items: Array<Pick<ApprovalsDayItem, "itemId" | "reps" | "isReset">>,
+  resetOrigins: Record<string, ResetOrigin | null>,
+): ProposalInput[] {
+  const out: ProposalInput[] = [];
+  for (const item of items) {
+    if (!item.isReset || item.reps.length > 0) continue;
+    const owners = resetOwners(item, resetOrigins[item.itemId] ?? null);
+    if (!owners || owners.length === 0) continue;
+    out.push({
+      blockItemId: item.itemId,
+      addReps: owners,
+      reason: "Reset goes back to the rep who set it (rule I7)",
+    });
+  }
+  return out;
+}
+
 /** A sanitized, add-only proposal for one row. null ⇒ the row shows
  *  "No change". */
 export type SanitizedProposal = {

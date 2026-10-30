@@ -65,6 +65,7 @@ import {
   type ApprovalsDayItem,
   applyGuard,
   applyWriteIds,
+  autoProposals,
   buildApprovalsRows,
   decisionKind,
   resetOwners,
@@ -1150,6 +1151,40 @@ function mkDayItem(over: Partial<ApprovalsDayItem> = {}): ApprovalsDayItem {
     "Rule I7: unknown owner → no proposal at all for that row",
     sanitizeProposal(orphanReset, { blockItemId: "8", proposedReps: ["Jonathan Paz"] }, null),
     null,
+  );
+}
+
+// NIGHTLY AUTO-BUILD (owner 2026-10-30: the 9 PM job that builds tomorrow's
+// lineup unattended). The engine's ONLY self-generated proposal is the rule-I7
+// reset-owner add; everything else stays "No change" for the manager.
+{
+  const items = [
+    mkDayItem({ itemId: "20", reps: [], isReset: true }), // ownerless reset, origin known
+    mkDayItem({ itemId: "21", reps: ["Yakup Sancakli"], isReset: true }), // reset already staffed
+    mkDayItem({ itemId: "22", reps: [], isReset: false }), // plain unassigned lead
+    mkDayItem({ itemId: "23", reps: [], isReset: true }), // ownerless reset, origin unknown
+  ];
+  const origins = {
+    "20": { repName: "Jonathan Paz", partner: "Bergan Lundak" },
+    "23": null,
+  };
+  const auto = autoProposals(items, origins);
+  expectEq(
+    "Auto-build: only the ownerless reset with a known origin gets a proposal",
+    auto.map((p) => p.blockItemId),
+    ["20"],
+  );
+  expectEq("Auto-build: the proposal adds the creating rep + partner", auto[0]?.addReps, [
+    "Jonathan Paz",
+    "Bergan Lundak",
+  ]);
+  // Through the builder: the auto proposal survives sanitizing; the staffed
+  // reset, the plain lead and the unknown-origin reset all show "No change".
+  const rows = buildApprovalsRows({ office: "SD", items, proposals: auto, resetOrigins: origins });
+  expectEq(
+    "Auto-build: exactly one changed row out of four",
+    rows.filter((r) => r.hasChange).map((r) => r.blockItemId),
+    ["20"],
   );
 }
 
