@@ -12,9 +12,32 @@ import { normalizeName } from "@/lib/utils";
  * other — a miss just degrades that name to RepAvatar's initials fallback.
  */
 
-export type RepCartoon = { name: string; portrait: string | null; full: string | null };
+export type RepCartoon = {
+  name: string;
+  portrait: string | null;
+  full: string | null;
+  /** Turnaround spin frames (8 views at 45° — front first), when generated
+   *  from the CURRENT full-body art. The stats turntable steps through them
+   *  like a videogame character-select; absent → pseudo-spin fallback.
+   *  Optional so ad-hoc preview literals (the admin galleries' "on the
+   *  board" chips) don't have to carry it. */
+  turn?: string[] | null;
+};
 
 export const repCartoonsKey = ["rep_cartoons_approved"] as const;
+
+/** cartoon_meta.turn_urls, but only when it came from the live full art —
+ *  a re-rolled fighter must never spin last season's body. */
+function turnFrames(meta: unknown, fullUrl: string | null): string[] | null {
+  const m = (meta ?? {}) as { turn_urls?: unknown; turn_source?: unknown };
+  return fullUrl &&
+    m.turn_source === fullUrl &&
+    Array.isArray(m.turn_urls) &&
+    m.turn_urls.length >= 4 &&
+    m.turn_urls.every((u) => typeof u === "string")
+    ? (m.turn_urls as string[])
+    : null;
+}
 
 export function useRepCartoons() {
   return useQuery({
@@ -24,11 +47,11 @@ export function useRepCartoons() {
       const [repRes, canvRes] = await Promise.all([
         supabase
           .from("rep_photos")
-          .select("name, name_norm, cartoon_portrait_url, cartoon_full_url")
+          .select("name, name_norm, cartoon_portrait_url, cartoon_full_url, cartoon_meta")
           .eq("cartoon_status", "approved"),
         supabase
           .from("canvasser_photos")
-          .select("name, name_norm, cartoon_portrait_url, cartoon_full_url")
+          .select("name, name_norm, cartoon_portrait_url, cartoon_full_url, cartoon_meta")
           .eq("cartoon_status", "approved"),
       ]);
       const map = new Map<string, RepCartoon>();
@@ -41,6 +64,7 @@ export function useRepCartoons() {
             name: r.name,
             portrait: r.cartoon_portrait_url,
             full: r.cartoon_full_url,
+            turn: turnFrames(r.cartoon_meta, r.cartoon_full_url),
           });
         }
       }
@@ -50,6 +74,7 @@ export function useRepCartoons() {
             name: r.name,
             portrait: r.cartoon_portrait_url,
             full: r.cartoon_full_url,
+            turn: turnFrames(r.cartoon_meta, r.cartoon_full_url),
           });
         }
       }
