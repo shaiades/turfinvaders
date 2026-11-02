@@ -1247,6 +1247,239 @@ export function contestDaysLeft(rules: KombatRules, todayISO: string = laTodayIS
   return n;
 }
 
+// ── The Daily Fight (owner audit 2026-11-01): me-vs-me math ─────────────
+// Today's tally, pace → projected check, required rate, the scoring-day
+// combo, the coach's callout, FINISH HIM and the ROUND framing. All pure
+// LA-date string math, Mon–Sat workdays (the PaycheckCard convention).
+
+const isWorkdayISO = (iso: string): boolean => new Date(`${iso}T12:00:00Z`).getUTCDay() !== 0; // Sundays off
+
+export type ContestWorkdays = { total: number; elapsed: number; remaining: number };
+
+/** Mon–Sat days of the contest month. `elapsed` runs through today
+ *  inclusive (0 before the month); `remaining` runs FROM today inclusive —
+ *  they deliberately overlap on today, because pace counts today's partial
+ *  work while "need per day" still has today to work with. */
+export function contestWorkdays(
+  rules: KombatRules,
+  todayISO: string = laTodayISO(),
+): ContestWorkdays {
+  const start = rules.contest.month;
+  const end = lastDayOfMonth(start);
+  let total = 0;
+  let elapsed = 0;
+  let remaining = 0;
+  for (let d = start; d <= end; d = addDaysISO(d, 1)) {
+    if (!isWorkdayISO(d)) continue;
+    total += 1;
+    if (d <= todayISO) elapsed += 1;
+    if (d >= todayISO) remaining += 1;
+  }
+  return { total, elapsed, remaining };
+}
+
+export type DailyRowLite = {
+  points: number;
+  status: LedgerStatus;
+  occurred_on: string | null;
+};
+
+/** The viewer's points stamped on one LA calendar day (cancelled rows out). */
+export function todayPoints(
+  rows: readonly DailyRowLite[],
+  todayISO: string = laTodayISO(),
+): number {
+  return rows.reduce(
+    (s, r) =>
+      r.status !== "cancelled" && r.occurred_on === todayISO && r.points > 0 ? s + r.points : s,
+    0,
+  );
+}
+
+export type PaceProjection = {
+  projectedPoints: number;
+  projectedBase: number;
+  projectedTier: KombatTier | null;
+  projectedCheck: number;
+  /** Points per remaining workday to reach the next rung (0 = none left). */
+  perDayNeeded: number;
+};
+
+/** Straight-line month-end projection off the elapsed-workday run rate —
+ *  the same linear model PaycheckCard uses. Volume points scale the same
+ *  way, so the projected check prices the projected tier on the projected
+ *  base. */
+export function paceProjection(
+  totals: RepTotals | undefined,
+  rules: KombatRules,
+  unlockActive: boolean,
+  todayISO: string = laTodayISO(),
+): PaceProjection {
+  const wd = contestWorkdays(rules, todayISO);
+  const total = totals?.total ?? 0;
+  // Day one (or an opening Sunday) has no elapsed workday yet — treat it
+  // as one so early points project forward instead of reading as zero.
+  const scale = wd.total / Math.max(1, wd.elapsed);
+  const projectedPoints = total * scale;
+  const projectedBase = volumeBaseDollars(totals, rules) * scale;
+  const projectedTier = tierFor(projectedPoints, rules).current;
+  const projectedCheck = projectedTier
+    ? tierPayout(projectedTier, projectedBase, unlockActive, rules)
+    : 0;
+  const { next, toNext } = tierFor(total, rules);
+  const perDayNeeded = next && wd.remaining > 0 ? toNext / wd.remaining : 0;
+  return { projectedPoints, projectedBase, projectedTier, projectedCheck, perDayNeeded };
+}
+
+export type ScoringStreak = { days: number; aliveToday: boolean };
+
+/** Consecutive Mon–Sat days with ≥1 positive point event, walking back
+ *  from today. A scoreless today doesn't break the combo until the day is
+ *  over — the chain anchors on today if it scored, else on the last
+ *  workday before today. Sundays never count and never break. */
+export function scoringStreak(
+  rows: readonly DailyRowLite[],
+  todayISO: string = laTodayISO(),
+): ScoringStreak {
+  const scored = new Set<string>();
+  for (const r of rows) {
+    if (r.status !== "cancelled" && r.points > 0 && r.occurred_on) scored.add(r.occurred_on);
+  }
+  const prevWorkday = (iso: string): string => {
+    let d = addDaysISO(iso, -1);
+    while (!isWorkdayISO(d)) d = addDaysISO(d, -1);
+    return d;
+  };
+  const aliveToday = scored.has(todayISO);
+  // Anchor on today if it scored, else the last workday before today (a
+  // Sunday today walks back to Saturday the same way).
+  let cursor = aliveToday ? todayISO : prevWorkday(todayISO);
+  let days = 0;
+  while (scored.has(cursor)) {
+    days += 1;
+    cursor = prevWorkday(cursor);
+  }
+  return { days, aliveToday };
+}
+
+export type CoachCallout = { label: string; line: string };
+
+/** The one gap worth calling out today, by leverage: referrals (the
+ *  biggest untouched move, historically zero), reloads, a recruit, the
+ *  weekly test — else keep stacking. Zero-weight moves never nag. */
+export function coachCallout(
+  totals: RepTotals | undefined,
+  rules: KombatRules,
+  tookTestThisWeek?: boolean,
+): CoachCallout {
+  const pts = (cat: string): number => {
+    const slot = totals?.byCategory.get(cat);
+    return slot ? slot.locked + slot.pending : 0;
+  };
+  const referralPts =
+    pts("card.referral_sale") + pts("card.referral_miss") + pts("proof.referral_sit");
+  if (rules.card.referral_sale > 0 && referralPts === 0) {
+    return {
+      label: "Throw the big punch",
+      line: `You haven't pitched a single referral — ${rules.card.referral_sale} pts per close plus its volume, the biggest move in the game. Ask at every table today.`,
+    };
+  }
+  if (rules.card.reload > 0 && pts("card.reload") === 0) {
+    return {
+      label: "Mine your book",
+      line: `No reloads yet — ${rules.card.reload} pts each and your past customers already trust you. Call two of them today.`,
+    };
+  }
+  if (rules.proofs.weights.canvasser_recruit > 0 && pts("proof.canvasser_recruit") === 0) {
+    return {
+      label: "Build your corner",
+      line: `Recruit a canvasser — ${rules.proofs.weights.canvasser_recruit} pts when they land 2 confirmed leads, and their leads feed your month.`,
+    };
+  }
+  if (rules.activity.weekly_test > 0 && tookTestThisWeek === false) {
+    return {
+      label: "Free points on the table",
+      line: `This week's test is still sitting there — ${rules.activity.weekly_test} pts for a few minutes of reps.`,
+    };
+  }
+  return {
+    label: "Stay dangerous",
+    line: "Every move is on the board — stack volume and keep the combo alive.",
+  };
+}
+
+/** Dollars the next rung adds on TOP of the current one, on this base —
+ *  the carrot and FINISH HIM share this so they can never disagree. */
+export function payoutDelta(
+  next: KombatTier,
+  current: KombatTier | null,
+  baseDollars: number,
+  unlockActive: boolean,
+  rules: KombatRules,
+): number {
+  const now = current ? tierPayout(current, baseDollars, unlockActive, rules) : 0;
+  const then = tierPayout(next, baseDollars, unlockActive, rules);
+  return Math.max(0, then - now);
+}
+
+export const FINISH_HIM_WINDOW = 25;
+
+export type FinishHim = { active: boolean; pts: number; prize: number };
+
+/** Within striking distance of the next rung — the page's "FINISH HIM"
+ *  moment (owner audit 2026-11-01). */
+export function finishHim(
+  tier: { current: KombatTier | null; next: KombatTier | null; toNext: number },
+  baseDollars: number,
+  unlockActive: boolean,
+  rules: KombatRules,
+): FinishHim {
+  if (!tier.next || tier.toNext <= 0 || tier.toNext > FINISH_HIM_WINDOW) {
+    return { active: false, pts: 0, prize: 0 };
+  }
+  return {
+    active: true,
+    pts: tier.toNext,
+    prize: payoutDelta(tier.next, tier.current, baseDollars, unlockActive, rules),
+  };
+}
+
+export type RoundInfo = {
+  roundNumber: number;
+  /** Active bounty's stage name, null between bounties. */
+  label: string | null;
+  multiplier: number | null;
+  endsOn: string;
+  daysLeftInRound: number;
+};
+
+/** The contest week as a fight ROUND, wearing the active bounty as its
+ *  stage. Null outside the contest month. */
+export function roundInfo(
+  bounties: readonly KombatBounty[],
+  rules: KombatRules,
+  todayISO: string = laTodayISO(),
+): RoundInfo | null {
+  const weeks = kombatWeeks(rules.contest.month);
+  const idx = weeks.findIndex((w) => todayISO >= w.octStart && todayISO <= w.octEnd);
+  if (idx < 0) return null;
+  const week = weeks[idx];
+  // A partial leading week (the month opening mid-week, e.g. Nov 1 on a
+  // Sunday) folds into ROUND 1 so the bounty weeks number like the poster.
+  const roundNumber = weeks[0].start < rules.contest.month ? Math.max(1, idx) : idx + 1;
+  const live = bounties.find((b) => b.active && todayISO >= b.starts_on && todayISO <= b.ends_on);
+  const endsOn = live && live.ends_on <= week.octEnd ? live.ends_on : week.octEnd;
+  let daysLeftInRound = 0;
+  for (let d = todayISO; d <= endsOn; d = addDaysISO(d, 1)) daysLeftInRound += 1;
+  return {
+    roundNumber,
+    label: live?.label ?? null,
+    multiplier: live?.multiplier ?? null,
+    endsOn,
+    daysLeftInRound,
+  };
+}
+
 /** The belt color token for a tier key — gold crown, descending metals. */
 export const BELT_ACCENT: Record<string, string> = {
   king: "var(--kombat-gold)",

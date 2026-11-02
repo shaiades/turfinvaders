@@ -7,6 +7,7 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { rewardToast } from "@/lib/reward-toast";
+import type { RepCartoon } from "@/hooks/useRepCartoons";
 
 export type BeltUpFx = { seq: number; beltLabel: string; cash: number };
 
@@ -17,7 +18,16 @@ const fmtMoney = (n: number) =>
     maximumFractionDigits: 0,
   }).format(n);
 
-export function KombatBeltUpFx({ fx, onDone }: { fx: BeltUpFx; onDone: () => void }) {
+export function KombatBeltUpFx({
+  fx,
+  cartoon,
+  onDone,
+}: {
+  fx: BeltUpFx;
+  /** YOUR fighter, standing beside the new belt. */
+  cartoon?: RepCartoon | null;
+  onDone: () => void;
+}) {
   const onDoneRef = useRef(onDone);
   const fxRef = useRef(fx);
   useEffect(() => {
@@ -70,6 +80,13 @@ export function KombatBeltUpFx({ fx, onDone }: { fx: BeltUpFx; onDone: () => voi
       onClick={finish}
       className="fixed inset-0 z-[10030] flex items-center justify-center bg-background/70 pointer-events-auto"
     >
+      {cartoon?.full && (
+        <img
+          src={cartoon.full}
+          alt=""
+          className="animate-in slide-in-from-left-8 fade-in mr-[-1rem] hidden h-56 w-auto duration-300 drop-shadow-[0_0_30px_rgba(255,210,62,0.7)] sm:block"
+        />
+      )}
       <span className="animate-in zoom-in-50 fade-in duration-300 rounded-2xl border-2 border-kombat-gold/70 bg-kombat-black px-8 py-6 text-center shadow-[0_0_60px_-8px_var(--kombat-gold)]">
         <span className="block font-display text-[10px] uppercase tracking-[0.3em] text-kombat-red">
           New Belt

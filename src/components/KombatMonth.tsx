@@ -19,7 +19,7 @@ import { usePurposeProfile } from "@/hooks/usePurposeProfile";
 import { useActivityTests } from "@/hooks/useActivityTests";
 import { buildRepMatcher } from "@/lib/rep-identity";
 import { rewardToast } from "@/lib/reward-toast";
-import { laTodayISO, nextMonthStartISO } from "@/lib/dates";
+import { laWeekStartISO, nextMonthStartISO } from "@/lib/dates";
 import { CARD_COLUMNS, type BlockCard } from "@/lib/close-kombat";
 import { ArcadePanel, ArcadePill, NeonButton } from "@/components/arcade";
 import {
@@ -43,6 +43,7 @@ import {
   fmtPts,
   liveBlockVolumeDollars,
   mergeKombatRules,
+  roundInfo,
   tierFor,
   tierPayout,
   totalsFromLedger,
@@ -58,7 +59,8 @@ import { KombatBeltLadder } from "@/components/KombatBeltLadder";
 import { KombatScorecard } from "@/components/KombatScorecard";
 import { KombatLeaderboard } from "@/components/KombatLeaderboard";
 import { KombatBeltUpFx, type BeltUpFx } from "@/components/KombatBeltUpFx";
-import { ArenaBackdrop } from "@/components/KombatArena";
+import { ArenaBackdrop, CoinRain } from "@/components/KombatArena";
+import { KombatDailyFight } from "@/components/KombatDailyFight";
 import { makeBeeper } from "@/components/intro-fx";
 import { refreshKombatLedger } from "@/lib/kombat-month.functions";
 import { RepAvatar } from "@/components/RepAvatar";
@@ -312,6 +314,7 @@ export function KombatMonthTab({
   const koSeqRef = useRef(0);
   const prevRankRef = useRef<number | null>(null);
   const prevAheadRef = useRef<string | null>(null);
+  const passedByRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (!matcher.matched || myRank <= 0) {
       prevRankRef.current = null;
@@ -323,6 +326,17 @@ export function KombatMonthTab({
     if (prevRank !== null && myRank < prevRank && prevAhead) {
       koSeqRef.current += 1;
       setKo({ seq: koSeqRef.current, name: prevAhead.split(/\s+/)[0] || prevAhead });
+    }
+    // Getting knocked down stings too (owner audit 2026-11-01) — a nudge,
+    // not a ceremony, once per overtaker per session.
+    if (prevRank !== null && myRank > prevRank) {
+      const passer = totals[myRank - 2]?.rep_name;
+      if (passer && !passedByRef.current.has(passer)) {
+        passedByRef.current.add(passer);
+        rewardToast(`⬇ ${passer.split(/\s+/)[0]} just passed you — take it back.`, {
+          vibrate: false,
+        });
+      }
     }
     prevRankRef.current = myRank;
     prevAheadRef.current = myRank >= 2 ? (totals[myRank - 2]?.rep_name ?? null) : null;
@@ -386,8 +400,10 @@ export function KombatMonthTab({
   }, [ledger, ledgerQuery.isSuccess]);
 
   const written = writtenQuery.data ?? 0;
-  const activeBounties = (bountiesQuery.data ?? []).filter(
-    (b) => b.active && b.starts_on <= laTodayISO() && b.ends_on >= laTodayISO(),
+  const unlockActive = written >= rules.prizes.unlock_threshold;
+  const round = roundInfo(bountiesQuery.data ?? [], rules);
+  const tookTestThisWeek = (testsQuery.data?.takes ?? []).some(
+    (t: { taken_on: string }) => t.taken_on >= laWeekStartISO(),
   );
 
   // ── Belt-up ceremony ── when MY belt rises, drop the flourish once per
@@ -457,30 +473,66 @@ export function KombatMonthTab({
       <div className="relative z-10 space-y-4 md:space-y-6">
         {fx && <KombatStrikeFx key={fx.seq} fx={fx} onDone={() => setFx(null)} />}
         {beltFx && (
-          <KombatBeltUpFx key={`belt-${beltFx.seq}`} fx={beltFx} onDone={() => setBeltFx(null)} />
+          <KombatBeltUpFx
+            key={`belt-${beltFx.seq}`}
+            fx={beltFx}
+            cartoon={meFighter?.cartoon}
+            onDone={() => setBeltFx(null)}
+          />
         )}
-        {ko && <KombatKoFlash key={`ko-${ko.seq}`} name={ko.name} onDone={() => setKo(null)} />}
+        {ko && (
+          <KombatKoFlash
+            key={`ko-${ko.seq}`}
+            name={ko.name}
+            cartoon={meFighter?.cartoon}
+            onDone={() => setKo(null)}
+          />
+        )}
 
-        {/* Bounty banners */}
-        {activeBounties.map((b) => (
-          <div
-            key={b.id}
-            className="arcade-card border-kombat-gold/40 px-4 py-3 text-sm flex flex-wrap items-center gap-x-3 gap-y-1"
-          >
-            <span className="font-display text-[10px] uppercase tracking-widest text-kombat-gold">
-              Bounty live
-            </span>
-            <span className="font-semibold">{b.label}</span>
-            <span className="text-muted-foreground">
-              ×{b.multiplier} · through {b.ends_on}
-            </span>
+        {/* ROUND card — the contest week as a fight round, wearing the
+            active bounty as its stage (owner audit 2026-11-01). The round
+            number persists between bounties so the month always has a
+            structure. */}
+        {round && (
+          <div className="kombat-marquee arcade-card relative overflow-hidden border-kombat-gold/50 px-4 py-3.5">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+              <span className="gold-foil-text font-display text-base uppercase leading-relaxed sm:text-lg">
+                Round {round.roundNumber}
+              </span>
+              {round.label ? (
+                <>
+                  <span className="font-display text-[11px] uppercase tracking-widest text-kombat-red">
+                    {round.label}
+                  </span>
+                  <span
+                    aria-hidden
+                    className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-[#7a4d00] font-display text-[11px] text-[#231500]"
+                    style={{
+                      background:
+                        "radial-gradient(circle at 35% 30%, #fff7d0, #ffd23e 45%, #c8901a 80%, #7a4d00)",
+                      boxShadow: "0 0 14px rgba(255,210,62,.5)",
+                    }}
+                  >
+                    ×{round.multiplier}
+                  </span>
+                </>
+              ) : (
+                <span className="font-display text-[11px] uppercase tracking-widest text-muted-foreground">
+                  {rules.contest.label}
+                </span>
+              )}
+              <span className="ml-auto font-display text-[10px] uppercase tracking-widest text-cyan-300">
+                {round.daysLeftInRound}d left in round
+              </span>
+            </div>
           </div>
-        ))}
+        )}
 
         {/* Reigning champion spotlight — the #1 fighter, front and center */}
         {totals[0] && (
           <div className="pop-panel relative flex items-center gap-3 overflow-hidden rounded-xl border-2 border-kombat-gold/60 bg-kombat-black px-4 py-3">
             <span aria-hidden className="pop-halftone" />
+            <CoinRain count={8} className="z-0" />
             <RepAvatar
               name={totals[0].rep_name}
               cartoon={cartoonFor(cartoons, totals[0].rep_name)}
@@ -497,6 +549,12 @@ export function KombatMonthTab({
               <div className="truncate text-lg font-bold">{totals[0].rep_name}</div>
               <div className="font-mono text-sm tabular-nums text-kombat-gold">
                 {fmtPts(totals[0].total)} pts
+                {totals[1] && (
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    defends by {fmtPts(totals[0].total - totals[1].total)} over{" "}
+                    {totals[1].rep_name.split(/\s+/)[0]}
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -517,6 +575,17 @@ export function KombatMonthTab({
           onTakeTest={onTakeActivityTest}
           totals={totals}
           cartoons={cartoons}
+        />
+
+        {/* THE DAILY FIGHT — today's tally, pace → projected check, the
+            required rate, the combo and the coach's callout. Me vs me. */}
+        <KombatDailyFight
+          rules={rules}
+          myTotals={myTotals}
+          myRows={myLedger}
+          matched={matcher.matched !== null}
+          unlockActive={unlockActive}
+          tookTestThisWeek={tookTestThisWeek}
         />
 
         {/* YOUR NEXT FIGHT — you vs the rep one rank ahead (or defend at #1) */}

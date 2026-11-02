@@ -7,8 +7,18 @@ import { createPortal } from "react-dom";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { makeBeeper } from "@/components/intro-fx";
 import { rewardToast } from "@/lib/reward-toast";
+import type { RepCartoon } from "@/hooks/useRepCartoons";
 
-export function KombatKoFlash({ name, onDone }: { name: string; onDone: () => void }) {
+export function KombatKoFlash({
+  name,
+  cartoon,
+  onDone,
+}: {
+  name: string;
+  /** YOUR fighter, thrown into the frame beside the starburst. */
+  cartoon?: RepCartoon | null;
+  onDone: () => void;
+}) {
   const reduced = usePrefersReducedMotion();
   const doneRef = useRef(false);
   const onDoneRef = useRef(onDone);
@@ -57,6 +67,13 @@ export function KombatKoFlash({ name, onDone }: { name: string; onDone: () => vo
       className="pointer-events-none fixed inset-0 z-[10040] grid place-items-center"
       aria-hidden
     >
+      {cartoon?.full && (
+        <img
+          src={cartoon.full}
+          alt=""
+          className="animate-in slide-in-from-left-10 fade-in absolute left-[6%] bottom-[14%] h-44 w-auto duration-300 drop-shadow-[0_0_26px_rgba(255,210,62,0.65)] sm:left-[18%] sm:h-60"
+        />
+      )}
       <div className="pop-ko-flash relative grid h-56 w-56 place-items-center sm:h-72 sm:w-72">
         <span className="pop-burst absolute inset-0 bg-kombat-gold" />
         <span className="pop-burst absolute inset-[6px] bg-kombat-red" />
