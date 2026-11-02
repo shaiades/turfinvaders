@@ -44,7 +44,9 @@ import {
   liveBlockVolumeDollars,
   mergeKombatRules,
   tierFor,
+  tierPayout,
   totalsFromLedger,
+  volumeBaseDollars,
   type KombatBounty,
   type KombatReportRow,
   type KombatRules,
@@ -424,9 +426,12 @@ export function KombatMonthTab({
       setBeltFx((f) => ({
         seq: (f?.seq ?? 0) + 1,
         beltLabel: myTier!.label,
-        cash:
-          myTier!.cash *
-          (written >= rules.prizes.unlock_threshold ? rules.prizes.unlock_multiplier : 1),
+        cash: tierPayout(
+          myTier!,
+          volumeBaseDollars(myTotals, rules),
+          written >= rules.prizes.unlock_threshold,
+          rules,
+        ),
       }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -807,6 +812,8 @@ const PROOF_HINTS: Record<ProofCategory, string> = {
   before_after: "Both shots in one upload (collage or video walkthrough).",
   role_play: "Record a pitch or objection run — same as the Dojo.",
   gym_checkin: "Photo at the gym. One a day counts.",
+  canvasser_recruit:
+    "Who you recruited and their start date — approved once they land 2 confirmed leads.",
 };
 
 // Max proof upload size. MUST stay in sync with the contest-proofs bucket's

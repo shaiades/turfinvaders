@@ -21,21 +21,25 @@
 // cron (the lock sweep needs wall-clock time, not new data).
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { laTodayISO, nextMonthStartISO } from "@/lib/dates";
+import { laTodayISO, nextMonthStartISO, weekStartOfISO } from "@/lib/dates";
 import { CARD_COLUMNS, type BlockCard } from "@/lib/close-kombat";
 import {
   buildCardCandidates,
   buildCardVolumeCandidates,
   buildMoneyCandidates,
   buildReloadPitchCandidates,
+  buildWeeklyTestCandidates,
   scoredCardKeys,
   mergeKombatRules,
+  type ActivityTestRow,
   type KombatBounty,
   type KombatReportRow,
   type KombatRules,
   type LedgerCandidate,
   type ReloadSubitemRow,
 } from "@/lib/kombat-month";
+import { buildRepMatcher } from "@/lib/rep-identity";
+import { normalizeName } from "@/lib/utils";
 
 const CHUNK = 200;
 const chunks = <T>(arr: T[], size: number): T[][] => {
@@ -77,6 +81,95 @@ export async function loadKombatBounties(): Promise<KombatBounty[]> {
     .select("id, label, categories, multiplier, starts_on, ends_on, active");
   if (error) throw new Error(`contest_bounties: ${error.message}`);
   return (data ?? []) as KombatBounty[];
+}
+
+/** Weekly-test point rows (November model; a 0 weight — the October model —
+ *  skips every read). Tests are keyed by auth user, the ledger by board rep
+ *  name, so each sales rep binds through the SAME matcher ladder the Stats
+ *  tab uses (aliases included) against the rep names the other candidates
+ *  already produced; an unmatched rep has no ledger row to land on yet. */
+async function weeklyTestCandidates(
+  rules: KombatRules,
+  bounties: KombatBounty[],
+  otherCandidates: readonly LedgerCandidate[],
+  today: string,
+): Promise<LedgerCandidate[]> {
+  if (rules.activity.weekly_test === 0) return [];
+  const month = rules.contest.month;
+
+  const { data: roleRows, error: roleErr } = await supabaseAdmin
+    .from("user_roles")
+    .select("user_id")
+    .eq("role", "sales_rep");
+  if (roleErr) throw new Error(`user_roles: ${roleErr.message}`);
+  const ids = [...new Set((roleRows ?? []).map((r) => r.user_id))];
+  if (ids.length === 0) return [];
+
+  const { data: profiles, error: profErr } = await supabaseAdmin
+    .from("profiles")
+    .select("id, display_name, is_active")
+    .in("id", ids);
+  if (profErr) throw new Error(`profiles: ${profErr.message}`);
+
+  // Aliases, the useRepAliases shape: normalized display_name → board name.
+  const { data: aliasRows } = await supabaseAdmin
+    .from("kombat_rep_aliases")
+    .select("profile_id, board_name");
+  const aliasProfileIds = [...new Set((aliasRows ?? []).map((r) => r.profile_id))];
+  const aliasNameById = new Map<string, string | null>();
+  if (aliasProfileIds.length > 0) {
+    const { data: aliasProfiles } = await supabaseAdmin
+      .from("profiles")
+      .select("id, display_name")
+      .in("id", aliasProfileIds);
+    for (const p of aliasProfiles ?? []) aliasNameById.set(p.id, p.display_name);
+  }
+  const aliases = new Map<string, string>();
+  for (const r of aliasRows ?? []) {
+    const key = normalizeName(aliasNameById.get(r.profile_id));
+    if (key !== "") aliases.set(key, r.board_name);
+  }
+
+  // activity_tests is not in the generated Database types (same situation
+  // as getKombatAdminBoard); a loose accessor keeps the read honest.
+  const raw = supabaseAdmin as unknown as {
+    from: (table: string) => {
+      select: (cols: string) => {
+        in: (
+          col: string,
+          vals: string[],
+        ) => {
+          gte: (
+            col: string,
+            v: string,
+          ) => {
+            lt: (
+              col: string,
+              v: string,
+            ) => PromiseLike<{ data: ActivityTestRow[] | null; error: { message: string } | null }>;
+          };
+        };
+      };
+    };
+  };
+  const { data: tests, error: testErr } = await raw
+    .from("activity_tests")
+    .select("rep_id, taken_on")
+    .in("rep_id", ids)
+    .gte("taken_on", weekStartOfISO(month))
+    .lt("taken_on", nextMonthStartISO(month));
+  if (testErr) throw new Error(`activity_tests: ${testErr.message}`);
+  if (!tests || tests.length === 0) return [];
+
+  const repNames = [...new Set(otherCandidates.map((c) => c.rep_name))];
+  const repNameById = new Map<string, string>();
+  for (const p of profiles ?? []) {
+    if (p.is_active === false) continue;
+    const m = buildRepMatcher(p.display_name, repNames, aliases);
+    if (m.matched) repNameById.set(p.id, m.matched);
+  }
+
+  return buildWeeklyTestCandidates(tests, repNameById, rules, bounties, today);
 }
 
 export type KombatRecomputeSummary = {
@@ -154,6 +247,7 @@ export async function runKombatRecompute(): Promise<KombatRecomputeSummary> {
     ...buildCardVolumeCandidates(cards, reportRows, rules, bounties, today),
     ...buildReloadPitchCandidates(reloadRows, parentRepsById, rules, bounties, today),
   ];
+  candidates.push(...(await weeklyTestCandidates(rules, bounties, candidates, today)));
 
   const existing = (await pageAll((from, to) =>
     supabaseAdmin

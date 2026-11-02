@@ -48,7 +48,13 @@ import {
 // ── Rules ────────────────────────────────────────────────────────────────
 
 export type ProofCategory =
-  "testimonial" | "google_review" | "referral_sit" | "before_after" | "role_play" | "gym_checkin";
+  | "testimonial"
+  | "google_review"
+  | "referral_sit"
+  | "before_after"
+  | "role_play"
+  | "gym_checkin"
+  | "canvasser_recruit";
 
 export const PROOF_CATEGORIES: readonly ProofCategory[] = [
   "testimonial",
@@ -57,6 +63,7 @@ export const PROOF_CATEGORIES: readonly ProofCategory[] = [
   "before_after",
   "role_play",
   "gym_checkin",
+  "canvasser_recruit",
 ] as const;
 
 export const PROOF_LABELS: Record<ProofCategory, string> = {
@@ -66,9 +73,21 @@ export const PROOF_LABELS: Record<ProofCategory, string> = {
   before_after: "Before/after photo set",
   role_play: "Role play video",
   gym_checkin: "Gym check-in",
+  canvasser_recruit: "Canvasser recruited (2 confirmed leads)",
 };
 
-export type KombatTier = { key: string; label: string; points: number; cash: number };
+/** A prize rung. `cash` is a flat check (October model). When `pct` is set
+ *  (a PERCENT, e.g. 0.5 = 0.5%) the rung instead pays that cut of the rep's
+ *  own net written volume — never less than `floor` (November cash-back
+ *  model, owner 2026-11-01). `pct` wins over `cash` when both are set. */
+export type KombatTier = {
+  key: string;
+  label: string;
+  points: number;
+  cash: number;
+  pct?: number;
+  floor?: number;
+};
 
 export type KombatRules = {
   contest: { month: string; label: string };
@@ -94,6 +113,9 @@ export type KombatRules = {
   activity: {
     /** Reloads-subitem pitch that sat (Result Sold/PM). */
     reload_pitch: number;
+    /** Weekly Activity Test taken, once per contest week (0 = not scored —
+     *  the October model, where tests were an eligibility gate instead). */
+    weekly_test: number;
   };
   proofs: {
     weights: Record<ProofCategory, number>;
@@ -136,7 +158,7 @@ export const DEFAULT_KOMBAT_RULES: KombatRules = {
     referral_sale: 15,
     referral_miss: 10,
   },
-  activity: { reload_pitch: 3 },
+  activity: { reload_pitch: 3, weekly_test: 0 },
   proofs: {
     weights: {
       testimonial: 5,
@@ -145,6 +167,7 @@ export const DEFAULT_KOMBAT_RULES: KombatRules = {
       before_after: 1,
       role_play: 2,
       gym_checkin: 1,
+      canvasser_recruit: 0,
     },
     caps: {
       before_after_per_month: 10,
@@ -283,7 +306,8 @@ function customerKeys(
 // ── Ledger candidates ────────────────────────────────────────────────────
 
 export type LedgerStatus = "pending" | "locked" | "cancelled";
-export type LedgerSourceKind = "report_sale" | "sit" | "reload_pitch" | "self_gen_pitch" | "proof";
+export type LedgerSourceKind =
+  "report_sale" | "sit" | "reload_pitch" | "self_gen_pitch" | "proof" | "activity_test";
 
 export type LedgerCandidate = {
   month: string;
@@ -748,6 +772,57 @@ export function buildReloadPitchCandidates(
   return out;
 }
 
+/** One Weekly Activity Test taken per contest week earns points (owner
+ *  2026-11-01 — the test moved from an eligibility CLIFF, which formally
+ *  disqualified everyone in October, to plain points). A rep binds to a
+ *  ledger name through the same matcher every other surface uses; an
+ *  unmatched rep simply has no row for the points to land on yet. */
+export type ActivityTestRow = { rep_id: string; taken_on: string };
+
+export function buildWeeklyTestCandidates(
+  tests: readonly ActivityTestRow[],
+  repNameById: ReadonlyMap<string, string>,
+  rules: KombatRules,
+  bounties: readonly KombatBounty[],
+  todayISO: string = laTodayISO(),
+): LedgerCandidate[] {
+  const out: LedgerCandidate[] = [];
+  if (rules.activity.weekly_test === 0) return out;
+  const month = rules.contest.month;
+  const weeks = kombatWeeks(month);
+  const status: LedgerCandidate["status"] =
+    todayISO > contestFinalizeAfterISO(rules) ? "locked" : "pending";
+  const earliest = new Map<string, string>(); // `${rep_id}:${week.start}` → first taken_on
+  for (const t of tests) {
+    const week = weeks.find((w) => t.taken_on >= w.octStart && t.taken_on <= w.octEnd);
+    if (!week) continue;
+    const key = `${t.rep_id}:${week.start}`;
+    const prev = earliest.get(key);
+    if (!prev || t.taken_on < prev) earliest.set(key, t.taken_on);
+  }
+  for (const [key, takenOn] of earliest) {
+    const repId = key.slice(0, key.lastIndexOf(":"));
+    const rep = repNameById.get(repId);
+    if (!rep) continue;
+    const mult = bountyMultiplier("activity.weekly_test", takenOn, bounties);
+    out.push({
+      month,
+      rep_name: rep,
+      category: "activity.weekly_test",
+      points: rules.activity.weekly_test * mult,
+      status,
+      source_kind: "activity_test",
+      source_id: key,
+      occurred_on: takenOn,
+      meta: {
+        label: "Weekly test",
+        ...(mult !== 1 ? { bounty_multiplier: mult } : {}),
+      },
+    });
+  }
+  return out;
+}
+
 // ── Proof caps ───────────────────────────────────────────────────────────
 
 export type ApprovedProofLite = { category: ProofCategory; points: number; on: string };
@@ -799,7 +874,14 @@ export function computeProofAward(
       return { points: 0, capped: true, cap_note: `${caps.gym_per_week}/week cap reached` };
     }
   }
-  const spent = prior.reduce((s, p) => s + p.points, 0);
+  // A recruit is a milestone, not a grind — it never competes with the
+  // upload categories for the monthly proof budget (owner 2026-11-01).
+  if (category === "canvasser_recruit") {
+    return { points: weight, capped: false, cap_note: null };
+  }
+  const spent = prior
+    .filter((p) => p.category !== "canvasser_recruit")
+    .reduce((s, p) => s + p.points, 0);
   const remaining = Math.max(0, caps.total_per_month - spent);
   if (weight > remaining) {
     return {
@@ -877,12 +959,47 @@ export function companyWritten(rows: readonly KombatReportRow[], month: string):
   return rows.reduce((s, r) => s + (r.report_month === month ? r.sale_amt : 0), 0);
 }
 
+/** The rep's own net written dollars, recovered from their money.volume
+ *  ledger points (points = $k × per_1000, split across a sale's reps and
+ *  net of cancels — exactly the cash-back base the owner wants). Never put
+ *  money.volume in a bounty while pct tiers are live: the multiplier would
+ *  inflate this base. */
+export function volumeBaseDollars(
+  totals: Pick<RepTotals, "byCategory"> | undefined,
+  rules: KombatRules,
+): number {
+  if (!totals || rules.money.per_1000 <= 0) return 0;
+  const slot = totals.byCategory.get("money.volume");
+  const pts = slot ? slot.locked + slot.pending : 0;
+  return (pts / rules.money.per_1000) * 1000;
+}
+
+/** What one earned rung pays. A pct rung (pct is a PERCENT: 0.5 = 0.5%)
+ *  pays its cut of the rep's base — the unlock multiplies the RATE, the
+ *  floor backstops the check after it. A flat rung pays cash × unlock. */
+export function tierPayout(
+  tier: KombatTier,
+  baseDollars: number,
+  unlockActive: boolean,
+  rules: KombatRules,
+): number {
+  const mult = unlockActive ? rules.prizes.unlock_multiplier : 1;
+  if (tier.pct !== undefined && tier.pct > 0) {
+    return Math.max((tier.pct / 100) * mult * baseDollars, tier.floor ?? 0);
+  }
+  return tier.cash * mult;
+}
+
 export type PayoutRow = {
   rep_name: string;
   points: number;
   locked: number;
   eligible: boolean;
   tier: KombatTier | null;
+  /** Net written volume the pct applies to (0 for flat-cash tiers). */
+  base: number;
+  /** Effective cash-back percent after the unlock (null on flat tiers). */
+  rate: number | null;
   cash: number;
   dinner: boolean;
 };
@@ -906,18 +1023,22 @@ export function projectPayouts(
   rules: KombatRules,
 ): PayoutProjection {
   const unlockActive = written >= rules.prizes.unlock_threshold;
+  const mult = unlockActive ? rules.prizes.unlock_multiplier : 1;
   const rows: PayoutRow[] = totals.map((t) => {
     const eligible = eligibleByRep.get(t.rep_name) ?? false;
     const { current } = tierFor(t.total, rules);
     const tier = eligible ? current : null;
-    const cash = tier ? tier.cash * (unlockActive ? rules.prizes.unlock_multiplier : 1) : 0;
+    const isPct = tier !== undefined && tier !== null && tier.pct !== undefined && tier.pct > 0;
+    const base = isPct ? volumeBaseDollars(t, rules) : 0;
     return {
       rep_name: t.rep_name,
       points: t.total,
       locked: t.locked,
       eligible,
       tier,
-      cash,
+      base,
+      rate: isPct ? tier.pct! * mult : null,
+      cash: tier ? tierPayout(tier, base, unlockActive, rules) : 0,
       dinner: tier !== null,
     };
   });
@@ -1016,12 +1137,14 @@ export const CATEGORY_LABELS: Record<string, string> = {
   "card.referral_sale": "Referral sales",
   "card.referral_miss": "Referral pitches",
   "activity.reload_pitch": "Reload pitches",
+  "activity.weekly_test": "Weekly tests",
   "proof.testimonial": "Testimonials",
   "proof.google_review": "Google reviews",
   "proof.referral_sit": "Referral sits",
   "proof.before_after": "Before/after sets",
   "proof.role_play": "Role plays",
   "proof.gym_checkin": "Gym check-ins",
+  "proof.canvasser_recruit": "Canvasser recruits",
 };
 
 export const fmtPts = (n: number): string => {
@@ -1064,6 +1187,7 @@ export function buildScorecard(rules: KombatRules): ScorecardGroup[] {
     { label: "Referral pitch", points: c.referral_miss, per: "referral sat, no close" },
     { label: "Reload pitch", points: a.reload_pitch, per: "reload sat (sold/PM)" },
     { label: "Sit", points: c.sit, per: "any other sit (PM)" },
+    { label: "Weekly test", points: a.weekly_test, per: "activity test taken", note: "1/wk" },
   ].filter((x) => x.points !== 0);
   const proofs: ScorecardMove[] = [
     { label: "Video testimonial", points: p.weights.testimonial, per: "customer on camera" },
@@ -1086,6 +1210,12 @@ export function buildScorecard(rules: KombatRules): ScorecardGroup[] {
       points: p.weights.gym_checkin,
       per: "stay sharp",
       note: `${p.caps.gym_per_day}/day · ${p.caps.gym_per_week}/wk`,
+    },
+    {
+      label: "Canvasser recruit",
+      points: p.weights.canvasser_recruit,
+      per: "your recruit lands 2 confirmed leads",
+      note: "no cap",
     },
   ].filter((x) => x.points !== 0);
   return [
