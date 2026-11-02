@@ -30,7 +30,7 @@ import { useState } from "react";
 import { CoachingFlagChip, CoachingPanel } from "@/components/CoachingCard";
 import { CoachMessageComposer } from "@/components/CoachMessageComposer";
 import { Lock, EyeOff, Video } from "lucide-react";
-import { RepAvatar } from "@/components/RepAvatar";
+import { SpinningFighter } from "@/components/SpinningFighter";
 import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
 
 export const Route = createFileRoute("/_authenticated/canvassers/$canvasserId")({
@@ -284,10 +284,12 @@ function CanvasserProfile() {
           </Link>
         ) : null}
         <div className="mt-3 flex items-center gap-3 flex-wrap">
-          <RepAvatar
+          {/* The character-select turntable — this player's full-body fighter
+              slowly spins above their stats (owner mandate 2026-11-02). */}
+          <SpinningFighter
             name={profileQuery.data?.display_name ?? "Player"}
             cartoon={cartoonFor(cartoons, profileQuery.data?.display_name)}
-            className="h-12 w-12"
+            className="h-20 w-14"
             textClassName="text-sm"
           />
           <h1 className="font-display text-2xl text-neon">

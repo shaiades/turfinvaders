@@ -1742,3 +1742,61 @@ html.sun-mode:not(.dark) {
     background: color-mix(in oklab, var(--kombat-red) 18%, transparent);
   }
 }
+
+/* ───────────────────────── Spinning fighter ─────────────────────────
+   The character-select turntable (owner mandate 2026-11-02): wherever a
+   player is looking at THEIR individual stats — marketing, canvassing,
+   sales — their full-body fighter slowly spins beside the numbers, like a
+   video game. The stage supplies perspective; the card does one lazy
+   rotateY loop. Backface stays visible on purpose: the mirrored pass reads
+   as the character turning. Reduced motion parks the fighter face-on. */
+@keyframes fighter-spin {
+  from {
+    transform: rotateY(0deg);
+  }
+  to {
+    transform: rotateY(360deg);
+  }
+}
+@utility fighter-spin-stage {
+  perspective: 520px;
+}
+@utility fighter-spin {
+  animation: fighter-spin 7s linear infinite;
+  transform-style: preserve-3d;
+  will-change: transform;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+/* The glowing floor disc under the spinning fighter — tinted per side via
+   --pedestal-color (neon for the field, gold for Kombat). */
+@keyframes fighter-pedestal {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: translateX(-50%) scaleX(1);
+  }
+  50% {
+    opacity: 0.9;
+    transform: translateX(-50%) scaleX(1.12);
+  }
+}
+@utility fighter-pedestal {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: none;
+  border-radius: 9999px;
+  background: radial-gradient(
+    ellipse at center,
+    color-mix(in oklab, var(--pedestal-color, var(--neon)) 55%, transparent),
+    transparent 72%
+  );
+  animation: fighter-pedestal 3.2s ease-in-out infinite;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+    opacity: 0.55;
+  }
+}

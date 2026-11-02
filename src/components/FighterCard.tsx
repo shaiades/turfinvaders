@@ -30,7 +30,7 @@ const PAY_BADGE_IDS = new Set<BadgeId>(["boss_slayer"]);
 const PAY_BADGES = BADGES.filter((b) => PAY_BADGE_IDS.has(b.id));
 import { ArcadePanel, ArcadeSkeleton } from "@/components/arcade";
 import { BadgeUnlock } from "@/components/BadgeUnlock";
-import { RepAvatar } from "@/components/RepAvatar";
+import { SpinningFighter } from "@/components/SpinningFighter";
 import { RankPill, RANK_PERKS } from "@/components/RankPill";
 import { useCanvasserProfile } from "@/hooks/useCanvasserProfile";
 import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
@@ -140,15 +140,7 @@ export function FighterCard({
         {/* Identity: avatar (tap to upload) · name · SCCE rank + arcade level side by side */}
         <div className="flex items-center gap-4">
           {readOnly ? (
-            <RepAvatar
-              name={name}
-              cartoon={mine}
-              variant="full"
-              rounded="lg"
-              ring
-              className="h-20 w-20 shrink-0"
-              textClassName="text-xl"
-            />
+            <SpinningFighter name={name} cartoon={mine} className="h-24 w-20 shrink-0" />
           ) : (
             <>
               <button
@@ -158,15 +150,7 @@ export function FighterCard({
                 aria-label={hasFighter ? "Change my fighter photo" : "Upload my fighter photo"}
                 className="relative shrink-0 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-neon disabled:opacity-60"
               >
-                <RepAvatar
-                  name={name}
-                  cartoon={mine}
-                  variant="full"
-                  rounded="lg"
-                  ring
-                  className="h-20 w-20"
-                  textClassName="text-xl"
-                />
+                <SpinningFighter name={name} cartoon={mine} className="h-24 w-20" />
                 <span className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full border border-border bg-surface">
                   <Camera className="h-3.5 w-3.5 text-muted-foreground" />
                 </span>
