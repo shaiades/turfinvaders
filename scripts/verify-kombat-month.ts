@@ -37,6 +37,15 @@ import {
   scoredCardKeys,
   tierFor,
   tierPayout,
+  contestWorkdays,
+  todayPoints,
+  paceProjection,
+  scoringStreak,
+  coachCallout,
+  payoutDelta,
+  finishHim,
+  roundInfo,
+  FINISH_HIM_WINDOW,
   totalsFromLedger,
   volumeBaseDollars,
   buildWeeklyTestCandidates,
@@ -986,6 +995,170 @@ eq(
     proj.rows.find((r) => r.rep_name === "Rep B")!.cash,
     0,
   );
+}
+
+// ── The Daily Fight: me-vs-me math (owner audit 2026-11-01) ─────────────
+{
+  const nov = mergeKombatRules({
+    contest: { month: "2026-11-01", label: "November Kombat" },
+    card: { sit: 3, reload: 15, selfgen_sale: 20, referral_sale: 30, referral_miss: 15 },
+    activity: { reload_pitch: 0, weekly_test: 5 },
+    proofs: { weights: { referral_sit: 10, canvasser_recruit: 25 } },
+    prizes: {
+      tiers: [
+        { key: "bronze", label: "Bronze", points: 325, cash: 0, pct: 0.5, floor: 500 },
+        { key: "silver", label: "Silver", points: 425, cash: 0, pct: 1, floor: 1250 },
+        { key: "gold", label: "Gold", points: 525, cash: 0, pct: 2, floor: 2500 },
+        { key: "king", label: "Kombat King", points: 650, cash: 0, pct: 3, floor: 4000 },
+      ],
+      unlock_threshold: 2_500_000,
+      unlock_multiplier: 1.25,
+      budget_cap: 30_000,
+    },
+  });
+
+  // Workdays: Nov 2026 opens on a Sunday — 25 Mon–Sat days in the month.
+  const wd = contestWorkdays(nov, "2026-11-02");
+  eq("workdays: Nov 2026 has 25 Mon–Sat days", wd.total, 25);
+  eq("workdays: Mon Nov 2 is the first elapsed day", wd.elapsed, 1);
+  eq("workdays: remaining includes today", wd.remaining, 25);
+  const mid = contestWorkdays(nov, "2026-11-14");
+  eq("workdays: Sat Nov 14 elapsed", mid.elapsed, 12);
+  eq("workdays: Sat Nov 14 remaining", mid.remaining, 14);
+  eq("workdays: before the month nothing elapsed", contestWorkdays(nov, "2026-10-20").elapsed, 0);
+  eq("workdays: after the month nothing remains", contestWorkdays(nov, "2026-12-02").remaining, 0);
+
+  // Today's tally: only today's non-cancelled positive points.
+  const dayRows = [
+    { points: 5, status: "pending", occurred_on: "2026-11-14" },
+    { points: 3, status: "locked", occurred_on: "2026-11-14" },
+    { points: 9, status: "cancelled", occurred_on: "2026-11-14" },
+    { points: 7, status: "pending", occurred_on: "2026-11-13" },
+    { points: 2, status: "pending", occurred_on: null },
+  ] as const;
+  eq("today: sums today's counting rows only", todayPoints([...dayRows], "2026-11-14"), 8);
+
+  // Pace: 216 pts (120 volume) after 12 of 25 workdays → 450 pts, $250k base.
+  const paceTotals = totalsFromLedger([
+    { rep_name: "Rep A", category: "money.volume", points: 120, status: "pending" },
+    { rep_name: "Rep A", category: "card.sale", points: 96, status: "pending" },
+  ] as LedgerRowLite[]);
+  const pace = paceProjection(paceTotals[0], nov, false, "2026-11-14");
+  eq("pace: projected points scale by workdays", pace.projectedPoints, 450);
+  eq("pace: projected base scales the volume", pace.projectedBase, 250_000);
+  eq("pace: projected tier is Silver", pace.projectedTier?.key, "silver");
+  eq("pace: projected check prices the projection", pace.projectedCheck, 2500);
+  near("pace: per-day need for Bronze", pace.perDayNeeded, 109 / 14, 1e-9);
+  eq(
+    "pace: day-one points project as one elapsed day",
+    paceProjection(paceTotals[0], nov, false, "2026-11-01").projectedPoints,
+    216 * 25,
+  );
+
+  // Streak: Sundays never break, a missed workday does, today-no-score holds.
+  const sRow = (d: string) => ({ points: 1, status: "pending" as const, occurred_on: d });
+  eq(
+    "streak: three straight scoring days",
+    scoringStreak([sRow("2026-11-12"), sRow("2026-11-13"), sRow("2026-11-14")], "2026-11-14").days,
+    3,
+  );
+  const held = scoringStreak([sRow("2026-11-12"), sRow("2026-11-13")], "2026-11-14");
+  eq("streak: scoreless today doesn't break it yet", held.days, 2);
+  eq("streak: scoreless today isn't alive", held.aliveToday, false);
+  eq(
+    "streak: Sunday is skipped, not broken",
+    scoringStreak([sRow("2026-11-13"), sRow("2026-11-14"), sRow("2026-11-16")], "2026-11-16").days,
+    3,
+  );
+  eq(
+    "streak: a missed workday breaks the chain",
+    scoringStreak([sRow("2026-11-12"), sRow("2026-11-14")], "2026-11-14").days,
+    1,
+  );
+
+  // Coach's callout priority: referral gap first, then reloads, then recruit.
+  const t = (cats: [string, number][]) =>
+    totalsFromLedger(
+      cats.map(([category, points]) => ({
+        rep_name: "Rep A",
+        category,
+        points,
+        status: "pending" as const,
+      })) as LedgerRowLite[],
+    )[0];
+  eq(
+    "coach: no referrals → the big punch",
+    coachCallout(t([["card.sale", 5]]), nov).label,
+    "Throw the big punch",
+  );
+  eq(
+    "coach: referrals covered → reloads next",
+    coachCallout(t([["card.referral_sale", 30]]), nov).label,
+    "Mine your book",
+  );
+  eq(
+    "coach: reloads covered → recruit next",
+    coachCallout(
+      t([
+        ["card.referral_sale", 30],
+        ["card.reload", 15],
+      ]),
+      nov,
+    ).label,
+    "Build your corner",
+  );
+  eq(
+    "coach: all covered, test missing → free points",
+    coachCallout(
+      t([
+        ["card.referral_sale", 30],
+        ["card.reload", 15],
+        ["proof.canvasser_recruit", 25],
+      ]),
+      nov,
+      false,
+    ).label,
+    "Free points on the table",
+  );
+
+  // FINISH HIM: inside the window only, prize = the shared payout delta.
+  const silver = nov.prizes.tiers[1];
+  const gold = nov.prizes.tiers[2];
+  eq("payoutDelta: silver → gold on $150k", payoutDelta(gold, silver, 150_000, false, nov), 1500);
+  const hot = finishHim({ current: silver, next: gold, toNext: 20 }, 150_000, false, nov);
+  eq("finish him: active inside the window", hot.active, true);
+  eq("finish him: prize matches the delta", hot.prize, 1500);
+  eq(
+    "finish him: dormant outside the window",
+    finishHim({ current: silver, next: gold, toNext: FINISH_HIM_WINDOW + 1 }, 150_000, false, nov)
+      .active,
+    false,
+  );
+
+  // Rounds: Nov 1 (Sunday, partial week) folds into ROUND 1 with Reload Week.
+  const bounty = (label: string, starts: string, ends: string) => ({
+    id: label,
+    label,
+    categories: [],
+    multiplier: 2,
+    starts_on: starts,
+    ends_on: ends,
+    active: true,
+  });
+  const reload = bounty("Reload Week", "2026-11-02", "2026-11-08");
+  const r1 = roundInfo([reload], nov, "2026-11-03");
+  eq("round: Reload Week is ROUND 1", r1?.roundNumber, 1);
+  eq("round: wears the live bounty", r1?.label, "Reload Week");
+  eq("round: days left runs to the stage end", r1?.daysLeftInRound, 6);
+  eq("round: Nov 1 partial week is also ROUND 1", roundInfo([], nov, "2026-11-01")?.roundNumber, 1);
+  eq(
+    "round: week 2 numbers as ROUND 2",
+    roundInfo([bounty("Referral Week", "2026-11-09", "2026-11-15")], nov, "2026-11-10")
+      ?.roundNumber,
+    2,
+  );
+  eq("round: quiet week has no stage label", roundInfo([], nov, "2026-11-25")?.label, null);
+  eq("round: outside the month is null", roundInfo([], nov, "2026-12-02"), null);
 }
 
 console.log(`checks run, ${fails.length} failure(s)`);

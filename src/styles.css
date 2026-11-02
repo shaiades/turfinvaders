@@ -1721,3 +1721,24 @@ html.sun-mode:not(.dark) {
     radial-gradient(640px 320px at 50% -40px, rgb(40 70 220 / 0.5), transparent 70%),
     linear-gradient(118deg, #04071c 0%, #0b1140 46%, #16227a 78%, #0b1140 100%);
 }
+
+/* FINISH HIM — the belt ladder's striking-distance state: a blood-red
+   pulse on the carrot when the next rung is within 25 pts. */
+@keyframes kombat-finish-him {
+  0%,
+  100% {
+    box-shadow: 0 0 10px -2px color-mix(in oklab, var(--kombat-red) 70%, transparent);
+    background: color-mix(in oklab, var(--kombat-red) 14%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 26px -2px color-mix(in oklab, var(--kombat-red) 95%, transparent);
+    background: color-mix(in oklab, var(--kombat-red) 26%, transparent);
+  }
+}
+@utility kombat-finish-him {
+  animation: kombat-finish-him 1.1s ease-in-out infinite;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+    background: color-mix(in oklab, var(--kombat-red) 18%, transparent);
+  }
+}

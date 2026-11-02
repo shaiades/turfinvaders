@@ -12,7 +12,9 @@ import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import {
   BELT_ACCENT,
   contestDaysLeft,
+  finishHim,
   fmtPts,
+  payoutDelta,
   tierFor,
   tierPayout,
   volumeBaseDollars,
@@ -75,6 +77,9 @@ export function KombatBeltLadder({
   // The hero number on a cash-back ladder: the check as it stands RIGHT NOW.
   const myCheck = tier.current ? tierPayout(tier.current, myBase, unlocked, rules) : 0;
   const check = useCountUp(myCheck, reduced || !matched);
+  const fh = matched
+    ? finishHim(tier, myBase, unlocked, rules)
+    : { active: false, pts: 0, prize: 0 };
 
   // Who sits on each belt right now (their highest cleared tier) — the shared
   // climb: every rep's fighter stacked on their current rung.
@@ -190,26 +195,44 @@ export function KombatBeltLadder({
                 </div>
               )}
 
-              {/* Carrot */}
+              {/* Carrot — flips into FINISH HIM inside striking distance. */}
               <div className="mt-4">
                 {tier.next ? (
-                  <div className="flex items-baseline justify-between gap-2 text-sm">
-                    <span className="font-semibold">
-                      <span className="text-kombat-gold tabular-nums">
-                        {fmtPts(tier.toNext)} pts
-                      </span>{" "}
-                      to {tier.next.label}
-                    </span>
-                    <span className="text-xs text-kombat-gold font-display uppercase tracking-widest">
-                      {carrotLabel(tier.next, tier.current, myBase, unlocked, rules)}
-                    </span>
-                  </div>
+                  fh.active ? (
+                    <div className="kombat-finish-him mb-1 rounded-md border-2 border-kombat-red px-3 py-2">
+                      <span className="font-display text-sm uppercase tracking-widest text-kombat-red">
+                        Finish him!
+                      </span>
+                      <span className="ml-2 text-sm font-semibold">
+                        <span className="tabular-nums">{fmtPts(fh.pts)} pts</span> seals{" "}
+                        {tier.next.label}
+                        {fh.prize > 0 && (
+                          <span className="text-victory"> (+{fmtMoney(fh.prize)})</span>
+                        )}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="flex items-baseline justify-between gap-2 text-sm">
+                      <span className="font-semibold">
+                        <span className="text-kombat-gold tabular-nums">
+                          {fmtPts(tier.toNext)} pts
+                        </span>{" "}
+                        to {tier.next.label}
+                      </span>
+                      <span className="text-xs text-kombat-gold font-display uppercase tracking-widest">
+                        {carrotLabel(tier.next, tier.current, myBase, unlocked, rules)}
+                      </span>
+                    </div>
+                  )
                 ) : (
                   <div className="text-sm font-semibold text-kombat-gold">
                     👑 KOMBAT KING — you maxed the ladder.
                   </div>
                 )}
-                <NeonBar pct={carrotPct} accent="var(--kombat-gold)" />
+                <NeonBar
+                  pct={carrotPct}
+                  accent={fh.active ? "var(--kombat-red)" : "var(--kombat-gold)"}
+                />
               </div>
 
               {/* $3M boss bar */}
@@ -488,11 +511,9 @@ function carrotLabel(
 ): string {
   if ((next.pct ?? 0) > 0) {
     if (baseDollars > 0) {
-      const now = current ? tierPayout(current, baseDollars, unlocked, rules) : 0;
-      const then = tierPayout(next, baseDollars, unlocked, rules);
-      return `+${fmtMoney(Math.max(0, then - now))}`;
+      return `+${fmtMoney(payoutDelta(next, current, baseDollars, unlocked, rules))}`;
     }
-    return `${fmtPts(next.pct! * (unlocked ? rules.prizes.unlock_multiplier : 1))}% back`;
+    return `${fmtRate(next.pct! * (unlocked ? rules.prizes.unlock_multiplier : 1))}% back`;
   }
   return next.cash > 0 ? `+${fmtMoney(cashWithUnlock(next.cash, unlocked, rules))}` : "Dinner";
 }

@@ -1121,6 +1121,9 @@ function CloseKombatInner({
     <div className="space-y-4 md:space-y-6">
       {/* Header — pop-art arcade title banner (owner 2026-10-02: "missing image") */}
       <KombatHeroBanner
+        {...(pageTab === "kombat"
+          ? { subtitle: "IT'S ALL ABOUT THE CA$H — your points set your rate" }
+          : {})}
         actions={
           <>
             {/* Sound/haptics switch — reps' easy on-switch for the Kombat FX
