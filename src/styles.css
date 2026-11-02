@@ -1599,3 +1599,125 @@ html.sun-mode:not(.dark) {
 .money-shake {
   animation: money-shake 2.4s ease-in-out infinite;
 }
+
+/* ── November Kombat cash-back skin (owner 2026-11-01) ──────────────────
+   The launch poster's treatment, in-app: metallic gold-foil lettering,
+   a casino-marquee bulb frame, a sweeping gloss on the money cards and
+   the poster's deep-navy halftone backdrop. Kombat's palette is
+   deliberately constant across light/dark, so these use literal golds. */
+
+@utility gold-foil-text {
+  background-image: linear-gradient(
+    180deg,
+    #fff7d0 8%,
+    #ffd23e 38%,
+    #c8901a 55%,
+    #ffd23e 70%,
+    #7a4d00 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+@keyframes kombat-marquee-twinkle {
+  0%,
+  100% {
+    opacity: 0.9;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+@utility kombat-marquee {
+  position: relative;
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 3px;
+    pointer-events: none;
+    z-index: 30;
+    background-image:
+      radial-gradient(
+        circle at 13px 6px,
+        #fff7d0 2.2px,
+        rgb(255 210 62 / 0.8) 3.2px,
+        rgb(255 210 62 / 0.18) 6px,
+        transparent 8px
+      ),
+      radial-gradient(
+        circle at 13px 6px,
+        #fff7d0 2.2px,
+        rgb(255 210 62 / 0.8) 3.2px,
+        rgb(255 210 62 / 0.18) 6px,
+        transparent 8px
+      ),
+      radial-gradient(
+        circle at 6px 13px,
+        #fff7d0 2.2px,
+        rgb(255 210 62 / 0.8) 3.2px,
+        rgb(255 210 62 / 0.18) 6px,
+        transparent 8px
+      ),
+      radial-gradient(
+        circle at 6px 13px,
+        #fff7d0 2.2px,
+        rgb(255 210 62 / 0.8) 3.2px,
+        rgb(255 210 62 / 0.18) 6px,
+        transparent 8px
+      );
+    background-repeat: repeat-x, repeat-x, repeat-y, repeat-y;
+    background-size:
+      26px 12px,
+      26px 12px,
+      12px 26px,
+      12px 26px;
+    background-position:
+      top left,
+      bottom left,
+      top left,
+      top right;
+    animation: kombat-marquee-twinkle 2.6s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    &::after {
+      animation: none;
+    }
+  }
+}
+
+@keyframes kombat-cash-shine {
+  0% {
+    transform: translateX(-180%) rotate(16deg);
+  }
+  100% {
+    transform: translateX(460%) rotate(16deg);
+  }
+}
+@utility kombat-cash-shine {
+  position: relative;
+  overflow: hidden;
+  &::before {
+    content: "";
+    position: absolute;
+    top: -60%;
+    bottom: -60%;
+    left: 0;
+    width: 34%;
+    pointer-events: none;
+    background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.14), transparent);
+    animation: kombat-cash-shine 4.5s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    &::before {
+      display: none;
+    }
+  }
+}
+
+@utility kombat-cash-backdrop {
+  background:
+    radial-gradient(rgb(120 150 255 / 0.1) 1px, transparent 1.4px) 0 0 / 12px 12px,
+    radial-gradient(640px 320px at 50% -40px, rgb(40 70 220 / 0.5), transparent 70%),
+    linear-gradient(118deg, #04071c 0%, #0b1140 46%, #16227a 78%, #0b1140 100%);
+}

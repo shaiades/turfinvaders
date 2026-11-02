@@ -72,6 +72,9 @@ export function KombatBeltLadder({
   const unlocked = written >= rules.prizes.unlock_threshold;
   const cashBack = belts.some((b) => (b.pct ?? 0) > 0);
   const myBase = volumeBaseDollars(myTotals, rules);
+  // The hero number on a cash-back ladder: the check as it stands RIGHT NOW.
+  const myCheck = tier.current ? tierPayout(tier.current, myBase, unlocked, rules) : 0;
+  const check = useCountUp(myCheck, reduced || !matched);
 
   // Who sits on each belt right now (their highest cleared tier) — the shared
   // climb: every rep's fighter stacked on their current rung.
@@ -114,10 +117,16 @@ export function KombatBeltLadder({
           {/* Left: your standing + the carrot + boss bar. Money rains behind
               the whole column; a gold aura breathes behind your score. */}
           <div className="relative min-w-0">
-            {matched && myTotal > 0 && <CoinRain count={10} className="z-0" />}
+            {matched && myTotal > 0 && <CoinRain count={cashBack ? 14 : 10} className="z-0" />}
             <div className="relative z-10">
               <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-                {matched ? "Your points" : "Points to win"}
+                {cashBack
+                  ? matched
+                    ? "Your check so far"
+                    : "Cash on the table"
+                  : matched
+                    ? "Your points"
+                    : "Points to win"}
               </div>
               {/* w-fit so the aura centers on the number itself, not the column. */}
               <div className="relative mt-1 w-fit">
@@ -126,29 +135,58 @@ export function KombatBeltLadder({
                 )}
                 <div
                   className={
-                    "kombat-score-flare relative z-10 font-display tabular-nums text-kombat-gold leading-none text-[clamp(2.2rem,12vw,3.5rem)] " +
-                    (points.bump
+                    "kombat-score-flare relative z-10 font-display tabular-nums leading-none text-[clamp(2.2rem,12vw,3.5rem)] " +
+                    (cashBack ? "gold-foil-text " : "text-kombat-gold ") +
+                    ((cashBack ? check.bump : points.bump)
                       ? "transition-transform duration-200 scale-105"
                       : "transition-transform duration-200")
                   }
                 >
-                  {fmtPts(matched ? points.display : 0)}
+                  {cashBack
+                    ? fmtMoney(matched ? check.display : 0)
+                    : fmtPts(matched ? points.display : 0)}
                 </div>
               </div>
               {matched ? (
-                <div className="mt-1 text-xs text-muted-foreground">
-                  <span className="text-kombat-gold font-semibold">
-                    {fmtPts(myTotals?.locked ?? 0)}
-                  </span>{" "}
-                  final ·{" "}
-                  <span className="text-foreground font-semibold">
-                    {fmtPts(myTotals?.pending ?? 0)}
-                  </span>{" "}
-                  live
-                </div>
+                cashBack ? (
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    <span className="text-kombat-gold font-semibold tabular-nums">
+                      {fmtPts(myTotal)} pts
+                    </span>{" "}
+                    ·{" "}
+                    {tier.current && (tier.current.pct ?? 0) > 0 ? (
+                      <>
+                        <span className="text-victory font-semibold">
+                          {fmtRate(
+                            tier.current.pct! * (unlocked ? rules.prizes.unlock_multiplier : 1),
+                          )}
+                          % of {fmtMoney(myBase)} written
+                        </span>
+                      </>
+                    ) : (
+                      <span>
+                        no rate unlocked yet —{" "}
+                        <span className="text-foreground font-semibold">
+                          {firstRungTeaser(belts, myBase, unlocked, rules)}
+                        </span>
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    <span className="text-kombat-gold font-semibold">
+                      {fmtPts(myTotals?.locked ?? 0)}
+                    </span>{" "}
+                    final ·{" "}
+                    <span className="text-foreground font-semibold">
+                      {fmtPts(myTotals?.pending ?? 0)}
+                    </span>{" "}
+                    live
+                  </div>
+                )
               ) : (
                 <div className="mt-1 text-xs text-muted-foreground">
-                  Your row opens on your first synced October sale.
+                  Your row opens on your first synced {contestMonthName(rules)} sale.
                 </div>
               )}
 
@@ -207,43 +245,71 @@ export function KombatBeltLadder({
             </div>
           </div>
 
-          {/* Right: the belt POSTER — the premium "what you're fighting for"
-              flyer and the live where-you-stand ladder, merged into one chart.
-              Feast backdrop + serif framing (the old KombatPrizeFlyer), with
-              each rung now carrying its points wall, cash, and your status. */}
+          {/* Right: the CASH poster — the November launch poster's treatment
+              (navy halftone, marquee bulbs, gold-foil lettering) carrying the
+              live where-you-stand ladder. The October feast flyer lives on
+              for flat-cash ladders only. */}
           <div
-            className="relative min-w-0 overflow-hidden rounded-xl border-2 border-kombat-gold/40"
+            className={
+              "relative min-w-0 overflow-hidden rounded-xl border-2 border-kombat-gold/40 " +
+              (cashBack ? "kombat-marquee kombat-cash-backdrop" : "")
+            }
             style={{
               boxShadow: "0 0 30px -12px color-mix(in oklab, var(--kombat-gold) 55%, transparent)",
             }}
           >
-            <img
-              src="/close-kombat-feast.jpg"
-              alt=""
-              aria-hidden
-              className="absolute inset-0 z-0 h-full w-full object-cover object-center"
-            />
-            <span
-              aria-hidden
-              className="absolute inset-0 z-0"
-              style={{
-                background:
-                  "linear-gradient(180deg, rgba(8,6,4,.93) 0%, rgba(8,6,4,.5) 32%, rgba(8,6,4,.58) 60%, rgba(8,6,4,.95) 100%)",
-              }}
-            />
-            <div className="relative z-10 p-4 sm:p-5">
+            {!cashBack && (
+              <>
+                <img
+                  src="/close-kombat-feast.jpg"
+                  alt=""
+                  aria-hidden
+                  className="absolute inset-0 z-0 h-full w-full object-cover object-center"
+                />
+                <span
+                  aria-hidden
+                  className="absolute inset-0 z-0"
+                  style={{
+                    background:
+                      "linear-gradient(180deg, rgba(8,6,4,.93) 0%, rgba(8,6,4,.5) 32%, rgba(8,6,4,.58) 60%, rgba(8,6,4,.95) 100%)",
+                  }}
+                />
+              </>
+            )}
+            <div className={"relative z-10 " + (cashBack ? "p-5 sm:p-6" : "p-4 sm:p-5")}>
               <div className="font-display text-[9px] uppercase tracking-widest text-kombat-gold">
                 What you're fighting for
               </div>
-              <div
-                className="text-2xl font-black text-kombat-gold sm:text-3xl"
-                style={{ fontFamily: SERIF, textShadow: "0 2px 18px rgba(0,0,0,.7)" }}
-              >
-                The Belt Ladder
-              </div>
-              <p className="mt-0.5 text-xs text-white/80">
-                Hit a belt by month end — the cash is yours.
-              </p>
+              {cashBack ? (
+                <>
+                  <div className="mt-1 font-display text-lg uppercase leading-relaxed sm:text-xl">
+                    <span className="gold-foil-text">It's all about the </span>
+                    <span
+                      className="text-victory"
+                      style={{
+                        textShadow: "0 0 16px color-mix(in oklab, var(--victory) 70%, transparent)",
+                      }}
+                    >
+                      CA$H
+                    </span>
+                  </div>
+                  <p className="mt-1.5 text-xs text-white/80">
+                    Your points set your rate. Your rate × everything you write = your check.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div
+                    className="text-2xl font-black text-kombat-gold sm:text-3xl"
+                    style={{ fontFamily: SERIF, textShadow: "0 2px 18px rgba(0,0,0,.7)" }}
+                  >
+                    The Belt Ladder
+                  </div>
+                  <p className="mt-0.5 text-xs text-white/80">
+                    Hit a belt by month end — the cash is yours.
+                  </p>
+                </>
+              )}
               <ol className="mt-4 space-y-1.5">
                 {belts.map((b) => {
                   const cleared = myTotal >= b.points;
@@ -255,6 +321,7 @@ export function KombatBeltLadder({
                       key={b.key}
                       className={
                         "flex items-center gap-3 rounded-md border px-3 py-2.5 transition-colors " +
+                        (isTarget && cashBack ? "kombat-cash-shine " : "") +
                         (cleared
                           ? "border-kombat-gold/60 bg-[color-mix(in_oklab,var(--kombat-gold)_16%,rgba(0,0,0,.5))]"
                           : isTarget
@@ -263,10 +330,15 @@ export function KombatBeltLadder({
                       }
                       style={cleared ? { boxShadow: `0 0 16px -6px ${accent}` } : undefined}
                     >
-                      <BeltIcon cleared={cleared} isTarget={isTarget} accent={accent} />
+                      <BeltIcon
+                        cleared={cleared}
+                        isTarget={isTarget}
+                        accent={accent}
+                        crown={cashBack && b === belts[0]}
+                      />
                       <span className="min-w-0 flex-1">
                         <span
-                          className="block truncate font-display text-[11px] uppercase tracking-widest"
+                          className="block font-display text-[11px] uppercase tracking-widest leading-relaxed"
                           style={{ color: cleared || isTarget ? accent : undefined }}
                         >
                           {b.label}
@@ -295,14 +367,27 @@ export function KombatBeltLadder({
                         )}
                       </span>
                       <span className="shrink-0 text-right">
-                        <span className="block text-sm font-semibold tabular-nums">
-                          {(b.pct ?? 0) > 0
-                            ? `${fmtPts(b.pct! * (unlocked ? rules.prizes.unlock_multiplier : 1))}% back`
-                            : b.cash > 0
+                        {(b.pct ?? 0) > 0 ? (
+                          <span className="block font-display text-base leading-relaxed sm:text-lg">
+                            <span className="gold-foil-text">
+                              {fmtRate(b.pct! * (unlocked ? rules.prizes.unlock_multiplier : 1))}%
+                            </span>
+                          </span>
+                        ) : (
+                          <span className="block text-sm font-semibold tabular-nums">
+                            {b.cash > 0
                               ? fmtMoney(cashWithUnlock(b.cash, unlocked, rules))
                               : "Dinner"}
-                        </span>
-                        <span className="block text-[9px] uppercase tracking-widest text-muted-foreground">
+                          </span>
+                        )}
+                        <span
+                          className={
+                            "block text-[9px] uppercase tracking-widest " +
+                            ((b.pct ?? 0) > 0 && (b.floor ?? 0) > 0
+                              ? "text-victory/90"
+                              : "text-muted-foreground")
+                          }
+                        >
                           {(b.pct ?? 0) > 0 && (b.floor ?? 0) > 0
                             ? `min ${fmtMoney(b.floor!)}`
                             : cleared
@@ -416,24 +501,50 @@ function BeltIcon({
   cleared,
   isTarget,
   accent,
+  crown = false,
 }: {
   cleared: boolean;
   isTarget: boolean;
   accent: string;
+  /** The top rung of a cash-back ladder wears the poster's crown. */
+  crown?: boolean;
 }) {
   return (
     <span
       aria-hidden
       className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-[11px] font-bold"
       style={{
-        borderColor: cleared || isTarget ? accent : "var(--border)",
+        borderColor: cleared || isTarget || crown ? accent : "var(--border)",
         color: cleared || isTarget ? accent : "var(--muted-foreground)",
         background: cleared ? `color-mix(in oklab, ${accent} 16%, transparent)` : "transparent",
       }}
     >
-      {cleared ? "★" : isTarget ? "◆" : "🔒"}
+      {crown ? "👑" : cleared ? "★" : isTarget ? "◆" : "🔒"}
     </span>
   );
+}
+
+/** "0.63", not "0.625000000001" — rate chips stay human. */
+const fmtRate = (x: number): string => String(Math.round(x * 100) / 100);
+
+const contestMonthName = (rules: KombatRules): string =>
+  new Date(`${rules.contest.month}T12:00:00Z`).toLocaleString("en-US", {
+    month: "long",
+    timeZone: "UTC",
+  });
+
+/** Before the first rung: what the lowest level already amounts to on the
+ *  volume this rep has written — the "it's closer than you think" line. */
+function firstRungTeaser(
+  belts: readonly KombatTier[],
+  baseDollars: number,
+  unlocked: boolean,
+  rules: KombatRules,
+): string {
+  const first = belts[belts.length - 1];
+  if (!first || (first.pct ?? 0) === 0) return "";
+  const worth = tierPayout(first, baseDollars, unlocked, rules);
+  return `${first.label} at ${first.points} pts pays ${fmtMoney(worth)}`;
 }
 
 function Gate({
