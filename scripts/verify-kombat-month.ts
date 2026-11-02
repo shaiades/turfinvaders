@@ -36,7 +36,10 @@ import {
   scoreReportCard,
   scoredCardKeys,
   tierFor,
+  tierPayout,
   totalsFromLedger,
+  volumeBaseDollars,
+  buildWeeklyTestCandidates,
   type KombatBounty,
   type KombatReportRow,
   type LedgerRowLite,
@@ -871,6 +874,116 @@ eq(
       [],
       R,
     ),
+    0,
+  );
+}
+
+// ── November cash-back model (owner 2026-11-01) ─────────────────────────
+{
+  const novRules = mergeKombatRules({
+    contest: { month: "2026-11-01", label: "November Kombat" },
+    card: { sit: 3, selfgen_sale: 20, referral_sale: 30, referral_miss: 15 },
+    activity: { reload_pitch: 0, weekly_test: 5 },
+    proofs: { weights: { referral_sit: 10, canvasser_recruit: 25 } },
+    eligibility: { require_weekly_test: false },
+    prizes: {
+      tiers: [
+        { key: "bronze", label: "Bronze", points: 325, cash: 0, pct: 0.5, floor: 500 },
+        { key: "silver", label: "Silver", points: 425, cash: 0, pct: 1, floor: 1250 },
+        { key: "gold", label: "Gold", points: 525, cash: 0, pct: 2, floor: 2500 },
+        { key: "king", label: "Kombat King", points: 650, cash: 0, pct: 3, floor: 4000 },
+      ],
+      unlock_threshold: 2_500_000,
+      unlock_multiplier: 1.25,
+      budget_cap: 30_000,
+    },
+  });
+
+  // volume base: money.volume points are $k (per_1000 = 1), split + net.
+  const totals = totalsFromLedger([
+    { rep_name: "Rep A", category: "money.volume", points: 130, status: "pending" },
+    { rep_name: "Rep A", category: "money.volume", points: 20, status: "locked" },
+    { rep_name: "Rep A", category: "card.sale", points: 5, status: "pending" },
+    { rep_name: "Rep A", category: "money.volume", points: 99, status: "cancelled" },
+  ] as LedgerRowLite[]);
+  eq("cash-back: base from volume points", volumeBaseDollars(totals[0], novRules), 150_000);
+  eq(
+    "cash-back: base ignores cancelled rows",
+    totals[0].byCategory.get("money.volume")!.pending,
+    130,
+  );
+
+  const silver = novRules.prizes.tiers[1];
+  const king = novRules.prizes.tiers[3];
+  eq("cash-back: 1% of $150k", tierPayout(silver, 150_000, false, novRules), 1500);
+  eq("cash-back: floor backstops a thin base", tierPayout(silver, 90_000, false, novRules), 1250);
+  eq("cash-back: unlock multiplies the RATE", tierPayout(king, 300_000, true, novRules), 11_250);
+  eq(
+    "cash-back: flat tier still pays cash × unlock",
+    tierPayout({ key: "x", label: "X", points: 1, cash: 500 }, 999_999, true, novRules),
+    625,
+  );
+
+  // Weekly tests: one per contest week, earliest take wins, zero weight = off.
+  const names = new Map([["u1", "Rep A"]]);
+  const tests = [
+    { rep_id: "u1", taken_on: "2026-11-04" },
+    { rep_id: "u1", taken_on: "2026-11-06" }, // same week — collapses
+    { rep_id: "u1", taken_on: "2026-11-10" },
+    { rep_id: "u2", taken_on: "2026-11-10" }, // unmatched rep — dropped
+  ];
+  const wk = buildWeeklyTestCandidates(tests, names, novRules, []);
+  eq("weekly test: one row per rep per week", wk.length, 2);
+  eq("weekly test: 5 pts each", wk[0]?.points, 5);
+  eq("weekly test: earliest take stamps the row", wk[0]?.occurred_on, "2026-11-04");
+  eq("weekly test: source kind", wk[0]?.source_kind, "activity_test");
+  eq(
+    "weekly test: zero weight produces nothing",
+    buildWeeklyTestCandidates(tests, names, R, []).length,
+    0,
+  );
+
+  // Canvasser recruit: full points, exempt from the monthly proof cap.
+  const grind = Array.from({ length: 40 }, (_, i) => ({
+    category: "gym_checkin" as const,
+    points: 1,
+    on: `2026-11-${String((i % 28) + 1).padStart(2, "0")}`,
+  }));
+  const recruit = computeProofAward("canvasser_recruit", "2026-11-12", grind, novRules, []);
+  eq("recruit: pays past the 40-pt proof cap", recruit.points, 25);
+  eq("recruit: never capped", recruit.capped, false);
+  const afterRecruit = computeProofAward(
+    "referral_sit",
+    "2026-11-13",
+    [{ category: "canvasser_recruit", points: 25, on: "2026-11-12" }],
+    novRules,
+    [],
+  );
+  eq("recruit: doesn't eat the others' cap budget", afterRecruit.points, 10);
+
+  // Payout projection end-to-end on the pct ladder.
+  const pTotals = totalsFromLedger([
+    { rep_name: "Rep A", category: "money.volume", points: 150, status: "pending" },
+    { rep_name: "Rep A", category: "card.sale", points: 300, status: "pending" },
+    { rep_name: "Rep B", category: "money.volume", points: 60, status: "pending" },
+  ] as LedgerRowLite[]);
+  const proj = projectPayouts(
+    pTotals,
+    new Map([
+      ["Rep A", true],
+      ["Rep B", true],
+    ]),
+    2_600_000,
+    novRules,
+  );
+  const a = proj.rows.find((r) => r.rep_name === "Rep A")!;
+  eq("projection: unlock active at $2.6M", proj.unlockActive, true);
+  eq("projection: Rep A rate = 1% × 1.25", a.rate, 1.25);
+  eq("projection: Rep A base", a.base, 150_000);
+  eq("projection: Rep A check", a.cash, 1875);
+  eq(
+    "projection: Rep B below every rung pays 0",
+    proj.rows.find((r) => r.rep_name === "Rep B")!.cash,
     0,
   );
 }

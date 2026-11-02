@@ -152,7 +152,18 @@ export function KombatMonthAdmin({
 
   const exportPayouts = () => {
     const lines = [
-      ["Rep", "Points", "Final points", "Eligible", "Tier", "Cash", "Cash (pro-rated)", "Dinner"]
+      [
+        "Rep",
+        "Points",
+        "Final points",
+        "Eligible",
+        "Tier",
+        "Rate %",
+        "Volume base",
+        "Cash",
+        "Cash (pro-rated)",
+        "Dinner",
+      ]
         .map(csvCell)
         .join(","),
       ...projection.rows.map((r) =>
@@ -162,6 +173,8 @@ export function KombatMonthAdmin({
           fmtPts(r.locked),
           r.eligible ? "yes" : "no",
           r.tier?.label ?? "",
+          r.rate !== null ? r.rate.toFixed(3) : "",
+          r.base > 0 ? r.base.toFixed(2) : "",
           r.cash.toFixed(2),
           (r.cash * projection.prorate).toFixed(2),
           r.dinner ? "yes" : "no",
@@ -236,6 +249,8 @@ export function KombatMonthAdmin({
                 <th className="py-1.5 pr-2 text-right">Final</th>
                 <th className="py-1.5 pr-2">Eligible</th>
                 <th className="py-1.5 pr-2">Tier</th>
+                <th className="py-1.5 pr-2 text-right">Rate</th>
+                <th className="py-1.5 pr-2 text-right">Base</th>
                 <th className="py-1.5 text-right">Cash</th>
               </tr>
             </thead>
@@ -247,6 +262,12 @@ export function KombatMonthAdmin({
                   <td className="py-2 pr-2 text-right tabular-nums">{fmtPts(r.locked)}</td>
                   <td className="py-2 pr-2">{r.eligible ? "✓" : "—"}</td>
                   <td className="py-2 pr-2">{tierFor(r.points, rules).current?.label ?? "—"}</td>
+                  <td className="py-2 pr-2 text-right tabular-nums">
+                    {r.rate !== null ? `${fmtPts(r.rate)}%` : "—"}
+                  </td>
+                  <td className="py-2 pr-2 text-right tabular-nums">
+                    {r.base > 0 ? fmtMoney(r.base) : "—"}
+                  </td>
                   <td className="py-2 text-right tabular-nums">
                     {r.cash > 0 ? fmtMoney(r.cash * projection.prorate) : r.dinner ? "Dinner" : "—"}
                   </td>
@@ -335,10 +356,12 @@ function AliasPanel({
       if (profileId === "" || boardName === "") {
         throw new Error("Pick both a player and a board name.");
       }
-      const { error } = await supabase.from("kombat_rep_aliases").upsert(
-        { profile_id: profileId, board_name: boardName, created_by: user?.id ?? null },
-        { onConflict: "profile_id" },
-      );
+      const { error } = await supabase
+        .from("kombat_rep_aliases")
+        .upsert(
+          { profile_id: profileId, board_name: boardName, created_by: user?.id ?? null },
+          { onConflict: "profile_id" },
+        );
       if (error) throw new Error(error.message);
     },
     onSuccess: () => {
@@ -684,6 +707,7 @@ function RulesEditor({ rules, onChanged }: { rules: KombatRules; onChanged: () =
             {num("card.referral_miss", "Referral pitch (miss)")}
             {num("activity.reload_pitch", "Reload pitch (subitem)")}
             {num("card.sit", "Sit")}
+            {num("activity.weekly_test", "Weekly test (pts/week)")}
           </div>
         </section>
         <section>
@@ -705,7 +729,9 @@ function RulesEditor({ rules, onChanged }: { rules: KombatRules; onChanged: () =
             {rules.prizes.tiers.map((t, i) => (
               <div className="space-y-2" key={t.key}>
                 {num(`prizes.tiers.${i}.points`, `${t.label} points`)}
-                {num(`prizes.tiers.${i}.cash`, `${t.label} cash`)}
+                {num(`prizes.tiers.${i}.cash`, `${t.label} flat cash`)}
+                {num(`prizes.tiers.${i}.pct`, `${t.label} cash back %`)}
+                {num(`prizes.tiers.${i}.floor`, `${t.label} min check ($)`)}
               </div>
             ))}
           </div>
@@ -773,6 +799,11 @@ function unflatten(draft: Record<string, string>, base: KombatRules): KombatRule
       if (Number.isFinite(n)) (cur as Record<string, unknown>)[leaf] = n;
     } else if (typeof prevType === "string" && raw !== "") {
       (cur as Record<string, unknown>)[leaf] = raw;
+    } else if (prevType === undefined && raw !== "") {
+      // A numeric leaf the stored rules don't carry yet (e.g. a tier's new
+      // pct/floor) — typing a number creates it instead of silently dropping.
+      const n = Number(raw);
+      if (Number.isFinite(n)) (cur as Record<string, unknown>)[leaf] = n;
     }
   }
   return next;

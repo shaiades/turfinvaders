@@ -14,8 +14,11 @@ import {
   contestDaysLeft,
   fmtPts,
   tierFor,
+  tierPayout,
+  volumeBaseDollars,
   type EligibilityStatus,
   type KombatRules,
+  type KombatTier,
   type RepTotals,
 } from "@/lib/kombat-month";
 import { RepAvatar } from "@/components/RepAvatar";
@@ -67,6 +70,8 @@ export function KombatBeltLadder({
   // Belts highest-first — climbing the ladder reads as rising.
   const belts = [...rules.prizes.tiers].sort((a, b) => b.points - a.points);
   const unlocked = written >= rules.prizes.unlock_threshold;
+  const cashBack = belts.some((b) => (b.pct ?? 0) > 0);
+  const myBase = volumeBaseDollars(myTotals, rules);
 
   // Who sits on each belt right now (their highest cleared tier) — the shared
   // climb: every rep's fighter stacked on their current rung.
@@ -158,9 +163,7 @@ export function KombatBeltLadder({
                       to {tier.next.label}
                     </span>
                     <span className="text-xs text-kombat-gold font-display uppercase tracking-widest">
-                      {tier.next.cash > 0
-                        ? `+${fmtMoney(cashWithUnlock(tier.next.cash, unlocked, rules))}`
-                        : "Dinner"}
+                      {carrotLabel(tier.next, tier.current, myBase, unlocked, rules)}
                     </span>
                   </div>
                 ) : (
@@ -175,7 +178,7 @@ export function KombatBeltLadder({
               <div className="mt-5">
                 <div className="flex items-baseline justify-between gap-2 text-[10px] font-display uppercase tracking-widest">
                   <span className={unlocked ? "text-kombat-gold" : "text-muted-foreground"}>
-                    Team goal — crack $3M
+                    Team goal — crack {fmtMoneyShort(rules.prizes.unlock_threshold)}
                   </span>
                   <span className="tabular-nums text-muted-foreground">
                     {fmtMoney(written)} / {fmtMoney(rules.prizes.unlock_threshold)}
@@ -190,11 +193,12 @@ export function KombatBeltLadder({
                 <p className="mt-1.5 text-xs">
                   {unlocked ? (
                     <span className="text-victory font-semibold">
-                      💥 $3M SMASHED — every cash prize pays ×{rules.prizes.unlock_multiplier}.
+                      💥 {fmtMoneyShort(rules.prizes.unlock_threshold)} SMASHED — every{" "}
+                      {cashBack ? "rate" : "cash prize"} pays ×{rules.prizes.unlock_multiplier}.
                     </span>
                   ) : (
                     <span className="text-muted-foreground">
-                      Drop the boss together → every cash tier pays ×
+                      Drop the boss together → every {cashBack ? "rate" : "cash tier"} pays ×
                       {rules.prizes.unlock_multiplier}.
                     </span>
                   )}
@@ -242,64 +246,75 @@ export function KombatBeltLadder({
               </p>
               <ol className="mt-4 space-y-1.5">
                 {belts.map((b) => {
-                const cleared = myTotal >= b.points;
-                const isTarget = tier.next?.key === b.key;
-                const accent = BELT_ACCENT[b.key] ?? "var(--kombat-gold)";
-                const atBelt = byBelt.get(b.key) ?? [];
-                return (
-                  <li
-                    key={b.key}
-                    className={
-                      "flex items-center gap-3 rounded-md border px-3 py-2.5 transition-colors " +
-                      (cleared
-                        ? "border-kombat-gold/60 bg-[color-mix(in_oklab,var(--kombat-gold)_16%,rgba(0,0,0,.5))]"
-                        : isTarget
-                          ? "border-kombat-red/60 bg-[color-mix(in_oklab,var(--kombat-red)_18%,rgba(0,0,0,.5))]"
-                          : "border-kombat-gold/20 bg-black/50")
-                    }
-                    style={cleared ? { boxShadow: `0 0 16px -6px ${accent}` } : undefined}
-                  >
-                    <BeltIcon cleared={cleared} isTarget={isTarget} accent={accent} />
-                    <span className="min-w-0 flex-1">
-                      <span
-                        className="block truncate font-display text-[11px] uppercase tracking-widest"
-                        style={{ color: cleared || isTarget ? accent : undefined }}
-                      >
-                        {b.label}
-                      </span>
-                      <span className="block text-[10px] text-muted-foreground tabular-nums">
-                        {b.points} pts{isTarget && matched ? ` · ${fmtPts(tier.toNext)} to go` : ""}
-                      </span>
-                      {atBelt.length > 0 && (
-                        <span className="mt-1.5 flex flex-wrap items-center gap-1">
-                          {atBelt.slice(0, 6).map((t) => (
-                            <RepAvatar
-                              key={t.rep_name}
-                              name={t.rep_name}
-                              cartoon={cartoonFor(cartoons, t.rep_name)}
-                              className="h-6 w-6"
-                              textClassName="text-[0.5rem]"
-                            />
-                          ))}
-                          {atBelt.length > 6 && (
-                            <span className="text-[10px] text-muted-foreground tabular-nums">
-                              +{atBelt.length - 6}
-                            </span>
-                          )}
+                  const cleared = myTotal >= b.points;
+                  const isTarget = tier.next?.key === b.key;
+                  const accent = BELT_ACCENT[b.key] ?? "var(--kombat-gold)";
+                  const atBelt = byBelt.get(b.key) ?? [];
+                  return (
+                    <li
+                      key={b.key}
+                      className={
+                        "flex items-center gap-3 rounded-md border px-3 py-2.5 transition-colors " +
+                        (cleared
+                          ? "border-kombat-gold/60 bg-[color-mix(in_oklab,var(--kombat-gold)_16%,rgba(0,0,0,.5))]"
+                          : isTarget
+                            ? "border-kombat-red/60 bg-[color-mix(in_oklab,var(--kombat-red)_18%,rgba(0,0,0,.5))]"
+                            : "border-kombat-gold/20 bg-black/50")
+                      }
+                      style={cleared ? { boxShadow: `0 0 16px -6px ${accent}` } : undefined}
+                    >
+                      <BeltIcon cleared={cleared} isTarget={isTarget} accent={accent} />
+                      <span className="min-w-0 flex-1">
+                        <span
+                          className="block truncate font-display text-[11px] uppercase tracking-widest"
+                          style={{ color: cleared || isTarget ? accent : undefined }}
+                        >
+                          {b.label}
                         </span>
-                      )}
-                    </span>
-                    <span className="shrink-0 text-right">
-                      <span className="block text-sm font-semibold tabular-nums">
-                        {b.cash > 0 ? fmtMoney(cashWithUnlock(b.cash, unlocked, rules)) : "Dinner"}
+                        <span className="block text-[10px] text-muted-foreground tabular-nums">
+                          {b.points} pts
+                          {isTarget && matched ? ` · ${fmtPts(tier.toNext)} to go` : ""}
+                        </span>
+                        {atBelt.length > 0 && (
+                          <span className="mt-1.5 flex flex-wrap items-center gap-1">
+                            {atBelt.slice(0, 6).map((t) => (
+                              <RepAvatar
+                                key={t.rep_name}
+                                name={t.rep_name}
+                                cartoon={cartoonFor(cartoons, t.rep_name)}
+                                className="h-6 w-6"
+                                textClassName="text-[0.5rem]"
+                              />
+                            ))}
+                            {atBelt.length > 6 && (
+                              <span className="text-[10px] text-muted-foreground tabular-nums">
+                                +{atBelt.length - 6}
+                              </span>
+                            )}
+                          </span>
+                        )}
                       </span>
-                      <span className="block text-[9px] uppercase tracking-widest text-muted-foreground">
-                        {cleared ? "Cleared" : isTarget ? "Next" : "Locked"}
+                      <span className="shrink-0 text-right">
+                        <span className="block text-sm font-semibold tabular-nums">
+                          {(b.pct ?? 0) > 0
+                            ? `${fmtPts(b.pct! * (unlocked ? rules.prizes.unlock_multiplier : 1))}% back`
+                            : b.cash > 0
+                              ? fmtMoney(cashWithUnlock(b.cash, unlocked, rules))
+                              : "Dinner"}
+                        </span>
+                        <span className="block text-[9px] uppercase tracking-widest text-muted-foreground">
+                          {(b.pct ?? 0) > 0 && (b.floor ?? 0) > 0
+                            ? `min ${fmtMoney(b.floor!)}`
+                            : cleared
+                              ? "Cleared"
+                              : isTarget
+                                ? "Next"
+                                : "Locked"}
+                        </span>
                       </span>
-                    </span>
-                  </li>
-                );
-              })}
+                    </li>
+                  );
+                })}
               </ol>
             </div>
           </div>
@@ -309,14 +324,24 @@ export function KombatBeltLadder({
       {/* Rules + eligibility gates */}
       <div className="mt-5 border-t border-kombat-red/20 pt-4">
         <p className="text-xs text-muted-foreground">
-          <span className="text-kombat-gold font-semibold">
-            Dinner = 175 pts ≈ your $175k share
-          </span>{" "}
-          of the $3M. Earn points on{" "}
-          <span className="text-foreground">every sale, every activity, every proof</span>. Points
-          count the second they land and update live all month; a cancellation drops them right
-          away. The count locks after the cancel window at month end — that's the final tally. Hit a
-          belt by <span className="text-kombat-gold">Oct 31</span> to win the cash.
+          {cashBack ? (
+            <>
+              <span className="text-kombat-gold font-semibold">
+                Your points set your rate. Your rate × everything you write = your check.
+              </span>{" "}
+              Earn points on{" "}
+              <span className="text-foreground">every sale, every activity, every proof</span> — and
+              every level you climb re-prices the whole month you already wrote.
+            </>
+          ) : (
+            <>
+              <span className="text-kombat-gold font-semibold">Hit a belt, win its cash.</span> Earn
+              points on{" "}
+              <span className="text-foreground">every sale, every activity, every proof</span>.
+            </>
+          )}{" "}
+          Points count the second they land and update live all month; a cancellation drops them
+          right away. The count locks after the cancel window at month end — that's the final tally.
         </p>
         <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
           <Gate
@@ -324,12 +349,25 @@ export function KombatBeltLadder({
             label="My Purpose done"
             detail={eligibility.purposeOk ? "Unlocked" : "Finish the workshop"}
           />
-          <Gate
-            ok={eligibility.testsOk}
-            label="Weekly Activity Test"
-            detail={`${eligibility.weeksHit}/${eligibility.weeksDue} weeks`}
-            onClick={onTakeTest}
-          />
+          {rules.eligibility.require_weekly_test ? (
+            <Gate
+              ok={eligibility.testsOk}
+              label="Weekly Activity Test"
+              detail={`${eligibility.weeksHit}/${eligibility.weeksDue} weeks`}
+              onClick={onTakeTest}
+            />
+          ) : (
+            <Gate
+              ok={eligibility.weeksHit > 0}
+              label="Weekly Activity Test"
+              detail={
+                rules.activity.weekly_test > 0
+                  ? `${eligibility.weeksHit}/${eligibility.weeksDue} weeks · ${rules.activity.weekly_test} pts each`
+                  : `${eligibility.weeksHit}/${eligibility.weeksDue} weeks`
+              }
+              onClick={onTakeTest}
+            />
+          )}
           <Gate
             ok={eligibility.saleOk}
             label="A sale that sticks"
@@ -338,7 +376,7 @@ export function KombatBeltLadder({
         </div>
         {!eligibility.eligible && (
           <p className="mt-2 text-[11px] text-warning">
-            ⚠ Clear all three gates or you can't collect — points mean nothing without the cash.
+            ⚠ Clear every gate or you can't collect — points mean nothing without the cash.
           </p>
         )}
       </div>
@@ -348,6 +386,30 @@ export function KombatBeltLadder({
 
 function cashWithUnlock(cash: number, unlocked: boolean, rules: KombatRules): number {
   return unlocked ? cash * rules.prizes.unlock_multiplier : cash;
+}
+
+const fmtMoneyShort = (n: number): string =>
+  n >= 1_000_000 ? `$${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M` : fmtMoney(n);
+
+/** The carrot's prize label. On a cash-back ladder with volume on the
+ *  board, show what reaching the next rung is worth in DOLLARS — the next
+ *  rung re-prices everything already written, which is the whole hook. */
+function carrotLabel(
+  next: KombatTier,
+  current: KombatTier | null,
+  baseDollars: number,
+  unlocked: boolean,
+  rules: KombatRules,
+): string {
+  if ((next.pct ?? 0) > 0) {
+    if (baseDollars > 0) {
+      const now = current ? tierPayout(current, baseDollars, unlocked, rules) : 0;
+      const then = tierPayout(next, baseDollars, unlocked, rules);
+      return `+${fmtMoney(Math.max(0, then - now))}`;
+    }
+    return `${fmtPts(next.pct! * (unlocked ? rules.prizes.unlock_multiplier : 1))}% back`;
+  }
+  return next.cash > 0 ? `+${fmtMoney(cashWithUnlock(next.cash, unlocked, rules))}` : "Dinner";
 }
 
 function BeltIcon({
