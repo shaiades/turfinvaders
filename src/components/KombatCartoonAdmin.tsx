@@ -17,6 +17,7 @@ import {
   type RepFighterRow,
 } from "@/lib/rep-fighters.functions";
 import { repCartoonsKey } from "@/hooks/useRepCartoons";
+import { TurnaroundAdminButton } from "@/components/TurnaroundAdminButton";
 
 const ADMIN_KEY = ["rep_fighters_admin"] as const;
 
@@ -125,6 +126,8 @@ export function KombatCartoonAdmin() {
           <NeonButton tone="kombat-red" disabled={busy} onClick={() => genBatch.mutate()}>
             {genBatch.isPending ? "Generating…" : "Generate next 6"}
           </NeonButton>
+          {/* Spin frames for the stats-page turntable — covers BOTH casts. */}
+          <TurnaroundAdminButton disabled={busy} />
         </div>
       }
     >

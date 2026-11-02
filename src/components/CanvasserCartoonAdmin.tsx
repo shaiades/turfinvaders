@@ -20,6 +20,7 @@ import {
 } from "@/lib/canvasser-fighters.functions";
 import { fileToResizedDataUrl } from "@/lib/image-upload";
 import { repCartoonsKey } from "@/hooks/useRepCartoons";
+import { TurnaroundAdminButton } from "@/components/TurnaroundAdminButton";
 
 const ADMIN_KEY = ["canvasser_fighters_admin"] as const;
 
@@ -143,11 +144,15 @@ export function CanvasserCartoonAdmin() {
         // live art whose van color went stale. Hidden only when nobody has a
         // photo yet (nothing to draw).
         !list.isError && rows.length - (counts.none ?? 0) > 0 ? (
-          <NeonButton tone="kombat-gold" disabled={pending} onClick={() => void runRerollAll()}>
-            {bulk.running
-              ? `Working… ${bulk.done}${bulk.failed ? ` · ${bulk.failed} failed` : ""}`
-              : "Generate / refresh fighters"}
-          </NeonButton>
+          <div className="flex flex-wrap gap-2">
+            <NeonButton tone="kombat-gold" disabled={pending} onClick={() => void runRerollAll()}>
+              {bulk.running
+                ? `Working… ${bulk.done}${bulk.failed ? ` · ${bulk.failed} failed` : ""}`
+                : "Generate / refresh fighters"}
+            </NeonButton>
+            {/* Spin frames for the stats-page turntable — covers BOTH casts. */}
+            <TurnaroundAdminButton disabled={pending} />
+          </div>
         ) : undefined
       }
     >
