@@ -78,6 +78,7 @@ import { KombatHeroBanner } from "@/components/KombatHeroBanner";
 import { ArcadeFxToggle } from "@/components/ArcadeFxToggle";
 import { makeBeeper } from "@/components/intro-fx";
 import { RepAvatar } from "@/components/RepAvatar";
+import { SpinningFighter } from "@/components/SpinningFighter";
 import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
 import { useRepAliases } from "@/hooks/useRepAliases";
 import { toast } from "sonner";
@@ -2415,6 +2416,7 @@ function RepHero({
   // valuable number finally moves when it grows.
   const reduced = usePrefersReducedMotion();
   const { display: revenueDisplay, bump: revenueBump } = useCountUp(row?.revenue ?? 0, reduced);
+  const cartoons = useRepCartoons().data;
   if (!matched && hasNames) {
     // Identity miss (R-4): say so instead of silently rendering a stranger's
     // board — the old failure mode was a rep who "wasn't on" their own ladder.
@@ -2443,17 +2445,27 @@ function RepHero({
       )}
     >
       <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <div className="text-[10px] font-display uppercase tracking-widest text-kombat-gold/80">
-            Your {rangeLabel} · Volume
-          </div>
-          <div
-            className={cn(
-              "mt-1.5 font-display text-4xl sm:text-5xl text-kombat-gold leading-none tabular-nums",
-              revenueBump && !reduced && "transition-transform duration-200 scale-105",
-            )}
-          >
-            {fmtMoney(revenueDisplay)}
+        <div className="flex items-center gap-3 min-w-0">
+          {/* Your fighter, slowly spinning beside your numbers — the
+              character-select turntable (owner mandate 2026-11-02). */}
+          <SpinningFighter
+            name={matched ?? "You"}
+            cartoon={cartoonFor(cartoons, matched)}
+            tone="gold"
+            className="h-24 w-16 sm:h-28 sm:w-20"
+          />
+          <div className="min-w-0">
+            <div className="text-[10px] font-display uppercase tracking-widest text-kombat-gold/80">
+              Your {rangeLabel} · Volume
+            </div>
+            <div
+              className={cn(
+                "mt-1.5 font-display text-4xl sm:text-5xl text-kombat-gold leading-none tabular-nums",
+                revenueBump && !reduced && "transition-transform duration-200 scale-105",
+              )}
+            >
+              {fmtMoney(revenueDisplay)}
+            </div>
           </div>
         </div>
         {row && (
@@ -2659,6 +2671,7 @@ function YearHero({
 }) {
   const reduced = usePrefersReducedMotion();
   const { display: revenueDisplay, bump: revenueBump } = useCountUp(row?.revenue ?? 0, reduced);
+  const cartoons = useRepCartoons().data;
   if (!matched && hasNames) {
     return (
       <ArcadeCard faction="kombat" className="p-4" data-tour="kombat-hero">
@@ -2682,17 +2695,26 @@ function YearHero({
       )}
     >
       <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <div className="text-[10px] font-display uppercase tracking-widest text-kombat-gold/80">
-            Your {rangeLabel} · Volume
-          </div>
-          <div
-            className={cn(
-              "mt-1.5 font-display text-4xl sm:text-5xl text-kombat-gold leading-none tabular-nums",
-              revenueBump && !reduced && "transition-transform duration-200 scale-105",
-            )}
-          >
-            {fmtMoney(revenueDisplay)}
+        <div className="flex items-center gap-3 min-w-0">
+          {/* Same character-select turntable as the range hero (2026-11-02). */}
+          <SpinningFighter
+            name={matched ?? "You"}
+            cartoon={cartoonFor(cartoons, matched)}
+            tone="gold"
+            className="h-24 w-16 sm:h-28 sm:w-20"
+          />
+          <div className="min-w-0">
+            <div className="text-[10px] font-display uppercase tracking-widest text-kombat-gold/80">
+              Your {rangeLabel} · Volume
+            </div>
+            <div
+              className={cn(
+                "mt-1.5 font-display text-4xl sm:text-5xl text-kombat-gold leading-none tabular-nums",
+                revenueBump && !reduced && "transition-transform duration-200 scale-105",
+              )}
+            >
+              {fmtMoney(revenueDisplay)}
+            </div>
           </div>
         </div>
         {row && (
