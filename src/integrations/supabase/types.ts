@@ -120,21 +120,121 @@ export type Database = {
           coach_private: boolean
           feed_live: boolean
           id: number
+          score_v2: boolean
           updated_at: string
         }
         Insert: {
           coach_private?: boolean
           feed_live?: boolean
           id?: number
+          score_v2?: boolean
           updated_at?: string
         }
         Update: {
           coach_private?: boolean
           feed_live?: boolean
           id?: number
+          score_v2?: boolean
           updated_at?: string
         }
         Relationships: []
+      }
+      arcade_rules: {
+        Row: {
+          id: boolean
+          rules: Json
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          id?: boolean
+          rules?: Json
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          id?: boolean
+          rules?: Json
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
+      canvasser_arcade_ledger: {
+        Row: {
+          canvasser_id: string
+          category: string
+          created_at: string
+          day: string
+          id: string
+          meta: Json
+          points: number
+          source_id: string
+          source_kind: string
+        }
+        Insert: {
+          canvasser_id: string
+          category: string
+          created_at?: string
+          day: string
+          id?: string
+          meta?: Json
+          points: number
+          source_id: string
+          source_kind: string
+        }
+        Update: {
+          canvasser_id?: string
+          category?: string
+          created_at?: string
+          day?: string
+          id?: string
+          meta?: Json
+          points?: number
+          source_id?: string
+          source_kind?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "canvasser_arcade_ledger_canvasser_id_fkey"
+            columns: ["canvasser_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      canvasser_combo_state: {
+        Row: {
+          best: number
+          canvasser_id: string
+          count: number
+          day: string
+          last_at: string
+        }
+        Insert: {
+          best?: number
+          canvasser_id: string
+          count?: number
+          day: string
+          last_at?: string
+        }
+        Update: {
+          best?: number
+          canvasser_id?: string
+          count?: number
+          day?: string
+          last_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "canvasser_combo_state_canvasser_id_fkey"
+            columns: ["canvasser_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       attendance_overrides: {
         Row: {
@@ -1400,26 +1500,32 @@ export type Database = {
       }
       lead_events: {
         Row: {
+          amount: number | null
           canvasser_id: string | null
           count: number
           created_at: string
           id: string
+          kind: string
           occurred_at: string
           team_id: string
         }
         Insert: {
+          amount?: number | null
           canvasser_id?: string | null
           count?: number
           created_at?: string
           id?: string
+          kind?: string
           occurred_at?: string
           team_id: string
         }
         Update: {
+          amount?: number | null
           canvasser_id?: string | null
           count?: number
           created_at?: string
           id?: string
+          kind?: string
           occurred_at?: string
           team_id?: string
         }

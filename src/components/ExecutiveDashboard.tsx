@@ -37,6 +37,7 @@ import { toast } from "sonner";
 import { Plus } from "lucide-react";
 import { useOfficeFilter } from "@/components/OfficeFilterContext";
 import { laTodayISO, laWeekStartISO, weekStartOfISO } from "@/lib/dates";
+import { fetchConfirmedByCanvasserDay } from "@/hooks/useSelfMetrics";
 
 /* ============ Helpers ============ */
 /* All day/week/month buckets are America/Los_Angeles (midnight PT resets). */
@@ -78,7 +79,7 @@ function LiveDailyAction() {
         supabase
           .from("daily_logs")
           .select(
-            "canvasser_id, team_id, leads_called_in, next_days, future_leads, no_demo, confirmed_leads",
+            "canvasser_id, team_id, leads_called_in, next_days, future_leads, no_demo",
           )
           .eq("log_date", today),
         supabase.from("profiles").select("id, display_name, team_id, suspension_tracked"),
@@ -347,7 +348,7 @@ function RawDataTable() {
         supabase
           .from("daily_logs")
           .select(
-            "id, canvasser_id, team_id, log_date, demos_sits, sales, no_demo, one_legs, future_leads, unmarked, people_talked_to, leads_called_in, confirmed_leads",
+            "id, canvasser_id, team_id, log_date, demos_sits, sales, no_demo, one_legs, future_leads, unmarked, people_talked_to, leads_called_in",
           )
           .order("log_date", { ascending: false })
           .limit(500),
@@ -364,8 +365,19 @@ function RawDataTable() {
           (p as { office_location?: string | null }).office_location ?? null,
         ]),
       );
-      return (logsR.data ?? []).map((r) => ({
+      const logRows = logsR.data ?? [];
+      // Confirmed column comes from daily_metrics — daily_logs.confirmed_leads
+      // is a dead column nothing writes (this table showed 0 forever). Fetch
+      // the same window the 500 log rows cover and join per canvasser-day.
+      const oldest = logRows.length ? logRows[logRows.length - 1].log_date : laTodayISO();
+      const confirmedByDay = new Map<string, number>();
+      for (const mRow of await fetchConfirmedByCanvasserDay({ sinceISO: oldest })) {
+        const key = `${mRow.canvasser_id}|${mRow.metric_date}`;
+        confirmedByDay.set(key, (confirmedByDay.get(key) ?? 0) + (mRow.leads_confirmed ?? 0));
+      }
+      return logRows.map((r) => ({
         ...r,
+        confirmed_leads: confirmedByDay.get(`${r.canvasser_id}|${r.log_date}`) ?? 0,
         name: nameById.get(r.canvasser_id) ?? r.canvasser_id.slice(0, 8),
         office_location: locById.get(r.canvasser_id) ?? null,
       }));

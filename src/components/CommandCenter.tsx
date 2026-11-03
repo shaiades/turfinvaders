@@ -4,6 +4,7 @@ import { weeklyPoints } from "@/lib/pay";
 import { ArcadePanel } from "@/components/arcade";
 import { laWeekStartISO } from "@/lib/dates";
 import { isLeadSourceName } from "@/lib/lead-sources";
+import { fetchConfirmedByCanvasserDay } from "@/hooks/useSelfMetrics";
 const turfInvadersHero = { url: "/turf-invaders-hero.jpg" };
 
 type Props = {
@@ -32,7 +33,7 @@ export function CommandCenter({ teamId, range }: Props) {
     queryFn: async (): Promise<WeekTotals> => {
       let q = supabase
         .from("daily_logs")
-        .select("canvasser_id, log_date, leads_called_in, confirmed_leads, demos_sits, sales, no_shows")
+        .select("canvasser_id, log_date, leads_called_in, demos_sits, sales, no_shows")
         .gte("log_date", startISO);
       if (endISO) q = q.lte("log_date", endISO);
       if (teamId) q = q.eq("team_id", teamId);
@@ -41,9 +42,12 @@ export function CommandCenter({ teamId, range }: Props) {
       // Command Center (owner ask 2026-10-16). Same rule as the dispatch
       // board / ladder / wrap; matched by profile name because legacy channel
       // logs can carry a team snapshot.
-      const [logsRes, profilesRes] = await Promise.all([
+      // Confirms come from daily_metrics — daily_logs.confirmed_leads is a
+      // dead column nothing writes (this card showed 0 confirmed forever).
+      const [logsRes, profilesRes, metricRows] = await Promise.all([
         q,
         supabase.from("profiles").select("id, display_name"),
+        fetchConfirmedByCanvasserDay({ sinceISO: startISO, untilISO: endISO, teamId }),
       ]);
       if (logsRes.error) throw logsRes.error;
       if (profilesRes.error) throw profilesRes.error;
@@ -55,14 +59,17 @@ export function CommandCenter({ teamId, range }: Props) {
       const daySet = new Set<string>();
       let confirmedLeads = 0, leadsCalledIn = 0, demosSits = 0, sales = 0, noShows = 0;
       for (const r of rows) {
-        confirmedLeads += r.confirmed_leads ?? 0;
         leadsCalledIn += r.leads_called_in ?? 0;
         demosSits += r.demos_sits ?? 0;
         sales += r.sales ?? 0;
         noShows += r.no_shows ?? 0;
-        const hadActivity = (r.leads_called_in ?? 0) + (r.confirmed_leads ?? 0)
+        const hadActivity = (r.leads_called_in ?? 0)
           + (r.demos_sits ?? 0) + (r.sales ?? 0) > 0;
         if (hadActivity) daySet.add(`${r.canvasser_id}|${r.log_date}`);
+      }
+      for (const mRow of metricRows) {
+        if (pseudoIds.has(mRow.canvasser_id)) continue;
+        confirmedLeads += mRow.leads_confirmed ?? 0;
       }
       return { confirmedLeads, leadsCalledIn, demosSits, sales, noShows, daysWorked: daySet.size };
     },

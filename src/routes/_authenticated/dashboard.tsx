@@ -51,6 +51,7 @@ import { ShoutoutComposer } from "@/components/ShoutoutComposer";
 import { BountyComposer } from "@/components/BountyComposer";
 import { ArenaMode } from "@/components/ArenaMode";
 import { PushAlertsCard } from "@/components/PushAlertsCard";
+import { ArcadeRulesAdmin } from "@/components/ArcadeRulesAdmin";
 import { FormerBadge } from "@/components/FormerBadge";
 import { useTodayLeads } from "@/hooks/useTodayLeads";
 import { useDateRange } from "@/hooks/useDateRange";
@@ -435,6 +436,9 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
             title="Alerts on this device"
             description="One switch per device: flagged punches, Objection Dojo submissions, and sale KA-CHINGs all ping you here once it's on."
           />
+          {/* Arcade Score v2 — the canvasser points economy, live-tunable
+              (engagement audit 2026-11-03). The switch is the master flag. */}
+          <ArcadeRulesAdmin />
           <WeeklyScheduleSettings />
           <CompanySettingsPanel />
         </TabsContent>

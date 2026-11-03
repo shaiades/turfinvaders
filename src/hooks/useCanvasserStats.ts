@@ -16,6 +16,7 @@ import {
 } from "@/lib/pay";
 import { resolveAvgCommission } from "@/lib/funnel";
 import { useFunnelRates } from "@/hooks/useFunnelRates";
+import { useSixtyDaySelfMetrics } from "@/hooks/useSelfMetrics";
 import { useMyEarnings } from "@/hooks/useMyEarnings";
 import { useCanvasserProfile } from "@/hooks/useCanvasserProfile";
 import {
@@ -95,6 +96,11 @@ export function useCanvasserStats(userId: string) {
   const earnings = useMyEarnings(userId);
   const logsQuery = useSixtyDayLogs(userId);
   const todayQuery = useTodayLogs(userId);
+  // Confirmed leads live in daily_metrics (office pipeline) —
+  // daily_logs.confirmed_leads is a dead column nothing writes, which is why
+  // the Stats funnel's Leads bar read 0 for everyone. Shared query key with
+  // useFunnelRates, so this adds no extra fetch.
+  const metricsQuery = useSixtyDaySelfMetrics(userId);
 
   const monthlyGoal = Number(profile.data?.monthly_goal ?? DEFAULT_MONTHLY_GOAL);
   const weeklyGoal = Number(profile.data?.weekly_income_goal ?? DEFAULT_WEEKLY_GOAL);
@@ -160,6 +166,14 @@ export function useCanvasserStats(userId: string) {
     const week = aggregate(allRows.filter((r) => r.log_date >= w && r.log_date <= wEnd));
     const month = aggregate(allRows.filter((r) => r.log_date >= m));
 
+    // Overlay the real confirm counts from daily_metrics (aggregate() summed
+    // the dead daily_logs column, i.e. zeros).
+    for (const row of metricsQuery.data ?? []) {
+      const c = row.leads_confirmed ?? 0;
+      if (row.metric_date >= w && row.metric_date <= wEnd) week.confirmed_leads += c;
+      if (row.metric_date >= m) month.confirmed_leads += c;
+    }
+
     // The fetched window is max(week, month) — bucket each figure explicitly.
     const sales = salesQuery.data ?? [];
     const mStartMs = Date.parse(laMidnightUtcISO(m));
@@ -203,7 +217,7 @@ export function useCanvasserStats(userId: string) {
           ? personalAgg.people_talked_to / personalAgg.doors_knocked
           : null,
     };
-  }, [logsQuery.data, salesQuery.data, clockedQuery.data, profile.data]);
+  }, [logsQuery.data, metricsQuery.data, salesQuery.data, clockedQuery.data, profile.data]);
 
   // Talk-per-door: personal 60d history when it's driving the rates,
   // industry-typical ~27% otherwise (talks aren't in the company baseline).

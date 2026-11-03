@@ -41,6 +41,9 @@ export function useTodayLeads(): {
       const { data, error } = await supabase
         .from("lead_events")
         .select("team_id, count")
+        // 'sold' rows are celebration events for leads already counted when
+        // they confirmed — counting them again would double a sale's lead.
+        .eq("kind", "confirmed")
         .gte("occurred_at", startOfTodayISO());
       if (error) throw error;
       return data ?? [];

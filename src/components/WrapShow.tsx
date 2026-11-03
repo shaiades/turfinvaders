@@ -14,6 +14,15 @@ import { ArcadeFxToggle } from "@/components/ArcadeFxToggle";
 import { arcadeCue } from "@/lib/arcade-fx";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { useWrapData, type WrapScope } from "@/hooks/useWrapData";
+import { useAuth } from "@/hooks/useAuth";
+import { useArcadeScore } from "@/hooks/useArcadeScore";
+import { useFinaleWrap } from "@/hooks/useFinaleWrap";
+import {
+  finaleActive,
+  finaleNextTier,
+  finaleTierFor,
+  type ArcadeRules,
+} from "@/lib/canvasser-arcade";
 import { BOSS_BOUNTY } from "@/lib/canvasserPay";
 import { laTodayISO } from "@/lib/dates";
 import { renderShareCard, shareOrDownloadCard } from "@/lib/share-card";
@@ -78,25 +87,46 @@ const KINDS = [
   "tomorrow",
   "share",
 ] as const;
-type Kind = (typeof KINDS)[number];
+type Kind = (typeof KINDS)[number] | "finale";
+// While the FINAL ROUND runs (Tier 3, engagement audit 2026-11-03), the wrap
+// gets a belt slide after the rank card — the night recap is the fresh-start
+// lever, so it ends on where the belt chase stands going into tomorrow.
+const FINALE_KINDS: readonly Kind[] = [
+  "title",
+  "leads",
+  "sits",
+  "sales",
+  "boss",
+  "earned",
+  "rank",
+  "finale",
+  "badges",
+  "tomorrow",
+  "share",
+];
 
 export function WrapShow({ scope, onClose }: { scope: WrapScope; onClose: () => void }) {
   const d = useWrapData(scope);
   const reduced = usePrefersReducedMotion();
   const [i, setI] = useState(0);
+  // FINAL ROUND belt slide, only while the tournament runs (flag + window).
+  const { user, previewCanvasserId } = useAuth();
+  const uid = previewCanvasserId ?? user?.id;
+  const score = useArcadeScore(uid);
+  const kinds = score.enabled && finaleActive(score.rules) ? FINALE_KINDS : KINDS;
   const [saving, setSaving] = useState(false);
   const close = onClose;
 
   const noScore = !d.loading && d.leads === 0 && d.vol === 0 && d.pts === 0;
-  const kind: Kind = KINDS[i];
+  const kind: Kind = kinds[Math.min(i, kinds.length - 1)];
 
   // Auto-advance (except the final share card). Re-armed each card.
   useEffect(() => {
     if (d.loading || noScore || kind === "share") return;
     const dur = kind === "title" ? 2600 : 3600;
-    const t = setTimeout(() => setI((n) => Math.min(n + 1, KINDS.length - 1)), dur);
+    const t = setTimeout(() => setI((n) => Math.min(n + 1, kinds.length - 1)), dur);
     return () => clearTimeout(t);
-  }, [i, kind, d.loading, noScore]);
+  }, [i, kind, d.loading, noScore, kinds.length]);
 
   // Celebration per card: confetti is motion (skipped under reduced-motion),
   // while sound + haptics ride their own prefs so they still fire when motion
@@ -141,7 +171,7 @@ export function WrapShow({ scope, onClose }: { scope: WrapScope; onClose: () => 
     d.morningRank,
   ]);
 
-  const next = () => setI((n) => Math.min(n + 1, KINDS.length - 1));
+  const next = () => setI((n) => Math.min(n + 1, kinds.length - 1));
   const prev = () => setI((n) => Math.max(n - 1, 0));
 
   const share = async () => {
@@ -171,7 +201,7 @@ export function WrapShow({ scope, onClose }: { scope: WrapScope; onClose: () => 
     <div className="fixed inset-0 z-[10025] flex flex-col bg-[linear-gradient(180deg,#0b0b12,#140a1e_60%,#0b0b12)] px-safe pt-safe pb-safe">
       {/* progress dots + sound/haptics + skip (above the tap zones) */}
       <div className="relative z-20 flex items-center gap-1.5 px-4 pt-4">
-        {KINDS.map((k, idx) => (
+        {kinds.map((k, idx) => (
           <span
             key={k}
             className={`h-1 flex-1 rounded-full transition-colors ${
@@ -224,7 +254,15 @@ export function WrapShow({ scope, onClose }: { scope: WrapScope; onClose: () => 
           </div>
         ) : (
           <div key={i} className={`flex w-full max-w-sm flex-col items-center ${anim}`}>
-            <WrapCard kind={kind} d={d} reduced={reduced} saving={saving} onShare={share} />
+            <WrapCard
+              kind={kind}
+              d={d}
+              reduced={reduced}
+              saving={saving}
+              onShare={share}
+              uid={uid}
+              rules={score.rules}
+            />
           </div>
         )}
       </div>
@@ -269,14 +307,20 @@ function WrapCard({
   reduced,
   saving,
   onShare,
+  uid,
+  rules,
 }: {
   kind: Kind;
   d: ReturnType<typeof useWrapData>;
   reduced: boolean;
   saving: boolean;
   onShare: () => void;
+  uid: string | undefined;
+  rules: ArcadeRules;
 }) {
   switch (kind) {
+    case "finale":
+      return <FinaleWrapSlide uid={uid} rules={rules} />;
     case "title":
       return (
         <>
@@ -584,5 +628,50 @@ function Mini({ label, value }: { label: string; value: string }) {
       <p className="text-muted-foreground/70">{label}</p>
       <p className="font-display text-foreground">{value}</p>
     </div>
+  );
+}
+
+/** FINAL ROUND belt slide — where the chase stands tonight: belt held, finale
+ *  points, and the gap to the next belt's cash. The fresh-start card. */
+function FinaleWrapSlide({ uid, rules }: { uid: string | undefined; rules: ArcadeRules }) {
+  const { points, loading } = useFinaleWrap(uid, rules, true);
+  const belt = finaleTierFor(points, rules);
+  const nxt = finaleNextTier(points, rules);
+  const beltColors: Record<string, string> = {
+    white: "var(--foreground)",
+    blue: "var(--turf-cyan)",
+    red: "var(--kombat-red)",
+    black: "var(--kombat-gold)",
+  };
+  const color = belt ? (beltColors[belt.key] ?? "var(--kombat-gold)") : "var(--muted-foreground)";
+  return (
+    <>
+      <p className="font-display text-xs uppercase tracking-widest text-[var(--kombat-red)]">
+        {rules.finale.label}
+      </p>
+      <p className="mt-3 text-5xl" aria-hidden>
+        🥋
+      </p>
+      <p
+        className="mt-3 font-display text-2xl uppercase tracking-widest"
+        style={{ color, textShadow: belt ? `0 0 30px ${color}` : undefined }}
+      >
+        {loading ? "…" : belt ? belt.label : "No belt yet"}
+      </p>
+      <p className="mt-2 font-display text-sm uppercase tracking-widest text-neon">
+        {Math.round(points)} finale pts
+      </p>
+      {nxt && !loading && (
+        <p className="mt-3 max-w-xs text-sm text-muted-foreground">
+          {Math.ceil(nxt.toGo)} pts to {nxt.next.label} — ${nxt.next.cash} cash. Sits score
+          heaviest; tomorrow's first knock starts the climb.
+        </p>
+      )}
+      {!nxt && !loading && (
+        <p className="mt-3 max-w-xs text-sm text-muted-foreground">
+          Top belt held — defend it to the bell.
+        </p>
+      )}
+    </>
   );
 }

@@ -32,6 +32,7 @@ import { CoachMessageComposer } from "@/components/CoachMessageComposer";
 import { Lock, EyeOff, Video } from "lucide-react";
 import { SpinningFighter } from "@/components/SpinningFighter";
 import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
+import { fetchConfirmedByCanvasserDay } from "@/hooks/useSelfMetrics";
 
 export const Route = createFileRoute("/_authenticated/canvassers/$canvasserId")({
   head: () => ({ meta: [{ title: "Player profile — Turf Invaders" }] }),
@@ -192,16 +193,26 @@ function CanvasserProfile() {
     queryKey: ["canvasser_stats", canvasserId, range.startISO, range.endISO],
     placeholderData: (prev) => prev,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("daily_logs")
-        .select(
-          "log_date, doors_knocked, people_talked_to, leads_called_in, confirmed_leads, demos_sits, sales",
-        )
-        .eq("canvasser_id", canvasserId)
-        .gte("log_date", range.startISO)
-        .lte("log_date", range.endISO);
+      // Confirms come from daily_metrics — daily_logs.confirmed_leads is a
+      // dead column nothing writes (the funnel's Leads figure read 0 forever).
+      const [{ data, error }, metricRows] = await Promise.all([
+        supabase
+          .from("daily_logs")
+          .select(
+            "log_date, doors_knocked, people_talked_to, leads_called_in, demos_sits, sales",
+          )
+          .eq("canvasser_id", canvasserId)
+          .gte("log_date", range.startISO)
+          .lte("log_date", range.endISO),
+        fetchConfirmedByCanvasserDay({
+          sinceISO: range.startISO,
+          untilISO: range.endISO,
+          canvasserId,
+        }),
+      ]);
       if (error) throw error;
       const rows = data ?? [];
+      const confirmedTotal = metricRows.reduce((a, r) => a + (r.leads_confirmed ?? 0), 0);
       const byDay = new Map<string, DayActivity>();
       for (const r of rows) {
         const d = byDay.get(r.log_date) ?? ZERO_DAY(r.log_date);
@@ -217,11 +228,11 @@ function CanvasserProfile() {
           doors: acc.doors + (r.doors_knocked ?? 0),
           contacts: acc.contacts + (r.people_talked_to ?? 0),
           leadsCalledIn: acc.leadsCalledIn + (r.leads_called_in ?? 0),
-          leads: acc.leads + (r.confirmed_leads ?? 0),
+          leads: acc.leads,
           sits: acc.sits + (r.demos_sits ?? 0),
           sales: acc.sales + (r.sales ?? 0),
         }),
-        { doors: 0, contacts: 0, leadsCalledIn: 0, leads: 0, sits: 0, sales: 0 },
+        { doors: 0, contacts: 0, leadsCalledIn: 0, leads: confirmedTotal, sits: 0, sales: 0 },
       );
       return { ...total, byDay };
     },
