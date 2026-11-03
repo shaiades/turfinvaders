@@ -40,7 +40,8 @@
     "verify:pin-queue": "npx tsx scripts/verify-pin-queue.ts",
     "verify:money": "npx tsx scripts/verify-money.ts",
     "verify:turfage": "npx tsx scripts/verify-turf-age.ts",
-    "verify:dialer": "npx tsx scripts/verify-dialer.ts"
+    "verify:dialer": "npx tsx scripts/verify-dialer.ts",
+    "verify:rep-bonus": "npx tsx scripts/verify-rep-bonus.ts"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",
