@@ -32,9 +32,16 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useAuth } from "@/hooks/useAuth";
 import { RankPill } from "@/components/RankPill";
+import { RepBonusPanel } from "@/components/RepBonusPanel";
 import { useOfficeFilter } from "@/components/OfficeFilterContext";
 import { cn } from "@/lib/utils";
-import { addDaysISO, laDateISO, laMidnightUtcISO, monthStartISO, nextMonthStartISO } from "@/lib/dates";
+import {
+  addDaysISO,
+  laDateISO,
+  laMidnightUtcISO,
+  monthStartISO,
+  nextMonthStartISO,
+} from "@/lib/dates";
 import { useWeekSelector } from "@/hooks/useWeekSelector";
 import { csvCell } from "@/lib/csv";
 import { isAdminRole, isPayrollRunRole } from "@/lib/role-policy";
@@ -90,11 +97,7 @@ function PayLockBadge({ status, className }: { status: string; className?: strin
   const meta = status === "reverted" ? PAY_LOCK_META.reverted : PAY_LOCK_META.warning;
   return (
     <div
-      className={cn(
-        "text-[9px] font-display uppercase tracking-widest",
-        meta.className,
-        className,
-      )}
+      className={cn("text-[9px] font-display uppercase tracking-widest", meta.className, className)}
       title={meta.title}
     >
       {meta.label}
@@ -347,7 +350,9 @@ export function PayrollLedger() {
       const [logsRes, leadsRes, profilesRes, teamsRes, timeRes] = await Promise.all([
         supabase
           .from("daily_logs")
-          .select("canvasser_id, team_id, no_demo, one_legs, future_leads, demos_sits, sales, log_date")
+          .select(
+            "canvasser_id, team_id, no_demo, one_legs, future_leads, demos_sits, sales, log_date",
+          )
           .gte("log_date", startStr)
           .lte("log_date", endStr),
         // Only used to include sale-only canvassers in the roster; amounts come
@@ -360,7 +365,9 @@ export function PayrollLedger() {
           .or(
             `and(created_at.gte.${windowStart},created_at.lt.${windowEnd}),and(reviewed_at.gte.${windowStart},reviewed_at.lt.${windowEnd})`,
           ),
-        supabase.from("profiles").select("id, display_name, team_id, current_rank, office_location, pay_lock_status"),
+        supabase
+          .from("profiles")
+          .select("id, display_name, team_id, current_rank, office_location, pay_lock_status"),
         supabase.from("teams").select("id, name, color"),
         supabase
           .from("time_entries")
@@ -433,8 +440,12 @@ export function PayrollLedger() {
         a.sale_amount = Number(pc?.sale_price_total ?? 0);
         const profile = profileById.get(cid);
         const team = profile?.team_id ? teamById.get(profile.team_id) : null;
-        const rank = pc?.rank ?? (profile as { current_rank?: string | null } | undefined)?.current_rank ?? "Jr. Silver";
-        const payLock = (profile as { pay_lock_status?: string | null } | undefined)?.pay_lock_status ?? "active";
+        const rank =
+          pc?.rank ??
+          (profile as { current_rank?: string | null } | undefined)?.current_rank ??
+          "Jr. Silver";
+        const payLock =
+          (profile as { pay_lock_status?: string | null } | undefined)?.pay_lock_status ?? "active";
         const clocked = hoursByCanv.get(cid) ?? 0;
         const hoursSource: "clocked" | "none" = clocked > 0 ? "clocked" : "none";
         const sitBonus = Number(pc?.sit_bonus ?? 0);
@@ -635,7 +646,9 @@ export function PayrollLedger() {
         r.monster.toFixed(2),
         r.payError ? "ERROR" : r.totalPay.toFixed(2),
         attestQ.data ? (attestQ.data.get(r.id) ?? "none") : "",
-        Object.keys(ex).filter((k) => Number(ex[k]) > 0 || ex[k] === true).join("; "),
+        Object.keys(ex)
+          .filter((k) => Number(ex[k]) > 0 || ex[k] === true)
+          .join("; "),
       ];
       lines.push(cells.map(csvCell).join(","));
     }
@@ -812,8 +825,8 @@ export function PayrollLedger() {
               Reopen approved payroll
             </DialogTitle>
             <DialogDescription>
-              This unlocks the week's time records for correction. The approved run stays on file
-              as history; after fixing, create a fresh draft and approve it again. Every step is
+              This unlocks the week's time records for correction. The approved run stays on file as
+              history; after fixing, create a fresh draft and approve it again. Every step is
               audited.
             </DialogDescription>
           </DialogHeader>
@@ -826,11 +839,15 @@ export function PayrollLedger() {
           <Input
             value={reopenConfirm}
             onChange={(e) => setReopenConfirm(e.target.value)}
-            placeholder='Type REOPEN to confirm'
+            placeholder="Type REOPEN to confirm"
             className="text-base md:text-sm"
           />
           <DialogFooter className="gap-2">
-            <Button variant="outline" className="min-h-11 md:min-h-9" onClick={() => setReopenOpen(false)}>
+            <Button
+              variant="outline"
+              className="min-h-11 md:min-h-9"
+              onClick={() => setReopenOpen(false)}
+            >
               Cancel
             </Button>
             <Button
@@ -927,9 +944,7 @@ export function PayrollLedger() {
                         {o.direction === "collect" ? "collect" : "refund"} $
                         {Number(o.outstanding ?? 0).toFixed(2)}
                       </span>
-                      {o.paid_week ? (
-                        <span className="ml-1">· paid wk {o.paid_week}</span>
-                      ) : null}
+                      {o.paid_week ? <span className="ml-1">· paid wk {o.paid_week}</span> : null}
                     </li>
                   ))}
                 </ul>
@@ -1183,6 +1198,8 @@ export function PayrollLedger() {
       </ArcadePanel>
 
       <MonthlyVolumeBonusPanel monthStart={monthStartISO(startStr)} />
+
+      <RepBonusPanel monthStart={monthStartISO(startStr)} />
     </div>
   );
 }
@@ -1287,8 +1304,8 @@ function MonthlyVolumeBonusPanel({ monthStart }: { monthStart: string }) {
                     "volume —"
                   ) : (
                     <>
-                      ${r.volume.toFixed(2)} volume ·{" "}
-                      ${(100000 - (r.volume % 100000)).toFixed(0)} to the next $1,500
+                      ${r.volume.toFixed(2)} volume · ${(100000 - (r.volume % 100000)).toFixed(0)}{" "}
+                      to the next $1,500
                     </>
                   )}
                 </div>
@@ -1339,4 +1356,3 @@ function MonthlyVolumeBonusPanel({ monthStart }: { monthStart: string }) {
     </ArcadePanel>
   );
 }
-

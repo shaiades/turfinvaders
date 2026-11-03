@@ -2073,6 +2073,7 @@ function CloseKombatInner({
           <TabsContent value="money" className="mt-4">
             <CloseKombatMoneyTab
               repId={user?.id}
+              matchedRepName={matcher.matched}
               deals={myDeals}
               rangeLabel={range.label}
               rangeStart={range.start}

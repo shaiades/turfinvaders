@@ -89,6 +89,17 @@ async function handle(request: Request): Promise<Response> {
     } catch (kombatErr) {
       kombat = { error: kombatErr instanceof Error ? kombatErr.message : String(kombatErr) };
     }
+    // Double Up / Triple Up lock sweep (owner, 2026-11-03): like the Kombat
+    // ledger, pending bonus days lock on wall-clock time (the month-end
+    // cancel window), so the daily run must advance them even when nobody
+    // pressed Sync. Best-effort: a bonus error must never fail the refresh.
+    let repBonus: unknown = null;
+    try {
+      const { runRepBonusRecompute } = await import("@/lib/rep-bonus.server");
+      repBonus = await runRepBonusRecompute();
+    } catch (bonusErr) {
+      repBonus = { error: bonusErr instanceof Error ? bonusErr.message : String(bonusErr) };
+    }
     // Rep fighter photos (owner, 2026-10-02): keep Monday profile photos fresh
     // so new reps appear in the admin gallery ready to generate. Photos only —
     // cartoon generation stays admin-triggered (it spends API budget and needs
@@ -100,7 +111,7 @@ async function handle(request: Request): Promise<Response> {
     } catch (photoErr) {
       repPhotos = { error: photoErr instanceof Error ? photoErr.message : String(photoErr) };
     }
-    return json({ ok: true, ...summary, kombat, repPhotos });
+    return json({ ok: true, ...summary, kombat, repBonus, repPhotos });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     // Failure trail (cron doctrine: a dead 6 AM run must be visible in the

@@ -3416,6 +3416,51 @@ export type Database = {
           },
         ]
       }
+      rep_day_bonuses: {
+        Row: {
+          amount: number
+          bonus_date: string
+          created_at: string
+          id: string
+          job_count: number
+          jobs: Json
+          locked_at: string | null
+          rep_name: string
+          status: string
+          tier: string
+          updated_at: string
+          volume: number
+        }
+        Insert: {
+          amount: number
+          bonus_date: string
+          created_at?: string
+          id?: string
+          job_count: number
+          jobs?: Json
+          locked_at?: string | null
+          rep_name: string
+          status: string
+          tier: string
+          updated_at?: string
+          volume: number
+        }
+        Update: {
+          amount?: number
+          bonus_date?: string
+          created_at?: string
+          id?: string
+          job_count?: number
+          jobs?: Json
+          locked_at?: string | null
+          rep_name?: string
+          status?: string
+          tier?: string
+          updated_at?: string
+          volume?: number
+        }
+        Relationships: []
+      }
       rep_job_visits: {
         Row: {
           created_at: string

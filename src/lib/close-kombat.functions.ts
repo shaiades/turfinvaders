@@ -70,5 +70,16 @@ export const syncBlockCards = createServerFn({ method: "POST" })
         `kombat ledger recompute: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+    // Double Up / Triple Up bonus recompute (owner, 2026-11-03): fresh cards
+    // or cancel stamps may mint, downgrade or cancel a day's bonus. Same
+    // best-effort contract as the Kombat recompute above.
+    try {
+      const { runRepBonusRecompute } = await import("@/lib/rep-bonus.server");
+      await runRepBonusRecompute();
+    } catch (err) {
+      summary.wcc.errors.push(
+        `rep bonus recompute: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
     return summary;
   });
