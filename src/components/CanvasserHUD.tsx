@@ -1,4 +1,7 @@
+import { useEffect, useState } from "react";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
+import { useArcadeScore } from "@/hooks/useArcadeScore";
+import { comboDisplay } from "@/lib/canvasser-arcade";
 import {
   HOURLY_MID,
   HOURLY_TOP,
@@ -12,6 +15,8 @@ import { RankPill } from "@/components/RankPill";
 import { metricText } from "@/components/arcade";
 import { dailyLogKeys, sumLogCounters, useSixtyDayLogs, useTodayLogs } from "@/hooks/useDailyLogs";
 import { useCanvasserProfile } from "@/hooks/useCanvasserProfile";
+import { useLifetimeXp } from "@/hooks/useLifetimeXp";
+import { useBossMeter } from "@/hooks/useCanvasserArcade";
 import { useOpenShift, useTodayShifts } from "@/hooks/useTimeClockSelf";
 
 /**
@@ -34,6 +39,16 @@ export function CanvasserHUD({ userId }: { userId: string }) {
   const profile = useCanvasserProfile(userId);
   const openShift = useOpenShift(userId);
   const todayShifts = useTodayShifts(userId);
+  // Lifetime arcade level — the identity chip beside the rank (shared query
+  // key with FighterCard/useWrapData: zero extra fetches). The level-up
+  // CELEBRATION belongs to the Fighter card, not this strip.
+  const lifetime = useLifetimeXp(userId, { celebrate: false });
+  // The $100K Boss (engagement audit §1.7): once the boss is more than half
+  // down, the chase to the $1,500 chest earns a permanent spot on the strip —
+  // goal-gradient, the pull strengthens as the number shrinks. Rides the
+  // shared useMyEarnings cache; zero extra fetches.
+  const { boss } = useBossMeter(userId);
+  const bossChase = boss.hpInto > boss.hpMax / 2;
 
   // New pings land on the HUD the moment they hit daily_logs. Invalidate the
   // whole self prefix, not just today's key — the 60d cache feeds the Stats
@@ -87,6 +102,7 @@ export function CanvasserHUD({ userId }: { userId: string }) {
     totals.doors_knocked > 0;
 
   return (
+    <>
     <div
       data-tour="hud"
       className="border-t border-border/60 px-4 py-1.5 flex items-center justify-between gap-3 text-[10px] font-display uppercase tracking-widest"
@@ -96,7 +112,19 @@ export function CanvasserHUD({ userId }: { userId: string }) {
           ⚠ Off the clock
         </span>
       ) : (
-        <RankPill rank={rank} tappable />
+        <span className="flex min-w-0 items-center gap-1.5">
+          <RankPill rank={rank} tappable />
+          {/* Lifetime arcade level — identity, not money (title lives on the
+              Fighter card; the chip stays tiny for 390px phones). */}
+          {lifetime.level && (
+            <span
+              title={lifetime.level.title}
+              className="rounded border border-[var(--turf-cyan)]/50 px-1.5 py-0.5 text-[var(--turf-cyan)]"
+            >
+              LV {lifetime.level.level}
+            </span>
+          )}
+        </span>
       )}
       {/* flex-wrap: on the narrowest phones the money hint wraps to its own
           line instead of overflowing or vanishing. */}
@@ -118,7 +146,95 @@ export function CanvasserHUD({ userId }: { userId: string }) {
         {/* The money hint shows at EVERY width — standard 390px iPhones were
             hiding exactly the line that makes the game pay (audit 2026-10-15). */}
         {!wkBroken && <span className="text-muted-foreground/70">{tierHint}</span>}
+        {/* Boss chase — the final stretch to the $1,500 chest. */}
+        {bossChase && (
+          <span
+            className={
+              boss.enraged
+                ? "animate-pulse text-[var(--kombat-red)]"
+                : "text-[var(--kombat-gold)]"
+            }
+          >
+            {boss.enraged ? "⚔ BOSS 1 ROOF AWAY" : `⚔ $${Math.ceil(boss.hpLeft / 1000)}K to $1.5K`}
+          </span>
+        )}
       </div>
+    </div>
+    <ArcadeScoreStrip userId={userId} />
+    </>
+  );
+}
+
+/**
+ * Arcade Score v2 strip (engagement audit 2026-11-03, Tier 2): the SUPER
+ * meter (goal gradient — segments fill toward today's target, the last one
+ * glows) and the live COMBO chain with its drain bar (loss aversion — you
+ * can WATCH the chain dying and one more conversation saves it). Renders
+ * nothing until the owner flips arcade_flags.score_v2; rides useArcadeScore's
+ * shared queries, re-projecting only the drain locally once a second.
+ */
+const SUPER_SEGMENTS = 8;
+function ArcadeScoreStrip({ userId }: { userId: string }) {
+  const score = useArcadeScore(userId);
+  // 1s tick so the drain bar moves between the 60s polls / realtime nudges.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!score.enabled) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [score.enabled]);
+  if (!score.enabled) return null;
+
+  const m = score.meter;
+  const filled = m.unleashed ? SUPER_SEGMENTS : Math.floor(m.pct * SUPER_SEGMENTS);
+  const combo = comboDisplay(score.comboState, score.rules, now);
+  const windowMs = Math.max(1, score.rules.combo.window_min * 60_000);
+  const drainPct = Math.min(1, combo.msLeft / windowMs);
+  const dying = combo.alive && drainPct < 0.25;
+
+  return (
+    <div className="border-t border-border/40 px-4 py-1 flex items-center justify-between gap-3 font-display text-[9px] uppercase tracking-widest">
+      {/* SUPER meter */}
+      <div className="flex min-w-0 flex-1 items-center gap-1.5">
+        <span className={m.unleashed ? "text-[var(--kombat-gold)]" : "text-muted-foreground"}>
+          {m.unleashed ? "⚡ Super" : "Super"}
+        </span>
+        <div className="flex flex-1 gap-[3px]" aria-hidden>
+          {Array.from({ length: SUPER_SEGMENTS }, (_, i) => (
+            <span
+              key={i}
+              className={`h-1.5 flex-1 rounded-sm transition-colors ${
+                i < filled
+                  ? m.unleashed
+                    ? "bg-[var(--kombat-gold)] shadow-[0_0_6px_var(--kombat-gold)]"
+                    : "bg-[var(--turf-cyan)]"
+                  : i === filled && filled === SUPER_SEGMENTS - 1
+                    ? "animate-pulse bg-[var(--turf-cyan)]/40"
+                    : "bg-border/70"
+              }`}
+            />
+          ))}
+        </div>
+        <span className="tabular-nums text-muted-foreground">
+          {m.unleashed ? `+${m.bonus} banked` : `${m.remaining} to go`}
+        </span>
+      </div>
+      {/* COMBO chain + drain bar */}
+      {combo.alive && (
+        <div className="flex shrink-0 items-center gap-1.5">
+          <span className={dying ? "animate-pulse text-[var(--kombat-red)]" : "text-[var(--kombat-gold)]"}>
+            🔥 x{combo.count}
+          </span>
+          <div className="h-1.5 w-12 overflow-hidden rounded-sm bg-border/70" aria-hidden>
+            <span
+              className={`block h-full transition-[width] duration-1000 ease-linear ${
+                dying ? "bg-[var(--kombat-red)]" : "bg-[var(--kombat-gold)]"
+              }`}
+              style={{ width: `${Math.round(drainPct * 100)}%` }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

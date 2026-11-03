@@ -428,6 +428,45 @@ export async function computeDispatchProduction(data: DispatchWindow) {
     const activeDays: Record<string, number> = {};
     for (const [cid, days] of Object.entries(activeDaySets)) activeDays[cid] = days.size;
 
+    // Arcade Score v2 (engagement audit 2026-11-03): when arcade_flags.score_v2
+    // is on, the server-granted canvasser_arcade_ledger IS the game-point axis
+    // (it already folds bounties and crits in at write time), replacing the
+    // legacy bounty+mystery sums client-side. FAIL-SOFT before the migration
+    // lands: flag reads false, the ladder keeps its legacy sums.
+    let scoreV2 = false;
+    const arcadePts: Record<string, number> = {};
+    try {
+      const flagR = await supabaseAdmin
+        .from("arcade_flags" as never)
+        .select("score_v2")
+        .eq("id", 1)
+        .maybeSingle();
+      scoreV2 = !!(flagR.data as { score_v2?: boolean } | null)?.score_v2;
+      if (scoreV2) {
+        const ledgerRows = await pageAll<{
+          id: string;
+          canvasser_id: string | null;
+          points: number | null;
+        }>(
+          (from, to) =>
+            supabaseAdmin
+              .from("canvasser_arcade_ledger" as never)
+              .select("id, canvasser_id, points")
+              .gte("day", data.log_start)
+              .lte("day", data.log_end)
+              .order("id", { ascending: true })
+              .range(from, to) as never,
+          (r) => String(r.id),
+        );
+        for (const l of ledgerRows) {
+          if (!l.canvasser_id) continue;
+          arcadePts[l.canvasser_id] = (arcadePts[l.canvasser_id] ?? 0) + Number(l.points ?? 0);
+        }
+      }
+    } catch {
+      scoreV2 = false; /* the score layer must never break the board */
+    }
+
     return {
       points,
       volume,
@@ -445,6 +484,8 @@ export async function computeDispatchProduction(data: DispatchWindow) {
       bountyPts,
       dojoPts,
       dropPts,
+      scoreV2,
+      arcadePts,
       activeDays,
     };
   }

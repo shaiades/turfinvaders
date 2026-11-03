@@ -5,6 +5,9 @@ import { RepAvatar } from "@/components/RepAvatar";
 import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
 import { BossMeter } from "@/components/BossMeter";
 import { VanWarsRace } from "@/components/VanWarsRace";
+import { NewChallengerFx, type ChallengerMoment } from "@/components/NewChallengerFx";
+import { FinalRound, finaleTabVisible } from "@/components/FinalRound";
+import { useArcadeScore } from "@/hooks/useArcadeScore";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import {
   useArcadeLadder,
@@ -40,7 +43,7 @@ type Metric = "pts" | "vol" | "lds";
  * own Paycheck card, never on a peer's row.
  */
 
-type Tab = "day" | "week" | "month";
+type Tab = "day" | "week" | "month" | "finale";
 
 const fmtVol = (n: number) =>
   n >= 10_000 ? `$${Math.round(n / 1000)}K` : `$${Math.round(n).toLocaleString()}`;
@@ -71,8 +74,17 @@ export function CanvasserLeaderboard() {
   // doors (the ladder hook already ranks the day range that way — points
   // credit sits to the APPOINTMENT day, which zeroed out hot setters).
   const metric: Metric = moneyMode ? "vol" : tab === "day" ? "lds" : "pts";
-  const range: RangeKey = tab;
+  const range: RangeKey = tab === "finale" ? "month" : tab;
   const { rows: ptsRows, self, loading } = useArcadeLadder(range);
+  // FINAL ROUND (Tier 3): the tab exists only while score_v2 is live AND the
+  // owner has set the finale window in ArcadeRulesAdmin — dormant until then.
+  const arcade = useArcadeScore(selfId);
+  const showFinale = finaleTabVisible(arcade.enabled, arcade.rules);
+  // If the owner pulls the finale (or the flag) while someone sits on the
+  // tab, fall back to Today instead of stranding them on a hidden tab.
+  useEffect(() => {
+    if (tab === "finale" && !showFinale) setTab("day");
+  }, [tab, showFinale]);
 
   // The $ "Bonus Race" ranks by money (the $100K race); every other view keeps
   // the ladder's own order (points, or leads-set on Today). The Rookie league
@@ -106,6 +118,13 @@ export function CanvasserLeaderboard() {
   const prevRank = useRef(new Map<string, number>());
   const prevVol = useRef(new Map<string, number>());
   const [flash, setFlash] = useState<Record<string, "up" | "down" | "coin">>({});
+  // SF2 versus screen when YOUR row crosses someone (engagement audit
+  // 2026-11-03). Rides this same rank diff — zero new realtime. Guards:
+  // never on a view switch (reordering isn't a result), 90s cooldown so a
+  // flip-flopping tie can't strobe the overlay.
+  const [challenger, setChallenger] = useState<ChallengerMoment | null>(null);
+  const challengerView = useRef<string | null>(null);
+  const challengerAt = useRef(0);
   useEffect(() => {
     const next: Record<string, "up" | "down" | "coin"> = {};
     rows.forEach((r, i) => {
@@ -122,14 +141,43 @@ export function CanvasserLeaderboard() {
     });
     prevRank.current = rm;
     prevVol.current = vm;
+    const view = `${tab}:${moneyMode}:${league}`;
+    const sameView = challengerView.current === view;
+    challengerView.current = view;
     if (Object.keys(next).length > 0) {
       // A light buzz when YOUR row moves or banks a sale (haptics pref gated).
       if (selfId && next[selfId]) haptic(next[selfId] === "up" ? 20 : 15);
+      const selfMove = selfId ? next[selfId] : undefined;
+      if (
+        sameView &&
+        selfId &&
+        (selfMove === "up" || selfMove === "down") &&
+        Date.now() - challengerAt.current > 90_000
+      ) {
+        const i = rows.findIndex((r) => r.id === selfId);
+        // The rival is who you just traded places with: the row now directly
+        // behind you (up) or ahead of you (down).
+        const rival = i >= 0 ? rows[selfMove === "up" ? i + 1 : i - 1] : undefined;
+        if (rival) {
+          challengerAt.current = Date.now();
+          setChallenger({
+            direction: selfMove,
+            selfName: rows[i].name,
+            selfCartoon: cartoonFor(cartoons, rows[i].name),
+            rivalName: rival.name,
+            rivalCartoon: cartoonFor(cartoons, rival.name),
+            deficit:
+              selfMove === "down"
+                ? Math.max(1, Math.ceil(rival.pts - rows[i].pts) + 1)
+                : undefined,
+          });
+        }
+      }
       setFlash((f) => ({ ...f, ...next }));
       const t = setTimeout(() => setFlash({}), 2600);
       return () => clearTimeout(t);
     }
-  }, [rows, selfId]);
+  }, [rows, selfId, tab, moneyMode, league, cartoons]);
 
   // Remember today's rank the first time they look, so the Daily Wrap can show
   // the morning → night climb. Only the live "Today" standing counts as morning.
@@ -195,6 +243,9 @@ export function CanvasserLeaderboard() {
 
   return (
     <div className="space-y-4">
+      {challenger && (
+        <NewChallengerFx moment={challenger} onDone={() => setChallenger(null)} />
+      )}
       {/* SOLO | VAN WARS — the top-level switch */}
       <div className="flex gap-1.5 rounded-xl border border-border bg-surface p-1.5">
         {(["solo", "vanwars"] as const).map((m) => (
@@ -217,14 +268,15 @@ export function CanvasserLeaderboard() {
         <VanWarsRace />
       ) : (
         <>
-          {/* Range tabs */}
+          {/* Range tabs (+ FINAL ROUND while the tournament is configured) */}
           <div className="flex flex-wrap gap-1 rounded-lg border border-border bg-surface p-1">
             {(
               [
                 ["day", "Today"],
                 ["week", "Week"],
                 ["month", "Month"],
-              ] as const
+                ...(showFinale ? ([["finale", "Final Round"]] as const) : []),
+              ] as readonly (readonly [Tab, string])[]
             ).map(([k, label]) => (
               <button
                 key={k}
@@ -232,8 +284,12 @@ export function CanvasserLeaderboard() {
                 onClick={() => setTab(k)}
                 className={`min-h-11 flex-1 rounded-md px-3 py-1.5 font-display text-[10px] uppercase tracking-widest transition md:min-h-0 ${
                   tab === k
-                    ? "bg-[color-mix(in_oklab,var(--neon)_15%,transparent)] text-neon shadow-[0_0_18px_-4px_var(--neon)]"
-                    : "text-muted-foreground hover:text-foreground"
+                    ? k === "finale"
+                      ? "bg-[color-mix(in_oklab,var(--kombat-red)_20%,transparent)] text-[var(--kombat-gold)] shadow-[0_0_18px_-4px_var(--kombat-red)]"
+                      : "bg-[color-mix(in_oklab,var(--neon)_15%,transparent)] text-neon shadow-[0_0_18px_-4px_var(--neon)]"
+                    : k === "finale"
+                      ? "text-[var(--kombat-gold)]/80 hover:text-[var(--kombat-gold)]"
+                      : "text-muted-foreground hover:text-foreground"
                 }`}
               >
                 {label}
@@ -242,6 +298,7 @@ export function CanvasserLeaderboard() {
           </div>
 
           {/* Leagues — Main / Rookies / Risers (Phase 4 §5) */}
+          {tab !== "finale" && (
           <div className="flex gap-1 rounded-lg border border-border bg-surface p-1">
             {(
               [
@@ -264,6 +321,7 @@ export function CanvasserLeaderboard() {
               </button>
             ))}
           </div>
+          )}
 
           {/* Month view carries the $100K boss + the points/$ ranking toggle. */}
           {tab === "month" && (
@@ -293,7 +351,9 @@ export function CanvasserLeaderboard() {
             </>
           )}
 
-          {league === "risers" ? (
+          {tab === "finale" ? (
+            <FinalRound selfId={selfId} />
+          ) : league === "risers" ? (
             <RisersBoard selfId={selfId} />
           ) : loading ? (
             <ArcadeSkeleton className="h-64 w-full" />

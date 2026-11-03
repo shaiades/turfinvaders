@@ -168,15 +168,21 @@ export function useArcadeLadder(range: RangeKey): ArcadeLadder {
     const rows: LadderRow[] = [];
     for (const id of ids) {
       const r = prod.results?.[id];
-      // Bonus points (bounty + dojo + mystery) ride only here (the arcade):
-      // Fleet Dispatch, the HUD tier hint and the pay engine all read base
-      // production points.
+      // Bonus points ride only here (the arcade): Fleet Dispatch, the HUD
+      // tier hint and the pay engine all read base production points.
+      // Score v2 (engagement audit 2026-11-03): with the flag on, the
+      // server-granted ledger replaces the legacy bounty+mystery sums (it
+      // folds bounties and crits in at write time); dojo stays its own layer.
       const basePts = prod.points?.[id] ?? 0;
-      const pts =
-        basePts +
-        (prod.bountyPts?.[id] ?? 0) +
-        (prod.dojoPts?.[id] ?? 0) +
-        (prod.dropPts?.[id] ?? 0);
+      // v2 pts REPLACE the base sum entirely — the ledger already scores sits
+      // (25) and sales (50), so adding basePts (sit=1, sale=2) would double
+      // count. Legacy pts stay basePts + the old bonus layers.
+      const pts = prod.scoreV2
+        ? (prod.arcadePts?.[id] ?? 0) + (prod.dojoPts?.[id] ?? 0)
+        : basePts +
+          (prod.bountyPts?.[id] ?? 0) +
+          (prod.dojoPts?.[id] ?? 0) +
+          (prod.dropPts?.[id] ?? 0);
       const vol = prod.volume?.[id] ?? 0;
       const lds = r?.lds ?? 0;
       const cxl = prod.cancels?.[id] ?? 0;

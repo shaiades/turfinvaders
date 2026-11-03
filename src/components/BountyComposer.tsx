@@ -1,9 +1,11 @@
 // §6 Bounties — an owner/manager launches a time-boxed boost that shows as a
-// banner for the whole field. Managers only (RLS). Since the 2026-10-15 audit
-// every bounty means ONE thing, which really scores: multiplier× arcade points
-// per confirmed lead set inside the window (leads carry the only sub-day
-// timestamp we trust). The old sit/sale/doors category picker is gone — those
-// couldn't score and made the banner lie. Game points only, never pay.
+// banner for the whole field. Managers only (RLS). A bounty may only promise
+// what actually scores (the 2026-10-15 rule): with score_v2 off that is one
+// thing — multiplier× arcade points per confirmed lead set in the window — so
+// the picker stays "leads"-only. Once the Tier 2 flag is on, the SQL triggers
+// honor the category per grant, so the doors/leads/sit/sale picker comes back
+// (engagement audit 2026-11-03 — SIT WEEK bounty weeks feed the FINAL ROUND).
+// Game points only, never pay.
 
 import { useState } from "react";
 import { Zap } from "lucide-react";
@@ -18,14 +20,23 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
-import { createBounty } from "@/hooks/useBounties";
+import { createBounty, type BountyCategory } from "@/hooks/useBounties";
+import { useArcadeScore } from "@/hooks/useArcadeScore";
 
 const DURATIONS = [
   { m: 60, label: "1h" },
   { m: 120, label: "2h" },
   { m: 240, label: "4h" },
+  { m: 1440, label: "1 day" },
+  { m: 1440 * 7, label: "1 week" },
 ];
 const MULTS = [2, 3];
+const CATEGORIES: { key: BountyCategory; chip: string; per: string }[] = [
+  { key: "doors", chip: "🚪 Doors", per: "per conversation" },
+  { key: "leads", chip: "⚡ Leads", per: "per lead" },
+  { key: "sit", chip: "🥊 Sits", per: "per sit" },
+  { key: "sale", chip: "💰 Sales", per: "per sale" },
+];
 
 export function BountyComposer() {
   const { user } = useAuth();
@@ -33,15 +44,21 @@ export function BountyComposer() {
   const [open, setOpen] = useState(false);
   const [mult, setMult] = useState(2);
   const [mins, setMins] = useState(120);
+  const [cat, setCat] = useState<BountyCategory>("leads");
   const [busy, setBusy] = useState(false);
+  // Legacy scoring multiplies leads only — the picker opens with the flag.
+  const v2 = useArcadeScore(user?.id).enabled;
+  const category: BountyCategory = v2 ? cat : "leads";
 
   const launch = async () => {
     if (!user?.id) return;
     setBusy(true);
     try {
       const durLabel = DURATIONS.find((d) => d.m === mins)?.label ?? `${mins}m`;
+      const per = CATEGORIES.find((c) => c.key === category)?.per ?? "per lead";
       await createBounty({
-        label: `${mult}× pts per lead for the next ${durLabel}`,
+        label: `${mult}× pts ${per} for the next ${durLabel}`,
+        category,
         multiplier: mult,
         minutes: mins,
         userId: user.id,
@@ -74,9 +91,30 @@ export function BountyComposer() {
         </DialogHeader>
         <div className="space-y-3">
           <p className="text-xs text-muted-foreground">
-            Every confirmed lead set while the bounty runs earns the multiplier on the arcade
-            boards. Game points only — pay is untouched.
+            {v2
+              ? "Every scored action of the picked kind earns the multiplier on the arcade boards while the bounty runs."
+              : "Every confirmed lead set while the bounty runs earns the multiplier on the arcade boards."}{" "}
+            Game points only — pay is untouched.
           </p>
+          {v2 && (
+            <div>
+              <label className="font-display text-[10px] uppercase tracking-widest text-muted-foreground">
+                Boost
+              </label>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {CATEGORIES.map((c) => (
+                  <button
+                    key={c.key}
+                    type="button"
+                    onClick={() => setCat(c.key)}
+                    className={chip(cat === c.key)}
+                  >
+                    {c.chip}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <div>
             <label className="font-display text-[10px] uppercase tracking-widest text-muted-foreground">
               Multiplier

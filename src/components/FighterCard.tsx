@@ -24,10 +24,12 @@ import { BADGES, type BadgeId } from "@/lib/canvasserPay";
 import { addDaysISO, laWeekStartISO } from "@/lib/dates";
 import { sumLogCounters, useSixtyDayLogs } from "@/hooks/useDailyLogs";
 
-// The badges that survive §1: tied to a real pay event. Boss Slayer = the
-// $1,500 monthly volume bonus. (Data for the retired five is kept.)
+// Pay-tied badge (its own row — this one is MONEY): Boss Slayer = the $1,500
+// monthly volume bonus. The other five are STYLE badges — un-retired by the
+// engagement audit (2026-11-03 §1.4) as the status row under the fighter.
 const PAY_BADGE_IDS = new Set<BadgeId>(["boss_slayer"]);
 const PAY_BADGES = BADGES.filter((b) => PAY_BADGE_IDS.has(b.id));
+const STYLE_BADGES = BADGES.filter((b) => !PAY_BADGE_IDS.has(b.id));
 import { ArcadePanel, ArcadeSkeleton } from "@/components/arcade";
 import { BadgeUnlock } from "@/components/BadgeUnlock";
 import { SpinningFighter } from "@/components/SpinningFighter";
@@ -37,6 +39,7 @@ import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
 import { useMyFighterUpload } from "@/hooks/useMyFighterUpload";
 import { useWrapData } from "@/hooks/useWrapData";
 import { useCanvasserBadges } from "@/hooks/useCanvasserBadges";
+import { useLifetimeXp } from "@/hooks/useLifetimeXp";
 
 /** Pay-lock states → banner copy (config-dict twin of PayrollLedger's
  *  PAY_LOCK_META; "active" renders nothing). Moved here from CanvasserMission
@@ -107,6 +110,10 @@ export function FighterCard({
   }, [weekLogs.data, profile.data]);
   const fileRef = useRef<HTMLInputElement>(null);
   const { onPick, busy } = useMyFighterUpload();
+  // Lifetime arcade LEVEL + title (identity axis; the pay tier above stays
+  // the money axis). RPC is self-scoped, so previews skip it (useWrapData
+  // precedent); celebration only for the player themself.
+  const lifetime = useLifetimeXp(userId, { enabled: !readOnly, celebrate: !readOnly });
 
   // Live-earned set this month → persisted trophies (stay lit once earned) +
   // the one-time unlock animation for anything freshly earned.
@@ -174,9 +181,7 @@ export function FighterCard({
             </div>
             <div className="mt-1.5 flex flex-wrap items-center gap-2">
               <RankPill rank={rank} size="md" tappable />
-              {/* ONE progression (Phase 4 §1): the weekly PAY TIER is the
-                  level — the cosmetic XP curve and its titles are retired
-                  from the UI (data kept). */}
+              {/* The weekly PAY TIER — the money axis. */}
               <span
                 title={tierPill.hint}
                 className="inline-flex items-center gap-1 rounded border border-[var(--kombat-gold)]/50 bg-[color-mix(in_oklab,var(--kombat-gold)_12%,transparent)] px-2 py-0.5 font-display text-[11px] uppercase tracking-widest text-[var(--kombat-gold)]"
@@ -198,13 +203,39 @@ export function FighterCard({
           </div>
         </div>
 
-        {/* Badges row — persisted trophies: once earned, lit forever. Only
-            PAY-TIED badges survive Phase 4 §1 (Boss Slayer = the $1,500
-            volume bonus); the cosmetic ones are retired from the UI, their
-            earned rows kept. */}
+        {/* Lifetime arcade LEVEL — the identity axis (un-retired, engagement
+            audit §1.4): all-time XP, only ever climbs, never touches pay. */}
+        {lifetime.level && (
+          <div className="mt-4 border-t border-border/60 pt-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-display text-[11px] uppercase tracking-widest text-neon">
+                LV {lifetime.level.level} · {lifetime.level.title}
+              </span>
+              <span className="font-display text-[9px] uppercase tracking-widest tabular-nums text-muted-foreground">
+                {lifetime.level.intoLevel.toLocaleString()}/
+                {lifetime.level.levelSpan.toLocaleString()} XP
+              </span>
+            </div>
+            <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full border border-border bg-foreground/5">
+              <div
+                className="h-full rounded-full transition-[width] duration-700 ease-out"
+                style={{
+                  width: `${Math.min(1, lifetime.level.pct) * 100}%`,
+                  background: "var(--turf-cyan)",
+                  boxShadow: "0 0 10px var(--turf-cyan)",
+                }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Badge rows — persisted trophies: once earned, lit forever. MONEY
+            (Boss Slayer = the $1,500 volume bonus) gets its own row; the five
+            STYLE badges are back (engagement audit §1.4 — the status shelf). */}
         <div className="mt-4">
           <p className="mb-1.5 font-display text-[9px] uppercase tracking-widest text-muted-foreground">
-            Badges · {PAY_BADGES.filter((d) => badges.earned.has(d.id)).length}/{PAY_BADGES.length}
+            Money Badge ·{" "}
+            {PAY_BADGES.filter((d) => badges.earned.has(d.id)).length}/{PAY_BADGES.length}
           </p>
           {badgesLoading ? (
             <ArcadeSkeleton className="h-8 w-full" />
@@ -219,6 +250,35 @@ export function FighterCard({
                     className={`flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] ${
                       unlocked
                         ? "border-[var(--kombat-gold)]/60 text-foreground"
+                        : "border-border text-muted-foreground/40"
+                    }`}
+                  >
+                    <span aria-hidden className={unlocked ? "" : "opacity-40 grayscale"}>
+                      {def.icon}
+                    </span>
+                    {def.label}
+                  </span>
+                );
+              })}
+            </div>
+          )}
+          <p className="mt-3 mb-1.5 font-display text-[9px] uppercase tracking-widest text-muted-foreground">
+            Style Badges ·{" "}
+            {STYLE_BADGES.filter((d) => badges.earned.has(d.id)).length}/{STYLE_BADGES.length}
+          </p>
+          {badgesLoading ? (
+            <ArcadeSkeleton className="h-8 w-full" />
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {STYLE_BADGES.map((def) => {
+                const unlocked = badges.earned.has(def.id);
+                return (
+                  <span
+                    key={def.id}
+                    title={`${def.label} — ${def.blurb}`}
+                    className={`flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] ${
+                      unlocked
+                        ? "border-[var(--turf-cyan)]/60 text-foreground"
                         : "border-border text-muted-foreground/40"
                     }`}
                   >
@@ -275,12 +335,11 @@ export function FighterCard({
 
       {/* First-time unlock animation — plays once, then markSeen persists it.
           Never in a preview: the moment (and its seen flag) belongs to the
-          player, not to whoever is looking over their shoulder. Only the
-          pay-tied survivors animate; the onDone flushes EVERY unseen id so a
-          retired badge can't sit "unseen" forever. */}
-      {!readOnly && badges.unseen.some((b) => PAY_BADGE_IDS.has(b.id)) && (
+          player, not to whoever is looking over their shoulder. ALL badges
+          animate again now that the style five are back on the shelf. */}
+      {!readOnly && badges.unseen.length > 0 && (
         <BadgeUnlock
-          badges={badges.unseen.filter((b) => PAY_BADGE_IDS.has(b.id))}
+          badges={badges.unseen}
           onDone={() => badges.markSeen(badges.unseen.map((b) => b.id))}
         />
       )}

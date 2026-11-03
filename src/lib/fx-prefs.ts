@@ -8,6 +8,7 @@
 export const SOUND_KEY = "ti_sound_on_v1";
 export const HAPTICS_KEY = "ti_haptics_on_v1";
 export const MUSIC_MUTED_KEY = "ti_music_muted_v1";
+export const SOUND_PROMPTED_KEY = "ti_sound_prompted_v1";
 export const FX_PREF_EVENT = "ti-fx-pref";
 
 /** Sound defaults OFF — nothing plays until the viewer opts in. */
@@ -75,6 +76,26 @@ export function setHapticsOn(on: boolean): void {
     /* private mode */
   }
   emit();
+}
+
+/** Whether the one-time "TURN UP THE ARCADE?" opt-in sheet has been shown on
+ *  this device (engagement audit 2026-11-03 §1.5). The sheet is a PROMPT, not
+ *  a default flip — sound stays off-by-default per the owner spec above, but
+ *  most reps never found the toggle, so we ask exactly once. */
+export function hasSoundPrompted(): boolean {
+  try {
+    return localStorage.getItem(SOUND_PROMPTED_KEY) === "1";
+  } catch {
+    return true; // private mode: never nag where we can't remember the answer
+  }
+}
+
+export function markSoundPrompted(): void {
+  try {
+    localStorage.setItem(SOUND_PROMPTED_KEY, "1");
+  } catch {
+    /* private mode */
+  }
 }
 
 /** True iff the device exposes the Vibration API (phones; not most desktops). */

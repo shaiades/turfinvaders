@@ -29,6 +29,7 @@
 // this module derives; locked rows are never touched again.
 
 import { addDaysISO, laTodayISO, nextMonthStartISO, weekStartOfISO } from "@/lib/dates";
+import { isWorkdayISO, rangeWorkdays } from "@/lib/contest-core";
 import {
   buildPendingReportCheck,
   cardOutcome,
@@ -1252,30 +1253,19 @@ export function contestDaysLeft(rules: KombatRules, todayISO: string = laTodayIS
 // combo, the coach's callout, FINISH HIM and the ROUND framing. All pure
 // LA-date string math, Mon–Sat workdays (the PaycheckCard convention).
 
-const isWorkdayISO = (iso: string): boolean => new Date(`${iso}T12:00:00Z`).getUTCDay() !== 0; // Sundays off
-
 export type ContestWorkdays = { total: number; elapsed: number; remaining: number };
 
 /** Mon–Sat days of the contest month. `elapsed` runs through today
  *  inclusive (0 before the month); `remaining` runs FROM today inclusive —
  *  they deliberately overlap on today, because pace counts today's partial
- *  work while "need per day" still has today to work with. */
+ *  work while "need per day" still has today to work with.
+ *  (The range walk lives in contest-core.ts since Tier 3 — shared with the
+ *  canvasser FINAL ROUND; verify:kombat-month pins the lift.) */
 export function contestWorkdays(
   rules: KombatRules,
   todayISO: string = laTodayISO(),
 ): ContestWorkdays {
-  const start = rules.contest.month;
-  const end = lastDayOfMonth(start);
-  let total = 0;
-  let elapsed = 0;
-  let remaining = 0;
-  for (let d = start; d <= end; d = addDaysISO(d, 1)) {
-    if (!isWorkdayISO(d)) continue;
-    total += 1;
-    if (d <= todayISO) elapsed += 1;
-    if (d >= todayISO) remaining += 1;
-  }
-  return { total, elapsed, remaining };
+  return rangeWorkdays(rules.contest.month, lastDayOfMonth(rules.contest.month), todayISO);
 }
 
 export type DailyRowLite = {

@@ -12,6 +12,7 @@ import { DayOffRequestCard } from "@/components/DayOffRequestCard";
 import { PlanPanel } from "@/components/PlanPanel";
 import { DailyLogPanel } from "@/components/DailyLogPanel";
 import { CanvasserStats, GrindCounter } from "@/components/CanvasserStats";
+import { BossMeter } from "@/components/BossMeter";
 import { FighterCard } from "@/components/FighterCard";
 import { PaycheckCard } from "@/components/PaycheckCard";
 import type { CanvasserStatsData } from "@/hooks/useCanvasserStats";
@@ -283,6 +284,10 @@ function TodayPanel({
               }`}
         </p>
       </div>
+      {/* The $100K Boss on the working surface (engagement audit §1.7) — the
+          real-money endgame was buried on the Leaders Month tab; every sit
+          and sale should be seen chipping the boss where the day happens. */}
+      <BossMeter userId={userId} />
       <DailyLogPanel
         canEditMondayUrl={false}
         overrideUserId={previewing ? userId : undefined}

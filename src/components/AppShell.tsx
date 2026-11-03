@@ -22,6 +22,8 @@ import { AccessRevokedScreen, useLiveAccessRevoked } from "@/components/AccessRe
 import { CanvasserHUD } from "@/components/CanvasserHUD";
 import { CrewBeacon } from "@/components/CrewBeacon";
 import { LeadConfirmedCelebration } from "@/components/LeadConfirmedCelebration";
+import { SoundPrimer } from "@/components/SoundPrimer";
+import { ArcadeMoments } from "@/components/ArcadeMoments";
 import { AppMenu } from "@/components/AppMenu";
 import { BackgroundMusic, MusicToggle } from "@/components/BackgroundMusic";
 import { ProfilePhotoGate } from "@/components/profile-photo/ProfilePhotoGate";
@@ -808,6 +810,16 @@ export function AppShell({ children }: { children: ReactNode }) {
       {user && (role === "canvasser" || role === "captain") && (
         <LeadConfirmedCelebration userId={user.id} />
       )}
+      {/* Arcade Score v2 moments (engagement audit Tier 2) — the app's second
+          and LAST fixed realtime channel (with LeadConfirmedCelebration):
+          every server point grant becomes sub-second FX. Dormant until the
+          canvasser_arcade_ledger tables exist + score_v2 triggers write. */}
+      {user && (role === "canvasser" || role === "captain") && (
+        <ArcadeMoments userId={user.id} />
+      )}
+      {/* One-time sound opt-in (engagement audit §1.5) — field tiers only;
+          renders nothing once answered. */}
+      {user && (role === "canvasser" || role === "captain") && <SoundPrimer />}
       <main
         className={`flex-1 max-w-7xl w-full min-w-0 mx-auto px-4 sm:px-6 py-4 md:py-8 md:pb-8 ${
           user && navItems.length > 1 ? "pb-28" : "pb-8"
