@@ -146,8 +146,6 @@ serve(async (req) => {
   const supabaseAdmin = createClient(supabaseUrl, supabaseKey)
 
   try {
-    await supabaseAdmin.from('webhook_logs').insert({ step: '0_Endpoint_Hit' })
-
     const text = await req.text()
     if (!text) {
       await supabaseAdmin.from('webhook_logs').insert({ step: '1_Error', data: { msg: 'Empty body' } })
@@ -155,6 +153,10 @@ serve(async (req) => {
     }
 
     const body = JSON.parse(text)
+    // raw_payload is the replay safety net: when deliveries are dropped
+    // downstream (the Nov 2 token-visibility outage), the stored body is what
+    // scripts/replay-outage-*.mjs rebuilds events from.
+    await supabaseAdmin.from('webhook_logs').insert({ step: '0_Endpoint_Hit', raw_payload: body })
     if (body.challenge) {
       return new Response(JSON.stringify({ challenge: body.challenge }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -508,14 +510,18 @@ serve(async (req) => {
         step: 'Error_Monday_No_Item',
         data: { pulseId, mondayError },
       })
-      // Transient failure (network / API error / rate limit): return 5xx so
-      // Monday's once-a-minute retry loop redelivers — the Event_Processed
-      // marker is only written after success, so retries are not swallowed.
-      // A clean response with no item = the item is gone; that's permanent.
-      if (mondayError) {
-        return new Response('Monday API error', { status: 502, headers: corsHeaders })
-      }
-      return new Response('No Monday item', { status: 200, headers: corsHeaders })
+      // Return 5xx so Monday's once-a-minute retry loop redelivers — the
+      // Event_Processed marker is only written after success, so retries are
+      // not swallowed. This now covers the error-free empty result too: Monday
+      // answers a clean [] both for a deleted item AND for an item the token's
+      // user cannot see (the Nov 2 outage silently dropped 1.5 days of results
+      // that way). A deleted item costs ~30 harmless retries, coalesced by
+      // fetchItemBatched; a visibility outage now survives to the fix instead
+      // of losing the events.
+      return new Response(mondayError ? 'Monday API error' : 'No Monday item (deleted, or token cannot see it)', {
+        status: 502,
+        headers: corsHeaders,
+      })
     }
 
     const item = mondayItem as any

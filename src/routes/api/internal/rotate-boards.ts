@@ -744,9 +744,78 @@ async function check(): Promise<Response> {
         .not("id", "is", null);
     }
 
+    // ── Token-visibility canary (Nov 2 outage) ── a swapped Monday token can
+    // be valid yet blind: items(…) answers a clean [] for boards its user
+    // cannot see, and the edge fn then drops every event with no error. Board
+    // access ≠ item visibility (the bot could create webhooks on boards whose
+    // items it couldn't read), so the canary must be an items read.
+    for (const [office, boardId] of active) {
+      try {
+        const data = await monday(
+          token,
+          `query ($b: [ID!]) { boards(ids: $b) { items_count items_page(limit: 1) { items { id } } } }`,
+          { b: [boardId] },
+        );
+        const board = (data.boards as Array<{
+          items_count: number;
+          items_page: { items: Array<{ id: string }> };
+        }> | null)?.[0];
+        if (!board) {
+          issues[`${office}_token_blind`] = `board ${boardId} invisible to the stored token`;
+        } else if (board.items_count > 0 && board.items_page.items.length === 0) {
+          issues[`${office}_token_blind`] =
+            `board ${boardId} reports ${board.items_count} items but an items read returns none — ` +
+            `the stored token's user cannot see them`;
+        }
+      } catch (err) {
+        issues[`${office}_token_blind`] =
+          `canary read failed: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    }
+
+    // A no-item spike is the same failure seen from the delivery side.
+    {
+      const sinceIso = new Date(Date.now() - 24 * 3600_000).toISOString();
+      const [{ count: noItem }, { count: fetches }] = await Promise.all([
+        supabaseAdmin
+          .from("webhook_logs")
+          .select("id", { count: "exact", head: true })
+          .eq("step", "Error_Monday_No_Item")
+          .gte("created_at", sinceIso),
+        supabaseAdmin
+          .from("webhook_logs")
+          .select("id", { count: "exact", head: true })
+          .eq("step", "3_Monday_API_Response")
+          .gte("created_at", sinceIso),
+      ]);
+      if ((noItem ?? 0) > 25 && (noItem ?? 0) > 0.3 * (fetches ?? 0)) {
+        issues.no_item_spike = `${noItem} of ${fetches} item fetches returned no item in 24h`;
+      }
+    }
+
     const healthy = Object.keys(issues).length === 0;
     const summary = { healthy, checked: Object.fromEntries(active), liveness, ...issues };
     await log(summary);
+
+    // Blindness loses results permanently (Monday retries only ~30 min), so it
+    // pages the owner instead of waiting in webhook_logs.
+    const blindness = Object.entries(issues).filter(
+      ([k]) => k.endsWith("_token_blind") || k === "no_item_spike",
+    );
+    if (blindness.length) {
+      const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      if (serviceKey) {
+        await fetch("https://xogitpqeuwalerxygvjw.supabase.co/functions/v1/notify-owner-digest", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
+          body: JSON.stringify({
+            title: "Monday token can't see the boards",
+            body: blindness.map(([k, v]) => `${k}: ${String(v)}`).join("\n"),
+            url: "/fleet-dispatch",
+          }),
+        }).catch(() => {});
+      }
+    }
     return json({ ok: true, ...summary });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

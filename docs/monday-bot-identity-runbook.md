@@ -21,15 +21,25 @@ own hand-edits as the bot's and can overwrite them. A dedicated bot fixes both.
 identity is derived live via `fetchMondayMe(token)`.
 
 1. **Create the user** (Monday admin): add a user, e.g. `turfinvaders-bot`
-   (a real mailbox you control). Give it **write** access to all six boards:
-   - SD Block `18433845590`, OC Block `18433845468`
+   (a real mailbox you control). Grant access at the **workspace level** —
+   subscribe the bot to the Lead Center workspace (`2645110`), NOT to
+   individual boards: the SD/OC block boards are re-cloned weekly, and a
+   board-level grant dies on the next rotation. The grant must cover:
+   - **Incoming Leads `4155518549`** ← forgetting this one caused the Nov 2–3
+     outage: every lead event's item fetch returned empty and 1.5 days of
+     canvasser results were silently dropped
+   - SD/OC Block (whatever this week's clones are) + the Block template
+     `18422998575`
    - OOH Dispo Reports `18433859050`
    - Resets/Rehash (OC Confirmed) `18411299428`
    - Sales Processing `4155553389`
    - Nightly Lineup – Approvals `18433860636`
-   > Note: the SD/OC block boards are re-cloned weekly, so grant access at the
-   > workspace/folder level (not just this week's board) or the bot loses write
-   > access on the next rotation.
+   > ⚠️ Board access ≠ item visibility. On Nov 2 the bot could create webhooks
+   > on boards whose **items** it could not read, and Monday answers a clean
+   > empty result (no error) for invisible items. After any token change,
+   > verify with an **items read per board** as the bot (step 4), not just a
+   > boards query. The daily webhook check now runs this canary automatically
+   > and pages the owner when a board goes blind.
 
 2. **Generate its token**: sign in to Monday **as the bot** → avatar →
    Developers → My Access Tokens → copy the personal API token. (Monday will not
