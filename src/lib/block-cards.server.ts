@@ -506,6 +506,18 @@ export async function syncBoardsToBlockCards(input: SyncInput): Promise<SyncSumm
         if (!page || page.length < CHUNK) break;
       }
       const fetchedIds = new Set(rows.map((r) => r.monday_item_id));
+      // A walk that fetched NOTHING while rows exist is a blind token (Monday
+      // answers a clean [] for boards the token's user can't see — the Nov 2
+      // outage), not a board someone emptied. Deleting on it would erase the
+      // snapshot the outage recovery needs, so keep the rows and report.
+      if (rows.length === 0 && existing.length > 0) {
+        skipped.push({
+          board_id: board.id,
+          name: board.name,
+          reason: `delete-reconcile skipped: walk fetched 0 items but ${existing.length} block_cards rows exist — token likely blind`,
+        });
+        continue;
+      }
       const stale = existing.filter((id) => !fetchedIds.has(id));
       for (const batch of chunks(stale, CHUNK)) {
         const { error } = await supabaseAdmin
