@@ -12,6 +12,7 @@ import {
 import L from "leaflet";
 import "leaflet-rotate";
 import {
+  Hammer,
   History,
   Info,
   LocateFixed,
@@ -33,6 +34,7 @@ import { ZipBordersLayer, ZIP_MIN_ZOOM, type ZipTint } from "@/components/ZipBor
 import { HouseBubblesLayer, HOUSE_MIN_ZOOM, type OsmHouse } from "@/components/HouseBubbles";
 import { houseAtPoint, snapTapToHouse } from "@/lib/house-cache";
 import { CustomerHomesLayer } from "@/components/CustomerHomes";
+import { ActiveJobsLayer } from "@/components/ActiveJobs";
 import { HouseAddressPopup } from "@/components/HouseAddressPopup";
 
 // Canonical copy lives in lib/pin-results (SSR-safe); re-exported here so map
@@ -1192,6 +1194,27 @@ function NeonMapInner({
     () => allTerritories.reduce((n, t) => (t.old ? n + 1 : n), 0),
     [allTerritories],
   );
+
+  // Active Tidal jobs + half-mile rings, ON by default (owner ask
+  // 2026-11-04: "new toggle, on by default"); preference sticks per device,
+  // ZIP-toggle style.
+  const [jobsOn, setJobsOn] = useState(() => {
+    try {
+      return typeof window !== "undefined" && localStorage.getItem("ti_active_jobs") !== "0";
+    } catch {
+      return true;
+    }
+  });
+  function toggleJobs() {
+    setJobsOn((on) => {
+      try {
+        localStorage.setItem("ti_active_jobs", on ? "0" : "1");
+      } catch {
+        /* preference just won't stick */
+      }
+      return !on;
+    });
+  }
   // Same name as the prop so every downstream memo (render set, labels,
   // popups) sees one consistent, filtered world.
   const territories = useMemo(
@@ -1629,6 +1652,9 @@ function NeonMapInner({
             over, and unmounting (not just inerting) also keeps a badge tap
             from eating polygon vertices. */}
           {!drawingNow && <CustomerHomesLayer tappable />}
+          {/* Active jobs + rings share the customer layer's mid-draw rule:
+            DOM badges unmount while a stroke is being drawn. */}
+          {!drawingNow && <ActiveJobsLayer enabled={jobsOn} />}
           {houseBubbles && !drawingNow && (
             <HouseBubblesLayer
               enabled
@@ -2162,6 +2188,27 @@ function NeonMapInner({
             }
           >
             ZIP
+          </button>
+          {/* Active Tidal jobs + half-mile rings — on by default; tap to
+              declutter when working outside every ring. */}
+          <button
+            type="button"
+            aria-label={jobsOn ? "Hide active Tidal jobs" : "Show active Tidal jobs"}
+            aria-pressed={jobsOn}
+            title={`Active jobs ${jobsOn ? "on" : "off"} — Tidal homes in progress this week`}
+            onClick={toggleJobs}
+            className="flex h-11 w-11 items-center justify-center rounded-full border bg-surface/90 backdrop-blur"
+            style={
+              jobsOn
+                ? {
+                    color: "#66ccff",
+                    borderColor: "#66ccff99",
+                    boxShadow: "0 0 10px -2px #66ccff",
+                  }
+                : { color: "var(--muted-foreground)", borderColor: "var(--border)" }
+            }
+          >
+            <Hammer className="h-5 w-5" />
           </button>
           {/* Old tagged areas (30d+) — hidden by default; tap to overlay
               them for history checks. Only mounts when some exist. */}

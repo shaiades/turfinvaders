@@ -29,6 +29,62 @@ export const getProductionSyncInfo = createServerFn({ method: "POST" })
     return { lastSyncedAt: data?.created_at ?? null };
   });
 
+/**
+ * Captain's on-demand Active Jobs refresh (owner ask 2026-11-04): the map
+ * layer reads the production_jobs mirror, which the cron refreshes daily at
+ * 6 AM PT — captains get a manual pull for mid-day schedule changes. Same
+ * engine as syncProduction, but captain-inclusive and COOLDOWN-gated: a
+ * fresh sync inside 15 minutes is answered from the mirror instead of
+ * spending Monday API budget (the admin-only syncProduction stays ungated).
+ */
+export const refreshActiveJobs = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<{ skipped: boolean; lastSyncedAt: string | null }> => {
+    const { data: roleRows, error: roleErr } = await context.supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId);
+    if (roleErr) throw new Error(roleErr.message);
+    const roles = (roleRows ?? []).map((r: { role: string }) => r.role);
+    if (!roles.includes("owner") && !roles.includes("office_staff") && !roles.includes("captain")) {
+      throw new Error("Only Captains, Owners or Managers can refresh active jobs.");
+    }
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: last } = await supabaseAdmin
+      .from("webhook_logs")
+      .select("created_at")
+      .eq("step", "Production_Jobs_Synced")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const lastAt = last?.created_at ?? null;
+    if (lastAt && Date.now() - Date.parse(lastAt) < 15 * 60_000) {
+      return { skipped: true, lastSyncedAt: lastAt };
+    }
+
+    const { syncProductionJobs } = await import("@/lib/production-jobs.server");
+    try {
+      await syncProductionJobs();
+      return { skipped: false, lastSyncedAt: new Date().toISOString() };
+    } catch (err) {
+      // Same failure trail as syncProduction below — the catch-up/"Last
+      // updated" readers of Production_Jobs_Synced never see a failure row.
+      const { laTodayISO } = await import("@/lib/dates");
+      await supabaseAdmin
+        .from("webhook_logs")
+        .insert({
+          step: "Production_Jobs_Sync_Failed",
+          data: {
+            today: laTodayISO(),
+            error: err instanceof Error ? err.message : String(err),
+          } as never,
+        })
+        .then(() => {});
+      throw err;
+    }
+  });
+
 export const syncProduction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<ProductionSyncSummary> => {
