@@ -197,13 +197,12 @@ function RulesForm({ rules, onChanged }: { rules: ArcadeRules; onChanged: () => 
                 {t.label}
               </p>
               {num(`finale.tiers.${i}.points`, "Points")}
-              {num(`finale.tiers.${i}.cash`, "Cash $")}
             </div>
           ))}
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
-          Belts re-weight ledger history live — safe to tune mid-contest. Cash is an owner spiff,
-          never payroll.
+          Belts re-weight ledger history live — safe to tune mid-contest. Belts are status
+          only; the finale cash is the $100K Boss ($1,500 per $100K sold) from the pay engine.
         </p>
       </section>
       <NeonButton tone="turf-cyan" disabled={!dirty || save.isPending} onClick={() => save.mutate()}>

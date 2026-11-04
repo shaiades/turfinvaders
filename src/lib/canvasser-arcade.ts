@@ -23,10 +23,9 @@ import {
 export type ArcadeFinaleTier = {
   key: string;
   label: string;
-  /** Finale points required to hold this belt. */
+  /** Finale points required to hold this belt. Belts are status trophies —
+   *  the money is the $100K Boss ($1,500 per $100K sold, pay engine). */
   points: number;
-  /** Cash prize (owner spiff — never payroll). */
-  cash: number;
 };
 
 export type ArcadeRules = {
@@ -52,7 +51,6 @@ export type ArcadeRules = {
      *  the SQL triggers score base weights; finale standings re-weight in
      *  code so October history can be dry-run before announcing). */
     weights: { sit: number; lead_confirmed: number };
-    budget_cap: number;
   };
 };
 
@@ -68,13 +66,12 @@ export const DEFAULT_ARCADE_RULES: ArcadeRules = {
     end: null,
     label: "FINAL ROUND",
     tiers: [
-      { key: "white", label: "White Belt", points: 300, cash: 100 },
-      { key: "blue", label: "Blue Belt", points: 600, cash: 250 },
-      { key: "red", label: "Red Belt", points: 1000, cash: 500 },
-      { key: "black", label: "Black Belt", points: 1500, cash: 1000 },
+      { key: "white", label: "White Belt", points: 300 },
+      { key: "blue", label: "Blue Belt", points: 600 },
+      { key: "red", label: "Red Belt", points: 1000 },
+      { key: "black", label: "Black Belt", points: 1500 },
     ],
     weights: { sit: 1.6, lead_confirmed: 1.25 },
-    budget_cap: 10_000,
   },
 };
 

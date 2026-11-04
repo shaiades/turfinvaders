@@ -1,17 +1,19 @@
 // FINAL ROUND — the end-of-year canvasser tournament (engagement audit
 // 2026-11-03, Tier 3). Kombat's psychology on the Tier 2 ledger: a belt
-// ladder with CASH prizes (owner spiffs — never payroll), weekly fight
-// ROUNDs, a days-left bell, FINISH HIM inside 25 pts of the next belt, and
-// a straight-line pace line ("on pace for RED"). Standings re-weight the
-// ledger in code (finalePoints) so sits and confirmed leads dominate —
-// every belt chase feeds the $100K Boss money. Config lives in
-// arcade_rules.finale (ArcadeRulesAdmin edits it live); this tab only
-// renders once the owner sets the window, so it ships dormant.
+// ladder of STATUS trophies, weekly fight ROUNDs, a days-left bell, FINISH
+// HIM inside 25 pts of the next belt, and a straight-line pace line ("on
+// pace for RED"). The ONE pot of money is the $100K Boss — $1,500 per $100K
+// sold, straight from the pay engine (owner mandate 2026-11-04: no separate
+// belt cash) — so the BossMeter sits on this tab as THE prize. Standings
+// re-weight the ledger in code (finalePoints) so sits and confirmed leads
+// dominate. Config lives in arcade_rules.finale (ArcadeRulesAdmin edits it
+// live); this tab only renders once the owner sets the window.
 
 import { useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel, ArcadeSkeleton, metricText } from "@/components/arcade";
+import { BossMeter } from "@/components/BossMeter";
 import { RepAvatar } from "@/components/RepAvatar";
 import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
 import { useArcadeScore } from "@/hooks/useArcadeScore";
@@ -148,8 +150,9 @@ export function FinalRound({ selfId }: { selfId: string | undefined }) {
         window.localStorage.setItem(BELT_SEEN_KEY, JSON.stringify(seen));
         playArcadeSound("levelup");
         haptic([40, 60, 40, 60, 90]);
-        rewardToast(`🥋 ${myBelt.label.toUpperCase()} EARNED — $${myBelt.cash} locked`, {
-          description: "FINAL ROUND belt secured. Next belt's cash is on the board.",
+        rewardToast(`🥋 ${myBelt.label.toUpperCase()} EARNED`, {
+          description:
+            "FINAL ROUND belt secured — and every sit keeps draining the $100K Boss.",
           duration: 8000,
         });
         if (!reduced) {
@@ -243,8 +246,8 @@ export function FinalRound({ selfId }: { selfId: string | undefined }) {
                     }`}
                   >
                     {fh
-                      ? `FINISH HIM — ${Math.ceil(fh.toGo)} pts to ${fh.next.label} ($${fh.next.cash})`
-                      : `${Math.ceil(nxt.toGo)} pts to ${nxt.next.label} — $${nxt.next.cash} cash`}
+                      ? `FINISH HIM — ${Math.ceil(fh.toGo)} pts to ${fh.next.label}`
+                      : `${Math.ceil(nxt.toGo)} pts to ${nxt.next.label}`}
                   </div>
                   {pace && pace.perDayToNext > 0 && (
                     <p className="mt-1 text-center font-display text-[9px] uppercase tracking-widest text-muted-foreground">
@@ -261,8 +264,12 @@ export function FinalRound({ selfId }: { selfId: string | undefined }) {
         </div>
       </ArcadePanel>
 
-      {/* Prize ladder — the cash makes the climb concrete. */}
-      <ArcadePanel title="Prize ladder">
+      {/* THE prize — the $100K Boss. $1,500 per $100K sold, straight from
+          the pay engine; belts below are the bragging rights. */}
+      {selfId && <BossMeter userId={selfId} />}
+
+      {/* Belt ladder — status trophies that make the climb concrete. */}
+      <ArcadePanel title="Belt ladder">
         <div className="grid grid-cols-2 gap-2 px-1 pb-1 md:grid-cols-4">
           {tiers.map((t) => {
             const held = !!myBelt && myPts >= t.points;
@@ -280,19 +287,19 @@ export function FinalRound({ selfId }: { selfId: string | undefined }) {
                   {held ? "✓ " : ""}
                   {t.label}
                 </div>
-                <div className="mt-1 font-display text-base text-[var(--kombat-gold)]">
-                  ${t.cash}
+                <div className="mt-1 font-display text-base" style={{ color: beltColor(t.key) }}>
+                  {t.points}
                 </div>
                 <div className="font-display text-[9px] uppercase tracking-widest text-muted-foreground">
-                  {t.points} pts
+                  pts
                 </div>
               </div>
             );
           })}
         </div>
         <p className="px-1 pb-1 text-center font-display text-[8px] uppercase tracking-widest text-muted-foreground/70">
-          Cash spiffs on top of pay — sits & confirmed leads score heaviest. And every sit
-          still drains the $100K Boss: $1,500 per $100K, the real endgame.
+          Belts are bragging rights — the cash is the boss: $1,500 for every $100K sold.
+          Sits & confirmed leads score heaviest.
         </p>
       </ArcadePanel>
 
