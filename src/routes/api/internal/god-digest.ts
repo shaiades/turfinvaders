@@ -15,9 +15,11 @@ import { createFileRoute } from "@tanstack/react-router";
  * LA date, so the double slot (or a manual re-fire) can never double-ping.
  * Sundays: skipped by the cron expression itself.
  *
- * Delivery: POSTs the composed text to the notify-owner-digest edge fn
- * (owner-role push_subscriptions), authed with the service-role key both
- * sides already hold — no new secret to provision.
+ * Delivery: the claim row IS the send — a webhook_logs trigger (migration
+ * 20261001200000) POSTs the brief to the notify-owner-digest edge fn via
+ * pg_net with the vault notify_secret, the same doctrine as every other
+ * push in the app. (Direct Vercel→edge delivery 401s structurally on this
+ * project: the two sides' service-key copies do not match.)
  *
  * Auth: `Authorization: Bearer <CRON_SECRET>`; `?force=1` (still
  * secret-gated) bypasses the hour guard for a dry-run, and `?dry=1`
@@ -30,7 +32,6 @@ const json = (body: unknown, status = 200) =>
     headers: { "Content-Type": "application/json" },
   });
 
-const EDGE_URL = "https://xogitpqeuwalerxygvjw.supabase.co/functions/v1/notify-owner-digest";
 const DIGEST_STEP = "God_Digest_Sent";
 
 async function handle(request: Request): Promise<Response> {
@@ -75,24 +76,15 @@ async function handle(request: Request): Promise<Response> {
 
   if (dry) return json({ dry: true, ...digest });
 
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!serviceKey) return json({ error: "SUPABASE_SERVICE_ROLE_KEY not configured" }, 500);
-  const res = await fetch(EDGE_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${serviceKey}`,
-    },
-    body: JSON.stringify({ title: digest.title, body: digest.body, url: "/god-mode" }),
-  });
-  const delivery = await res.json().catch(() => ({}));
-
-  await supabaseAdmin.from("webhook_logs").insert({
+  // The insert both claims the LA date and fires the delivery trigger
+  // (webhook_logs_zz_god_digest → pg_net → notify-owner-digest).
+  const { error: claimErr } = await supabaseAdmin.from("webhook_logs").insert({
     step: DIGEST_STEP,
-    data: { date: today, body: digest.body, delivery, edge_status: res.status } as never,
+    data: { date: today, title: digest.title, body: digest.body } as never,
   });
+  if (claimErr) return json({ error: claimErr.message }, 500);
 
-  return json({ sent: res.ok, edge_status: res.status, delivery, body: digest.body });
+  return json({ queued: true, body: digest.body });
 }
 
 export const Route = createFileRoute("/api/internal/god-digest")({
