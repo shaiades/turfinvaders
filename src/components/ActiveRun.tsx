@@ -35,6 +35,7 @@ import { HouseResultSheet } from "@/components/HouseResultSheet";
 import { FieldStandingsSheet } from "@/components/FieldStandingsSheet";
 import { DoorScriptSheet } from "@/components/DoorScriptSheet";
 import { RebuttalCard } from "@/components/RebuttalCard";
+import { activeJobRingAt, useActiveJobs } from "@/components/ActiveJobs";
 import { prefetchTurfHouses, type OsmHouse } from "@/components/HouseBubbles";
 import { ArcadePanel } from "@/components/arcade";
 import { toast } from "sonner";
@@ -230,6 +231,22 @@ export function ActiveRun({
   // 3-second rebuttal card after a tagged objection (Phase 2 §2). seq bumps
   // per showing so a repeat of the same objection re-arms the timer.
   const [rebuttal, setRebuttal] = useState<{ seq: number; objection: string } | null>(null);
+
+  // Door-script hook (owner ask 2026-11-04): a pin dropped inside an active
+  // job's half-mile ring earns a one-line tip — the line is TRUE there.
+  // Outside every ring, nothing. Throttled per device so a rep working the
+  // 10 doors around a job reads it once, not ten times.
+  const activeJobsQuery = useActiveJobs();
+  const lastJobTipRef = useRef(0);
+  const maybeJobSiteTip = (ll: { lat: number; lng: number }) => {
+    const now = Date.now();
+    if (now - lastJobTipRef.current < 10 * 60_000) return;
+    if (!activeJobRingAt(ll, activeJobsQuery.data)) return;
+    lastJobTipRef.current = now;
+    toast("💬 True here: “We're working on a home a few streets over this week.”", {
+      duration: 5000,
+    });
+  };
 
   // Talk combo (Phase 4 §4): consecutive CONVERSATION results — the same pin
   // types the bump trigger counts as people_talked_to (talked_to, renter,
@@ -643,7 +660,7 @@ export function ActiveRun({
                     }
                     return;
                   }
-                  pins.guardedMapDrop(ll, active);
+                  if (pins.guardedMapDrop(ll, active)) maybeJobSiteTip(ll);
                   registerResult(active);
                 },
                 armed: armedResult
@@ -949,7 +966,9 @@ export function ActiveRun({
             openLead(houseLeadAddress(h), { kind: "house", lat: h.lat, lng: h.lng });
             return;
           }
-          pins.guardedMapDrop({ lat: h.lat, lng: h.lng }, pin_type, objection);
+          if (pins.guardedMapDrop({ lat: h.lat, lng: h.lng }, pin_type, objection)) {
+            maybeJobSiteTip({ lat: h.lat, lng: h.lng });
+          }
           registerResult(pin_type);
           if (objection) setRebuttal((r) => ({ seq: (r?.seq ?? 0) + 1, objection }));
         }}

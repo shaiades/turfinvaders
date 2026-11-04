@@ -388,18 +388,21 @@ export function useFieldPins(userId: string | undefined, me: LatLng | null) {
   // taps queue via the mutation scope, so working a duplex fast loses nothing.
   const lastDropRef = useRef<{ t: number; ll: LatLng } | null>(null);
 
-  /** The map-tap entry point: GPS guard + double-tap dedupe, then insert. */
-  const guardedMapDrop = (ll: LatLng, pin_type: ActivePin, objection?: string) => {
+  /** The map-tap entry point: GPS guard + double-tap dedupe, then insert.
+   *  True when the drop was actually submitted — callers hang follow-ups
+   *  (the active-job script tip) off a real drop, never a guarded no-op. */
+  const guardedMapDrop = (ll: LatLng, pin_type: ActivePin, objection?: string): boolean => {
     // Block BEFORE the optimistic row: a no-GPS drop would otherwise buzz,
     // show a pin for the 8 s fix wait, then silently vanish.
     if (!me) {
       toast.error("No GPS fix — pin not saved. Wait for the blue dot and try again.");
-      return;
+      return false;
     }
     const last = lastDropRef.current;
-    if (last && Date.now() - last.t < 600 && haversineMeters(last.ll, ll) < 8) return;
+    if (last && Date.now() - last.t < 600 && haversineMeters(last.ll, ll) < 8) return false;
     lastDropRef.current = { t: Date.now(), ll };
     dropAtPoint.mutate({ ll, pin_type, objection });
+    return true;
   };
 
   /** The tally-button entry point: the pin IS the device fix, so it can never
