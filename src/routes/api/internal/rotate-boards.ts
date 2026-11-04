@@ -458,10 +458,13 @@ async function check(): Promise<Response> {
     const token = settings?.monday_api_token as string | undefined;
     if (!token) return json({ error: "no monday_api_token" }, 500);
     // [label, boardId, expected events]. The static Incoming Leads board gets
-    // create_item plus the column-scoped Lead Status hook — never a blanket
-    // change_column_value (it would flood the edge function on a 5,000+-item
-    // CRM board, and the liveness healer must never "replace" one into
-    // existence there).
+    // create_item, the column-scoped Lead Status hook, and a plain
+    // change_column_value for the Lead Date column. The date hook is unscoped
+    // because Monday rejects config on change_column_value (the edge fn's
+    // ensure_lead_date_webhook admin action registers it the same way); the
+    // handler drops other leads-board columns before any Monday API spend, so
+    // the cost is delivery volume only. Maintaining it here means the daily
+    // check self-heals it — before 2026-11-03 nothing recreated it if lost.
     const active: Array<[string, string, ReadonlyArray<WebhookEvent>]> = [];
     if (settings?.active_monday_board_sd)
       active.push(["SD", String(settings.active_monday_board_sd), WEBHOOK_EVENTS]);
@@ -469,7 +472,11 @@ async function check(): Promise<Response> {
       active.push(["OC", String(settings.active_monday_board_oc), WEBHOOK_EVENTS]);
     if (!active.length) return json({ error: "no active_monday_board_* in system_settings" }, 500);
     if (settings?.incoming_leads_board_id)
-      active.push(["Leads", String(settings.incoming_leads_board_id), ["create_item", LEAD_STATUS_EVENT]]);
+      active.push([
+        "Leads",
+        String(settings.incoming_leads_board_id),
+        ["create_item", LEAD_STATUS_EVENT, "change_column_value"],
+      ]);
     const activeIds = new Set(active.map(([, id]) => id));
 
     // ── Active-board drift ── the crews hand-create week boards, sometimes
