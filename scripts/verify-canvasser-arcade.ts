@@ -48,7 +48,7 @@ expectEq("partial pts merges", merged.pts.sit, 40);
 expectEq("untouched siblings survive", merged.pts.sale, 50);
 expectEq("stored null subtree falls back", merged.crit.mult, DEFAULT_ARCADE_RULES.crit.mult);
 const tierEdit = mergeArcadeRules({
-  finale: { tiers: [{ key: "solo", label: "Solo", points: 10, cash: 1 }] },
+  finale: { tiers: [{ key: "solo", label: "Solo", points: 10 }] },
 });
 expectEq("tier arrays replace whole", tierEdit.finale.tiers.length, 1);
 

@@ -632,7 +632,7 @@ function Mini({ label, value }: { label: string; value: string }) {
 }
 
 /** FINAL ROUND belt slide — where the chase stands tonight: belt held, finale
- *  points, and the gap to the next belt's cash. The fresh-start card. */
+ *  points, and the gap to the next belt. The fresh-start card. */
 function FinaleWrapSlide({ uid, rules }: { uid: string | undefined; rules: ArcadeRules }) {
   const { points, loading } = useFinaleWrap(uid, rules, true);
   const belt = finaleTierFor(points, rules);
@@ -663,8 +663,8 @@ function FinaleWrapSlide({ uid, rules }: { uid: string | undefined; rules: Arcad
       </p>
       {nxt && !loading && (
         <p className="mt-3 max-w-xs text-sm text-muted-foreground">
-          {Math.ceil(nxt.toGo)} pts to {nxt.next.label} — ${nxt.next.cash} cash. Sits score
-          heaviest; tomorrow's first knock starts the climb.
+          {Math.ceil(nxt.toGo)} pts to {nxt.next.label}. Sits score heaviest — every sit
+          drains the $100K Boss ($1,500 per $100K sold); tomorrow's first knock starts the climb.
         </p>
       )}
       {!nxt && !loading && (
