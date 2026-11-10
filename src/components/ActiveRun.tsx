@@ -227,7 +227,7 @@ export function ActiveRun({
   const [standingsOpen, setStandingsOpen] = useState(false);
   // The door script, one tap from the map (Phase 2 §1).
   const [scriptOpen, setScriptOpen] = useState(false);
-  // 3-second rebuttal card after a tagged objection (Phase 2 §2). seq bumps
+  // Rebuttal card after a tagged objection (Phase 2 §2). seq bumps
   // per showing so a repeat of the same objection re-arms the timer.
   const [rebuttal, setRebuttal] = useState<{ seq: number; objection: string } | null>(null);
 

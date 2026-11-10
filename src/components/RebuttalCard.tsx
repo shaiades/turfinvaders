@@ -1,7 +1,9 @@
-// The 3-second rebuttal card (Phase 2 §2, owner 2026-10-15): the moment a
-// canvasser tags an objection after "Not Interested", the matching comeback
-// flashes over the map — Empathy → Clarification → Realignment, read it on the
-// walk to the next door — with a "Drill this" link into the Objection Dojo.
+// The rebuttal card (Phase 2 §2, owner 2026-10-15): the moment a canvasser
+// tags an objection after "Not Interested", the matching comeback shows over
+// the map — Empathy → Clarification → Realignment, read it on the walk to the
+// next door — with a "Drill this" link into the Objection Dojo. Stays up 10s
+// (was 3s — reps couldn't finish reading it, field feedback 2026-11-09); the
+// X dismisses it sooner.
 // Copy comes from src/data/door-script.ts (rebuttalFor); no match → renders
 // nothing. Mounted inside NeonMap's overlay so it rides along in fullscreen.
 
@@ -10,7 +12,7 @@ import { Link } from "@tanstack/react-router";
 import { Swords, X } from "lucide-react";
 import { rebuttalFor } from "@/data/door-script";
 
-const SHOW_MS = 3_000;
+const SHOW_MS = 10_000;
 
 export function RebuttalCard({
   objection,
