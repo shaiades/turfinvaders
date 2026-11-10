@@ -8,6 +8,11 @@ export default defineConfig(async ({ command }) => ({
   // PORT lets a second checkout (e.g. a git worktree) run its own dev server
   // while the main one holds 8080.
   server: { host: "::", port: Number(process.env.PORT) || 8080 },
+  // The commit this bundle was built from — compared against /api/version by
+  // the deploy-skew check (src/lib/deploy-skew.ts). "dev" disables the check.
+  define: {
+    __BUILD_COMMIT__: JSON.stringify(process.env.VERCEL_GIT_COMMIT_SHA ?? "dev"),
+  },
   resolve: {
     dedupe: [
       "react",
