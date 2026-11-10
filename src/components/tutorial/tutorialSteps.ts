@@ -37,12 +37,14 @@ export type TutorialStep = {
   showWordmark?: boolean;
 };
 
-export type TourPageId = "field" | "mission" | "leaders" | "wrap" | "learn" | "kombat";
+export type TourPageId = "field" | "phones" | "mission" | "leaders" | "wrap" | "learn" | "kombat";
 
 /** Which tour a pathname belongs to (canvasser routes only — canvassers
  *  bounce off /my-territory to /field since the merge). */
 export function pageIdForPathname(pathname: string): TourPageId | null {
   if (pathname === "/field") return "field";
+  // The confirmation department's Active Run (owner 2026-10-19).
+  if (pathname === "/phones") return "phones";
   if (pathname === "/dashboard") return "mission";
   // Captain twins (audit 2026-09-12): their Mission lives on /mission and
   // their canvass map on /my-territory — same anchors, same tours.
@@ -91,6 +93,38 @@ export const PAGE_TOURS: Record<TourPageId, TutorialStep[]> = {
       cursorAt: { x: 0.5, y: 0.68 }, // tap under the label so it stays readable
       title: "Got a yes?",
       body: "Smash ⚡ Submit New Lead. It pins the house and opens the lead form — fill it out right on the doorstep while it's hot.",
+    },
+  ],
+  // Dial Run — the phone room's whole rhythm in four taps (owner 2026-10-20:
+  // "like an Apple product, super easy"). Keep it under 30 seconds.
+  phones: [
+    {
+      id: "phones-dial",
+      target: "phones-dial",
+      cursorAt: { x: 0.5, y: 0.6 },
+      title: "One tap per call",
+      body: "The moment you place a call, smash DIAL. That's it — the dial is counted, here and on every leaderboard. Working from Monday? A Log Call there counts automatically too.",
+    },
+    {
+      id: "phones-chips",
+      target: "phones-chips",
+      padding: 6,
+      title: "Tag how it ended",
+      body: "When the call ends, tap the result — No Answer, Talked To, Not Interested, Callback, or LEAD when you set one. Mis-tap? Undo Last fixes it. Leads still get worked on the Monday board; this is your score.",
+    },
+    {
+      id: "phones-bank",
+      target: "phones-bank",
+      optional: true, // awaiting-rates state still renders, but play it safe
+      padding: 6,
+      title: "Every dial banks money",
+      body: "Even a no-answer has a dollar value — projected from real conversion rates. Watch the pig fill as you stack dials; it refills every $100.",
+    },
+    {
+      id: "phones-goal",
+      target: "phones-goal",
+      title: "Your goal, in dials",
+      body: "Set your income goal in Mission → Plan and this engine tells you exactly how many dials close the gap. Reverse-engineer the week, then go beat it.",
     },
   ],
   mission: [
