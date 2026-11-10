@@ -1,16 +1,21 @@
 // Web Push delivery for the God Mode morning digest (owner directive
-// 2026-10-01). ONE caller: the Vercel cron route /api/internal/god-digest,
-// which composes the text and authenticates with the project's service-role
-// key (both sides already hold it — no new secret). Audience: OWNER role
-// push subscriptions only. Deployed with --no-verify-jwt; this handler
-// enforces its own auth. Secrets: VAPID_KEYS_JSON (same keypair as the
-// other notify-* functions).
+// 2026-10-01). ONE caller: the webhook_logs God_Digest_Sent trigger
+// (migration 20261001200000), which fires when the Vercel cron route
+// claims the day — the same pg_net + vault doctrine as every other
+// notify-* function. Audience: OWNER role push subscriptions only.
+// Deployed with --no-verify-jwt; the shared NOTIFY_SECRET gates the path
+// (never compare against this runtime's injected service key: its value
+// does not match the Vercel side's copy on this project, which 401'd
+// every direct delivery attempt).
+// Secrets: VAPID_KEYS_JSON + NOTIFY_SECRET (same as the other notify fns).
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import * as webpush from "jsr:@negrel/webpush@0.5.0";
 
-const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const admin = createClient(Deno.env.get("SUPABASE_URL")!, SERVICE_KEY);
+const admin = createClient(
+  Deno.env.get("SUPABASE_URL")!,
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+);
 
 let appServerPromise: Promise<webpush.ApplicationServer> | null = null;
 function getAppServer(): Promise<webpush.ApplicationServer> {
@@ -66,9 +71,9 @@ const json = (body: unknown, status = 200) =>
 
 Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
-  // Server-to-server only: the caller must present the service-role key.
-  const auth = req.headers.get("authorization") ?? "";
-  if (auth !== `Bearer ${SERVICE_KEY}`) return json({ error: "Unauthorized" }, 401);
+  if (req.headers.get("x-notify-secret") !== Deno.env.get("NOTIFY_SECRET")) {
+    return json({ error: "Unauthorized" }, 401);
+  }
 
   let payload: { title?: string; body?: string; url?: string };
   try {
