@@ -57,6 +57,20 @@ function edgeUrl(): string {
   }
   return url;
 }
+// A failed rotation or check loses results silently — webhook_logs is the only
+// trace, and nobody reads it live (the 11/9/26 outage ran at 06:00 UTC and sat
+// unnoticed until 17:00 PT). Hard failures page the owner through the same
+// digest channel the token-blindness canary uses.
+async function pageOwner(title: string, body: string): Promise<void> {
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!serviceKey) return;
+  await fetch("https://xogitpqeuwalerxygvjw.supabase.co/functions/v1/notify-owner-digest", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
+    body: JSON.stringify({ title, body, url: "/fleet-dispatch" }),
+  }).catch(() => {});
+}
+
 const WEBHOOK_EVENTS = ["create_item", "change_column_value"] as const;
 // The static Incoming Leads board also carries a column-scoped status hook:
 // only the confirmation team's "Lead Status" column may fire (an unscoped
@@ -317,8 +331,14 @@ async function rotate(): Promise<Response> {
     const token = settings?.monday_api_token as string | undefined;
     const templateId = settings?.monday_template_board_id as string | undefined;
     const incomingLeadsBoardId = String(settings?.incoming_leads_board_id ?? "");
-    if (!token) return json({ error: "no monday_api_token" }, 500);
-    if (!templateId) return json({ error: "no monday_template_board_id" }, 500);
+    if (!token || !templateId) {
+      const missing = !token ? "monday_api_token" : "monday_template_board_id";
+      await pageOwner(
+        "Board rotation FAILED — this week's boards may have no webhooks",
+        `system_settings.${missing} is empty, so the weekly rotation cannot run.`,
+      );
+      return json({ error: `no ${missing}` }, 500);
+    }
     const registry: RegistryEntry[] = Array.isArray(settings?.monday_webhooks)
       ? (settings!.monday_webhooks as RegistryEntry[])
       : [];
@@ -437,6 +457,10 @@ async function rotate(): Promise<Response> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await log({ error: message });
+    await pageOwner(
+      "Board rotation FAILED — this week's boards may have no webhooks",
+      `${message}\n\nUntil this is fixed, Block-board results (sits/sales/submitted leads) do not count and Monday never retries them.`,
+    );
     return json({ ok: false, error: message }, 500);
   }
 }
@@ -810,23 +834,19 @@ async function check(): Promise<Response> {
       ([k]) => k.endsWith("_token_blind") || k === "no_item_spike",
     );
     if (blindness.length) {
-      const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-      if (serviceKey) {
-        await fetch("https://xogitpqeuwalerxygvjw.supabase.co/functions/v1/notify-owner-digest", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
-          body: JSON.stringify({
-            title: "Monday token can't see the boards",
-            body: blindness.map(([k, v]) => `${k}: ${String(v)}`).join("\n"),
-            url: "/fleet-dispatch",
-          }),
-        }).catch(() => {});
-      }
+      await pageOwner(
+        "Monday token can't see the boards",
+        blindness.map(([k, v]) => `${k}: ${String(v)}`).join("\n"),
+      );
     }
     return json({ ok: true, ...summary });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await log({ error: message });
+    await pageOwner(
+      "Daily webhook check FAILED",
+      `${message}\n\nDropped Monday webhooks are not being self-healed until this is fixed.`,
+    );
     return json({ ok: false, error: message }, 500);
   }
 }
