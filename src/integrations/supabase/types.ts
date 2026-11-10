@@ -4606,6 +4606,18 @@ export type Database = {
       }
     }
     Views: {
+      active_jobs_map: {
+        Row: {
+          city: string | null
+          lat: number | null
+          lng: number | null
+          monday_item_id: string | null
+          office_location: string | null
+          projects: string | null
+          street: string | null
+        }
+        Relationships: []
+      }
       commission_clawback_outstanding: {
         Row: {
           canvasser_id: string | null
@@ -4679,6 +4691,13 @@ export type Database = {
     }
     Functions: {
       accrue_sick_leave: { Args: never; Returns: number }
+      active_job_ring_doors: {
+        Args: { _week_start: string }
+        Returns: {
+          doors: number
+          monday_item_id: string
+        }[]
+      }
       admin_create_time_entry: {
         Args: {
           _clock_in: string

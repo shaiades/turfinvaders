@@ -21,6 +21,7 @@ import {
 } from "@/components/arcade";
 import { LiveLeadCounter } from "@/components/LiveLeadCounter";
 import { CommandCenter } from "@/components/CommandCenter";
+import { ActiveJobsCommand } from "@/components/ActiveJobsCommand";
 import { HistoricalImporter } from "@/components/HistoricalImporter";
 import { PayrollLedger } from "@/components/PayrollLedger";
 import { TimesheetEditor } from "@/components/TimesheetEditor";
@@ -675,6 +676,11 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
       ) : (
         <NoVanCard />
       )}
+
+      {/* "10 doors around every active job" (owner ask 2026-11-04): every
+          In Progress Tidal job with this week's door count inside its ring,
+          plus the captain's on-demand Monday refresh. */}
+      <ActiveJobsCommand />
 
       {van && (
         <>
