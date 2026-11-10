@@ -30,6 +30,7 @@ import { Route as AuthenticatedPhonesRouteImport } from './routes/_authenticated
 import { Route as AuthenticatedPlaybookRouteImport } from './routes/_authenticated/playbook'
 import { Route as AuthenticatedReportsRouteImport } from './routes/_authenticated/reports'
 import { Route as AuthenticatedUsersRouteImport } from './routes/_authenticated/users'
+import { Route as ApiVersionRouteImport } from './routes/api/version'
 import { Route as AuthCallbackRouteImport } from './routes/auth_.callback'
 import { Route as AuthWelcomeRouteImport } from './routes/auth_.welcome'
 import { Route as AuthenticatedCanvassersCanvasserIdRouteImport } from './routes/_authenticated/canvassers.$canvasserId'
@@ -155,6 +156,11 @@ const AuthenticatedUsersRoute = AuthenticatedUsersRouteImport.update({
   path: '/users',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const ApiVersionRoute = ApiVersionRouteImport.update({
+  id: '/api/version',
+  path: '/api/version',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthCallbackRoute = AuthCallbackRouteImport.update({
   id: '/auth_/callback',
   path: '/auth/callback',
@@ -261,6 +267,7 @@ export interface FileRoutesByFullPath {
   '/playbook': typeof AuthenticatedPlaybookRoute
   '/reports': typeof AuthenticatedReportsRoute
   '/users': typeof AuthenticatedUsersRoute
+  '/api/version': typeof ApiVersionRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/welcome': typeof AuthWelcomeRoute
   '/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRouteWithChildren
@@ -298,6 +305,7 @@ export interface FileRoutesByTo {
   '/playbook': typeof AuthenticatedPlaybookRoute
   '/reports': typeof AuthenticatedReportsRoute
   '/users': typeof AuthenticatedUsersRoute
+  '/api/version': typeof ApiVersionRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/welcome': typeof AuthWelcomeRoute
   '/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRouteWithChildren
@@ -337,6 +345,7 @@ export interface FileRoutesById {
   '/_authenticated/playbook': typeof AuthenticatedPlaybookRoute
   '/_authenticated/reports': typeof AuthenticatedReportsRoute
   '/_authenticated/users': typeof AuthenticatedUsersRoute
+  '/api/version': typeof ApiVersionRoute
   '/auth_/callback': typeof AuthCallbackRoute
   '/auth_/welcome': typeof AuthWelcomeRoute
   '/_authenticated/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRouteWithChildren
@@ -376,6 +385,7 @@ export interface FileRouteTypes {
     | '/playbook'
     | '/reports'
     | '/users'
+    | '/api/version'
     | '/auth/callback'
     | '/auth/welcome'
     | '/canvassers/$canvasserId'
@@ -413,6 +423,7 @@ export interface FileRouteTypes {
     | '/playbook'
     | '/reports'
     | '/users'
+    | '/api/version'
     | '/auth/callback'
     | '/auth/welcome'
     | '/canvassers/$canvasserId'
@@ -451,6 +462,7 @@ export interface FileRouteTypes {
     | '/_authenticated/playbook'
     | '/_authenticated/reports'
     | '/_authenticated/users'
+    | '/api/version'
     | '/auth_/callback'
     | '/auth_/welcome'
     | '/_authenticated/canvassers/$canvasserId'
@@ -473,6 +485,7 @@ export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
   LeadSubmittedRoute: typeof LeadSubmittedRoute
+  ApiVersionRoute: typeof ApiVersionRoute
   AuthCallbackRoute: typeof AuthCallbackRoute
   AuthWelcomeRoute: typeof AuthWelcomeRoute
   ApiInternalCrownVanwarsRoute: typeof ApiInternalCrownVanwarsRoute
@@ -630,6 +643,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/users'
       preLoaderRoute: typeof AuthenticatedUsersRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/api/version': {
+      id: '/api/version'
+      path: '/api/version'
+      fullPath: '/api/version'
+      preLoaderRoute: typeof ApiVersionRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/auth_/callback': {
       id: '/auth_/callback'
@@ -819,6 +839,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
   LeadSubmittedRoute: LeadSubmittedRoute,
+  ApiVersionRoute: ApiVersionRoute,
   AuthCallbackRoute: AuthCallbackRoute,
   AuthWelcomeRoute: AuthWelcomeRoute,
   ApiInternalCrownVanwarsRoute: ApiInternalCrownVanwarsRoute,
