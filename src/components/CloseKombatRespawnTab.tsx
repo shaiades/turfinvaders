@@ -17,10 +17,13 @@ import {
   type ShiftKey,
 } from "@/lib/respawn";
 import {
+  useMyRecurring,
   useMyRespawn,
   useMyRespawnForWeek,
+  useRecurringQueue,
   useRespawnMutations,
   useRespawnQueue,
+  type RecurringRow,
   type RespawnRow,
 } from "@/hooks/useRespawn";
 
@@ -72,8 +75,13 @@ function ShiftChips({ shifts }: { shifts: string[] }) {
   );
 }
 
-/** Shows the granted vs declined split once a request has been decided. */
-function GrantBreakdown({ row }: { row: RespawnRow }) {
+/** Shows the granted vs declined split once a request has been decided.
+ *  Structural prop so one-time (RespawnRow) and recurring rows both fit. */
+function GrantBreakdown({
+  row,
+}: {
+  row: { status: RespawnStatus; shifts: string[]; approved_shifts: string[] | null };
+}) {
   if (row.status === "pending") return null;
   const granted = normalizeShifts(row.approved_shifts ?? []) as ShiftKey[];
   const requested = normalizeShifts(row.shifts) as ShiftKey[];
@@ -87,6 +95,44 @@ function GrantBreakdown({ row }: { row: RespawnRow }) {
       {declined.length > 0 && (
         <p className="text-destructive">Declined: {summarizeShifts(declined)}</p>
       )}
+    </div>
+  );
+}
+
+/** The Day × AM/PM picker grid shared by the one-week and recurring forms. */
+function ShiftGrid({ picked, toggle }: { picked: Set<ShiftKey>; toggle: (s: ShiftKey) => void }) {
+  return (
+    <div className="space-y-2">
+      {DAY_KEYS.map((d) => {
+        const am = `${d}_am` as ShiftKey;
+        const pm = `${d}_pm` as ShiftKey;
+        return (
+          <div
+            key={d}
+            className="grid grid-cols-[3rem_minmax(0,1fr)_minmax(0,1fr)] items-center gap-2"
+          >
+            <span className="font-display text-xs uppercase tracking-widest text-muted-foreground">
+              {DAY_LABEL[d]}
+            </span>
+            <ArcadePill
+              tone="kombat-gold"
+              active={picked.has(am)}
+              onClick={() => toggle(am)}
+              className="w-full justify-center"
+            >
+              AM off
+            </ArcadePill>
+            <ArcadePill
+              tone="kombat-gold"
+              active={picked.has(pm)}
+              onClick={() => toggle(pm)}
+              className="w-full justify-center"
+            >
+              PM off
+            </ArcadePill>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -223,38 +269,7 @@ function RepRespawn({ userId }: { userId: string }) {
           )}
 
           {/* Day × AM/PM grid */}
-          <div className="space-y-2">
-            {DAY_KEYS.map((d) => {
-              const am = `${d}_am` as ShiftKey;
-              const pm = `${d}_pm` as ShiftKey;
-              return (
-                <div
-                  key={d}
-                  className="grid grid-cols-[3rem_minmax(0,1fr)_minmax(0,1fr)] items-center gap-2"
-                >
-                  <span className="font-display text-xs uppercase tracking-widest text-muted-foreground">
-                    {DAY_LABEL[d]}
-                  </span>
-                  <ArcadePill
-                    tone="kombat-gold"
-                    active={picked.has(am)}
-                    onClick={() => toggle(am)}
-                    className="w-full justify-center"
-                  >
-                    AM off
-                  </ArcadePill>
-                  <ArcadePill
-                    tone="kombat-gold"
-                    active={picked.has(pm)}
-                    onClick={() => toggle(pm)}
-                    className="w-full justify-center"
-                  >
-                    PM off
-                  </ArcadePill>
-                </div>
-              );
-            })}
-          </div>
+          <ShiftGrid picked={picked} toggle={toggle} />
 
           <div className="space-y-1.5">
             <label className="font-display text-[10px] uppercase tracking-widest text-muted-foreground">
@@ -299,6 +314,8 @@ function RepRespawn({ userId }: { userId: string }) {
         </div>
       </ArcadePanel>
 
+      <RepRecurring userId={userId} />
+
       {upcoming.length > 0 && (
         <ArcadePanel title="Your other requests">
           <ul className="space-y-2">
@@ -326,10 +343,153 @@ function RepRespawn({ userId }: { userId: string }) {
   );
 }
 
+// ── Rep: the standing "every week" request ──────────────────────────────────
+
+function RepRecurring({ userId }: { userId: string }) {
+  const existing = useMyRecurring(userId);
+  const { submitRecurring, cancelRecurring } = useRespawnMutations();
+  const [picked, setPicked] = useState<Set<ShiftKey>>(new Set());
+  const [reason, setReason] = useState("");
+
+  const row = existing.data ?? null;
+  // Start the form from what's on file whenever the row loads/changes.
+  useEffect(() => {
+    setPicked(new Set(normalizeShifts(row?.shifts ?? []) as ShiftKey[]));
+    setReason(row?.reason ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [row?.id, row?.updated_at]);
+
+  const toggle = (s: ShiftKey) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(s)) next.delete(s);
+      else next.add(s);
+      return next;
+    });
+
+  const onSubmit = () => {
+    const shifts = [...picked];
+    if (shifts.length === 0) {
+      toast.error("Pick at least one shift to repeat off every week.");
+      return;
+    }
+    submitRecurring.mutate(
+      { shifts, reason: reason.trim() || undefined },
+      {
+        onSuccess: () => toast.success("Weekly request sent — pending approval."),
+        onError: (e) => toast.error(e instanceof Error ? e.message : "Could not send request."),
+      },
+    );
+  };
+
+  const onWithdraw = () => {
+    if (!row) return;
+    cancelRecurring.mutate(row.id, {
+      onSuccess: () => toast.success("Weekly day off removed — you're back on every shift."),
+      onError: (e) => toast.error(e instanceof Error ? e.message : "Could not withdraw."),
+    });
+  };
+
+  const granted = row ? (normalizeShifts(row.approved_shifts ?? []) as ShiftKey[]) : [];
+
+  return (
+    <ArcadePanel
+      faction="kombat"
+      title="Repeating day off"
+      info={
+        <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+          Every week
+        </span>
+      }
+    >
+      <div className="space-y-4">
+        <p className="text-xs text-muted-foreground">
+          Always off the same shifts — e.g. every Monday? Set it once here. Approved shifts stay off{" "}
+          <strong>every week</strong> (the Sunday schedule reset never touches them) until you
+          remove it.
+        </p>
+
+        {row && (
+          <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-surface/50 p-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusChip status={row.status} />
+              {(row.status === "approved" || row.status === "partial") && (
+                <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                  {granted.length > 0 ? `Off every ${summarizeShifts(granted)}` : null}
+                </span>
+              )}
+              {row.status === "pending" ? null : (
+                <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                  Editing sends it back to pending
+                </span>
+              )}
+            </div>
+            <GrantBreakdown row={row} />
+            {row.decision_note && (
+              <span className="text-xs text-muted-foreground">“{row.decision_note}”</span>
+            )}
+          </div>
+        )}
+
+        <ShiftGrid picked={picked} toggle={toggle} />
+
+        <div className="space-y-1.5">
+          <label className="font-display text-[10px] uppercase tracking-widest text-muted-foreground">
+            Reason / notes (optional)
+          </label>
+          <Textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="e.g. school every Monday, second job…"
+            className="min-h-16 text-base md:text-sm"
+            maxLength={1000}
+          />
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <Button
+            className="min-h-11 flex-1"
+            onClick={onSubmit}
+            disabled={submitRecurring.isPending || picked.size === 0}
+          >
+            {submitRecurring.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : row ? (
+              "Update weekly request"
+            ) : (
+              "Set weekly day off"
+            )}
+          </Button>
+          {/* Unlike one-time requests, a rep may withdraw their standing
+              request in ANY status — that's how a weekly day off ends. */}
+          {row && (
+            <Button
+              variant="outline"
+              className="min-h-11"
+              onClick={onWithdraw}
+              disabled={cancelRecurring.isPending}
+            >
+              {cancelRecurring.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : row.status === "pending" ? (
+                "Withdraw"
+              ) : (
+                "Stop repeating"
+              )}
+            </Button>
+          )}
+        </div>
+      </div>
+    </ArcadePanel>
+  );
+}
+
 // ── Admin: the approval queue ───────────────────────────────────────────────
 
-function AdminRow({ r }: { r: RespawnRow }) {
-  const { review, cancel } = useRespawnMutations();
+function AdminRow({ r, recurring = false }: { r: RespawnRow | RecurringRow; recurring?: boolean }) {
+  const muts = useRespawnMutations();
+  const review = recurring ? muts.reviewRecurring : muts.review;
+  const cancel = recurring ? muts.cancelRecurring : muts.cancel;
   const [denying, setDenying] = useState(false);
   const [note, setNote] = useState("");
   // Which requested shifts the approver is granting. Starts as all of them;
@@ -356,9 +516,19 @@ function AdminRow({ r }: { r: RespawnRow }) {
       },
       {
         onSuccess: (res) => {
+          if (recurring) {
+            toast.success(
+              res.status === "denied"
+                ? "Denied."
+                : res.attendanceApplied
+                  ? `${res.status === "partial" ? "Partially approved" : "Approved"} — off every week, attendance updated.`
+                  : `${res.status === "partial" ? "Partially approved" : "Approved"} — off every week (no attendance row matched; check the board).`,
+            );
+            return;
+          }
           // "Next week" note: a weekend approval for the coming week that the
           // Sunday-noon rollover applied to attendance now (#14).
-          const nextWeek = r.week_start === comingWeekStartISO();
+          const nextWeek = "week_start" in r && r.week_start === comingWeekStartISO();
           const appliedMsg =
             res.attendanceApplied && nextWeek
               ? "Approved for next week — applied to attendance."
@@ -390,7 +560,14 @@ function AdminRow({ r }: { r: RespawnRow }) {
             {r.office === "OC" ? "Orange County" : "San Diego"}
           </div>
         </div>
-        <StatusChip status={r.status} late={r.late} />
+        <div className="flex items-center gap-1.5">
+          {recurring && (
+            <span className="rounded-full border border-neon/50 px-2.5 py-1 text-[10px] font-display uppercase tracking-widest text-neon">
+              Every week
+            </span>
+          )}
+          <StatusChip status={r.status} late={"late" in r ? r.late : false} />
+        </div>
       </div>
 
       {r.status === "pending" ? (
@@ -497,7 +674,9 @@ function AdminRow({ r }: { r: RespawnRow }) {
 function AdminRespawn() {
   const fromWeek = laWeekStartISO(new Date());
   const queue = useRespawnQueue(fromWeek);
+  const recurringQueue = useRecurringQueue();
   const { applyWeek } = useRespawnMutations();
+  const recurringRows = recurringQueue.data ?? [];
 
   const groups = useMemo(() => {
     const rows = queue.data ?? [];
@@ -510,7 +689,9 @@ function AdminRespawn() {
     return [...byWeek.entries()].sort(([a], [b]) => a.localeCompare(b));
   }, [queue.data]);
 
-  const pendingTotal = (queue.data ?? []).filter((r) => r.status === "pending").length;
+  const pendingTotal =
+    (queue.data ?? []).filter((r) => r.status === "pending").length +
+    recurringRows.filter((r) => r.status === "pending").length;
 
   return (
     <div className="space-y-4">
@@ -542,12 +723,30 @@ function AdminRespawn() {
           </Button>
         }
       >
-        {queue.isLoading ? (
+        {queue.isLoading && recurringQueue.isLoading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
-        ) : groups.length === 0 ? (
+        ) : groups.length === 0 && recurringRows.length === 0 ? (
           <p className="text-sm text-muted-foreground">No requests for the weeks ahead.</p>
         ) : (
           <div className="space-y-5">
+            {recurringRows.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="font-display text-xs uppercase tracking-widest text-neon">
+                    Recurring · every week
+                  </span>
+                  <span className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+                    {recurringRows.filter((r) => r.status === "pending").length} pending ·{" "}
+                    {recurringRows.length} total · survives the Sunday reset
+                  </span>
+                </div>
+                <div className="grid gap-2 md:grid-cols-2">
+                  {recurringRows.map((r) => (
+                    <AdminRow key={r.id} r={r} recurring />
+                  ))}
+                </div>
+              </div>
+            )}
             {groups.map(([wk, rows]) => (
               <div key={wk} className="space-y-2">
                 <div className="flex items-center gap-2">
@@ -597,8 +796,10 @@ export function CloseKombatRespawnTab({
         <CalendarOff className="mt-0.5 h-4 w-4 shrink-0 text-kombat-gold" />
         <p>
           Step off the floor to recharge. Request the AM/PM shifts you need off — any week, weeks
-          ahead. Requests for the coming week are due <strong>Sunday 12 PM PT</strong>; later ones
-          still go through, just flagged late. Tyler, Shai or Jorge approve them.
+          ahead — or set a <strong>repeating day off</strong> (same shifts every week). Requests for
+          the coming week are due <strong>Sunday 12 PM PT</strong>; later ones still go through,
+          just flagged late. Tyler, Shai or Jorge approve them. The schedule resets every Sunday at
+          noon — approved one-time shifts fill the new week, repeating ones never reset.
         </p>
       </div>
       {isAdmin && <AdminRespawn />}

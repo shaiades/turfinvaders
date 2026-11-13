@@ -45,7 +45,9 @@ export async function syncDayOffItem(
     rowId: string;
     repName: string;
     office: RepOffice;
-    weekStart: string;
+    /** The requested week's Monday — null for a RECURRING (every-week) request,
+     *  which leaves the board's Week column empty. */
+    weekStart: string | null;
     shifts: ShiftKey[];
     reason: string | null;
     status: RespawnStatus;
@@ -54,7 +56,7 @@ export async function syncDayOffItem(
 ): Promise<string> {
   const colVals: Record<string, unknown> = {
     [DAY_OFF_COL.office]: { label: OFFICE_DAYOFF_LABEL[input.office] },
-    [DAY_OFF_COL.week]: { date: input.weekStart },
+    ...(input.weekStart ? { [DAY_OFF_COL.week]: { date: input.weekStart } } : {}),
     [DAY_OFF_COL.shifts]: { labels: input.shifts.map((s) => SHIFT_LABEL[s]) },
     [DAY_OFF_COL.reason]: { text: input.reason ?? "" },
     [DAY_OFF_COL.approval]: { label: mondayApprovalLabel(input.status) },
@@ -69,7 +71,9 @@ export async function syncDayOffItem(
       token,
       UPSERT_VALS,
       { b: DAY_OFF_BOARD_ID, i: input.existingItemId, vals: JSON.stringify(colVals) },
-      { idempotencyKey: `respawn-upd-${input.existingItemId}-${input.weekStart}-${input.status}` },
+      {
+        idempotencyKey: `respawn-upd-${input.existingItemId}-${input.weekStart ?? "recurring"}-${input.status}`,
+      },
     );
     return input.existingItemId;
   }
