@@ -17,12 +17,20 @@ export function usePendingRespawnCount(): number {
     queryKey: ["respawn_pending_count"],
     refetchInterval: 60_000,
     queryFn: async () => {
-      const { count, error } = await supabase
-        .from("respawn_requests")
-        .select("id", { count: "exact", head: true })
-        .eq("status", "pending");
-      if (error) return 0;
-      return count ?? 0;
+      // One-time + recurring pending requests both land in the same queue tab.
+      const [oneTime, recurring] = await Promise.all([
+        supabase
+          .from("respawn_requests")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "pending"),
+        supabase
+          .from("respawn_recurring")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "pending"),
+      ]);
+      return (
+        (oneTime.error ? 0 : (oneTime.count ?? 0)) + (recurring.error ? 0 : (recurring.count ?? 0))
+      );
     },
   });
   return enabled ? (data ?? 0) : 0;
