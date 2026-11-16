@@ -744,6 +744,17 @@
 .turf-popup .nm-pop-btn-danger:hover {
   background: color-mix(in oklab, var(--destructive) 24%, transparent);
 }
+/* Quiet secondary variant (open full assignment history) — pairs under the
+   assign button, so a tighter gap and muted chrome. */
+.turf-popup .nm-pop-btn-quiet {
+  margin-top: 6px;
+  border-color: var(--border);
+  background: transparent;
+  color: var(--muted-foreground);
+}
+.turf-popup .nm-pop-btn-quiet:hover {
+  background: color-mix(in oklab, var(--foreground) 8%, transparent);
+}
 .turf-popup .nm-pop-btn:disabled {
   opacity: 0.45;
   cursor: default;

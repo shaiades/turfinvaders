@@ -187,6 +187,9 @@ function ManagerTerritoryView({
   const [pendingPolygon, setPendingPolygon] = useState<LatLng[] | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTurfId, setEditingTurfId] = useState<string | null>(null);
+  // Map popup's "Assignment history" shortcut: open the sheet with its
+  // history section already expanded (owner ask 2026-11-16).
+  const [openWithHistory, setOpenWithHistory] = useState(false);
   const [listDeleteId, setListDeleteId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [searchBusy, setSearchBusy] = useState(false);
@@ -1211,6 +1214,20 @@ function ManagerTerritoryView({
                     // popup's own admin actions (below) handle them.
                     if (id.startsWith("repcard:")) return;
                     setEditingTurfId(id);
+                    setOpenWithHistory(false);
+                    setIsModalOpen(true);
+                  }
+                : undefined
+            }
+            // Popup's second button: same sheet, but landing on the full
+            // assignment-history list instead of the picker (owner ask
+            // 2026-11-16: "find out who I've put in this area before").
+            onTerritoryHistory={
+              !drawing
+                ? (id) => {
+                    if (id.startsWith("repcard:")) return;
+                    setEditingTurfId(id);
+                    setOpenWithHistory(true);
                     setIsModalOpen(true);
                   }
                 : undefined
@@ -1442,6 +1459,8 @@ function ManagerTerritoryView({
         myTeamId={teamId}
         lastWorked={editingTurf ? lastWorked : null}
         history={editingTurf ? assignmentHistory : []}
+        initialShowHistory={openWithHistory}
+        historyLoading={!!editingTurf && historyQuery.isPending}
         saving={saveTurf.isPending || updateTurf.isPending}
         deleting={deleteTurf.isPending}
         onSave={(assigneeId, name) => {

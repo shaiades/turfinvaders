@@ -86,7 +86,8 @@ export function DeleteAreaConfirmDialog({
 
 export function AreaDetailsSheet({
   open, onOpenChange, mode, turf, vertexCount, users, lastWorked, history = [],
-  saving, deleting, onSave, onDelete, myTeamId,
+  saving, deleting, onSave, onDelete, myTeamId, initialShowHistory = false,
+  historyLoading = false,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -106,6 +107,12 @@ export function AreaDetailsSheet({
    *  their people in the whole company roster (owner ask 2026-09-17,
    *  Eric's "hard to assign area" report). One tap reveals everyone. */
   myTeamId?: string | null;
+  /** Open with the Assignment history section already expanded (the map
+   *  popup's "Assignment history" shortcut). */
+  initialShowHistory?: boolean;
+  /** True while the per-turf history query is still in flight — the expanded
+   *  section says "Loading…" instead of a premature "no history". */
+  historyLoading?: boolean;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [touched, setTouched] = useState(false);
@@ -131,7 +138,7 @@ export function AreaDetailsSheet({
       setTouched(false);
       setQuery("");
       setConfirmingDelete(false);
-      setShowHistory(false);
+      setShowHistory(initialShowHistory && mode === "edit");
       setShowEveryone(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -220,7 +227,10 @@ export function AreaDetailsSheet({
           </SheetHeader>
 
           <div className="space-y-3 overflow-y-auto px-4 pt-3">
-            {isEdit && history.length > 0 && (
+            {/* Also kept visible (with an empty note) when the map popup's
+                Assignment-history shortcut opened the sheet but the turf has
+                no rows yet — a silently missing section reads as a dead tap. */}
+            {isEdit && (history.length > 0 || showHistory) && (
               <div className="rounded-lg border border-border">
                 <button
                   type="button"
@@ -231,13 +241,20 @@ export function AreaDetailsSheet({
                   <History className="w-4 h-4 text-muted-foreground shrink-0" />
                   <span className="flex-1 text-sm font-medium">
                     Assignment history{" "}
-                    <span className="text-muted-foreground">· {history.length}</span>
+                    {history.length > 0 && (
+                      <span className="text-muted-foreground">· {history.length}</span>
+                    )}
                   </span>
                   <ChevronDown
                     className={`w-4 h-4 text-muted-foreground shrink-0 transition-transform ${showHistory ? "rotate-180" : ""}`}
                   />
                 </button>
-                {showHistory && (
+                {showHistory && history.length === 0 && (
+                  <div className="border-t border-border px-3 py-2.5 text-xs text-muted-foreground">
+                    {historyLoading ? "Loading history…" : "No assignment history for this area yet."}
+                  </div>
+                )}
+                {showHistory && history.length > 0 && (
                   <ol className="border-t border-border divide-y divide-border">
                     {history.map((h, i) => {
                       const color = h.userId ? assigneeColor(h.userId) : UNASSIGNED_COLOR;
