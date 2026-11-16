@@ -41,6 +41,11 @@ const reviewInput = z.object({
 
 const cancelInput = z.object({ id: z.string().uuid() });
 
+const submitRecurringInput = z.object({
+  shifts: z.array(z.string()).max(14),
+  reason: z.string().max(1000).optional(),
+});
+
 const applyWeekInput = z.object({
   weekStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
@@ -330,6 +335,276 @@ export const cancelRespawnRequest = createServerFn({ method: "POST" })
       }
     } catch (e) {
       console.error("[respawn] cancel Monday sync failed", e);
+    }
+
+    return { ok: true };
+  });
+
+// ═════════════════════════════════════════════════════════════════════════════
+// RECURRING (standing weekly) requests — owner ask 2026-11-13: "let reps request
+// a repeating day off every week". One row per rep (respawn_recurring, unique
+// user_id), same pending → approve/partial/deny flow and approvers. Granted
+// shifts are marked Off on the attendance board IMMEDIATELY (a recurring grant
+// applies to every week, the current one included) and the Sunday-noon
+// respawn-weekly-reset edge function keeps them Off across weekly resets.
+// ═════════════════════════════════════════════════════════════════════════════
+
+/** Monday Day-Off board reason for a recurring item (the board's Week column is
+ *  left empty; this marker is how the office tells it apart). */
+function recurringMondayReason(reason: string | null): string {
+  return reason ? `Repeats every week — ${reason}` : "Repeats every week";
+}
+
+/** Reverting a recurring grant to "On" can wipe a one-time Off the rep also has
+ *  for the CURRENT attendance week — re-apply that week's granted shifts after
+ *  the revert so the board ends up right. Best-effort (inside Monday try/catch). */
+async function reapplyCurrentWeekOffs(
+  token: string,
+  userId: string,
+  office: RepOffice,
+  repName: string,
+): Promise<void> {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data: row } = await supabaseAdmin
+    .from("respawn_requests")
+    .select("shifts, approved_shifts, status")
+    .eq("user_id", userId)
+    .eq("week_start", attendanceWeekStartISO(new Date()))
+    .in("status", ["approved", "partial"])
+    .maybeSingle();
+  if (!row) return;
+  const granted = normalizeShifts(
+    (row.approved_shifts as string[] | null) ?? (row.shifts as string[] | null) ?? [],
+  ) as ShiftKey[];
+  if (granted.length === 0) return;
+  const { applyAttendance } = await import("@/lib/respawn.server");
+  await applyAttendance(token, { office, repName, shifts: granted });
+}
+
+export const submitRecurringRespawn = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => submitRecurringInput.parse(d))
+  .handler(async ({ data, context }): Promise<{ ok: true; mondaySynced: boolean }> => {
+    const userId = context.userId;
+    const shifts = normalizeShifts(data.shifts);
+    if (shifts.length === 0) {
+      throw new Error("Pick at least one shift to repeat off (or withdraw instead).");
+    }
+    const reason = data.reason?.trim() ? data.reason.trim() : null;
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: profile, error: profErr } = await supabaseAdmin
+      .from("profiles")
+      .select("display_name, office_location")
+      .eq("id", userId)
+      .maybeSingle();
+    if (profErr) throw new Error(profErr.message);
+    const repName = (profile?.display_name as string | null)?.trim() || "Unknown";
+    const { office, rosterProvided } = resolveRosterOffice(
+      profile?.office_location as string | null,
+    );
+    if (!rosterProvided) {
+      console.warn(
+        `[respawn] ${repName} (${userId}) has no roster office_location — defaulting to ${office}. Set their office in Manage Players.`,
+      );
+    }
+
+    const { data: existing } = await supabaseAdmin
+      .from("respawn_recurring")
+      .select("id, monday_item_id, status, approved_shifts")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const existingItemId = (existing?.monday_item_id as string | null) ?? null;
+
+    // Supabase first (source of truth). Editing resets an approved/denied
+    // standing request back to Pending and clears the decision stamp.
+    const { data: saved, error: upErr } = await supabaseAdmin
+      .from("respawn_recurring")
+      .upsert(
+        {
+          user_id: userId,
+          rep_name: repName,
+          office,
+          shifts,
+          reason,
+          status: "pending",
+          approved_shifts: null,
+          decided_by: null,
+          decided_at: null,
+          decision_note: null,
+          monday_item_id: existingItemId,
+        },
+        { onConflict: "user_id" },
+      )
+      .select("id")
+      .single();
+    if (upErr) throw new Error(upErr.message);
+    const rowId = saved.id as string;
+
+    let mondaySynced = false;
+    try {
+      const token = await mondayToken();
+      if (token) {
+        const { syncDayOffItem, applyAttendance } = await import("@/lib/respawn.server");
+        // An edited previously-granted standing request goes back to pending —
+        // UN-apply its attendance writes first (a recurring grant is always
+        // "current week"), then restore any one-time Offs it overlapped.
+        const prevGranted = ["approved", "partial"].includes((existing?.status as string) ?? "")
+          ? (normalizeShifts((existing?.approved_shifts as string[] | null) ?? []) as ShiftKey[])
+          : [];
+        if (prevGranted.length > 0) {
+          await applyAttendance(token, { office, repName, shifts: prevGranted, label: "On" });
+          await reapplyCurrentWeekOffs(token, userId, office, repName);
+        }
+        const itemId = await syncDayOffItem(token, {
+          rowId,
+          repName: `${repName} · weekly`,
+          office,
+          weekStart: null,
+          shifts: shifts as ShiftKey[],
+          reason: recurringMondayReason(reason),
+          status: "pending",
+          existingItemId,
+        });
+        mondaySynced = true;
+        if (itemId && itemId !== existingItemId) {
+          await supabaseAdmin
+            .from("respawn_recurring")
+            .update({ monday_item_id: itemId })
+            .eq("user_id", userId);
+        }
+      }
+    } catch (e) {
+      console.error("[respawn] recurring submit Monday sync failed", e);
+    }
+
+    return { ok: true, mondaySynced };
+  });
+
+export const reviewRecurringRespawn = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => reviewInput.parse(d))
+  .handler(
+    async ({
+      data,
+      context,
+    }): Promise<{ ok: true; status: string; attendanceApplied: boolean }> => {
+      await assertAdmin(context.supabase as unknown as AdminClient, context.userId);
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+      const { data: row, error: rowErr } = await supabaseAdmin
+        .from("respawn_recurring")
+        .select("id, user_id, rep_name, office, shifts, reason, status, monday_item_id")
+        .eq("id", data.id)
+        .maybeSingle();
+      if (rowErr) throw new Error(rowErr.message);
+      if (!row) throw new Error("That request no longer exists.");
+
+      const requested = normalizeShifts(row.shifts) as ShiftKey[];
+      const { status, approvedShifts, declinedShifts } = settleApproval(
+        requested,
+        data.approve ? ((data.approvedShifts ?? null) as ShiftKey[] | null) : [],
+        data.approve,
+      );
+
+      const { error: updErr } = await supabaseAdmin
+        .from("respawn_recurring")
+        .update({
+          status,
+          approved_shifts: approvedShifts,
+          decided_by: context.userId,
+          decided_at: new Date().toISOString(),
+          decision_note: data.note?.trim() ? data.note.trim() : null,
+        })
+        .eq("id", data.id);
+      if (updErr) throw new Error(updErr.message);
+
+      // Mirror: decision onto the Day-Off item; a grant marks the shifts Off on
+      // the attendance board NOW (recurring = every week, this one included).
+      // The Sunday reset keeps them Off for every week after.
+      let attendanceApplied = false;
+      try {
+        const token = await mondayToken();
+        if (token) {
+          const { setDayOffDecision, applyAttendance } = await import("@/lib/respawn.server");
+          if (row.monday_item_id) {
+            await setDayOffDecision(token, row.monday_item_id as string, {
+              status,
+              baseReason: recurringMondayReason((row.reason as string | null) ?? null),
+              grantedShifts: approvedShifts,
+              declinedShifts,
+              note: data.note?.trim() ? data.note.trim() : null,
+            });
+          }
+          if (approvedShifts.length > 0) {
+            attendanceApplied = await applyAttendance(token, {
+              office: row.office as RepOffice,
+              repName: row.rep_name as string,
+              shifts: approvedShifts,
+            });
+          }
+        }
+      } catch (e) {
+        console.error("[respawn] recurring review Monday sync failed", e);
+      }
+
+      return { ok: true, status, attendanceApplied };
+    },
+  );
+
+export const cancelRecurringRespawn = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => cancelInput.parse(d))
+  .handler(async ({ data, context }): Promise<{ ok: true }> => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: row } = await supabaseAdmin
+      .from("respawn_recurring")
+      .select("id, user_id, rep_name, office, shifts, approved_shifts, status, monday_item_id")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (!row) return { ok: true };
+
+    // A rep ends their own standing day-off by withdrawing it — unlike one-time
+    // requests, an APPROVED recurring one may be withdrawn by its owner too
+    // (there is no week for it to "expire" with); an approver may remove any.
+    const isOwner = (row.user_id as string) === context.userId;
+    const isAdmin = await userIsAdmin(context.supabase as unknown as AdminClient, context.userId);
+    if (!isOwner && !isAdmin) {
+      throw new Error("Only the requester or an approver can withdraw this request.");
+    }
+
+    const { error: delErr } = await supabaseAdmin
+      .from("respawn_recurring")
+      .delete()
+      .eq("id", data.id);
+    if (delErr) throw new Error(delErr.message);
+
+    try {
+      const token = await mondayToken();
+      if (token) {
+        const { deleteDayOffItem, applyAttendance } = await import("@/lib/respawn.server");
+        const wasGranted = ["approved", "partial"].includes(row.status as string);
+        const grantedShifts = normalizeShifts(
+          (row.approved_shifts as string[] | null) ?? [],
+        ) as ShiftKey[];
+        if (wasGranted && grantedShifts.length > 0) {
+          await applyAttendance(token, {
+            office: row.office as RepOffice,
+            repName: row.rep_name as string,
+            shifts: grantedShifts,
+            label: "On",
+          });
+          await reapplyCurrentWeekOffs(
+            token,
+            row.user_id as string,
+            row.office as RepOffice,
+            row.rep_name as string,
+          );
+        }
+        if (row.monday_item_id) await deleteDayOffItem(token, row.monday_item_id as string);
+      }
+    } catch (e) {
+      console.error("[respawn] recurring cancel Monday sync failed", e);
     }
 
     return { ok: true };

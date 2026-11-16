@@ -2,8 +2,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
   applyApprovedRespawnsForWeek,
+  cancelRecurringRespawn,
   cancelRespawnRequest,
+  reviewRecurringRespawn,
   reviewRespawnRequest,
+  submitRecurringRespawn,
   submitRespawnRequest,
 } from "@/lib/respawn.functions";
 import type { RepOffice, RespawnStatus } from "@/lib/respawn";
@@ -28,6 +31,24 @@ export type RespawnRow = {
   reason: string | null;
   status: RespawnStatus;
   late: boolean;
+  decided_by: string | null;
+  decided_at: string | null;
+  decision_note: string | null;
+  monday_item_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/** A standing "every week" request (respawn_recurring) — one per rep. */
+export type RecurringRow = {
+  id: string;
+  user_id: string;
+  rep_name: string;
+  office: RepOffice | string;
+  shifts: string[];
+  approved_shifts: string[] | null;
+  reason: string | null;
+  status: RespawnStatus;
   decided_by: string | null;
   decided_at: string | null;
   decision_note: string | null;
@@ -94,6 +115,40 @@ export function useRespawnQueue(fromWeekISO: string, enabled = true) {
   });
 }
 
+/** My standing weekly request (RLS self). null row = none on file. */
+export function useMyRecurring(userId: string | null) {
+  return useQuery({
+    queryKey: ["respawn", "recurring-mine", userId ?? "none"],
+    enabled: !!userId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("respawn_recurring")
+        .select(SELECT)
+        .eq("user_id", userId!)
+        .maybeSingle();
+      if (error) return null;
+      return (data ?? null) as RecurringRow | null;
+    },
+  });
+}
+
+/** Approver queue: every standing weekly request (RLS admin). */
+export function useRecurringQueue(enabled = true) {
+  return useQuery({
+    queryKey: ["respawn", "recurring-queue"],
+    enabled,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("respawn_recurring")
+        .select(SELECT)
+        .order("created_at", { ascending: true })
+        .limit(300);
+      if (error) return null;
+      return (data ?? []) as RecurringRow[];
+    },
+  });
+}
+
 export function useRespawnMutations() {
   const qc = useQueryClient();
   const refresh = () => qc.invalidateQueries({ queryKey: ["respawn"] });
@@ -124,5 +179,26 @@ export function useRespawnMutations() {
     onSuccess: refresh,
   });
 
-  return { submit, review, cancel, applyWeek };
+  const submitRecurring = useMutation({
+    mutationFn: (vars: { shifts: string[]; reason?: string }) =>
+      submitRecurringRespawn({ data: vars }),
+    onSuccess: refresh,
+  });
+
+  const reviewRecurring = useMutation({
+    mutationFn: (vars: {
+      id: string;
+      approve: boolean;
+      note?: string;
+      approvedShifts?: string[];
+    }) => reviewRecurringRespawn({ data: vars }),
+    onSuccess: refresh,
+  });
+
+  const cancelRecurring = useMutation({
+    mutationFn: (id: string) => cancelRecurringRespawn({ data: { id } }),
+    onSuccess: refresh,
+  });
+
+  return { submit, review, cancel, applyWeek, submitRecurring, reviewRecurring, cancelRecurring };
 }

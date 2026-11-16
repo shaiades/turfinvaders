@@ -3847,6 +3847,57 @@ export type Database = {
         }
         Relationships: []
       }
+      respawn_recurring: {
+        Row: {
+          approved_shifts: string[] | null
+          created_at: string
+          decided_at: string | null
+          decided_by: string | null
+          decision_note: string | null
+          id: string
+          monday_item_id: string | null
+          office: string
+          reason: string | null
+          rep_name: string
+          shifts: string[]
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          approved_shifts?: string[] | null
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          decision_note?: string | null
+          id?: string
+          monday_item_id?: string | null
+          office: string
+          reason?: string | null
+          rep_name: string
+          shifts?: string[]
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          approved_shifts?: string[] | null
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          decision_note?: string | null
+          id?: string
+          monday_item_id?: string | null
+          office?: string
+          reason?: string | null
+          rep_name?: string
+          shifts?: string[]
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       respawn_requests: {
         Row: {
           approved_shifts: string[] | null
@@ -4005,6 +4056,7 @@ export type Database = {
           ooh_writeback_board_allowlist: string | null
           ooh_writeback_mode: string
           profile_photo_remind_later: boolean
+          respawn_weekly_reset_enabled: boolean
           updated_at: string
         }
         Insert: {
@@ -4027,6 +4079,7 @@ export type Database = {
           ooh_writeback_board_allowlist?: string | null
           ooh_writeback_mode?: string
           profile_photo_remind_later?: boolean
+          respawn_weekly_reset_enabled?: boolean
           updated_at?: string
         }
         Update: {
@@ -4049,6 +4102,7 @@ export type Database = {
           ooh_writeback_board_allowlist?: string | null
           ooh_writeback_mode?: string
           profile_photo_remind_later?: boolean
+          respawn_weekly_reset_enabled?: boolean
           updated_at?: string
         }
         Relationships: []
