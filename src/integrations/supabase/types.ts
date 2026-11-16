@@ -4039,6 +4039,7 @@ export type Database = {
         Row: {
           active_monday_board_oc: string | null
           active_monday_board_sd: string | null
+          auto_unassign_stale_areas_enabled: boolean
           confirmer_dial_credit: boolean
           confirmer_recycle_credit: boolean
           created_at: string
@@ -4062,6 +4063,7 @@ export type Database = {
         Insert: {
           active_monday_board_oc?: string | null
           active_monday_board_sd?: string | null
+          auto_unassign_stale_areas_enabled?: boolean
           confirmer_dial_credit?: boolean
           confirmer_recycle_credit?: boolean
           created_at?: string
@@ -4085,6 +4087,7 @@ export type Database = {
         Update: {
           active_monday_board_oc?: string | null
           active_monday_board_sd?: string | null
+          auto_unassign_stale_areas_enabled?: boolean
           confirmer_dial_credit?: boolean
           confirmer_recycle_credit?: boolean
           created_at?: string
