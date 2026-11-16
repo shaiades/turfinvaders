@@ -1057,6 +1057,7 @@ function NeonMapInner({
   onViewChange,
   fitPolygons,
   onTerritoryClick,
+  onTerritoryHistory,
   onHistoricalAssign,
   onHistoricalDelete,
   onPinClick,
@@ -1094,6 +1095,10 @@ function NeonMapInner({
    *  re-frame on reassignment. Framing only — movement stays free. */
   fitPolygons?: LatLng[][];
   onTerritoryClick?: (id: string) => void;
+  /** Popup-mode secondary action: opens the full assignment-history view for
+   *  a live turf (the sheet with its history expanded) — the popup's own
+   *  "Earlier" list caps at a few rows. */
+  onTerritoryHistory?: (id: string) => void;
   /** Admin-only popup actions for `repcard:` historical-coverage rings:
    *  promote into a live turf / delete the ring. Omitted (captains, canvasser
    *  maps) the popup keeps its read-only explainer. */
@@ -1792,18 +1797,32 @@ function NeonMapInner({
                         </div>
                       )
                     ) : (
-                      <button
-                        type="button"
-                        className="nm-pop-btn"
-                        onClick={() => {
-                          // Close the on-map card before the sheet takes over, so
-                          // it isn't left open behind (and after) the sheet.
-                          mapRef.current?.closePopup();
-                          onTerritoryClick!(t.id);
-                        }}
-                      >
-                        Assign / edit →
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          className="nm-pop-btn"
+                          onClick={() => {
+                            // Close the on-map card before the sheet takes over, so
+                            // it isn't left open behind (and after) the sheet.
+                            mapRef.current?.closePopup();
+                            onTerritoryClick!(t.id);
+                          }}
+                        >
+                          Assign / edit →
+                        </button>
+                        {onTerritoryHistory && (
+                          <button
+                            type="button"
+                            className="nm-pop-btn nm-pop-btn-quiet"
+                            onClick={() => {
+                              mapRef.current?.closePopup();
+                              onTerritoryHistory(t.id);
+                            }}
+                          >
+                            Assignment history →
+                          </button>
+                        )}
+                      </>
                     )}
                   </Popup>
                 )}
