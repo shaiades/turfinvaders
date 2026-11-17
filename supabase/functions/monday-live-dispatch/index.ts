@@ -184,18 +184,21 @@ serve(async (req) => {
           status,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         })
-      const webhookSecret = Deno.env.get('MONDAY_WEBHOOK_SECRET') ?? ''
+      const { data: sRow } = await supabaseAdmin
+        .from('system_settings')
+        .select('id, monday_api_token, incoming_leads_board_id, monday_webhooks, monday_webhook_secret')
+        .limit(1)
+        .maybeSingle()
+      const webhookSecret =
+        String((sRow as any)?.monday_webhook_secret ?? '').trim() ||
+        (Deno.env.get('MONDAY_WEBHOOK_SECRET') ?? '')
       if (!webhookSecret) {
         return respond(500, {
           ok: false,
-          error: 'MONDAY_WEBHOOK_SECRET is not set — refusing to register a secretless webhook',
+          error:
+            'no webhook secret — system_settings.monday_webhook_secret and MONDAY_WEBHOOK_SECRET are both empty; refusing to register a secretless webhook',
         })
       }
-      const { data: sRow } = await supabaseAdmin
-        .from('system_settings')
-        .select('id, monday_api_token, incoming_leads_board_id, monday_webhooks')
-        .limit(1)
-        .maybeSingle()
       const adminToken = (sRow as any)?.monday_api_token ? String((sRow as any).monday_api_token) : null
       const leadsBoardId = String((sRow as any)?.incoming_leads_board_id ?? '4155518549')
       if (!adminToken) return respond(500, { ok: false, error: 'No Monday token in system_settings' })
@@ -241,11 +244,20 @@ serve(async (req) => {
       return respond(200, { ok: true, created: String(createdId) })
     }
 
-    // Optional shared-secret gate, soft rollout: no-op until MONDAY_WEBHOOK_SECRET
-    // is set in the function secrets; then mismatches are logged but allowed until
-    // MONDAY_WEBHOOK_ENFORCE_SECRET=true, so existing Monday integrations keep
-    // working while their webhook URLs are updated to include ?secret=...
-    const expectedSecret = Deno.env.get('MONDAY_WEBHOOK_SECRET') ?? ''
+    // Shared-secret gate. The authoritative secret lives in
+    // system_settings.monday_webhook_secret (single source of truth — the
+    // same value rotate-boards embeds in hook URLs); the MONDAY_WEBHOOK_SECRET
+    // function secret is a fallback only. Soft rollout semantics kept:
+    // no-op while both are empty, mismatches logged but allowed until
+    // MONDAY_WEBHOOK_ENFORCE_SECRET=true.
+    const { data: secretRow } = await supabaseAdmin
+      .from('system_settings')
+      .select('monday_webhook_secret')
+      .limit(1)
+      .maybeSingle()
+    const expectedSecret =
+      String((secretRow as any)?.monday_webhook_secret ?? '').trim() ||
+      (Deno.env.get('MONDAY_WEBHOOK_SECRET') ?? '')
     if (expectedSecret) {
       const presentedSecret =
         req.headers.get('x-monday-secret') ?? new URL(req.url).searchParams.get('secret') ?? ''
@@ -383,7 +395,10 @@ serve(async (req) => {
       || null
     if (!mondayToken && settingsRow) {
       for (const [k, v] of Object.entries(settingsRow)) {
-        if (typeof v === 'string' && v.length > 20 && k !== 'id' && !k.startsWith('active_monday_board')) {
+        if (
+          typeof v === 'string' && v.length > 20 && k !== 'id' &&
+          !k.startsWith('active_monday_board') && k !== 'monday_webhook_secret'
+        ) {
           mondayToken = v; break
         }
       }

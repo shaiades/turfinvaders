@@ -44,14 +44,38 @@ const json = (body: unknown, status = 200) =>
   });
 
 const MONDAY_API = process.env.MONDAY_API_URL || "https://api.monday.com/v2";
-// The edge function enforces MONDAY_WEBHOOK_SECRET (same value on both sides);
-// webhooks registered without it are rejected on delivery. Resolved lazily so a
-// missing env var surfaces in the run summary instead of at module load.
-function edgeUrl(): string {
-  const secret = process.env.MONDAY_WEBHOOK_SECRET;
+// The edge function validates `?secret=` on every delivery, so hook URLs must
+// carry the same value it checks. The authoritative copy lives in
+// system_settings.monday_webhook_secret (set once, by SQL, next to
+// monday_api_token); the MONDAY_WEBHOOK_SECRET env var is only a fallback.
+// Two rotations (11/9/26, 11/16/26) died on hand-pasted env values — a
+// 725-char and then a 191-char paste, the latter pushing the URL past
+// Monday's 255-char cap — so the shape is validated here and a bad value
+// fails loudly (the callers' catch blocks page the owner) instead of
+// registering dead hooks.
+const SECRET_SHAPE = /^[A-Za-z0-9_-]{16,110}$/;
+function resolveWebhookSecret(settings: { monday_webhook_secret?: unknown } | null): string {
+  const fromDb = String(settings?.monday_webhook_secret ?? "").trim();
+  const fromEnv = (process.env.MONDAY_WEBHOOK_SECRET ?? "").trim();
+  const secret = fromDb || fromEnv;
+  const source = fromDb ? "system_settings.monday_webhook_secret" : "the MONDAY_WEBHOOK_SECRET env var";
+  if (!secret) {
+    throw new Error(
+      "no webhook secret: system_settings.monday_webhook_secret and MONDAY_WEBHOOK_SECRET are both empty",
+    );
+  }
+  if (!SECRET_SHAPE.test(secret)) {
+    throw new Error(
+      `webhook secret from ${source} is malformed (${secret.length} chars) — ` +
+        "expected 16-110 chars of [A-Za-z0-9_-]; fix the stored value",
+    );
+  }
+  return secret;
+}
+function edgeUrl(secret: string): string {
   const base =
     "https://xogitpqeuwalerxygvjw.supabase.co/functions/v1/monday-live-dispatch?apikey=sb_publishable_ivjX0mrVvSLM1DHfDTDVuw_qHUtGeS2";
-  const url = secret ? `${base}&secret=${secret}` : base;
+  const url = `${base}&secret=${secret}`;
   if (url.length > 255) {
     throw new Error(`webhook URL is ${url.length} chars — Monday caps webhook URLs at 255`);
   }
@@ -62,13 +86,34 @@ function edgeUrl(): string {
 // unnoticed until 17:00 PT). Hard failures page the owner through the same
 // digest channel the token-blindness canary uses.
 async function pageOwner(title: string, body: string): Promise<void> {
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!serviceKey) return;
-  await fetch("https://xogitpqeuwalerxygvjw.supabase.co/functions/v1/notify-owner-digest", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
-    body: JSON.stringify({ title, body, url: "/fleet-dispatch" }),
-  }).catch(() => {});
+  // Each page attempt leaves a webhook_logs row either way — on 11/16/26 it
+  // was impossible to tell after the fact whether the 6 AM failure page ever
+  // went out. Logging is best-effort too; paging never throws.
+  let outcome: Record<string, unknown>;
+  try {
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!serviceKey) {
+      outcome = { title, ok: false, error: "SUPABASE_SERVICE_ROLE_KEY not set" };
+    } else {
+      const resp = await fetch(
+        "https://xogitpqeuwalerxygvjw.supabase.co/functions/v1/notify-owner-digest",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
+          body: JSON.stringify({ title, body, url: "/fleet-dispatch" }),
+        },
+      );
+      outcome = { title, ok: resp.ok, status: resp.status, response: (await resp.text()).slice(0, 200) };
+    }
+  } catch (err) {
+    outcome = { title, ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+  try {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    await supabaseAdmin.from("webhook_logs").insert({ step: "Owner_Paged", data: outcome as never });
+  } catch {
+    /* logging the page must never break the page */
+  }
 }
 
 const WEBHOOK_EVENTS = ["create_item", "change_column_value"] as const;
@@ -325,7 +370,7 @@ async function rotate(): Promise<Response> {
     const { data: settings } = await supabaseAdmin
       .from("system_settings")
       .select(
-        "monday_api_token, monday_template_board_id, monday_webhooks, active_monday_board_sd, active_monday_board_oc, incoming_leads_board_id",
+        "monday_api_token, monday_template_board_id, monday_webhooks, active_monday_board_sd, active_monday_board_oc, incoming_leads_board_id, monday_webhook_secret",
       )
       .maybeSingle();
     const token = settings?.monday_api_token as string | undefined;
@@ -345,9 +390,6 @@ async function rotate(): Promise<Response> {
 
     const { start, end } = weekRange();
     const summary: Record<string, unknown> = { week: `${start} - ${end}` };
-    if (!process.env.MONDAY_WEBHOOK_SECRET)
-      summary.webhook_secret_warning =
-        "MONDAY_WEBHOOK_SECRET not set — new webhooks will be rejected by the edge function";
 
     // Existing boards, newest first.
     const boardsData = await monday(
@@ -387,22 +429,53 @@ async function rotate(): Promise<Response> {
         summary[`${office}_existing`] = { boardId, name: existing!.name };
       }
       newIds[office] = String(boardId);
+    }
 
-      for (const event of WEBHOOK_EVENTS) {
-        const already = registry.some((r) => r.board_id === String(boardId) && r.event === event);
-        if (already) continue;
-        const created = await monday(
-          token,
-          `mutation ($b: ID!, $u: String!, $e: WebhookEventType!) { create_webhook(board_id: $b, url: $u, event: $e) { id } }`,
-          { b: String(boardId), u: edgeUrl(), e: event },
-          { idempotencyKey: `wh-${boardId}-${event}` },
-        );
-        registry.push({
-          board_id: String(boardId),
-          webhook_id: String((created.create_webhook as { id: string }).id),
-          event,
-          registered_at: new Date().toISOString(),
-        });
+    // Flip the active boards BEFORE touching webhooks. On 11/16/26 a bad
+    // webhook secret aborted the whole rotation here, leaving
+    // active_monday_board_* on the previous week — which also starved every
+    // non-webhook consumer (block_cards reconcile, 8:45 auto-issue, nightly
+    // approvals) that reads the active boards from settings. With the flip
+    // first, a webhook failure degrades to "live updates lag until the next
+    // reconcile" instead of "the whole app watches last week's boards".
+    await supabaseAdmin
+      .from("system_settings")
+      .update({ active_monday_board_sd: newIds.SD, active_monday_board_oc: newIds.OC })
+      .not("id", "is", null);
+    summary.active_boards_updated = { SD: newIds.SD, OC: newIds.OC };
+
+    const hookErrors: string[] = [];
+    let secret: string | null = null;
+    try {
+      secret = resolveWebhookSecret(settings);
+    } catch (err) {
+      hookErrors.push(err instanceof Error ? err.message : String(err));
+    }
+    if (secret) {
+      for (const office of ["SD", "OC"] as const) {
+        const boardId = newIds[office];
+        for (const event of WEBHOOK_EVENTS) {
+          const already = registry.some((r) => r.board_id === boardId && r.event === event);
+          if (already) continue;
+          try {
+            const created = await monday(
+              token,
+              `mutation ($b: ID!, $u: String!, $e: WebhookEventType!) { create_webhook(board_id: $b, url: $u, event: $e) { id } }`,
+              { b: boardId, u: edgeUrl(secret), e: event },
+              { idempotencyKey: `wh-${boardId}-${event}` },
+            );
+            registry.push({
+              board_id: boardId,
+              webhook_id: String((created.create_webhook as { id: string }).id),
+              event,
+              registered_at: new Date().toISOString(),
+            });
+          } catch (err) {
+            hookErrors.push(
+              `${office} ${event}: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        }
       }
     }
 
@@ -445,12 +518,18 @@ async function rotate(): Promise<Response> {
 
     await supabaseAdmin
       .from("system_settings")
-      .update({
-        active_monday_board_sd: newIds.SD,
-        active_monday_board_oc: newIds.OC,
-        monday_webhooks: keep as never,
-      })
+      .update({ monday_webhooks: keep as never })
       .not("id", "is", null);
+
+    if (hookErrors.length) {
+      summary.hook_errors = hookErrors;
+      await log(summary);
+      await pageOwner(
+        "Board rotation: boards switched but some webhooks FAILED",
+        `${hookErrors.join("\n")}\n\nThe app is watching this week's boards (reconcile keeps data flowing), but live updates lag until the webhooks are fixed — the daily 13:30 UTC check will retry them.`,
+      );
+      return json({ ok: false, ...summary }, 500);
+    }
 
     await log(summary);
     return json({ ok: true, ...summary });
@@ -476,7 +555,7 @@ async function check(): Promise<Response> {
     const { data: settings } = await supabaseAdmin
       .from("system_settings")
       .select(
-        "monday_api_token, monday_webhooks, active_monday_board_sd, active_monday_board_oc, incoming_leads_board_id",
+        "monday_api_token, monday_webhooks, active_monday_board_sd, active_monday_board_oc, incoming_leads_board_id, monday_webhook_secret",
       )
       .maybeSingle();
     const token = settings?.monday_api_token as string | undefined;
@@ -559,9 +638,10 @@ async function check(): Promise<Response> {
     // and adopt a dead webhook id instead of creating a live one.
     const runNonce = Date.now().toString(36);
     const issues: Record<string, unknown> = {};
-    if (!process.env.MONDAY_WEBHOOK_SECRET)
-      issues.webhook_secret_warning =
-        "MONDAY_WEBHOOK_SECRET not set — re-created webhooks would be rejected by the edge function";
+    // Resolved AFTER the drift block above so a malformed secret can never
+    // stop the settings flip (rotate() tolerates it too); a throw here is
+    // caught below and pages the owner.
+    const secret = resolveWebhookSecret(settings);
 
     const liveWebhooks = async (boardId: string) => {
       const data = await monday(token, `query ($b: ID!) { webhooks(board_id: $b) { id event } }`, {
@@ -576,7 +656,7 @@ async function check(): Promise<Response> {
     // The Lead Status hook must be created column-scoped, or Monday would fire
     // it for every status column on the board (Office, Blowout Text, …).
     const createWebhook = async (boardId: string, event: WebhookEvent, idempotencyKey: string) => {
-      const args: Record<string, unknown> = { b: boardId, u: edgeUrl(), e: event };
+      const args: Record<string, unknown> = { b: boardId, u: edgeUrl(secret), e: event };
       let mutation = `mutation ($b: ID!, $u: String!, $e: WebhookEventType!) { create_webhook(board_id: $b, url: $u, event: $e) { id } }`;
       if (event === LEAD_STATUS_EVENT) {
         mutation = `mutation ($b: ID!, $u: String!, $e: WebhookEventType!, $c: JSON!) { create_webhook(board_id: $b, url: $u, event: $e, config: $c) { id } }`;
@@ -709,7 +789,7 @@ async function check(): Promise<Response> {
             /* already gone */
           }
         }
-        const deadArgs: Record<string, unknown> = { b: boardId, u: edgeUrl(), e: event };
+        const deadArgs: Record<string, unknown> = { b: boardId, u: edgeUrl(secret), e: event };
         let deadMutation = `mutation ($b: ID!, $u: String!, $e: WebhookEventType!) { create_webhook(board_id: $b, url: $u, event: $e) { id } }`;
         if (event === LEAD_STATUS_EVENT) {
           deadMutation = `mutation ($b: ID!, $u: String!, $e: WebhookEventType!, $c: JSON!) { create_webhook(board_id: $b, url: $u, event: $e, config: $c) { id } }`;

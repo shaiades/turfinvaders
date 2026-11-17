@@ -4049,6 +4049,7 @@ export type Database = {
           live_dispatch_mode: string
           monday_api_token: string | null
           monday_template_board_id: string | null
+          monday_webhook_secret: string | null
           monday_webhooks: Json
           nightly_auto_issue_enabled: boolean
           ooh_autocreate: boolean
@@ -4073,6 +4074,7 @@ export type Database = {
           live_dispatch_mode?: string
           monday_api_token?: string | null
           monday_template_board_id?: string | null
+          monday_webhook_secret?: string | null
           monday_webhooks?: Json
           nightly_auto_issue_enabled?: boolean
           ooh_autocreate?: boolean
@@ -4097,6 +4099,7 @@ export type Database = {
           live_dispatch_mode?: string
           monday_api_token?: string | null
           monday_template_board_id?: string | null
+          monday_webhook_secret?: string | null
           monday_webhooks?: Json
           nightly_auto_issue_enabled?: boolean
           ooh_autocreate?: boolean
