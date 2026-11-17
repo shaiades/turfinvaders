@@ -86,33 +86,22 @@ function edgeUrl(secret: string): string {
 // unnoticed until 17:00 PT). Hard failures page the owner through the same
 // digest channel the token-blindness canary uses.
 async function pageOwner(title: string, body: string): Promise<void> {
-  // Each page attempt leaves a webhook_logs row either way — on 11/16/26 it
-  // was impossible to tell after the fact whether the 6 AM failure page ever
-  // went out. Logging is best-effort too; paging never throws.
-  let outcome: Record<string, unknown>;
-  try {
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!serviceKey) {
-      outcome = { title, ok: false, error: "SUPABASE_SERVICE_ROLE_KEY not set" };
-    } else {
-      const resp = await fetch(
-        "https://xogitpqeuwalerxygvjw.supabase.co/functions/v1/notify-owner-digest",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
-          body: JSON.stringify({ title, body, url: "/fleet-dispatch" }),
-        },
-      );
-      outcome = { title, ok: resp.ok, status: resp.status, response: (await resp.text()).slice(0, 200) };
-    }
-  } catch (err) {
-    outcome = { title, ok: false, error: err instanceof Error ? err.message : String(err) };
-  }
+  // Delivery goes through the database, not a direct edge-fn call: this
+  // Owner_Page insert fires the notify_owner_page trigger, which POSTs to
+  // notify-owner-digest with the vault's notify_secret (pg_net, async). The
+  // old direct call authenticated with Vercel's SUPABASE_SERVICE_ROLE_KEY
+  // compared string-equal against the edge runtime's copy — the two drifted,
+  // and every page and morning digest 11/11–11/17/26 died as a silent 401.
+  // DB writes from here are exercised on every run, so the insert either
+  // works or the whole run is already failing loudly. The row doubles as the
+  // audit trail; pg_net's delivery result lands in net._http_response.
   try {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    await supabaseAdmin.from("webhook_logs").insert({ step: "Owner_Paged", data: outcome as never });
+    await supabaseAdmin
+      .from("webhook_logs")
+      .insert({ step: "Owner_Page", data: { title, body, url: "/fleet-dispatch" } as never });
   } catch {
-    /* logging the page must never break the page */
+    /* paging must never break the caller */
   }
 }
 
