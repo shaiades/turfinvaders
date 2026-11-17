@@ -30,7 +30,6 @@ const json = (body: unknown, status = 200) =>
     headers: { "Content-Type": "application/json" },
   });
 
-const EDGE_URL = "https://xogitpqeuwalerxygvjw.supabase.co/functions/v1/notify-owner-digest";
 const DIGEST_STEP = "God_Digest_Sent";
 
 async function handle(request: Request): Promise<Response> {
@@ -75,24 +74,23 @@ async function handle(request: Request): Promise<Response> {
 
   if (dry) return json({ dry: true, ...digest });
 
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!serviceKey) return json({ error: "SUPABASE_SERVICE_ROLE_KEY not configured" }, 500);
-  const res = await fetch(EDGE_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${serviceKey}`,
-    },
-    body: JSON.stringify({ title: digest.title, body: digest.body, url: "/god-mode" }),
+  // Delivery goes through the database: this Owner_Page insert fires the
+  // notify_owner_page trigger, which POSTs to notify-owner-digest with the
+  // vault's notify_secret (pg_net, async). The old direct call authenticated
+  // with Vercel's SUPABASE_SERVICE_ROLE_KEY compared string-equal against the
+  // edge runtime's copy — the two drifted, and every digest 11/11–11/17/26
+  // died as a silent 401 (visible in this step's own edge_status trail).
+  await supabaseAdmin.from("webhook_logs").insert({
+    step: "Owner_Page",
+    data: { title: digest.title, body: digest.body, url: "/god-mode" } as never,
   });
-  const delivery = await res.json().catch(() => ({}));
 
   await supabaseAdmin.from("webhook_logs").insert({
     step: DIGEST_STEP,
-    data: { date: today, body: digest.body, delivery, edge_status: res.status } as never,
+    data: { date: today, body: digest.body, delivery: "queued via Owner_Page trigger" } as never,
   });
 
-  return json({ sent: res.ok, edge_status: res.status, delivery, body: digest.body });
+  return json({ sent: true, body: digest.body });
 }
 
 export const Route = createFileRoute("/api/internal/god-digest")({

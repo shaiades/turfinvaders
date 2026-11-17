@@ -66,9 +66,18 @@ const json = (body: unknown, status = 200) =>
 
 Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
-  // Server-to-server only: the caller must present the service-role key.
+  // Server-to-server only. Preferred path: x-notify-secret matching
+  // NOTIFY_SECRET, same gate as the other notify-* functions — this is what
+  // the notify_owner_page DB trigger sends. The service-role bearer compare
+  // is kept for back-compat, but it proved fragile: Vercel's copy of the key
+  // drifted from this runtime's and every call 11/11–11/17/26 401'd silently.
+  const notifySecret = Deno.env.get("NOTIFY_SECRET") ?? "";
+  const viaNotifySecret =
+    notifySecret !== "" && req.headers.get("x-notify-secret") === notifySecret;
   const auth = req.headers.get("authorization") ?? "";
-  if (auth !== `Bearer ${SERVICE_KEY}`) return json({ error: "Unauthorized" }, 401);
+  if (!viaNotifySecret && auth !== `Bearer ${SERVICE_KEY}`) {
+    return json({ error: "Unauthorized" }, 401);
+  }
 
   let payload: { title?: string; body?: string; url?: string };
   try {
