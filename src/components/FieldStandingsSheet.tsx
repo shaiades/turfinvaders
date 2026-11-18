@@ -158,16 +158,13 @@ export function FieldStandingsSheet({
       // are office credit, never standings rows.
       if (isNonPersonName(p.display_name)) continue;
       const roles = rolesByUser.get(p.id) ?? [];
-      // Canvasser-tier board membership, FleetDispatch semantics MINUS
-      // confirmers (owner ask 2026-11-18: canvassers see only canvassers —
-      // confirmers work the phones, so their rows came off the field
-      // boards; a confirmer who also holds canvasser/captain still rides).
-      // Captains knock too; Admin-tier (Owner/Manager) members of a van
-      // ride as well — everyone in a van knocks (owner directive
-      // 2026-10-01). Sales reps stay off: a van-assigned closer is not a
-      // canvasser row.
+      // Canvasser-tier board membership, FleetDispatch semantics: captains
+      // knock too; confirmers ride as canvasser-tier rows; Admin-tier
+      // (Owner/Manager) members of a van ride as well — everyone in a van
+      // knocks (owner directive 2026-10-01). Sales reps stay off: a
+      // van-assigned closer is not a canvasser row.
       if (
-        !roles.some((r) => r === "captain" || r === "canvasser") &&
+        !roles.some((r) => r === "captain" || r === "canvasser" || r === "confirmer") &&
         !(p.team_id && roles.some((r) => isAdminRole(r)))
       )
         continue;
