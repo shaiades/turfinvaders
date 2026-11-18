@@ -140,13 +140,21 @@ export function useArcadeLadder(range: RangeKey): ArcadeLadder {
     queryKey: ["arcade_ladder", "roster"],
     staleTime: 5 * 60_000,
     queryFn: async () => {
-      const [profilesR, teamsR] = await Promise.all([
+      const [profilesR, teamsR, rolesR] = await Promise.all([
         supabase.from("profiles").select("id, display_name, team_id, created_at"),
         supabase.from("teams").select("id, name, color"),
+        supabase.from("user_roles").select("user_id, role"),
       ]);
       if (profilesR.error) throw profilesR.error;
       if (teamsR.error) throw teamsR.error;
-      return { profiles: profilesR.data ?? [], teams: teamsR.data ?? [] };
+      if (rolesR.error) throw rolesR.error;
+      const rolesByUser = new Map<string, string[]>();
+      for (const r of rolesR.data ?? []) {
+        const arr = rolesByUser.get(r.user_id) ?? [];
+        arr.push(r.role);
+        rolesByUser.set(r.user_id, arr);
+      }
+      return { profiles: profilesR.data ?? [], teams: teamsR.data ?? [], rolesByUser };
     },
   });
 
@@ -191,6 +199,16 @@ export function useArcadeLadder(range: RangeKey): ArcadeLadder {
       // Non-person rows (lead-source channels, test rows, "A & B" compounds)
       // are office credit, not canvassers — never on the reps' ladder.
       if (isNonPersonName(prof?.display_name)) continue;
+      // Confirmers work the phones, not the doors (owner ask 2026-11-18:
+      // canvassers see only canvassers) — a confirmer-only player sits out
+      // of the arcade boards; one who also holds canvasser/captain rides.
+      const idRoles = roster.rolesByUser.get(id) ?? [];
+      if (
+        idRoles.includes("confirmer") &&
+        !idRoles.includes("canvasser") &&
+        !idRoles.includes("captain")
+      )
+        continue;
       const teamId = prod.snapshotTeam?.[id] ?? prof?.team_id ?? null;
       const team = teamId ? teamById.get(teamId) : null;
       rows.push({
