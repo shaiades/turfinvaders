@@ -785,7 +785,7 @@ export function CloseKombatRespawnTab({
 }) {
   if (!userId) {
     return (
-      <ArcadePanel faction="kombat" title="Respawn">
+      <ArcadePanel faction="kombat" title="Time Off Request">
         <p className="text-sm text-muted-foreground">Sign in to request time off.</p>
       </ArcadePanel>
     );

@@ -1199,7 +1199,7 @@ function CloseKombatInner({
             {/* Respawn (owner, 2026-10-03): shift-off requests. Reps request;
                 Tyler/Shai/Jorge (admin tier) get the approval queue. Visible
                 to both, so it stays ungated. */}
-            <KombatTab value="respawn">Respawn</KombatTab>
+            <KombatTab value="respawn">Time Off Request</KombatTab>
             <KombatTab value="learn">Learn</KombatTab>
           </TabsList>
         </div>
