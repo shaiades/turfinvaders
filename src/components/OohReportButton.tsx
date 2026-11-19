@@ -74,7 +74,7 @@ export function OohSelfGenButton({
   return (
     <Button asChild variant={variant} className={className}>
       <a href={url} target="_blank" rel="noopener noreferrer">
-        <Store className="size-4" /> Log a reload
+        <Store className="size-4" /> Log a reset/reload/self-gen
       </a>
     </Button>
   );

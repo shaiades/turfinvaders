@@ -165,7 +165,7 @@ export function MyLeads({ displayName }: { displayName: string | null }) {
             <p className="text-sm text-foreground">No leads assigned to you today.</p>
             <p className="text-xs text-muted-foreground">
               Your next lead is released the night before — you’ll get a text when it’s yours.
-              Visited an old customer and sold? Log a reload below.
+              Got results on a lead that wasn’t assigned to you? Log it below.
             </p>
           </div>
         ) : (
