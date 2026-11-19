@@ -1,6 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
-  Outlet, Link, createRootRouteWithContext, useRouter, HeadContent, Scripts,
+  Outlet,
+  Link,
+  createRootRouteWithContext,
+  useRouter,
+  HeadContent,
+  Scripts,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
 
@@ -50,6 +55,7 @@ import leafletCss from "leaflet/dist/leaflet.css?url";
 import "../lib/fonts";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { registerServiceWorker } from "../lib/register-sw";
+import { initDeploySkewReload } from "../lib/deploy-skew";
 import { supabase } from "@/integrations/supabase/client";
 import { useTheme } from "@/hooks/useTheme";
 import { Toaster } from "sonner";
@@ -59,6 +65,26 @@ import { Toaster } from "sonner";
 const THEME_INIT_SCRIPT =
   "try{if(localStorage.getItem('theme')==='light')document.documentElement.classList.remove('dark')}catch(e){}";
 
+// Boot watchdog (incident 2026-11-10): a resumed PWA whose entry JS can no
+// longer load shows a permanent blank screen, and every recovery path above
+// — vite:preloadError, the error boundary — lives inside the JS that failed
+// to load. Inlined in <head>, this ships with the document itself: if the
+// app hasn't flagged __tiBooted 30s after the document finished loading,
+// reload once (guard: ≥2 min between attempts, skip while offline, give a
+// slow cellular load one 30s extension before judging). RootComponent sets
+// the flag and clears the timer on mount.
+const BOOT_WATCHDOG_SCRIPT =
+  "(function(){try{var arm=function(n){window.__tiBootTimer=window.setTimeout(function(){try{" +
+  "if(window.__tiBooted)return;" +
+  "if(document.readyState!=='complete'){if(n<1)arm(n+1);return}" +
+  "if(!navigator.onLine)return;" +
+  "var K='ti_boot_reload_at',last=0;" +
+  "try{last=Number(sessionStorage.getItem(K))||0}catch(e){}" +
+  "if(Date.now()-last<120000)return;" +
+  "try{sessionStorage.setItem(K,String(Date.now()))}catch(e){}" +
+  "location.reload()" +
+  "}catch(e){}},30000)};arm(0)}catch(e){}})();";
+
 function NotFoundComponent() {
   return (
     <div className="flex min-h-screen items-center justify-center px-4">
@@ -67,7 +93,10 @@ function NotFoundComponent() {
         <h2 className="mt-4 font-display text-base md:text-lg">GAME OVER</h2>
         <p className="mt-2 text-sm text-muted-foreground">This level doesn't exist.</p>
         <div className="mt-6">
-          <Link to="/" className="inline-flex items-center rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:opacity-90">
+          <Link
+            to="/"
+            className="inline-flex items-center rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:opacity-90"
+          >
             Respawn at home
           </Link>
         </div>
@@ -86,17 +115,24 @@ function ErrorComponent({ error }: { error: Error }) {
   return (
     <div className="flex min-h-screen items-center justify-center px-4">
       <div className="max-w-md text-center">
-        <h1 className="font-display text-lg md:text-xl text-[var(--destructive)]">Connection Lost</h1>
+        <h1 className="font-display text-lg md:text-xl text-[var(--destructive)]">
+          Connection Lost
+        </h1>
         <p className="mt-2 text-sm text-muted-foreground">Something glitched. Try again.</p>
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           {/* Full reload, not router.invalidate(): after a deploy the old
               shell's chunk URLs are gone, and only a fresh document pulls the
               new ones. For every other error class a reload is at worst
               equivalent. */}
-          <button onClick={() => window.location.reload()} className="rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium">
+          <button
+            onClick={() => window.location.reload()}
+            className="rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium"
+          >
             Retry
           </button>
-          <a href="/" className="rounded-md border border-border px-4 py-2 text-sm">Home</a>
+          <a href="/" className="rounded-md border border-border px-4 py-2 text-sm">
+            Home
+          </a>
         </div>
       </div>
     </div>
@@ -112,11 +148,23 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       // especially in the installed (standalone) home-screen app.
       { name: "viewport", content: "width=device-width, initial-scale=1, viewport-fit=cover" },
       { title: "Turf Invaders" },
-      { name: "description", content: "Turf Invaders — the arcade-style canvassing tracker. Claim territory, rack up points, level up your crew." },
+      {
+        name: "description",
+        content:
+          "Turf Invaders — the arcade-style canvassing tracker. Claim territory, rack up points, level up your crew.",
+      },
       { property: "og:title", content: "Turf Invaders" },
       { name: "twitter:title", content: "Turf Invaders" },
-      { property: "og:description", content: "Turf Invaders — the arcade-style canvassing tracker. Claim territory, rack up points, level up your crew." },
-      { name: "twitter:description", content: "Turf Invaders — the arcade-style canvassing tracker. Claim territory, rack up points, level up your crew." },
+      {
+        property: "og:description",
+        content:
+          "Turf Invaders — the arcade-style canvassing tracker. Claim territory, rack up points, level up your crew.",
+      },
+      {
+        name: "twitter:description",
+        content:
+          "Turf Invaders — the arcade-style canvassing tracker. Claim territory, rack up points, level up your crew.",
+      },
       { property: "og:image", content: "https://turfinvaders.com/turf-invaders-hero.jpg" },
       { name: "twitter:image", content: "https://turfinvaders.com/turf-invaders-hero.jpg" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -151,9 +199,15 @@ function RootShell({ children }: { children: ReactNode }) {
     <html lang="en" className="dark">
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        {import.meta.env.PROD && (
+          <script dangerouslySetInnerHTML={{ __html: BOOT_WATCHDOG_SCRIPT }} />
+        )}
         <HeadContent />
       </head>
-      <body>{children}<Scripts /></body>
+      <body>
+        {children}
+        <Scripts />
+      </body>
     </html>
   );
 }
@@ -163,7 +217,12 @@ function RootComponent() {
   const router = useRouter();
   const { theme } = useTheme();
   useEffect(() => {
+    // The app is alive: stand the boot watchdog down and start watching for
+    // deploys that land while this shell stays open all shift.
+    window.__tiBooted = true;
+    if (window.__tiBootTimer !== undefined) window.clearTimeout(window.__tiBootTimer);
     registerServiceWorker();
+    initDeploySkewReload();
   }, []);
   useEffect(() => {
     // supabase-js re-emits SIGNED_IN on tab focus / session recovery, not
