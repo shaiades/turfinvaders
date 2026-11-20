@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { ArcadePanel } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 import { OohReportButton, OohSelfGenButton } from "@/components/OohReportButton";
+import { StillInHouseButton } from "@/components/StillInHouseButton";
 import { MapPin, Users, Loader2, CheckCircle2 } from "lucide-react";
 import { laTodayISO } from "@/lib/dates";
 import { buildRepMatcher } from "@/lib/rep-identity";
@@ -103,10 +104,17 @@ function LeadCard({
         variant={pill.done ? "outline" : "default"}
       />
       {!pill.done && (
-        <p className="text-center text-[11px] text-muted-foreground">
-          No answer at the door? Tap Dispo this lead → “At the door” — the office calls them, you
-          don’t.
-        </p>
+        <>
+          <p className="text-center text-[11px] text-muted-foreground">
+            No answer at the door? Tap Dispo this lead → “At the door” — the office calls them, you
+            don’t.
+          </p>
+          {/* Stuck in the current sit when this appointment comes due? One tap
+              pings dispatch WITH a live GPS fix (location required, no fix →
+              no ping) so "still in house" is provable and the lead gets
+              covered or pushed. */}
+          <StillInHouseButton card={card} repName={repName} className="w-full" />
+        </>
       )}
     </div>
   );
