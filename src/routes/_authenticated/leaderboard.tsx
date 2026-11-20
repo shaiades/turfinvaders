@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { FleetDispatch } from "@/components/FleetDispatch";
+import { StillInHouseQueue } from "@/components/StillInHouseQueue";
 import { CanvasserLeaderboard } from "@/components/CanvasserLeaderboard";
 import { useAuth } from "@/hooks/useAuth";
 import { isAdminRole } from "@/lib/role-policy";
@@ -24,7 +25,16 @@ function LeaderboardPage() {
         <h1 className="font-display text-sm text-neon uppercase tracking-widest">Leaderboard</h1>
       </div>
       <div data-tour="leaders-board">
-        {loading ? null : leadership ? <FleetDispatch readOnly /> : <CanvasserLeaderboard />}
+        {loading ? null : leadership ? (
+          <>
+            {/* Reps stuck in a sit who can't make their next lead — live GPS
+                pings needing a cover rep or a push call. Quiet day: nothing. */}
+            <StillInHouseQueue />
+            <FleetDispatch readOnly />
+          </>
+        ) : (
+          <CanvasserLeaderboard />
+        )}
       </div>
     </div>
   );
