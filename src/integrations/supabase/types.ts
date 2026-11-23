@@ -1848,6 +1848,101 @@ export type Database = {
         }
         Relationships: []
       }
+      no_show_confirmers: {
+        Row: {
+          active: boolean
+          created_at: string
+          id: string
+          link_column_title: string
+          name: string
+          phone: string
+          phone_column_title: string | null
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          id?: string
+          link_column_title: string
+          name: string
+          phone: string
+          phone_column_title?: string | null
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          id?: string
+          link_column_title?: string
+          name?: string
+          phone?: string
+          phone_column_title?: string | null
+        }
+        Relationships: []
+      }
+      no_show_escalations: {
+        Row: {
+          address: string | null
+          appt_time: string | null
+          board_id: string | null
+          called_at: string | null
+          card_date: string | null
+          confirmer_id: string
+          confirmer_name: string
+          created_at: string
+          customer_phone: string | null
+          id: string
+          lead_name: string | null
+          monday_item_id: string
+          monday_synced_at: string | null
+          notified_at: string | null
+          office_location: string | null
+          token: string
+        }
+        Insert: {
+          address?: string | null
+          appt_time?: string | null
+          board_id?: string | null
+          called_at?: string | null
+          card_date?: string | null
+          confirmer_id: string
+          confirmer_name: string
+          created_at?: string
+          customer_phone?: string | null
+          id?: string
+          lead_name?: string | null
+          monday_item_id: string
+          monday_synced_at?: string | null
+          notified_at?: string | null
+          office_location?: string | null
+          token?: string
+        }
+        Update: {
+          address?: string | null
+          appt_time?: string | null
+          board_id?: string | null
+          called_at?: string | null
+          card_date?: string | null
+          confirmer_id?: string
+          confirmer_name?: string
+          created_at?: string
+          customer_phone?: string | null
+          id?: string
+          lead_name?: string | null
+          monday_item_id?: string
+          monday_synced_at?: string | null
+          notified_at?: string | null
+          office_location?: string | null
+          token?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "no_show_escalations_confirmer_id_fkey"
+            columns: ["confirmer_id"]
+            isOneToOne: false
+            referencedRelation: "no_show_confirmers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       objection_attempts: {
         Row: {
           canvasser_id: string
