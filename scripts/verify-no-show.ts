@@ -7,6 +7,7 @@
  *  CUSTOMER) and "No Demo" never do, and a redelivery whose previous value
  *  was already "No Show" never re-texts the confirmers. */
 import {
+  boardColsToEscalationCols,
   buildEscalationDetails,
   callbackUrl,
   colTextByTitle,
@@ -85,6 +86,22 @@ ok("10-digit gets +1", normalizePhoneE164("619-719-0335"), "+16197190335");
 ok("formatted 11-digit", normalizePhoneE164("1 (760) 803-1174"), "+17608031174");
 ok("already E.164 passes through", normalizePhoneE164("+16197190335"), "+16197190335");
 ok("garbage → null (never text a half-parsed number)", normalizePhoneE164("ext 442"), null);
+
+// ── Move-race guard: board column catalogs resolve by title too ─────────────
+const freshBoardCols = boardColsToEscalationCols([
+  { id: "color_ca2", title: " Confirmer Alert " },
+  { id: "text_jl", title: "Jeni Link" },
+  { id: 42, title: "bad id skipped" } as unknown as { id?: unknown; title?: unknown },
+  { id: "", title: "empty id skipped" },
+]);
+ok(
+  "board catalog → alert column by title",
+  findColIdByTitle(freshBoardCols, "confirmer alert"),
+  "color_ca2",
+);
+ok("board catalog → link column", findColIdByTitle(freshBoardCols, "Jeni Link"), "text_jl");
+ok("board catalog drops non-string/empty ids", freshBoardCols.length, 2);
+ok("null catalog → empty (falls back to event cols)", boardColsToEscalationCols(null), []);
 
 console.log(failures === 0 ? "\n✅ 0 failure(s)" : `\n❌ ${failures} failure(s)`);
 process.exit(failures === 0 ? 0 : 1);

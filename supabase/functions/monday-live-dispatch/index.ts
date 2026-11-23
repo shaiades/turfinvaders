@@ -5,6 +5,7 @@ import { isRehashOrRoomCard, normalizeLoose } from './confirmer-credit.ts'
 import {
   ALERT_COLUMN_TITLE,
   ALERT_SEND_LABEL,
+  boardColsToEscalationCols,
   buildEscalationDetails,
   callbackUrl,
   findColIdByTitle,
@@ -922,50 +923,112 @@ serve(async (req) => {
             .eq('monday_item_id', pulseIdStr)
             .is('monday_synced_at', null)
           if ((pending?.length ?? 0) > 0) {
+            // ── Move-race guard (2026-11-23 e2e test finding) ── an existing
+            // Block automation moves "No Show" cards to the Blowout Log
+            // seconds after the flip, racing these writes. Resolve the board
+            // the item is on NOW and use ITS columns/id for the mutations
+            // (the event's board is only the fallback when the lookup fails).
+            // A card already on a board without the confirmer columns can
+            // never be texted through the Block-board automation — and no
+            // later BO event will retry a moved card — so that case pages
+            // the owners instead of failing silently, and stamps the rows so
+            // a duplicate delivery never double-pages.
+            const whereIsItem = async (): Promise<
+              { boardId: string; cols: typeof cols } | null
+            > => {
+              const res = await mondayQuery(
+                mondayToken,
+                `query { items (ids: [${pulseIdStr}]) { board { id columns { id title } } } }`,
+              )
+              const b = (res.data as {
+                items?: Array<{
+                  board?: { id?: unknown; columns?: Array<{ id?: unknown; title?: unknown }> }
+                }>
+              } | null)?.items?.[0]?.board
+              return b && b.id != null && String(b.id) !== ''
+                ? { boardId: String(b.id), cols: boardColsToEscalationCols(b.columns) }
+                : null
+            }
+            const fresh = await whereIsItem()
+            const targetBoardId = fresh?.boardId ?? boardId
+            const targetCols = fresh?.cols ?? cols
+            let lastKnownBoardId = targetBoardId
             const colVals: Record<string, unknown> = {}
             for (const p of pending!) {
               const conf = confirmers!.find((c) => c.id === p.confirmer_id)
               if (!conf) continue
-              const linkId = findColIdByTitle(cols, conf.link_column_title)
+              const linkId = findColIdByTitle(targetCols, conf.link_column_title)
               if (linkId) colVals[linkId] = callbackUrl(p.token)
               const e164 = normalizePhoneE164(conf.phone)
               const phoneId = conf.phone_column_title
-                ? findColIdByTitle(cols, conf.phone_column_title)
+                ? findColIdByTitle(targetCols, conf.phone_column_title)
                 : null
               if (phoneId && e164) colVals[phoneId] = { phone: e164, countryShortName: 'US' }
             }
-            const alertColId = findColIdByTitle(cols, ALERT_COLUMN_TITLE)
+            const alertColId = findColIdByTitle(targetCols, ALERT_COLUMN_TITLE)
             const boardReady = alertColId !== null && Object.keys(colVals).length > 0
-            let mondayOk = boardReady
-            if (mondayOk) {
+            let outcome: 'sent' | 'moved' | 'monday_error' | 'missing_columns'
+            if (!boardReady) {
+              // No confirmer columns where the item is now: a genuinely
+              // un-set-up Block board stays pending (heals once the columns
+              // exist), but a card that LEFT the event's board is lost to
+              // the SMS channel for good.
+              outcome = fresh !== null && fresh.boardId !== boardId ? 'moved' : 'missing_columns'
+            } else {
+              outcome = 'sent'
               const linksRes = await mondayQuery(
                 mondayToken,
-                `mutation { change_multiple_column_values (board_id: ${boardId}, item_id: ${pulseIdStr}, column_values: ${JSON.stringify(JSON.stringify(colVals))}) { id } }`,
+                `mutation { change_multiple_column_values (board_id: ${targetBoardId}, item_id: ${pulseIdStr}, column_values: ${JSON.stringify(JSON.stringify(colVals))}) { id } }`,
               )
-              if (linksRes.error) mondayOk = false
+              let mutationError = linksRes.error
+              if (!mutationError) {
+                const alertRes = await mondayQuery(
+                  mondayToken,
+                  `mutation { change_multiple_column_values (board_id: ${targetBoardId}, item_id: ${pulseIdStr}, column_values: ${JSON.stringify(JSON.stringify({ [alertColId!]: { label: ALERT_SEND_LABEL } }))}) { id } }`,
+                )
+                mutationError = alertRes.error
+              }
+              if (mutationError) {
+                // Did the move win between the lookup and the writes?
+                const after = await whereIsItem()
+                if (after && after.boardId !== targetBoardId) {
+                  lastKnownBoardId = after.boardId
+                  outcome = 'moved'
+                } else {
+                  outcome = 'monday_error'
+                }
+              }
             }
-            if (mondayOk) {
-              const alertRes = await mondayQuery(
-                mondayToken,
-                `mutation { change_multiple_column_values (board_id: ${boardId}, item_id: ${pulseIdStr}, column_values: ${JSON.stringify(JSON.stringify({ [alertColId!]: { label: ALERT_SEND_LABEL } }))}) { id } }`,
-              )
-              if (alertRes.error) mondayOk = false
-            }
-            if (mondayOk) {
+            if (outcome === 'sent' || outcome === 'moved') {
               await supabaseAdmin
                 .from('no_show_escalations')
                 .update({ monday_synced_at: new Date().toISOString() })
                 .in('id', pending!.map((p) => p.id))
             }
+            if (outcome === 'moved') {
+              // "Lets us all know" even when the text could not go out: the
+              // Owner_Page pg_net trigger pushes this to every owner device.
+              await supabaseAdmin.from('webhook_logs').insert({
+                step: 'Owner_Page',
+                data: {
+                  title: `⚠️ No-show texts NOT sent — ${details.lead_name ?? pulseIdStr}`,
+                  body: `${snapshotOffice}: the card moved boards before the confirmer texts fired. Have the desk call ${details.customer_phone ?? 'the customer'}${details.address ? ` — ${details.address}` : ''}.`,
+                  url: '/close-kombat',
+                },
+              })
+            }
             await supabaseAdmin.from('webhook_logs').insert({
-              step: !boardReady
-                ? 'NoShow_Escalation_Board_Missing_Columns'
-                : mondayOk
-                  ? 'NoShow_Escalation_Sent'
-                  : 'NoShow_Escalation_Monday_Error',
+              step: outcome === 'sent'
+                ? 'NoShow_Escalation_Sent'
+                : outcome === 'moved'
+                  ? 'NoShow_Escalation_Item_Moved'
+                  : outcome === 'monday_error'
+                    ? 'NoShow_Escalation_Monday_Error'
+                    : 'NoShow_Escalation_Board_Missing_Columns',
               data: {
                 pulseId: pulseIdStr,
-                boardId,
+                eventBoardId: boardId,
+                currentBoardId: lastKnownBoardId,
                 confirmers: pending!.map((p) => p.confirmer_name),
                 wroteColumns: Object.keys(colVals),
                 alertColumnFound: alertColId !== null,

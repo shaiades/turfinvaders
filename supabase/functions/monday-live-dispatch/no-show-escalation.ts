@@ -102,6 +102,22 @@ export function callbackUrl(token: string): string {
   return `${CALLBACK_BASE_URL}${encodeURIComponent(token)}`
 }
 
+/** A board's own column catalog ({id,title} rows from a boards/items board
+ *  query) in EscalationCol shape, so findColIdByTitle works on either. Used
+ *  by the move-race guard: columns are resolved against the board the item
+ *  is on NOW, not the board the webhook event came from. */
+export function boardColsToEscalationCols(
+  columns: Array<{ id?: unknown; title?: unknown }> | null | undefined,
+): EscalationCol[] {
+  return (columns ?? [])
+    .filter((c) => typeof c?.id === 'string' && (c.id as string) !== '')
+    .map((c) => ({
+      id: c.id as string,
+      text: null,
+      column: { title: String(c.title ?? ''), id: c.id as string },
+    }))
+}
+
 /** E.164 for a US number: digits only, 10 digits get +1, 11 starting with 1
  *  get +. Anything else → null (never text a half-parsed number). */
 export function normalizePhoneE164(raw: string | null | undefined): string | null {

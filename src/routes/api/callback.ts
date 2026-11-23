@@ -123,29 +123,40 @@ async function flipMondayCalled(row: EscalationRow): Promise<void> {
         errors?: Array<{ message?: string }>;
       };
     };
-    const colsRes = await call(
-      `query { boards (ids: [${row.board_id}]) { columns { id title } } }`,
+    // An automation moves No Show cards to the Blowout Log, so the card may
+    // no longer be on the board the escalation row recorded: resolve the
+    // board the item is on NOW and flip there (falling back to the recorded
+    // board only when the item lookup comes back empty).
+    const itemRes = await call(
+      `query { items (ids: [${row.monday_item_id}]) { board { id columns { id title } } } }`,
     );
-    const boards = (
-      colsRes.data as
+    const board = (
+      itemRes.data as
         | {
-            boards?: Array<{ columns?: Array<{ id: string; title: string }> }>;
+            items?: Array<{
+              board?: { id?: string; columns?: Array<{ id: string; title: string }> };
+            }>;
           }
         | undefined
-    )?.boards;
-    const alertCol = boards?.[0]?.columns?.find(
+    )?.items?.[0]?.board;
+    const boardId = board?.id ? String(board.id) : row.board_id;
+    const alertCol = board?.columns?.find(
       (c) => (c.title || "").trim().toLowerCase() === ALERT_COLUMN_TITLE,
     );
     if (!alertCol) {
       await supabaseAdmin.from("webhook_logs").insert({
         step: "NoShow_Ack_Monday_Skipped",
-        data: { itemId: row.monday_item_id, reason: "no Confirmer Alert column" } as never,
+        data: {
+          itemId: row.monday_item_id,
+          boardId,
+          reason: "no Confirmer Alert column on the item's current board",
+        } as never,
       });
       return;
     }
     const vals = JSON.stringify(JSON.stringify({ [alertCol.id]: { label: ALERT_CALLED_LABEL } }));
     const flip = await call(
-      `mutation { change_multiple_column_values (board_id: ${row.board_id}, item_id: ${row.monday_item_id}, column_values: ${vals}) { id } }`,
+      `mutation { change_multiple_column_values (board_id: ${boardId}, item_id: ${row.monday_item_id}, column_values: ${vals}) { id } }`,
     );
     if (flip.errors?.length) {
       await supabaseAdmin.from("webhook_logs").insert({
