@@ -3,6 +3,15 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { fetchItemBatched, mondayQuery } from './monday.ts'
 import { isRehashOrRoomCard, normalizeLoose } from './confirmer-credit.ts'
 import {
+  ALERT_COLUMN_TITLE,
+  ALERT_SEND_LABEL,
+  buildEscalationDetails,
+  callbackUrl,
+  findColIdByTitle,
+  isNoShowFlip,
+  normalizePhoneE164,
+} from './no-show-escalation.ts'
+import {
   buildBlockCardRow,
   copyBaseName,
   deriveCardDate,
@@ -869,6 +878,114 @@ serve(async (req) => {
       ? deriveCardDate(cardGroupTitle, parsedWeek, null)
       : null
     const metric_date = blockDay ?? todayLA()
+
+    // ── No-show escalation ── (owner, 2026-11-23: "Every no show — text
+    // Cynthia and Jeni... and a button that lets us all know they called.")
+    // BO flipped to exactly "No Show" on a Block card → claim one
+    // no_show_escalations row per active confirmer (the UNIQUE
+    // (monday_item_id, confirmer_id) claim is the dedupe: redeliveries and
+    // office re-marks never re-text), write each confirmer's tokened
+    // /called/<token> link + phone into the card's per-confirmer columns,
+    // then flip "Confirmer Alert" → "Send" — the Monday Twilio automations
+    // (the SAME channel that texts customers) send the actual SMS. Two
+    // mutations on purpose: links/phones must be on the card BEFORE the
+    // trigger label lands, or the rendered SMS races the write.
+    // monday_synced_at stamps success; a Monday-side failure leaves it NULL
+    // and answers 200 anyway — the next BO event self-heals pending rows.
+    // Never breaks the counter pipeline (own try/catch).
+    if (
+      !isIncomingLeadsBoard && !isTemplateBoard && snapshotOffice &&
+      isNoShowFlip(changedColumnId, changedTitle, statusFromEvent, previousStatusFromEvent)
+    ) {
+      try {
+        const { data: confirmers } = await supabaseAdmin
+          .from('no_show_confirmers')
+          .select('id, name, phone, link_column_title, phone_column_title')
+          .eq('active', true)
+        if ((confirmers?.length ?? 0) > 0) {
+          const details = buildEscalationDetails(cols, item.name)
+          await supabaseAdmin.from('no_show_escalations').upsert(
+            confirmers!.map((c) => ({
+              monday_item_id: pulseIdStr,
+              board_id: boardId,
+              office_location: snapshotOffice,
+              confirmer_id: c.id,
+              confirmer_name: c.name,
+              card_date: blockDay ?? todayLA(),
+              ...details,
+            })),
+            { onConflict: 'monday_item_id,confirmer_id', ignoreDuplicates: true },
+          )
+          const { data: pending } = await supabaseAdmin
+            .from('no_show_escalations')
+            .select('id, token, confirmer_id, confirmer_name')
+            .eq('monday_item_id', pulseIdStr)
+            .is('monday_synced_at', null)
+          if ((pending?.length ?? 0) > 0) {
+            const colVals: Record<string, unknown> = {}
+            for (const p of pending!) {
+              const conf = confirmers!.find((c) => c.id === p.confirmer_id)
+              if (!conf) continue
+              const linkId = findColIdByTitle(cols, conf.link_column_title)
+              if (linkId) colVals[linkId] = callbackUrl(p.token)
+              const e164 = normalizePhoneE164(conf.phone)
+              const phoneId = conf.phone_column_title
+                ? findColIdByTitle(cols, conf.phone_column_title)
+                : null
+              if (phoneId && e164) colVals[phoneId] = { phone: e164, countryShortName: 'US' }
+            }
+            const alertColId = findColIdByTitle(cols, ALERT_COLUMN_TITLE)
+            const boardReady = alertColId !== null && Object.keys(colVals).length > 0
+            let mondayOk = boardReady
+            if (mondayOk) {
+              const linksRes = await mondayQuery(
+                mondayToken,
+                `mutation { change_multiple_column_values (board_id: ${boardId}, item_id: ${pulseIdStr}, column_values: ${JSON.stringify(JSON.stringify(colVals))}) { id } }`,
+              )
+              if (linksRes.error) mondayOk = false
+            }
+            if (mondayOk) {
+              const alertRes = await mondayQuery(
+                mondayToken,
+                `mutation { change_multiple_column_values (board_id: ${boardId}, item_id: ${pulseIdStr}, column_values: ${JSON.stringify(JSON.stringify({ [alertColId!]: { label: ALERT_SEND_LABEL } }))}) { id } }`,
+              )
+              if (alertRes.error) mondayOk = false
+            }
+            if (mondayOk) {
+              await supabaseAdmin
+                .from('no_show_escalations')
+                .update({ monday_synced_at: new Date().toISOString() })
+                .in('id', pending!.map((p) => p.id))
+            }
+            await supabaseAdmin.from('webhook_logs').insert({
+              step: !boardReady
+                ? 'NoShow_Escalation_Board_Missing_Columns'
+                : mondayOk
+                  ? 'NoShow_Escalation_Sent'
+                  : 'NoShow_Escalation_Monday_Error',
+              data: {
+                pulseId: pulseIdStr,
+                boardId,
+                confirmers: pending!.map((p) => p.confirmer_name),
+                wroteColumns: Object.keys(colVals),
+                alertColumnFound: alertColId !== null,
+              },
+            })
+          }
+        }
+      } catch (escErr) {
+        try {
+          await supabaseAdmin.from('webhook_logs').insert({
+            step: 'NoShow_Escalation_Error',
+            data: {
+              pulseId: pulseIdStr,
+              error: escErr instanceof Error ? escErr.message : String(escErr),
+            },
+          })
+        } catch (_) { /* escalation must never break the pipeline */ }
+      }
+    }
+
     // Was THIS delivery a change on the Canvass Stats column itself? The
     // same-state-rerun path below requires it: only an actual re-mark of the
     // outcome column may open a new appointment — a bare group drag or a

@@ -30,8 +30,10 @@ import { Route as AuthenticatedPhonesRouteImport } from './routes/_authenticated
 import { Route as AuthenticatedPlaybookRouteImport } from './routes/_authenticated/playbook'
 import { Route as AuthenticatedReportsRouteImport } from './routes/_authenticated/reports'
 import { Route as AuthenticatedUsersRouteImport } from './routes/_authenticated/users'
+import { Route as ApiCallbackRouteImport } from './routes/api/callback'
 import { Route as AuthCallbackRouteImport } from './routes/auth_.callback'
 import { Route as AuthWelcomeRouteImport } from './routes/auth_.welcome'
+import { Route as CalledTokenRouteImport } from './routes/called.$token'
 import { Route as AuthenticatedCanvassersCanvasserIdRouteImport } from './routes/_authenticated/canvassers.$canvasserId'
 import { Route as AuthenticatedMyPurposeIndexRouteImport } from './routes/_authenticated/my-purpose.index'
 import { Route as AuthenticatedMyPurposeWorkshopRouteImport } from './routes/_authenticated/my-purpose.workshop'
@@ -155,6 +157,11 @@ const AuthenticatedUsersRoute = AuthenticatedUsersRouteImport.update({
   path: '/users',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const ApiCallbackRoute = ApiCallbackRouteImport.update({
+  id: '/api/callback',
+  path: '/api/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthCallbackRoute = AuthCallbackRouteImport.update({
   id: '/auth_/callback',
   path: '/auth/callback',
@@ -163,6 +170,11 @@ const AuthCallbackRoute = AuthCallbackRouteImport.update({
 const AuthWelcomeRoute = AuthWelcomeRouteImport.update({
   id: '/auth_/welcome',
   path: '/auth/welcome',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CalledTokenRoute = CalledTokenRouteImport.update({
+  id: '/called/$token',
+  path: '/called/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedCanvassersCanvasserIdRoute =
@@ -261,8 +273,10 @@ export interface FileRoutesByFullPath {
   '/playbook': typeof AuthenticatedPlaybookRoute
   '/reports': typeof AuthenticatedReportsRoute
   '/users': typeof AuthenticatedUsersRoute
+  '/api/callback': typeof ApiCallbackRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/welcome': typeof AuthWelcomeRoute
+  '/called/$token': typeof CalledTokenRoute
   '/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRouteWithChildren
   '/my-purpose/workshop': typeof AuthenticatedMyPurposeWorkshopRoute
   '/purpose-leadership/$userId': typeof AuthenticatedPurposeLeadershipUserIdRoute
@@ -298,8 +312,10 @@ export interface FileRoutesByTo {
   '/playbook': typeof AuthenticatedPlaybookRoute
   '/reports': typeof AuthenticatedReportsRoute
   '/users': typeof AuthenticatedUsersRoute
+  '/api/callback': typeof ApiCallbackRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/welcome': typeof AuthWelcomeRoute
+  '/called/$token': typeof CalledTokenRoute
   '/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRouteWithChildren
   '/my-purpose/workshop': typeof AuthenticatedMyPurposeWorkshopRoute
   '/purpose-leadership/$userId': typeof AuthenticatedPurposeLeadershipUserIdRoute
@@ -337,8 +353,10 @@ export interface FileRoutesById {
   '/_authenticated/playbook': typeof AuthenticatedPlaybookRoute
   '/_authenticated/reports': typeof AuthenticatedReportsRoute
   '/_authenticated/users': typeof AuthenticatedUsersRoute
+  '/api/callback': typeof ApiCallbackRoute
   '/auth_/callback': typeof AuthCallbackRoute
   '/auth_/welcome': typeof AuthWelcomeRoute
+  '/called/$token': typeof CalledTokenRoute
   '/_authenticated/canvassers/$canvasserId': typeof AuthenticatedCanvassersCanvasserIdRouteWithChildren
   '/_authenticated/my-purpose/workshop': typeof AuthenticatedMyPurposeWorkshopRoute
   '/_authenticated/purpose-leadership/$userId': typeof AuthenticatedPurposeLeadershipUserIdRoute
@@ -376,8 +394,10 @@ export interface FileRouteTypes {
     | '/playbook'
     | '/reports'
     | '/users'
+    | '/api/callback'
     | '/auth/callback'
     | '/auth/welcome'
+    | '/called/$token'
     | '/canvassers/$canvasserId'
     | '/my-purpose/workshop'
     | '/purpose-leadership/$userId'
@@ -413,8 +433,10 @@ export interface FileRouteTypes {
     | '/playbook'
     | '/reports'
     | '/users'
+    | '/api/callback'
     | '/auth/callback'
     | '/auth/welcome'
+    | '/called/$token'
     | '/canvassers/$canvasserId'
     | '/my-purpose/workshop'
     | '/purpose-leadership/$userId'
@@ -451,8 +473,10 @@ export interface FileRouteTypes {
     | '/_authenticated/playbook'
     | '/_authenticated/reports'
     | '/_authenticated/users'
+    | '/api/callback'
     | '/auth_/callback'
     | '/auth_/welcome'
+    | '/called/$token'
     | '/_authenticated/canvassers/$canvasserId'
     | '/_authenticated/my-purpose/workshop'
     | '/_authenticated/purpose-leadership/$userId'
@@ -473,8 +497,10 @@ export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
   LeadSubmittedRoute: typeof LeadSubmittedRoute
+  ApiCallbackRoute: typeof ApiCallbackRoute
   AuthCallbackRoute: typeof AuthCallbackRoute
   AuthWelcomeRoute: typeof AuthWelcomeRoute
+  CalledTokenRoute: typeof CalledTokenRoute
   ApiInternalCrownVanwarsRoute: typeof ApiInternalCrownVanwarsRoute
   ApiInternalGodDigestRoute: typeof ApiInternalGodDigestRoute
   ApiInternalReconcileBlockCardsRoute: typeof ApiInternalReconcileBlockCardsRoute
@@ -631,6 +657,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedUsersRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/api/callback': {
+      id: '/api/callback'
+      path: '/api/callback'
+      fullPath: '/api/callback'
+      preLoaderRoute: typeof ApiCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/auth_/callback': {
       id: '/auth_/callback'
       path: '/auth/callback'
@@ -643,6 +676,13 @@ declare module '@tanstack/react-router' {
       path: '/auth/welcome'
       fullPath: '/auth/welcome'
       preLoaderRoute: typeof AuthWelcomeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/called/$token': {
+      id: '/called/$token'
+      path: '/called/$token'
+      fullPath: '/called/$token'
+      preLoaderRoute: typeof CalledTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/canvassers/$canvasserId': {
@@ -819,8 +859,10 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
   LeadSubmittedRoute: LeadSubmittedRoute,
+  ApiCallbackRoute: ApiCallbackRoute,
   AuthCallbackRoute: AuthCallbackRoute,
   AuthWelcomeRoute: AuthWelcomeRoute,
+  CalledTokenRoute: CalledTokenRoute,
   ApiInternalCrownVanwarsRoute: ApiInternalCrownVanwarsRoute,
   ApiInternalGodDigestRoute: ApiInternalGodDigestRoute,
   ApiInternalReconcileBlockCardsRoute: ApiInternalReconcileBlockCardsRoute,
