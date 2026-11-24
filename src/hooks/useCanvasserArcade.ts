@@ -20,6 +20,7 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import { dayLadderCompare, rangeLadderCompare } from "@/lib/arcade-rank";
 import { isNonPersonName } from "@/lib/lead-sources";
+import { isDeskCrew } from "@/lib/vanwars";
 import { useMyEarnings } from "@/hooks/useMyEarnings";
 import {
   bossState,
@@ -193,6 +194,12 @@ export function useArcadeLadder(range: RangeKey): ArcadeLadder {
       if (isNonPersonName(prof?.display_name)) continue;
       const teamId = prod.snapshotTeam?.[id] ?? prof?.team_id ?? null;
       const team = teamId ? teamById.get(teamId) : null;
+      // Confirmation-desk rows are office results, not canvasser results —
+      // they never broadcast on canvasser-facing boards (owner, 2026-11-23).
+      // The viewer's OWN row survives so a confirmer's self cards (wrap,
+      // fighter, MoneyChips) keep reading their numbers; the vans rollup
+      // below still drops it, so no "Confirmation" van tile ever renders.
+      if (isDeskCrew(team?.name) && id !== selfId) continue;
       rows.push({
         id,
         name: prof?.display_name ?? "Unknown",
@@ -220,6 +227,7 @@ export function useArcadeLadder(range: RangeKey): ArcadeLadder {
 
     const vanMap = new Map<string, VanRow & { _sits: number; _leads: number }>();
     for (const r of rows) {
+      if (isDeskCrew(r.teamName)) continue; // self-exception row: no desk van tile
       const key = r.teamName ?? "Unassigned";
       const v =
         vanMap.get(key) ??
@@ -255,7 +263,7 @@ export function useArcadeLadder(range: RangeKey): ArcadeLadder {
       }))
       .sort((a, b) => b.pts - a.pts || b.vol - a.vol);
     return { rows, vans };
-  }, [prodQ.data, rosterQ.data, range]);
+  }, [prodQ.data, rosterQ.data, range, selfId]);
 
   const self = useMemo(() => {
     const idx = rows.findIndex((r) => r.id === selfId);

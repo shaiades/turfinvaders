@@ -21,6 +21,7 @@ import {
 } from "@/lib/dispatch.functions";
 import { isNonPersonName } from "@/lib/lead-sources";
 import { isAdminRole } from "@/lib/roles";
+import { isDeskCrew } from "@/lib/vanwars";
 import { RangeTabs } from "@/components/RangeTabs";
 import { RepAvatar } from "@/components/RepAvatar";
 import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
@@ -151,6 +152,11 @@ export function FieldStandingsSheet({
     const results = (production.data?.results ?? {}) as Record<string, DispatchResults>;
     const snapshotTeam = (production.data?.snapshotTeam ?? {}) as Record<string, string>;
     const rolesByUser = roster.data?.rolesByUser ?? new Map<string, string[]>();
+    // Confirmation-desk vans are office results, not field results — their
+    // members never show on this canvasser-facing board (owner, 2026-11-23).
+    const deskTeamIds = new Set(
+      (vansQ.data ?? []).filter((v) => isDeskCrew(v.name)).map((v) => v.id),
+    );
     const byTeam = new Map<string, MemberRow[]>();
 
     for (const p of roster.data?.profiles ?? []) {
@@ -192,6 +198,7 @@ export function FieldStandingsSheet({
       // Former reps bucket under the van their in-range rows were stamped
       // with (live team_id was nulled at removal) — same rule as dispatch.
       const teamKey = (former ? (snapshotTeam[p.id] ?? p.team_id) : p.team_id) ?? "none";
+      if (deskTeamIds.has(teamKey)) continue;
       const list = byTeam.get(teamKey) ?? [];
       list.push(row);
       byTeam.set(teamKey, list);
