@@ -6,9 +6,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { ArcadePanel } from "@/components/arcade";
 import { Button } from "@/components/ui/button";
 
-/** Owner-only: which owners approve OFFICE staff time-off (owner decision
- *  2026-11-23 — Tyler + Shai, not every owner). Backs review_day_off v4 and
- *  the notify-day-off audience via
+/** Owner-only: who approves OFFICE staff time-off (owner decision
+ *  2026-11-23 — Tyler + Shai + HR Zuleyma, not every owner). Candidates are
+ *  owners and HR. Backs review_day_off v4 and the notify-day-off audience via
  *  system_settings.office_timeoff_approver_ids. An empty list falls back to
  *  the normal admin rule, so unchecking everyone turns the restriction off.
  *  Mounted beside the Day Off queue in the timesheet editor. */
@@ -20,10 +20,11 @@ export function OfficeTimeOffApproverSettings() {
     queryFn: async () => {
       const { data: roleRows, error: rErr } = await supabase
         .from("user_roles")
-        .select("user_id")
-        .eq("role", "owner");
+        .select("user_id, role")
+        .in("role", ["owner", "hr"]);
       if (rErr) throw rErr;
-      const ids = [...new Set((roleRows ?? []).map((r) => r.user_id))];
+      const roleById = new Map((roleRows ?? []).map((r) => [r.user_id, r.role]));
+      const ids = [...roleById.keys()];
       if (ids.length === 0) return [] as Array<{ id: string; name: string }>;
       const { data: profs, error: pErr } = await supabase
         .from("profiles")
@@ -31,7 +32,10 @@ export function OfficeTimeOffApproverSettings() {
         .in("id", ids);
       if (pErr) throw pErr;
       return (profs ?? [])
-        .map((p) => ({ id: p.id, name: p.display_name ?? "Unknown" }))
+        .map((p) => ({
+          id: p.id,
+          name: (p.display_name ?? "Unknown") + (roleById.get(p.id) === "hr" ? " · HR" : ""),
+        }))
         .sort((a, b) => a.name.localeCompare(b.name));
     },
   });
@@ -75,7 +79,7 @@ export function OfficeTimeOffApproverSettings() {
     qc.invalidateQueries({ queryKey: ["day-off"] });
     toast.success(
       picked.size > 0
-        ? "Office time-off now answers to the checked owners only"
+        ? "Office time-off now answers to the checked people only"
         : "Restriction off — any time admin can review office requests",
     );
   }
@@ -90,7 +94,7 @@ export function OfficeTimeOffApproverSettings() {
       }
     >
       <p className="text-xs text-muted-foreground mb-3">
-        Office staff requests go only to the checked owners — nobody else gets the push or the
+        Office staff requests go only to the checked people — nobody else gets the push or the
         Approve button. Uncheck everyone to let any time admin review.
       </p>
       <div className="flex flex-wrap gap-2">
