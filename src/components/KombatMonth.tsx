@@ -20,6 +20,7 @@ import { useActivityTests } from "@/hooks/useActivityTests";
 import { buildRepMatcher } from "@/lib/rep-identity";
 import { rewardToast } from "@/lib/reward-toast";
 import { laWeekStartISO, nextMonthStartISO } from "@/lib/dates";
+import { compressProofVideo } from "@/lib/compress-video";
 import { CARD_COLUMNS, type BlockCard } from "@/lib/close-kombat";
 import { ArcadePanel, ArcadePill, NeonButton } from "@/components/arcade";
 import {
@@ -888,7 +889,9 @@ const PROOF_HINTS: Record<ProofCategory, string> = {
 // Max proof upload size. MUST stay in sync with the contest-proofs bucket's
 // file_size_limit (migration 20261020120000) and the project-wide Storage
 // upload limit in the Supabase dashboard, which caps the bucket. 50MB is the
-// Free-plan ceiling; bigger phone videos need trimming (or a plan upgrade).
+// Free-plan ceiling; videos over it are compressed in the browser first
+// (compress-video.ts), so only photos over the cap or uncompressible clips
+// still hit the error.
 const MAX_PROOF_MB = 50;
 const MAX_PROOF_BYTES = MAX_PROOF_MB * 1024 * 1024;
 
@@ -911,6 +914,7 @@ function ProofSheet({
   const [satOn, setSatOn] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [uploadPct, setUploadPct] = useState<number | null>(null);
+  const [phase, setPhase] = useState<"compress" | "upload">("upload");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const myProofs = useQuery({
@@ -948,23 +952,49 @@ function ProofSheet({
       if (category === "referral_sit" && (customer.trim() === "" || satOn === "")) {
         throw new Error("Referral proofs need the customer name and the date they sat.");
       }
-      // Cap matches the contest-proofs bucket file_size_limit (keep the two in
-      // sync) so reps get a friendly message here instead of a server 413.
-      if (file.size > MAX_PROOF_BYTES) {
-        throw new Error(`Keep uploads under ${MAX_PROOF_MB}MB.`);
-      }
-      const ext = (file.name.split(".").pop() || (file.type.startsWith("video/") ? "mp4" : "jpg"))
+      let payload: Blob = file;
+      let ext = (file.name.split(".").pop() || (file.type.startsWith("video/") ? "mp4" : "jpg"))
         .toLowerCase()
         .replace(/[^a-z0-9]/g, "");
+      let contentType = file.type || "application/octet-stream";
+      // Camera-roll videos routinely blow past the 50MB bucket cap (a minute
+      // of 1080p iPhone footage is ~60MB) — shrink them in the browser first.
+      if (file.type.startsWith("video/") && file.size > MAX_PROOF_BYTES) {
+        setPhase("compress");
+        setUploadPct(0);
+        const compressed = await compressProofVideo(file, {
+          maxBytes: MAX_PROOF_BYTES,
+          onProgress: setUploadPct,
+        });
+        if (!compressed) {
+          throw new Error(
+            `This video is over ${MAX_PROOF_MB}MB and this browser can't shrink it — trim the clip in Photos and try again.`,
+          );
+        }
+        if (compressed.size > MAX_PROOF_BYTES) {
+          throw new Error(
+            `Even compressed this video is over ${MAX_PROOF_MB}MB — trim it shorter in Photos and try again.`,
+          );
+        }
+        payload = compressed;
+        ext = "mp4";
+        contentType = "video/mp4";
+      }
+      // Cap matches the contest-proofs bucket file_size_limit (keep the two in
+      // sync) so reps get a friendly message here instead of a server 413.
+      if (payload.size > MAX_PROOF_BYTES) {
+        throw new Error(`Keep uploads under ${MAX_PROOF_MB}MB.`);
+      }
       const path = `${userId}/${crypto.randomUUID()}.${ext}`;
       // Resumable upload — phone videos are large and cellular drops happen;
       // a single-shot upload() stalls where TUS chunks + resumes.
+      setPhase("upload");
       setUploadPct(0);
       await uploadResumable({
         bucket: "contest-proofs",
         path,
-        file,
-        contentType: file.type || "application/octet-stream",
+        file: payload,
+        contentType,
         onProgress: setUploadPct,
       });
       const { error } = await supabase.from("contest_proofs").insert({
@@ -983,7 +1013,10 @@ function ProofSheet({
       reset();
       void qc.invalidateQueries({ queryKey: ["kombat_my_proofs"] });
     },
-    onSettled: () => setUploadPct(null),
+    onSettled: () => {
+      setUploadPct(null);
+      setPhase("upload");
+    },
   });
 
   return (
@@ -1024,6 +1057,12 @@ function ProofSheet({
               className="min-h-11 md:min-h-9 text-base md:text-xs"
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             />
+            {file && file.type.startsWith("video/") && file.size > MAX_PROOF_BYTES && (
+              <p className="text-xs text-muted-foreground">
+                Big video ({Math.round(file.size / (1024 * 1024))}MB) — it&apos;ll be compressed on
+                your phone before it uploads, so sending can take a minute.
+              </p>
+            )}
           </div>
 
           {category === "google_review" && (
@@ -1086,8 +1125,8 @@ function ProofSheet({
           >
             {submit.isPending
               ? uploadPct === null
-                ? "Uploading…"
-                : `Uploading… ${uploadPct}%`
+                ? "Working…"
+                : `${phase === "compress" ? "Compressing" : "Uploading"}… ${uploadPct}%`
               : "Send for approval"}
           </NeonButton>
 
