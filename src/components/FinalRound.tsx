@@ -21,6 +21,7 @@ import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { playArcadeSound, haptic } from "@/lib/arcade-fx";
 import { rewardToast } from "@/lib/reward-toast";
 import { isNonPersonName } from "@/lib/lead-sources";
+import { isDeskCrew } from "@/lib/vanwars";
 import { laTodayISO } from "@/lib/dates";
 import { BELT_ACCENT } from "@/lib/kombat-month";
 import {
@@ -96,11 +97,17 @@ export function FinalRound({ selfId }: { selfId: string | undefined }) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, display_name")
+        // teams must be disambiguated: profiles↔teams also relate via
+        // teams.captain_id, so a bare teams(name) is ambiguous (PGRST201).
+        .select("id, display_name, teams!profiles_team_fk(name)")
         .in("id", ids);
       if (error) throw error;
-      const m = new Map<string, string>();
-      for (const p of data ?? []) m.set(p.id, p.display_name ?? "Unknown");
+      const m = new Map<string, { name: string; desk: boolean }>();
+      for (const p of data ?? [])
+        m.set(p.id, {
+          name: p.display_name ?? "Unknown",
+          desk: isDeskCrew((p.teams as { name: string | null } | null)?.name),
+        });
       return m;
     },
   });
@@ -111,12 +118,17 @@ export function FinalRound({ selfId }: { selfId: string | undefined }) {
       .map(([id, byCat]) => ({
         id,
         pts: finalePoints(byCat, rules),
-        name: namesQ.data?.get(id) ?? "Unknown",
+        name: namesQ.data?.get(id)?.name ?? "Unknown",
+        desk: namesQ.data?.get(id)?.desk ?? false,
       }))
-      .filter((r) => !isNonPersonName(r.name))
+      // Confirmation-desk ledger rows are office results, not field results —
+      // they never rank on the canvasser tournament (owner, 2026-11-23; same
+      // desk-crew rule as useArcadeLadder). The viewer's OWN row survives so a
+      // confirmer's belt/pace cards keep reading their numbers.
+      .filter((r) => !isNonPersonName(r.name) && (!r.desk || r.id === selfId))
       .sort((a, b) => b.pts - a.pts);
     return rows;
-  }, [ledger.data, namesQ.data, rules]);
+  }, [ledger.data, namesQ.data, rules, selfId]);
 
   const me = standings.find((r) => r.id === selfId);
   const myPts = me?.pts ?? 0;
