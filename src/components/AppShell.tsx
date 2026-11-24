@@ -964,8 +964,9 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       {/* Blocking profile-photo gate (owner 2026-10-06) — the full-screen
           "Snap your fighter photo" step. Self-gated on the REAL role + photo
-          status (canvassers only, confirmers collapse in; everyone else is
-          never asked). It owns the screen until a photo is saved — no skip by
+          status (canvassers + the office-worker tier since 2026-11-24;
+          confirmers collapse in; everyone else is never asked). It owns the
+          screen until a photo is saved — no skip by
           default — and reports `onActiveChange` so the cutscenes above stay
           held behind it. Replaces the old skippable FighterPhotoPrompt.
           Previews: ?photo_gate=1 / =error / =unlocked. */}
