@@ -1,11 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { OFFICE_LOCATIONS } from "@/lib/offices";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import {
-  LIMITED_CREATABLE_ROLES,
-  MANAGER_GRANTABLE_ROLES,
-  type AppRole,
-} from "@/lib/role-policy";
+import { LIMITED_CREATABLE_ROLES, MANAGER_GRANTABLE_ROLES, type AppRole } from "@/lib/role-policy";
 import { z } from "zod";
 
 /** Server twin of creatableRolesFor: which starting roles this caller may
@@ -25,6 +21,7 @@ const ROLES = [
   "hr",
   "bookkeeper",
   "sales_rep",
+  "office",
   "confirmer",
   "canvasser",
 ] as const;

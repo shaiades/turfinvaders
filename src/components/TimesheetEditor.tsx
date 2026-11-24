@@ -36,6 +36,8 @@ import { TimeClockExceptions } from "@/components/TimeClockExceptions";
 import { ReasonDialog } from "@/components/ReasonDialog";
 import { TimeEntryAuditSheet } from "@/components/TimeEntryAuditSheet";
 import { DayOffQueue } from "@/components/DayOffQueue";
+import { OfficeTimeOffApproverSettings } from "@/components/OfficeTimeOffApproverSettings";
+import { useAuth } from "@/hooks/useAuth";
 import { DayOffWeekStrip } from "@/components/DayOffWeekStrip";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
@@ -309,6 +311,7 @@ export function TimesheetEditor({
   initial?: { week?: string; person?: string };
 }) {
   const qc = useQueryClient();
+  const { realRole } = useAuth();
   const [mode, setMode] = useState<RangeMode>("week");
   // The anchor date the day/week/month ranges derive from.
   const [anchor, setAnchor] = useState<string>(() =>
@@ -869,6 +872,9 @@ export function TimesheetEditor({
       {/* Pending day-off requests, all vans (captains review theirs on
           Command). Silent when empty or pre-deploy. */}
       {!scope && <DayOffQueue />}
+      {/* Which owners approve OFFICE staff time off (Tyler + Shai — owner
+          decision 2026-11-23). Owner-only; silent pre-deploy. */}
+      {!scope && realRole === "owner" && <OfficeTimeOffApproverSettings />}
 
       <ArcadePanel
         title={scope ? "Crew Timesheets" : "Timesheets"}

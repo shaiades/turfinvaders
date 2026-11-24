@@ -45,6 +45,7 @@ import { TimeClock } from "@/components/TimeClock";
 import { TimeClockReviewQueue } from "@/components/TimeClockReviewQueue";
 import { VanClockConsole } from "@/components/VanClockConsole";
 import { DayOffQueue } from "@/components/DayOffQueue";
+import { DayOffRequestCard } from "@/components/DayOffRequestCard";
 import { ObjectionReviewPanel } from "@/components/ObjectionReviewPanel";
 import { CoachTriggersCard } from "@/components/CoachTriggersCard";
 import { CaptainVanWarsCard } from "@/components/CaptainVanWarsCard";
@@ -137,6 +138,8 @@ function Dashboard() {
   if (role === "bookkeeper") return <Navigate to="/reports" search={{ tab: "exports" }} replace />;
   // HR's home is the full timesheet/attendance editor (owner ask 2026-10-15).
   if (role === "hr") return <HrDashboard />;
+  // Office workers' home is the Office Portal (clock + time off).
+  if (role === "office") return <Navigate to="/office" search={{ tab: "clock" }} replace />;
   if (role === "captain")
     return <CaptainDashboard teamId={teamId} visibility={!!settings?.global_visibility} />;
   return user?.id ? (
@@ -311,6 +314,7 @@ function VisibilityChip({ on }: { on: boolean }) {
  *  elsewhere (?week=&person=) land the same way they do for Admins. */
 function HrDashboard() {
   const { week, person } = Route.useSearch();
+  const { user } = useAuth();
   return (
     <div className="space-y-4 md:space-y-6">
       <h1 className="font-display text-lg md:text-2xl text-foreground">TIME &amp; ATTENDANCE</h1>
@@ -318,6 +322,14 @@ function HrDashboard() {
         title="Alerts on this device"
         description="One switch: flagged punches and day-off requests ping you here once it's on."
       />
+      {/* HR punches a clock too (owner ask 2026-11-23: office staff clock in;
+          the hr role can't also hold `office`, so her clock lives here). */}
+      {user?.id ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <TimeClock userId={user.id} />
+          <DayOffRequestCard userId={user.id} />
+        </div>
+      ) : null}
       <TimesheetEditor
         key={`${week ?? ""}|${person ?? ""}`}
         initial={week || person ? { week, person } : undefined}

@@ -121,6 +121,37 @@ Deno.serve(async (req) => {
   let payload: { title: string; body: string; url: string; tag?: string };
 
   if (kind === "submission") {
+    // Office workers (owner decision 2026-11-23): their requests answer to
+    // the named owners ONLY (system_settings.office_timeoff_approver_ids,
+    // Tyler + Shai) — no role fan-out, so other owners/Managers/HR get no
+    // push. Empty list = not configured → fall through to the role audience,
+    // mirroring review_day_off v4's fallback.
+    const { data: requesterRoles } = await admin
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", user_id);
+    if ((requesterRoles ?? []).some((r) => r.role === "office")) {
+      const { data: settings } = await admin
+        .from("system_settings")
+        .select("office_timeoff_approver_ids")
+        .maybeSingle();
+      const approvers: string[] = settings?.office_timeoff_approver_ids ?? [];
+      if (approvers.length > 0) {
+        const targets2 = approvers.filter((id) => id !== user_id && id !== requested_by);
+        const payload2 = {
+          title: "Time off · approval needed",
+          body: `${workerName} requested a ${label} · ${absence_date}`,
+          url: "/dashboard",
+          tag: `day-off-${request_id}`,
+        };
+        if (targets2.length === 0) return json({ sent: 0, pruned: 0, failed: 0 });
+        const { data: subs2 } = await admin
+          .from("push_subscriptions")
+          .select("endpoint, p256dh, auth")
+          .in("user_id", targets2);
+        return json(await sendToSubs(subs2 ?? [], payload2));
+      }
+    }
     // Reviewers: owners + Managers + the worker's own captain.
     const { data: roleRows } = await admin
       .from("user_roles")

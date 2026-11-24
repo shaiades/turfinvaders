@@ -24,12 +24,19 @@ import {
   buildAuditTable,
   buildPayrollRangeTable,
   buildPunchDetailTable,
+  buildWeeklyHoursTable,
   reportTableToCsvLines,
   weekStartsInRange,
   type ExportFilter,
   type ReportTable,
 } from "@/lib/payroll-export";
-import { addDaysISO, laMonthStartISO, laTodayISO, laWeekStartISO, weekStartOfISO } from "@/lib/dates";
+import {
+  addDaysISO,
+  laMonthStartISO,
+  laTodayISO,
+  laWeekStartISO,
+  weekStartOfISO,
+} from "@/lib/dates";
 
 export type ReportsTab = "exports" | "payroll";
 
@@ -50,11 +57,21 @@ function RangeInputs({
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
       <label className="block space-y-1">
         <span className={FIELD_LABEL}>From</span>
-        <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="text-base md:text-sm" />
+        <Input
+          type="date"
+          value={from}
+          onChange={(e) => setFrom(e.target.value)}
+          className="text-base md:text-sm"
+        />
       </label>
       <label className="block space-y-1">
         <span className={FIELD_LABEL}>To</span>
-        <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="text-base md:text-sm" />
+        <Input
+          type="date"
+          value={to}
+          onChange={(e) => setTo(e.target.value)}
+          className="text-base md:text-sm"
+        />
       </label>
     </div>
   );
@@ -82,6 +99,8 @@ export function ReportsConsole({
   // Payroll: default to the last 4 completed weeks.
   const [payrollFrom, setPayrollFrom] = useState(() => addDaysISO(laWeekStartISO(), -28));
   const [payrollTo, setPayrollTo] = useState(() => addDaysISO(laWeekStartISO(), -7));
+  const [hoursFrom, setHoursFrom] = useState(() => addDaysISO(laWeekStartISO(), -28));
+  const [hoursTo, setHoursTo] = useState(() => addDaysISO(laWeekStartISO(), -7));
   // Punch detail + audit: default to this month so far.
   const [punchFrom, setPunchFrom] = useState(laMonthStartISO);
   const [punchTo, setPunchTo] = useState(today);
@@ -199,7 +218,10 @@ export function ReportsConsole({
 
       <Tabs value={effectiveTab} onValueChange={(v) => onTabChange(v as ReportsTab)}>
         <TabsList>
-          <TabsTrigger value="exports" className="font-display text-[10px] uppercase tracking-widest">
+          <TabsTrigger
+            value="exports"
+            className="font-display text-[10px] uppercase tracking-widest"
+          >
             Exports
           </TabsTrigger>
           {payrollAccess && (
@@ -300,6 +322,38 @@ export function ReportsConsole({
               </ArcadeCard>
             )}
 
+            {payrollAccess && (
+              <ArcadeCard className="p-5 space-y-3">
+                <div className="flex items-center gap-2">
+                  <FileSpreadsheet className="w-4 h-4 text-turf-cyan" />
+                  <span className="font-display text-xs uppercase tracking-widest">
+                    Hours — weekly (no $)
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  One row per person per week: regular / overtime / double-time hours, meal and rest
+                  premium day counts, and sick hours — no dollar amounts, so rates stay in your
+                  payroll software. Everyone who punched is included, office staff too. Dates snap
+                  to their Monday.
+                </p>
+                <RangeInputs
+                  from={hoursFrom}
+                  to={hoursTo}
+                  setFrom={setHoursFrom}
+                  setTo={setHoursTo}
+                />
+                {reportButtons(
+                  "Hours — weekly",
+                  `hours-weeks-${weekStartOfISO(hoursFrom)}-to-${weekStartOfISO(hoursTo)}${filterSlug}.csv`,
+                  () =>
+                    buildWeeklyHoursTable(
+                      weekStartsInRange(weekStartOfISO(hoursFrom), weekStartOfISO(hoursTo)),
+                      exportFilter,
+                    ),
+                )}
+              </ArcadeCard>
+            )}
+
             <ArcadeCard className="p-5 space-y-3">
               <div className="flex items-center gap-2">
                 <FileClock className="w-4 h-4 text-neon" />
@@ -312,7 +366,12 @@ export function ReportsConsole({
                 compliance, provenance and flags. Voided entries included and marked. This is the
                 record California requires — keep exports at least 4 years.
               </p>
-              <RangeInputs from={punchFrom} to={punchTo} setFrom={setPunchFrom} setTo={setPunchTo} />
+              <RangeInputs
+                from={punchFrom}
+                to={punchTo}
+                setFrom={setPunchFrom}
+                setTo={setPunchTo}
+              />
               {reportButtons(
                 "Punch detail",
                 `time-records-${punchFrom}-to-${punchTo}${filterSlug}.csv`,
@@ -329,7 +388,12 @@ export function ReportsConsole({
                 Every change to every punch: who, when, the required reason, before → after times.
                 Append-only — nothing can be erased from it.
               </p>
-              <RangeInputs from={auditFrom} to={auditTo} setFrom={setAuditFrom} setTo={setAuditTo} />
+              <RangeInputs
+                from={auditFrom}
+                to={auditTo}
+                setFrom={setAuditFrom}
+                setTo={setAuditTo}
+              />
               {reportButtons("Audit log", `time-audit-${auditFrom}-to-${auditTo}.csv`, () =>
                 buildAuditTable(auditFrom, auditTo),
               )}
@@ -341,8 +405,8 @@ export function ReportsConsole({
                 <span className="font-display text-xs uppercase tracking-widest">Absences</span>
               </div>
               <p className="text-xs text-muted-foreground">
-                Days off, sick days, no-shows and excused absences — requests and records, with
-                who entered and who approved each one.
+                Days off, sick days, no-shows and excused absences — requests and records, with who
+                entered and who approved each one.
               </p>
               <RangeInputs from={absFrom} to={absTo} setFrom={setAbsFrom} setTo={setAbsTo} />
               {reportButtons("Absences", `absences-${absFrom}-to-${absTo}${filterSlug}.csv`, () =>

@@ -103,7 +103,7 @@ export function InviteDialog({
     ? `mailto:${encodeURIComponent(email.trim())}?subject=${encodeURIComponent(
         "Your Turf Invaders invite",
       )}&body=${encodeURIComponent(
-        `Tap this link, hit Enter, and set your password:\n\n${link}\n\nIt's good for about an hour.`,
+        `Tap this link, hit Enter, and set your password:\n\n${link}\n\nIt's good for 14 days.`,
       )}`
     : null;
 
@@ -170,7 +170,7 @@ export function InviteDialog({
               <div className="space-y-2">
                 <label className="flex flex-col gap-1 text-xs">
                   <span className="font-display uppercase tracking-widest text-muted-foreground">
-                    Invite link · one-time · good for ~1 hour
+                    Invite link · good for 14 days
                   </span>
                   <Input readOnly value={link} onFocus={(e) => e.currentTarget.select()} />
                 </label>
@@ -188,7 +188,7 @@ export function InviteDialog({
                 </div>
                 <p className="text-[11px] text-muted-foreground">
                   Copy it into a text, or use Email it. It's safe to text — the link opens a page
-                  with an Enter button, so message previews can't burn it. Good for about an hour;
+                  with an Enter button, so message previews can't burn it. Good for 14 days;
                   generating a new link replaces any older unused one.
                 </p>
               </div>

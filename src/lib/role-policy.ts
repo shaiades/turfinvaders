@@ -9,7 +9,10 @@
  *  confirmation staff, added 2026-09-09 for Cynthia) sits just above
  *  canvasser so the title wins the label when both are held — but it is a
  *  TITLE, not a tier: privilegeRole() collapses it to canvasser everywhere
- *  permissions or experience are decided. */
+ *  permissions or experience are decided. office (receptionist/production/
+ *  back-office, added 2026-11-23 for the Office Portal) is NOT office_staff
+ *  ("Manager"): it is a worker tier whose whole app is /office — clock
+ *  in/out, lunch, time off. */
 export const APP_ROLES = [
   "owner",
   "office_staff",
@@ -17,6 +20,7 @@ export const APP_ROLES = [
   "hr",
   "bookkeeper",
   "sales_rep",
+  "office",
   "confirmer",
   "canvasser",
 ] as const;
@@ -72,6 +76,7 @@ export const VAN_EXEMPT_ROLES: readonly AppRole[] = [
   "hr",
   "bookkeeper",
   "sales_rep",
+  "office",
 ] as const;
 
 export function isVanExemptRole(role: AppRole | string | null | undefined): boolean {
@@ -178,6 +183,7 @@ export const LIMITED_CREATABLE_ROLES: readonly AppRole[] = ["canvasser", "sales_
 export const MANAGER_GRANTABLE_ROLES: readonly AppRole[] = [
   "captain",
   "sales_rep",
+  "office",
   "confirmer",
   "canvasser",
 ] as const;
@@ -237,6 +243,7 @@ export const ROLE_LABEL: Record<AppRole, string> = {
   hr: "HR",
   bookkeeper: "Bookkeeper",
   sales_rep: "Sales Rep",
+  office: "Office",
   confirmer: "Confirmer",
   canvasser: "Canvasser",
 };
@@ -248,6 +255,7 @@ export const ROLE_TONE: Record<AppRole, string> = {
   hr: "text-turf-pink border-turf-pink/40",
   bookkeeper: "text-victory/70 border-victory/30",
   sales_rep: "text-warning border-warning/40",
+  office: "text-turf-cyan/80 border-turf-cyan/30",
   confirmer: "text-turf-cyan border-turf-cyan/40",
   canvasser: "text-muted-foreground border-border",
 };
