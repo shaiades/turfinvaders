@@ -49,6 +49,7 @@ import {
   ROLE_LABEL,
   canUseViewAs,
   isManagerRole,
+  isOfficeWorkerRole,
   privilegeRole,
   requiresProfilePhoto,
 } from "@/lib/roles";
@@ -335,7 +336,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   // Office guard: their whole app is the Office Portal (clock + time off).
   useEffect(() => {
-    if (role !== "office") return;
+    if (!isOfficeWorkerRole(role)) return;
     const allowed = pathname === "/office" || pathname.startsWith("/office/");
     if (!allowed) {
       router.navigate({ to: "/office", search: { tab: "clock" }, replace: true });
@@ -391,7 +392,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         { to: "/reports", search: { tab: "payroll" }, label: "Payroll", icon: DollarSign },
       ];
     }
-    if (role === "office") {
+    if (isOfficeWorkerRole(role)) {
       // Office workers' two-tab app (owner ask 2026-11-23): the clock and
       // their time-off requests — both on /office, same two-items-one-path
       // pattern as the bookkeeper Reports/Payroll pair. Explicit branch so

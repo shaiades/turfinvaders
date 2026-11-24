@@ -5247,6 +5247,8 @@ export type Database = {
         | "bookkeeper"
         | "hr"
         | "office"
+        | "production"
+        | "receptionist"
       canvasser_status:
         | "active"
         | "suspended"
@@ -5402,6 +5404,8 @@ export const Constants = {
         "bookkeeper",
         "hr",
         "office",
+        "production",
+        "receptionist",
       ],
       canvasser_status: [
         "active",
