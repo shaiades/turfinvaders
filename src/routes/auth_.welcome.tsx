@@ -1,10 +1,12 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { useServerFn } from "@tanstack/react-start";
 import { ArcadeCard } from "@/components/arcade";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { destinationByRole } from "@/lib/redirect-by-role";
+import { redeemInvite } from "@/lib/invites.functions";
 import { toast } from "sonner";
 
 /** Landing page for manager-generated invite links (invites.functions.ts).
@@ -29,6 +31,10 @@ export const Route = createFileRoute("/auth_/welcome")({
 
 function WelcomePage() {
   const navigate = useNavigate();
+  const redeemInviteFn = useServerFn(redeemInvite);
+  // Durable 14-day invite token (?it=, invite_tokens) — exchanged for a
+  // fresh recovery hash only when the invitee taps ENTER.
+  const [inviteToken, setInviteToken] = useState<string | null>(null);
   const [tokenHash, setTokenHash] = useState<string | null>(null);
   const [entering, setEntering] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
@@ -46,6 +52,11 @@ function WelcomePage() {
     }
 
     // Tap-to-enter invite: hold the token, show the button, consume nothing.
+    const it = params.get("it");
+    if (it) {
+      setInviteToken(it);
+      return;
+    }
     const th = params.get("th");
     if (th) {
       setTokenHash(th);
@@ -82,16 +93,42 @@ function WelcomePage() {
    *  browser already holds the session (double-tap, reload after entering),
    *  fall through to the password screen instead of crying expired. */
   async function enterWithInvite() {
-    if (!tokenHash) return;
+    if (!tokenHash && !inviteToken) return;
     setEntering(true);
+
+    // Durable link: exchange our token for a fresh recovery hash first.
+    let th = tokenHash;
+    if (!th && inviteToken) {
+      try {
+        const res = await redeemInviteFn({ data: { token: inviteToken } });
+        th = res.th;
+      } catch {
+        const { data: sess } = await supabase.auth.getSession();
+        if (sess.session?.user) {
+          window.history.replaceState(null, "", window.location.pathname);
+          setUserId(sess.session.user.id);
+          setInviteToken(null);
+        } else {
+          setExpired(true);
+        }
+        setEntering(false);
+        return;
+      }
+    }
+    if (!th) {
+      setEntering(false);
+      return;
+    }
+
     const { data, error } = await supabase.auth.verifyOtp({
       type: "recovery",
-      token_hash: tokenHash,
+      token_hash: th,
     });
     if (data?.session?.user) {
       window.history.replaceState(null, "", window.location.pathname);
       setUserId(data.session.user.id);
       setTokenHash(null);
+      setInviteToken(null);
       setEntering(false);
       return;
     }
@@ -101,6 +138,7 @@ function WelcomePage() {
         window.history.replaceState(null, "", window.location.pathname);
         setUserId(sess.session.user.id);
         setTokenHash(null);
+        setInviteToken(null);
       } else {
         setExpired(true);
       }
@@ -137,15 +175,15 @@ function WelcomePage() {
           <div className="text-center">
             <h1 className="font-display text-sm text-destructive mb-3">LINK EXPIRED</h1>
             <p className="text-xs text-muted-foreground mb-6">
-              This invite link was already used or has expired — links last about an hour, and a
-              newer link replaces older ones. Ask your manager for a fresh one, or sign in if you
-              already have a password.
+              This invite link was already used or has expired — links last 14 days, and a newer
+              link replaces older ones. Ask your manager for a fresh one, or sign in if you already
+              have a password.
             </p>
             <Link to="/auth" className="text-xs text-neon underline underline-offset-4">
               Go to sign in
             </Link>
           </div>
-        ) : tokenHash && !userId ? (
+        ) : (tokenHash || inviteToken) && !userId ? (
           <div className="text-center space-y-4">
             <h1 className="font-display text-sm text-neon">YOUR INVITE IS READY</h1>
             <p className="text-xs text-muted-foreground">

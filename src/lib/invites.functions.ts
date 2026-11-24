@@ -2,7 +2,13 @@ import { createServerFn } from "@tanstack/react-start";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { isLeadSourceName } from "@/lib/lead-sources";
-import { LIMITED_CREATABLE_ROLES, type AppRole } from "@/lib/role-policy";
+import {
+  APP_ROLES,
+  LIMITED_CREATABLE_ROLES,
+  MANAGER_GRANTABLE_ROLES,
+  type AppRole,
+} from "@/lib/role-policy";
+import { OFFICE_LOCATIONS } from "@/lib/offices";
 import { z } from "zod";
 
 /** Invite links always point at production — local dev shares the prod
@@ -12,17 +18,44 @@ import { z } from "zod";
 const APP_ORIGIN = "https://turfinvaders.com";
 const WELCOME_PATH = "/auth/welcome";
 
-/** The invite link is OUR page carrying the recovery token HASH — never the
- *  raw supabase /auth/v1/verify action_link. That URL is consumed by a bare
- *  GET, so iMessage/WhatsApp/email link-preview bots were eating invites
- *  seconds after managers sent them ("the links expire instantly",
- *  2026-09-11). The welcome page only spends the token when the invitee
- *  taps Enter (verifyOtp POST), so previews are harmless and the link lives
- *  its full OTP window (dashboard MAILER_OTP_EXP, 3600s as of 2026-09-11).
- *  Note: generating a new link for the same account still replaces any
- *  older unused one. */
-function buildInviteLink(hashedToken: string) {
-  return `${APP_ORIGIN}${WELCOME_PATH}?th=${encodeURIComponent(hashedToken)}`;
+/** Durable invite links (owner ask 2026-11-23): the shared link carries OUR
+ *  128-bit token (invite_tokens, 14 days), not a Supabase recovery hash. The
+ *  welcome page exchanges it for a fresh recovery OTP only when the invitee
+ *  taps ENTER (redeemInvite below), so the 1-hour OTP window starts at the
+ *  tap — a link texted on Friday still works on Monday. Re-inviting
+ *  supersedes older links.
+ *
+ *  Why our own page + a tap, not Supabase's action_link: that URL is
+ *  consumed by a bare GET, so iMessage/WhatsApp/email link-preview bots were
+ *  eating invites seconds after managers sent them ("the links expire
+ *  instantly", 2026-09-11). /auth/welcome spends nothing until the invitee
+ *  taps Enter. */
+async function mintInviteToken(
+  supabaseAdmin: SupabaseClient,
+  userId: string,
+  createdBy: string,
+): Promise<{ link: string; expires_at: string }> {
+  await supabaseAdmin
+    .from("invite_tokens")
+    .update({ superseded_at: new Date().toISOString() })
+    .eq("user_id", userId)
+    .is("superseded_at", null);
+  const { data, error } = await supabaseAdmin
+    .from("invite_tokens")
+    .insert({ user_id: userId, created_by: createdBy })
+    .select("token, expires_at")
+    .single();
+  if (error || !data) {
+    throw new Error(
+      /invite_tokens/.test(error?.message ?? "")
+        ? "The invite-links table isn't deployed yet — apply migration 20261124150000 first."
+        : (error?.message ?? "Couldn't create the invite link — try again."),
+    );
+  }
+  return {
+    link: `${APP_ORIGIN}${WELCOME_PATH}?it=${data.token}`,
+    expires_at: data.expires_at,
+  };
 }
 
 /** The CSV import (2026-06-30) minted auth users with synthetic
@@ -170,16 +203,9 @@ export const createInviteLink = createServerFn({ method: "POST" })
       );
     }
 
-    const { data: linkData, error: linkErr } = await supabaseAdmin.auth.admin.generateLink({
-      type: "recovery",
-      email,
-      options: { redirectTo: `${APP_ORIGIN}${WELCOME_PATH}` },
-    });
-    if (linkErr) throw new Error(linkErr.message);
-    const hashedToken = linkData?.properties?.hashed_token;
-    if (!hashedToken) throw new Error("Supabase returned no link — try again.");
-
-    return { link: buildInviteLink(hashedToken), email, user_id: data.user_id };
+    // Durable 14-day link; the recovery OTP is minted when THEY tap Enter.
+    const minted = await mintInviteToken(supabaseAdmin, data.user_id, context.userId);
+    return { link: minted.link, expires_at: minted.expires_at, email, user_id: data.user_id };
   });
 
 /** The placeholder path of createInviteLink: mint the login, move the
@@ -280,12 +306,10 @@ async function inviteAsNewLogin(
     throw e instanceof Error ? e : new Error(String(e));
   }
 
-  const { data: linkData, error: linkErr } = await supabaseAdmin.auth.admin.generateLink({
-    type: "recovery",
-    email,
-    options: { redirectTo: `${APP_ORIGIN}${WELCOME_PATH}` },
-  });
-  if (linkErr || !linkData?.properties?.hashed_token) {
+  let minted: { link: string; expires_at: string };
+  try {
+    minted = await mintInviteToken(supabaseAdmin, newUserId, context.userId);
+  } catch {
     // The login + merge already landed — don't roll back history. Their row
     // is now auth-backed, so a retry goes down the normal path.
     throw new Error(
@@ -293,5 +317,141 @@ async function inviteAsNewLogin(
     );
   }
 
-  return { link: buildInviteLink(linkData.properties.hashed_token), email, user_id: newUserId };
+  return { link: minted.link, expires_at: minted.expires_at, email, user_id: newUserId };
 }
+
+/* ═══════════════ One-step add person (owner ask 2026-11-23) ═══════════════ */
+
+/** Server twin of creatableRolesFor — same rule as users.functions.ts. */
+function roleCreatableBy(callerRoles: string[], role: AppRole): boolean {
+  if (callerRoles.includes("owner")) return true;
+  if (callerRoles.includes("office_staff")) return MANAGER_GRANTABLE_ROLES.includes(role);
+  if (callerRoles.includes("captain")) return LIMITED_CREATABLE_ROLES.includes(role);
+  return false;
+}
+
+const createPersonSchema = z.object({
+  display_name: z.string().trim().min(1).max(100),
+  role: z.enum(APP_ROLES as unknown as [AppRole, ...AppRole[]]),
+  office_location: z.enum(OFFICE_LOCATIONS).optional(),
+  team_id: z.string().uuid().nullable().optional(),
+  email: z.string().trim().toLowerCase().email().max(255),
+});
+
+/** THE one-step add: name + role + email in, a working invite link out.
+ *  Creates the login (throwaway password — they set their own on
+ *  /auth/welcome), places the profile, sets the role, and mints a durable
+ *  14-day invite link, all in one call. Replaces the old two-step Add
+ *  Player → Invite dance. */
+export const createPersonWithInvite = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => createPersonSchema.parse(data))
+  .handler(async ({ data, context }) => {
+    const { data: roleRows, error: roleErr } = await context.supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId);
+    if (roleErr) throw new Error(roleErr.message);
+    const callerRoles = (roleRows ?? []).map((r) => r.role as string);
+    if (
+      !callerRoles.includes("owner") &&
+      !callerRoles.includes("office_staff") &&
+      !callerRoles.includes("captain")
+    ) {
+      throw new Error("Only Owners, Managers, or Captains can add new people.");
+    }
+    if (!roleCreatableBy(callerRoles, data.role)) {
+      throw new Error("Your role can't create accounts at that tier.");
+    }
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
+      email: data.email,
+      // Throwaway — never shown to anyone; they set their own on /auth/welcome.
+      password: `${crypto.randomUUID()}${crypto.randomUUID()}`,
+      email_confirm: true,
+      user_metadata: { display_name: data.display_name },
+    });
+    if (createErr) {
+      throw new Error(
+        /already|exists|registered/i.test(createErr.message)
+          ? `${data.email} already has an account — use Invite on their existing row instead.`
+          : createErr.message,
+      );
+    }
+    const newUserId = created.user?.id;
+    if (!newUserId) throw new Error("Failed to create the login — try again.");
+
+    // handle_new_user made a bare profile; place them.
+    const { error: profErr } = await supabaseAdmin
+      .from("profiles")
+      .update({
+        display_name: data.display_name,
+        team_id: data.team_id ?? null,
+        ...(data.office_location ? { office_location: data.office_location } : {}),
+      })
+      .eq("id", newUserId);
+    if (profErr) throw new Error(profErr.message);
+
+    // The chosen role beats the trigger's default.
+    if (data.role !== "canvasser") {
+      const { error: delErr } = await supabaseAdmin
+        .from("user_roles")
+        .delete()
+        .eq("user_id", newUserId);
+      if (delErr) throw new Error(delErr.message);
+      const { error: insErr } = await supabaseAdmin
+        .from("user_roles")
+        .insert({ user_id: newUserId, role: data.role });
+      if (insErr) throw new Error(insErr.message);
+    }
+
+    const minted = await mintInviteToken(supabaseAdmin, newUserId, context.userId);
+    return { user_id: newUserId, link: minted.link, expires_at: minted.expires_at };
+  });
+
+const redeemSchema = z.object({ token: z.string().regex(/^[0-9a-f]{32}$/) });
+
+/** The welcome page's exchange: durable ?it= token in, fresh recovery OTP
+ *  hash out. Unauthenticated by design — the invitee has no session yet; the
+ *  128-bit token IS the credential, exactly like the old recovery-hash link.
+ *  A redeemed token stays exchangeable for 1 hour (double-taps, a failed
+ *  verify, a reload), then reads as used. */
+export const redeemInvite = createServerFn({ method: "POST" })
+  .inputValidator((data: unknown) => redeemSchema.parse(data))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: row, error } = await supabaseAdmin
+      .from("invite_tokens")
+      .select("*")
+      .eq("token", data.token)
+      .maybeSingle();
+    if (error) throw new Error("Couldn't check that invite — try again.");
+    if (!row) throw new Error("invalid");
+    if (row.superseded_at) throw new Error("superseded");
+    if (new Date(row.expires_at).getTime() < Date.now()) throw new Error("expired");
+    if (row.used_at && Date.now() - new Date(row.used_at).getTime() > 60 * 60 * 1000) {
+      throw new Error("used");
+    }
+
+    const { data: userRes } = await supabaseAdmin.auth.admin.getUserById(row.user_id);
+    const email = userRes?.user?.email;
+    if (!email) throw new Error("invalid");
+
+    const { data: linkData, error: linkErr } = await supabaseAdmin.auth.admin.generateLink({
+      type: "recovery",
+      email,
+      options: { redirectTo: `${APP_ORIGIN}${WELCOME_PATH}` },
+    });
+    if (linkErr || !linkData?.properties?.hashed_token) {
+      throw new Error("Couldn't start sign-in — tap the link again.");
+    }
+    if (!row.used_at) {
+      await supabaseAdmin
+        .from("invite_tokens")
+        .update({ used_at: new Date().toISOString() })
+        .eq("id", row.id);
+    }
+    return { th: linkData.properties.hashed_token };
+  });

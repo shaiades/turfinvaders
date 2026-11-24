@@ -67,6 +67,7 @@ import {
   Sparkles,
   Swords,
   CalendarDays,
+  Clock,
   GraduationCap,
   CircleHelp,
   Compass,
@@ -332,6 +333,15 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
   }, [role, realRole, pathname, router]);
 
+  // Office guard: their whole app is the Office Portal (clock + time off).
+  useEffect(() => {
+    if (role !== "office") return;
+    const allowed = pathname === "/office" || pathname.startsWith("/office/");
+    if (!allowed) {
+      router.navigate({ to: "/office", search: { tab: "clock" }, replace: true });
+    }
+  }, [role, pathname, router]);
+
   const navItems: NavItem[] = (() => {
     // Signed in but role-less = the waiting room (Day 1 before an Owner
     // assigns a role). No tabs at all — the old fallthrough showed this
@@ -379,6 +389,16 @@ export function AppShell({ children }: { children: ReactNode }) {
       return [
         { to: "/reports", search: { tab: "exports" }, label: "Reports", icon: FileSpreadsheet },
         { to: "/reports", search: { tab: "payroll" }, label: "Payroll", icon: DollarSign },
+      ];
+    }
+    if (role === "office") {
+      // Office workers' two-tab app (owner ask 2026-11-23): the clock and
+      // their time-off requests — both on /office, same two-items-one-path
+      // pattern as the bookkeeper Reports/Payroll pair. Explicit branch so
+      // the leadership fallthrough never hands them the admin nav.
+      return [
+        { to: "/office", search: { tab: "clock" }, label: "Time Clock", icon: Clock },
+        { to: "/office", search: { tab: "timeoff" }, label: "Time Off", icon: CalendarDays },
       ];
     }
     if (role === "hr") {
@@ -814,9 +834,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           and LAST fixed realtime channel (with LeadConfirmedCelebration):
           every server point grant becomes sub-second FX. Dormant until the
           canvasser_arcade_ledger tables exist + score_v2 triggers write. */}
-      {user && (role === "canvasser" || role === "captain") && (
-        <ArcadeMoments userId={user.id} />
-      )}
+      {user && (role === "canvasser" || role === "captain") && <ArcadeMoments userId={user.id} />}
       {/* One-time sound opt-in (engagement audit §1.5) — field tiers only;
           renders nothing once answered. */}
       {user && (role === "canvasser" || role === "captain") && <SoundPrimer />}

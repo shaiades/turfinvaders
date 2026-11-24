@@ -103,7 +103,31 @@ export function useDayOffQueue(teamId?: string | null) {
       if (memberIds) q = q.in("user_id", memberIds);
       const { data, error } = await q;
       if (error) return null;
-      const rows = (data ?? []) as DayOffRow[];
+      let rows = (data ?? []) as DayOffRow[];
+
+      // Office workers' requests answer ONLY to the owners named in
+      // system_settings.office_timeoff_approver_ids (owner decision
+      // 2026-11-23, review_day_off v4) — hide them from every other viewer
+      // so an Approve tap can't bounce off the RPC. RPC missing (not
+      // deployed) or empty list → no filtering, matching the SQL fallback.
+      if (rows.length > 0) {
+        const { data: approverData } = await supabase.rpc("office_timeoff_approver_ids");
+        const approvers = (approverData as string[] | null) ?? [];
+        if (approvers.length > 0) {
+          const { data: me } = await supabase.auth.getUser();
+          const myId = me?.user?.id;
+          if (!myId || !approvers.includes(myId)) {
+            const { data: officeRows } = await supabase
+              .from("user_roles")
+              .select("user_id")
+              .eq("role", "office")
+              .in("user_id", [...new Set(rows.map((r) => r.user_id))]);
+            const officeIds = new Set((officeRows ?? []).map((r) => r.user_id));
+            if (officeIds.size > 0) rows = rows.filter((r) => !officeIds.has(r.user_id));
+          }
+        }
+      }
+
       const ids = [...new Set(rows.map((r) => r.user_id))];
       const names = new Map<string, string>();
       if (ids.length > 0) {

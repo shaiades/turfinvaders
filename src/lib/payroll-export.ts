@@ -238,6 +238,145 @@ export async function buildPayrollRangeTable(
   return { headers: PAYROLL_RANGE_HEADERS, rows };
 }
 
+export const WEEKLY_HOURS_HEADERS = [
+  "Week Start",
+  "Employee ID",
+  "Name",
+  "Role",
+  "Reg Hours",
+  "OT Hours (1.5x)",
+  "DT Hours (2x)",
+  "Total Hours",
+  "Meal Premium Days",
+  "Rest Premium Days",
+  "Sick Hours",
+  "Sick Balance",
+  "Attested",
+  "Exceptions",
+];
+
+export async function buildWeeklyHoursCsvLines(
+  weekStarts: string[],
+  filter?: ExportFilter,
+): Promise<string[]> {
+  return reportTableToCsvLines(await buildWeeklyHoursTable(weekStarts, filter));
+}
+
+/** The accountant's HOURS-ONLY weekly report (owner ask 2026-11-23): one
+ *  row per person per week with the CA-relevant hour splits and premium
+ *  DAY COUNTS, but no dollar columns — she applies each person's rate in
+ *  her payroll software. Same doctrine as the dollar report: approved
+ *  weeks read the frozen run lines, unapproved weeks the live engine
+ *  (whose hour outputs are role-agnostic — only the pay fields assume
+ *  canvasser tier rates, and none of those export here). */
+export async function buildWeeklyHoursTable(
+  weekStarts: string[],
+  filter?: ExportFilter,
+): Promise<ReportTable> {
+  const rows: string[][] = [];
+
+  const [profilesRes, balancesRes, rolesRes] = await Promise.all([
+    supabase.from("profiles").select("id, display_name"),
+    supabase.from("sick_leave_balances").select("user_id, balance_hours"),
+    // Role column is a courtesy for sorting office vs field in the
+    // spreadsheet — blank when user_roles isn't readable.
+    supabase.from("user_roles").select("user_id, role"),
+  ]);
+  if (profilesRes.error) throw profilesRes.error;
+  const profiles = profilesRes.data ?? [];
+  const profById = new Map(profiles.map((p) => [p.id, p]));
+  const sickBalance = new Map(
+    (balancesRes.data ?? []).map((b) => [b.user_id, Number(b.balance_hours ?? 0)]),
+  );
+  const roleOf = new Map((rolesRes.data ?? []).map((r) => [r.user_id, r.role as string]));
+
+  for (const weekStart of weekStarts) {
+    const attest = new Map<string, string>();
+    {
+      const { data } = await supabase
+        .from("time_week_attestations")
+        .select("user_id, status")
+        .eq("week_start", weekStart)
+        .is("superseded_at", null);
+      for (const a of data ?? []) attest.set(a.user_id, a.status);
+    }
+
+    const { data: run } = await supabase
+      .from("payroll_runs")
+      .select("id, status")
+      .eq("week_start", weekStart)
+      .neq("status", "reopened")
+      .maybeSingle();
+
+    if (run?.status === "approved") {
+      const { data: lineRows, error } = await supabase
+        .from("payroll_run_lines")
+        .select("*")
+        .eq("run_id", run.id)
+        .order("display_name");
+      if (error) throw error;
+      for (const l of lineRows ?? []) {
+        if (!inFilter(filter, l.canvasser_id)) continue;
+        if (num(l.hours) <= 0 && num((l as Record<string, unknown>).sick_hours) <= 0) continue;
+        const ex = (l.exceptions ?? {}) as Record<string, unknown>;
+        rows.push(
+          cells([
+            weekStart,
+            l.canvasser_id,
+            l.display_name,
+            roleOf.get(l.canvasser_id) ?? "",
+            num(l.reg_hours).toFixed(2),
+            num(l.ot_hours).toFixed(2),
+            num(l.dt_hours).toFixed(2),
+            num(l.hours).toFixed(2),
+            l.meal_premium_count ?? 0,
+            num((l as Record<string, unknown>).rest_premium_count),
+            num((l as Record<string, unknown>).sick_hours).toFixed(2),
+            ex.sick_balance != null ? num(ex.sick_balance).toFixed(2) : "",
+            String(ex.attestation ?? attest.get(l.canvasser_id) ?? ""),
+            exceptionsSummary(ex),
+          ]),
+        );
+      }
+      continue;
+    }
+
+    const results = await fetchWeeklyPaychecksChunked(
+      weekStart,
+      profiles.map((p) => p.id).filter((id) => inFilter(filter, id)),
+    );
+    const worked = results
+      .filter((r) => r.paycheck && (num(r.paycheck.hours) > 0 || num(r.paycheck.sick_hours) > 0))
+      .sort((a, b) =>
+        (profById.get(a.canvasser_id)?.display_name ?? "").localeCompare(
+          profById.get(b.canvasser_id)?.display_name ?? "",
+        ),
+      );
+    for (const r of worked) {
+      const pc = r.paycheck!;
+      rows.push(
+        cells([
+          weekStart,
+          r.canvasser_id,
+          profById.get(r.canvasser_id)?.display_name ?? r.canvasser_id,
+          roleOf.get(r.canvasser_id) ?? "",
+          num(pc.reg_hours).toFixed(2),
+          num(pc.ot_hours).toFixed(2),
+          num(pc.dt_hours).toFixed(2),
+          num(pc.hours).toFixed(2),
+          pc.meal_premium_count ?? 0,
+          pc.rest_premium_count ?? 0,
+          num(pc.sick_hours).toFixed(2),
+          sickBalance.has(r.canvasser_id) ? sickBalance.get(r.canvasser_id)!.toFixed(2) : "",
+          attest.get(r.canvasser_id) ?? "",
+          exceptionsSummary(pc.exceptions as Record<string, unknown> | null),
+        ]),
+      );
+    }
+  }
+  return { headers: WEEKLY_HOURS_HEADERS, rows };
+}
+
 export const PUNCH_DETAIL_HEADERS = [
   "Date",
   "Employee ID",
@@ -433,8 +572,7 @@ export async function buildAuditTable(startISO: string, endISO: string): Promise
     const { data } = await supabase.from("profiles").select("id, display_name");
     for (const p of data ?? []) names.set(p.id, p.display_name ?? p.id);
   }
-  const nameOf = (id: unknown) =>
-    typeof id === "string" && id ? (names.get(id) ?? id) : "";
+  const nameOf = (id: unknown) => (typeof id === "string" && id ? (names.get(id) ?? id) : "");
   const t = (v: unknown) => (typeof v === "string" && v ? laDateTimeLabel(v) : "");
 
   const PAGE = 1000;

@@ -2,7 +2,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { isManagerRole, privilegeRole } from "@/lib/roles";
 
 export type RoleDestination = {
-  to: "/field" | "/phones" | "/dashboard" | "/close-kombat" | "/reports";
+  to: "/field" | "/phones" | "/dashboard" | "/close-kombat" | "/reports" | "/office";
   search?: { tab: "dispatch" } | { tab: "exports" };
 };
 
@@ -28,6 +28,10 @@ export async function destinationByRole(userId: string): Promise<RoleDestination
   // Mary's whole app is the Reports console (read-only payroll + exports).
   if (roles.includes("bookkeeper") && !isManager) {
     return { to: "/reports", search: { tab: "exports" } };
+  }
+  // Office workers' whole app is the Office Portal (clock + time off).
+  if (roles.includes("office") && !isManager) {
+    return { to: "/office" };
   }
   const isCanvasserOnly = roles.includes("canvasser") && !isManager;
   // Confirmers tele-market: their Active Run is Dial Run (owner 2026-10-19).

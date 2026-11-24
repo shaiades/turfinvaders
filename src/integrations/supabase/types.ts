@@ -1463,6 +1463,39 @@ export type Database = {
         }
         Relationships: []
       }
+      invite_tokens: {
+        Row: {
+          created_at: string
+          created_by: string
+          expires_at: string
+          id: string
+          superseded_at: string | null
+          token: string
+          used_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by: string
+          expires_at?: string
+          id?: string
+          superseded_at?: string | null
+          token?: string
+          used_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          expires_at?: string
+          id?: string
+          superseded_at?: string | null
+          token?: string
+          used_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       kombat_rep_aliases: {
         Row: {
           board_name: string
@@ -4147,6 +4180,7 @@ export type Database = {
           monday_webhook_secret: string | null
           monday_webhooks: Json
           nightly_auto_issue_enabled: boolean
+          office_timeoff_approver_ids: string[]
           ooh_autocreate: boolean
           ooh_form_url: string | null
           ooh_go_live_at: string | null
@@ -4172,6 +4206,7 @@ export type Database = {
           monday_webhook_secret?: string | null
           monday_webhooks?: Json
           nightly_auto_issue_enabled?: boolean
+          office_timeoff_approver_ids?: string[]
           ooh_autocreate?: boolean
           ooh_form_url?: string | null
           ooh_go_live_at?: string | null
@@ -4197,6 +4232,7 @@ export type Database = {
           monday_webhook_secret?: string | null
           monday_webhooks?: Json
           nightly_auto_issue_enabled?: boolean
+          office_timeoff_approver_ids?: string[]
           ooh_autocreate?: boolean
           ooh_form_url?: string | null
           ooh_go_live_at?: string | null
@@ -5091,6 +5127,7 @@ export type Database = {
       }
       my_team_id: { Args: { _user_id: string }; Returns: string }
       normalize_display_name: { Args: { _s: string }; Returns: string }
+      office_timeoff_approver_ids: { Args: never; Returns: string[] }
       prepare_profile_deletion: {
         Args: { _target: string }
         Returns: undefined
@@ -5209,6 +5246,7 @@ export type Database = {
         | "confirmer"
         | "bookkeeper"
         | "hr"
+        | "office"
       canvasser_status:
         | "active"
         | "suspended"
@@ -5363,6 +5401,7 @@ export const Constants = {
         "confirmer",
         "bookkeeper",
         "hr",
+        "office",
       ],
       canvasser_status: [
         "active",
