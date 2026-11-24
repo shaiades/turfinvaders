@@ -9,9 +9,15 @@ import { OfficePortal, type OfficeTab } from "@/components/OfficePortal";
  *  REAL roles). */
 export const Route = createFileRoute("/_authenticated/office")({
   head: () => ({ meta: [{ title: "Office — Turf Invaders" }] }),
-  beforeLoad: requireRoleBeforeLoad(["office", "production", "receptionist", "owner"]),
+  beforeLoad: requireRoleBeforeLoad([
+    "office",
+    "production",
+    "receptionist",
+    "production_manager",
+    "owner",
+  ]),
   validateSearch: (search: Record<string, unknown>): { tab: OfficeTab } => ({
-    tab: search.tab === "timeoff" ? "timeoff" : "clock",
+    tab: search.tab === "timeoff" ? "timeoff" : search.tab === "team" ? "team" : "clock",
   }),
   component: OfficePage,
 });

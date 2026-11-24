@@ -21,6 +21,7 @@ export const APP_ROLES = [
   "hr",
   "bookkeeper",
   "sales_rep",
+  "production_manager",
   "office",
   "production",
   "receptionist",
@@ -30,12 +31,18 @@ export const APP_ROLES = [
 export type AppRole = (typeof APP_ROLES)[number];
 
 /** The office-worker tier: one behavior (Office Portal, 8 PM auto-close,
- *  named time-off approvers), three titles. Mirrors public.is_office_worker()
- *  in SQL and the notify-day-off audience branch — change them together. */
+ *  named time-off approvers), four titles. production_manager (Austin —
+ *  owner ask 2026-11-24) punches and requests time off like the rest of the
+ *  tier, and ADDITIONALLY gets the portal's Production tab: read production
+ *  staff's time cards, approve their time off, record their sick days. The
+ *  role is owner-granted only (not in MANAGER_GRANTABLE_ROLES, like hr).
+ *  Mirrors public.is_office_worker() in SQL and the notify-day-off audience
+ *  branch — change them together. */
 export const OFFICE_WORKER_ROLES: readonly AppRole[] = [
   "office",
   "production",
   "receptionist",
+  "production_manager",
 ] as const;
 
 export function isOfficeWorkerRole(role: AppRole | string | null | undefined): boolean {
@@ -96,6 +103,7 @@ export const VAN_EXEMPT_ROLES: readonly AppRole[] = [
   "office",
   "production",
   "receptionist",
+  "production_manager",
 ] as const;
 
 export function isVanExemptRole(role: AppRole | string | null | undefined): boolean {
@@ -269,6 +277,7 @@ export const ROLE_LABEL: Record<AppRole, string> = {
   bookkeeper: "Bookkeeper",
   sales_rep: "Sales Rep",
   office: "Office",
+  production_manager: "Production Manager",
   production: "Production",
   receptionist: "Receptionist",
   confirmer: "Confirmer",
@@ -283,6 +292,7 @@ export const ROLE_TONE: Record<AppRole, string> = {
   bookkeeper: "text-victory/70 border-victory/30",
   sales_rep: "text-warning border-warning/40",
   office: "text-turf-cyan/80 border-turf-cyan/30",
+  production_manager: "text-turf-cyan border-turf-cyan/50",
   production: "text-turf-cyan/80 border-turf-cyan/30",
   receptionist: "text-turf-cyan/80 border-turf-cyan/30",
   confirmer: "text-turf-cyan border-turf-cyan/40",
