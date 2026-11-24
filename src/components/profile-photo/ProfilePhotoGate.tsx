@@ -1,10 +1,11 @@
 // The blocking "Snap your fighter photo" step (owner directive 2026-10-06,
-// narrowed the same day: photos are requested from CANVASSERS ONLY — confirmers
-// collapse in via privilegeRole; sales reps already have Monday-sourced photos
-// the owner wants kept, and captains/Managers/owner are never asked). A
-// full-screen arcade overlay that drops right after login on a gated canvasser
-// with no photo yet, covering the whole app — nav included — until a photo is
-// saved. No skip button by default.
+// narrowed the same day: photos are requested from CANVASSERS — confirmers
+// collapse in via privilegeRole; widened 2026-11-24 to the OFFICE-WORKER tier
+// so their avatar shows on the Time Clock. Sales reps already have
+// Monday-sourced photos the owner wants kept, and captains/Managers/owner are
+// never asked). A full-screen arcade overlay that drops right after login on a
+// gated player with no photo yet, covering the whole app — nav included —
+// until a photo is saved. No skip button by default.
 //
 // Why this replaces the old FighterPhotoPrompt: that was a small, dismissible
 // dialog shown once per session, held UNDER the first-open cutscenes — a
@@ -26,7 +27,7 @@ import { useMyPhotoStatus } from "@/hooks/useMyPhotoStatus";
 import { usePhotoGateConfig } from "@/hooks/usePhotoGateConfig";
 import { useMyFighterUpload } from "@/hooks/useMyFighterUpload";
 import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
-import { requiresProfilePhoto } from "@/lib/roles";
+import { isOfficeWorkerRole, requiresProfilePhoto } from "@/lib/roles";
 import { RepAvatar } from "@/components/RepAvatar";
 import { NeonButton } from "@/components/arcade";
 import { PhotoCropper } from "@/components/profile-photo/PhotoCropper";
@@ -261,7 +262,9 @@ export function ProfilePhotoGate({
                 Snap your fighter photo
               </h1>
               <p className="max-w-xs text-center text-sm text-muted-foreground">
-                Your face goes on your avatar and the leaderboard. Add one to enter the arena.
+                {isOfficeWorkerRole(realRole)
+                  ? "Your face becomes your avatar on the time clock. Add one to get started."
+                  : "Your face goes on your avatar and the leaderboard. Add one to enter the arena."}
               </p>
             </div>
 

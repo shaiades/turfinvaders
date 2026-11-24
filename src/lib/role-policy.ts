@@ -169,15 +169,19 @@ export function requiresGratitudeGate(role: AppRole | string | null | undefined)
 }
 
 /** Blocking profile-photo gate (owner directive 2026-10-06, narrowed the same
- *  day: "don't request photos from anyone other than canvassers"). CANVASSERS
- *  ONLY — confirmers collapse in via privilegeRole (exact canvasser
- *  experience). Nobody else is ever asked for a photo: sales reps already have
- *  theirs (Monday-sourced rep_photos the owner wants kept as-is — a selfie
- *  must never replace one), captains and office_staff "Managers" are not
- *  canvassers, the owner administers the gate, and the bookkeeper is pure
- *  back-office. Replaces FIGHTER_SELFIE_ROLES (2026-10-05), which also asked
- *  captains and Managers — don't re-widen this without an owner decision. */
-export const PROFILE_PHOTO_ROLES: readonly AppRole[] = ["canvasser"] as const;
+ *  day: "don't request photos from anyone other than canvassers"). Canvassers
+ *  (confirmers collapse in via privilegeRole) PLUS the office-worker tier
+ *  (owner decision 2026-11-24: "make sure all the office staff has their
+ *  avatar on the clock to see"— their avatar shows on the Time Clock card).
+ *  Nobody else is ever asked for a photo: sales reps already have theirs
+ *  (Monday-sourced rep_photos the owner wants kept as-is — a selfie must
+ *  never replace one), captains and office_staff "Managers" are not asked,
+ *  the owner administers the gate, and the bookkeeper is pure back-office.
+ *  Don't re-widen this without an owner decision. */
+export const PROFILE_PHOTO_ROLES: readonly AppRole[] = [
+  "canvasser",
+  ...OFFICE_WORKER_ROLES,
+] as const;
 
 export function requiresProfilePhoto(role: AppRole | string | null | undefined): boolean {
   const r = privilegeRole(role);

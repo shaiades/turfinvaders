@@ -5,6 +5,9 @@ import { addDaysISO, fmtWallTime, laDateISO, laTodayISO } from "@/lib/dates";
 import { toast } from "sonner";
 import { rewardToast } from "@/lib/reward-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
+import { useRepCartoons, cartoonFor } from "@/hooks/useRepCartoons";
+import { RepAvatar } from "@/components/RepAvatar";
 import { useOpenShift, useTodayShifts } from "@/hooks/useTimeClockSelf";
 import { invalidatePunchCaches } from "@/lib/time-clock-keys";
 import { REST_BREAK_MIN_MINUTES, restBreaksRequired } from "@/lib/pay";
@@ -57,6 +60,11 @@ type BreakRow = {
 
 export function TimeClock({ userId }: { userId: string }) {
   const qc = useQueryClient();
+  // The puncher's own avatar on the clock (owner ask 2026-11-24: office staff
+  // too — "it makes this way more fun"). TimeClock always renders the signed-in
+  // user's own shift, so the auth displayName is the cartoon's join key.
+  const { displayName } = useAuth();
+  const myCartoon = cartoonFor(useRepCartoons().data, displayName);
   const [now, setNow] = useState(() => Date.now());
   // Clock-out intercepts into the attestations the day owes: the meal
   // question first (>5h, no compliant lunch), then the rest-break question
@@ -518,37 +526,62 @@ export function TimeClock({ userId }: { userId: string }) {
 
       <div className="flex flex-col items-center gap-5">
         <div className="flex items-center gap-3">
-          <div
-            className={`w-10 h-10 rounded-full flex items-center justify-center border ${
-              openMeal
-                ? "bg-warning/10 border-warning text-warning animate-pulse"
-                : openBreak
-                  ? "bg-neon/10 border-neon text-neon animate-pulse"
-                  : isClockedIn
-                    ? "bg-victory/10 border-victory text-victory animate-pulse"
-                    : "bg-surface-elevated border-border text-muted-foreground"
-            }`}
-          >
-            {openMeal ? (
-              <Utensils className="w-4 h-4" />
-            ) : openBreak ? (
-              <Coffee className="w-4 h-4" />
-            ) : (
-              <Clock className="w-4 h-4" />
-            )}
-          </div>
-          <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
-            {openError
-              ? "—"
-              : openPending
-                ? "Loading…"
-                : openMeal
-                  ? "On lunch"
+          <div className="relative shrink-0">
+            <RepAvatar
+              name={displayName ?? "You"}
+              cartoon={myCartoon}
+              className={`h-14 w-14 border-2 ${
+                openMeal
+                  ? "border-warning"
                   : openBreak
-                    ? "On break · paid"
+                    ? "border-neon"
                     : isClockedIn
-                      ? "On the clock"
-                      : "Off the clock"}
+                      ? "border-victory"
+                      : "border-border"
+              }`}
+              textClassName="text-base"
+            />
+            {/* State badge rides the avatar's corner — solid backdrop so the
+                icon stays legible over the art. */}
+            <div
+              className={`absolute -bottom-1 -right-1 w-6 h-6 rounded-full flex items-center justify-center border bg-background ${
+                openMeal
+                  ? "border-warning text-warning animate-pulse"
+                  : openBreak
+                    ? "border-neon text-neon animate-pulse"
+                    : isClockedIn
+                      ? "border-victory text-victory animate-pulse"
+                      : "border-border text-muted-foreground"
+              }`}
+            >
+              {openMeal ? (
+                <Utensils className="w-3 h-3" />
+              ) : openBreak ? (
+                <Coffee className="w-3 h-3" />
+              ) : (
+                <Clock className="w-3 h-3" />
+              )}
+            </div>
+          </div>
+          <div className="min-w-0">
+            {displayName && (
+              <div className="font-display text-xs uppercase tracking-widest text-foreground truncate">
+                {displayName}
+              </div>
+            )}
+            <div className="text-[10px] font-display uppercase tracking-widest text-muted-foreground">
+              {openError
+                ? "—"
+                : openPending
+                  ? "Loading…"
+                  : openMeal
+                    ? "On lunch"
+                    : openBreak
+                      ? "On break · paid"
+                      : isClockedIn
+                        ? "On the clock"
+                        : "Off the clock"}
+            </div>
           </div>
         </div>
 
