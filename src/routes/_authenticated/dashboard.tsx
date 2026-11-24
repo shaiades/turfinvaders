@@ -26,6 +26,7 @@ import { HistoricalImporter } from "@/components/HistoricalImporter";
 import { PayrollLedger } from "@/components/PayrollLedger";
 import { TimesheetEditor } from "@/components/TimesheetEditor";
 import { FleetDispatch } from "@/components/FleetDispatch";
+import { StillInHouseQueue } from "@/components/StillInHouseQueue";
 import { WeeklyScheduleSettings } from "@/components/WeeklyScheduleSettings";
 import { CompanySettingsPanel } from "@/components/CompanySettingsPanel";
 import { AddPlayerDialog } from "@/components/AddPlayerDialog";
@@ -420,6 +421,9 @@ function OwnerDashboard({ visibility }: { visibility: boolean }) {
           {/* Phase 5: today's coaching moments worth a 🎥, one-tap send.
               Renders nothing on a quiet day (it owns its bottom margin). */}
           <CoachTriggersCard />
+          {/* Reps stuck in a sit who can't make their next lead — live GPS
+              pings needing a cover rep or a push call. Nothing on a quiet day. */}
+          <StillInHouseQueue />
           <FleetDispatch />
         </TabsContent>
         <TabsContent value="timesheets" className="mt-0">
@@ -700,6 +704,7 @@ function CaptainDashboard({ teamId, visibility }: { teamId: string | null; visib
               Dispatch tab, scoped to this van (owner, 2026-08-25). It brings
               its own Day/Week/Month range; the page RangeTabs above govern
               only the Command Center, stat cards, and roster. */}
+          <StillInHouseQueue />
           <FleetDispatch readOnly focusTeamId={teamId} />
         </>
       )}
