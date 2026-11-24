@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { invalidatePunchCaches } from "@/lib/time-clock-keys";
+import { OFFICE_WORKER_ROLES } from "@/lib/role-policy";
 
 /**
  * Day-off / absence data layer. Every key sits under ["day-off", …] so one
@@ -120,7 +121,7 @@ export function useDayOffQueue(teamId?: string | null) {
             const { data: officeRows } = await supabase
               .from("user_roles")
               .select("user_id")
-              .eq("role", "office")
+              .in("role", [...OFFICE_WORKER_ROLES])
               .in("user_id", [...new Set(rows.map((r) => r.user_id))]);
             const officeIds = new Set((officeRows ?? []).map((r) => r.user_id));
             if (officeIds.size > 0) rows = rows.filter((r) => !officeIds.has(r.user_id));

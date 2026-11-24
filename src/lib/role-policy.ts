@@ -9,10 +9,11 @@
  *  confirmation staff, added 2026-09-09 for Cynthia) sits just above
  *  canvasser so the title wins the label when both are held — but it is a
  *  TITLE, not a tier: privilegeRole() collapses it to canvasser everywhere
- *  permissions or experience are decided. office (receptionist/production/
- *  back-office, added 2026-11-23 for the Office Portal) is NOT office_staff
- *  ("Manager"): it is a worker tier whose whole app is /office — clock
- *  in/out, lunch, time off. */
+ *  permissions or experience are decided. office / production / receptionist
+ *  (added 2026-11-23/24 for the Office Portal) are NOT office_staff
+ *  ("Manager"): they are one worker tier — identical behavior, different
+ *  titles (owner ask 2026-11-23) — whose whole app is /office: clock in/out,
+ *  lunch, time off. Gate on OFFICE_WORKER_ROLES, never on === "office". */
 export const APP_ROLES = [
   "owner",
   "office_staff",
@@ -21,10 +22,26 @@ export const APP_ROLES = [
   "bookkeeper",
   "sales_rep",
   "office",
+  "production",
+  "receptionist",
   "confirmer",
   "canvasser",
 ] as const;
 export type AppRole = (typeof APP_ROLES)[number];
+
+/** The office-worker tier: one behavior (Office Portal, 8 PM auto-close,
+ *  named time-off approvers), three titles. Mirrors public.is_office_worker()
+ *  in SQL and the notify-day-off audience branch — change them together. */
+export const OFFICE_WORKER_ROLES: readonly AppRole[] = [
+  "office",
+  "production",
+  "receptionist",
+] as const;
+
+export function isOfficeWorkerRole(role: AppRole | string | null | undefined): boolean {
+  if (!role) return false;
+  return (OFFICE_WORKER_ROLES as readonly string[]).includes(role);
+}
 
 export function isAppRole(v: unknown): v is AppRole {
   return (APP_ROLES as readonly unknown[]).includes(v);
@@ -77,6 +94,8 @@ export const VAN_EXEMPT_ROLES: readonly AppRole[] = [
   "bookkeeper",
   "sales_rep",
   "office",
+  "production",
+  "receptionist",
 ] as const;
 
 export function isVanExemptRole(role: AppRole | string | null | undefined): boolean {
@@ -184,6 +203,8 @@ export const MANAGER_GRANTABLE_ROLES: readonly AppRole[] = [
   "captain",
   "sales_rep",
   "office",
+  "production",
+  "receptionist",
   "confirmer",
   "canvasser",
 ] as const;
@@ -244,6 +265,8 @@ export const ROLE_LABEL: Record<AppRole, string> = {
   bookkeeper: "Bookkeeper",
   sales_rep: "Sales Rep",
   office: "Office",
+  production: "Production",
+  receptionist: "Receptionist",
   confirmer: "Confirmer",
   canvasser: "Canvasser",
 };
@@ -256,6 +279,8 @@ export const ROLE_TONE: Record<AppRole, string> = {
   bookkeeper: "text-victory/70 border-victory/30",
   sales_rep: "text-warning border-warning/40",
   office: "text-turf-cyan/80 border-turf-cyan/30",
+  production: "text-turf-cyan/80 border-turf-cyan/30",
+  receptionist: "text-turf-cyan/80 border-turf-cyan/30",
   confirmer: "text-turf-cyan border-turf-cyan/40",
   canvasser: "text-muted-foreground border-border",
 };

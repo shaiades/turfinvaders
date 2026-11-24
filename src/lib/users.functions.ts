@@ -22,6 +22,8 @@ const ROLES = [
   "bookkeeper",
   "sales_rep",
   "office",
+  "production",
+  "receptionist",
   "confirmer",
   "canvasser",
 ] as const;

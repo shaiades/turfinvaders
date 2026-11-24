@@ -1,5 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
-import { isManagerRole, privilegeRole } from "@/lib/roles";
+import { isManagerRole, isOfficeWorkerRole, privilegeRole } from "@/lib/roles";
 
 export type RoleDestination = {
   to: "/field" | "/phones" | "/dashboard" | "/close-kombat" | "/reports" | "/office";
@@ -30,7 +30,7 @@ export async function destinationByRole(userId: string): Promise<RoleDestination
     return { to: "/reports", search: { tab: "exports" } };
   }
   // Office workers' whole app is the Office Portal (clock + time off).
-  if (roles.includes("office") && !isManager) {
+  if (roles.some((r) => isOfficeWorkerRole(r)) && !isManager) {
     return { to: "/office" };
   }
   const isCanvasserOnly = roles.includes("canvasser") && !isManager;

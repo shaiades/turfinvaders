@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { createFileRoute, Link, Navigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
-import { isAdminRole } from "@/lib/roles";
+import { isAdminRole, isOfficeWorkerRole } from "@/lib/roles";
 import { destinationByRole } from "@/lib/redirect-by-role";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRealtimeInvalidate } from "@/hooks/useRealtimeInvalidate";
@@ -139,7 +139,7 @@ function Dashboard() {
   // HR's home is the full timesheet/attendance editor (owner ask 2026-10-15).
   if (role === "hr") return <HrDashboard />;
   // Office workers' home is the Office Portal (clock + time off).
-  if (role === "office") return <Navigate to="/office" search={{ tab: "clock" }} replace />;
+  if (isOfficeWorkerRole(role)) return <Navigate to="/office" search={{ tab: "clock" }} replace />;
   if (role === "captain")
     return <CaptainDashboard teamId={teamId} visibility={!!settings?.global_visibility} />;
   return user?.id ? (

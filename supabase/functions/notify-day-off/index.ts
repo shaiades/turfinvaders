@@ -121,16 +121,18 @@ Deno.serve(async (req) => {
   let payload: { title: string; body: string; url: string; tag?: string };
 
   if (kind === "submission") {
-    // Office workers (owner decision 2026-11-23): their requests answer to
-    // the named owners ONLY (system_settings.office_timeoff_approver_ids,
-    // Tyler + Shai) — no role fan-out, so other owners/Managers/HR get no
-    // push. Empty list = not configured → fall through to the role audience,
-    // mirroring review_day_off v4's fallback.
+    // Office tier (owner decisions 2026-11-23/24 — office, production,
+    // receptionist): their requests answer to the people named in
+    // system_settings.office_timeoff_approver_ids ONLY — no role fan-out,
+    // so other owners/Managers/HR get no push. Empty list = not configured
+    // → fall through to the role audience, mirroring review_day_off's
+    // fallback. Mirrors public.is_office_worker() and OFFICE_WORKER_ROLES.
+    const OFFICE_WORKER_ROLES = ["office", "production", "receptionist"];
     const { data: requesterRoles } = await admin
       .from("user_roles")
       .select("role")
       .eq("user_id", user_id);
-    if ((requesterRoles ?? []).some((r) => r.role === "office")) {
+    if ((requesterRoles ?? []).some((r) => OFFICE_WORKER_ROLES.includes(r.role))) {
       const { data: settings } = await admin
         .from("system_settings")
         .select("office_timeoff_approver_ids")
