@@ -127,7 +127,7 @@ Deno.serve(async (req) => {
     // so other owners/Managers/HR get no push. Empty list = not configured
     // → fall through to the role audience, mirroring review_day_off's
     // fallback. Mirrors public.is_office_worker() and OFFICE_WORKER_ROLES.
-    const OFFICE_WORKER_ROLES = ["office", "production", "receptionist"];
+    const OFFICE_WORKER_ROLES = ["office", "production", "receptionist", "production_manager"];
     const { data: requesterRoles } = await admin
       .from("user_roles")
       .select("role")
@@ -138,8 +138,20 @@ Deno.serve(async (req) => {
         .select("office_timeoff_approver_ids")
         .maybeSingle();
       const approvers: string[] = settings?.office_timeoff_approver_ids ?? [];
-      if (approvers.length > 0) {
-        const targets2 = approvers.filter((id) => id !== user_id && id !== requested_by);
+      // Production staff's requests also page the production manager(s), who
+      // can approve directly (owner ask 2026-11-24 — Austin).
+      let pmIds: string[] = [];
+      if ((requesterRoles ?? []).some((r) => r.role === "production")) {
+        const { data: pms } = await admin
+          .from("user_roles")
+          .select("user_id")
+          .eq("role", "production_manager");
+        pmIds = (pms ?? []).map((r) => r.user_id);
+      }
+      if (approvers.length > 0 || pmIds.length > 0) {
+        const targets2 = [...new Set([...approvers, ...pmIds])].filter(
+          (id) => id !== user_id && id !== requested_by,
+        );
         const payload2 = {
           title: "Time off · approval needed",
           body: `${workerName} requested a ${label} · ${absence_date}`,

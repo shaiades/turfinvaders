@@ -69,6 +69,7 @@ import {
   Swords,
   CalendarDays,
   Clock,
+  Users,
   GraduationCap,
   CircleHelp,
   Compass,
@@ -400,6 +401,18 @@ export function AppShell({ children }: { children: ReactNode }) {
       return [
         { to: "/office", search: { tab: "clock" }, label: "Time Clock", icon: Clock },
         { to: "/office", search: { tab: "timeoff" }, label: "Time Off", icon: CalendarDays },
+        // The production manager's console (Austin — owner ask 2026-11-24):
+        // production time cards, their time-off approvals, sick records.
+        ...(role === "production_manager"
+          ? [
+              {
+                to: "/office",
+                search: { tab: "team" },
+                label: "Production",
+                icon: Users,
+              } as NavItem,
+            ]
+          : []),
       ];
     }
     if (role === "hr") {

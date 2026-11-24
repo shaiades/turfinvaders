@@ -21,6 +21,7 @@ const ROLES = [
   "hr",
   "bookkeeper",
   "sales_rep",
+  "production_manager",
   "office",
   "production",
   "receptionist",
