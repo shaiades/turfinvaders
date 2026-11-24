@@ -2,8 +2,10 @@
 // and avatar circles in the Area Details sheet all derive from the assignee's
 // uuid — never stored, never drifting.
 
-/** Gray for unassigned turfs (matches the map's REMOTE_DROP_COLOR). */
-export const UNASSIGNED_COLOR = "#8a8f99";
+/** Neon pink for unassigned turfs — must pop on the dark map (the old gray
+ *  #8a8f99 was invisible). Distinct from PIN_COLORS: not_home #ff2d55 and
+ *  lead #39ff14 are taken. Remote-drop pins keep their own gray. */
+export const UNASSIGNED_COLOR = "#ff2fd6";
 
 /** Stable neon-bright color for a user id (uuid hash → HSL hue). */
 export function assigneeColor(userId: string | null | undefined): string {
